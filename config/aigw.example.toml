@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Beispielkonfiguration für `aigw serve --config config/aigw.example.toml`.
+# Alle Felder sind optional; gezeigt sind die Standardwerte.
+
+[server]
+listen = "127.0.0.1:4000"
+
+[store]
+# SQLite (Standard) oder postgres://…
+url = "sqlite://aigw.db?mode=rwc"
+
+[counters]
+# local | postgres-sync | redis
+backend = "local"

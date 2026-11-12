@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Nur stabile Optionen, damit `cargo fmt --check` mit der gepinnten Stable-Toolchain läuft.
+edition = "2024"
+style_edition = "2024"
+max_width = 100
+use_field_init_shorthand = true
+use_try_shorthand = true
+newline_style = "Unix"

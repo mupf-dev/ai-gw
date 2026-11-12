@@ -1,0 +1,99 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Cargo-Workspace für ai-gw (AIGW-8). Versionen werden ausschließlich hier gepflegt;
+# die Crates referenzieren nur `workspace = true`.
+
+[workspace]
+resolver = "3"
+members = [
+    "crates/aigw",
+    "crates/aigw-admin",
+    "crates/aigw-core",
+    "crates/aigw-counters",
+    "crates/aigw-plugins",
+    "crates/aigw-providers",
+    "crates/aigw-proxy",
+    "crates/aigw-store",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "AGPL-3.0-or-later"
+authors = ["ai-gw contributors"]
+repository = "https://github.com/mupf-dev/ai-gw"
+publish = false
+
+[workspace.dependencies]
+aigw-admin = { path = "crates/aigw-admin" }
+aigw-core = { path = "crates/aigw-core" }
+aigw-counters = { path = "crates/aigw-counters" }
+aigw-plugins = { path = "crates/aigw-plugins" }
+aigw-providers = { path = "crates/aigw-providers" }
+aigw-proxy = { path = "crates/aigw-proxy" }
+aigw-store = { path = "crates/aigw-store" }
+
+# HTTP-Stack (E2): axum 0.8 auf hyper 1, tower, tokio.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "http2", "json", "query", "tokio", "tracing"] }
+http = "1.3"
+http-body-util = "0.1.3"
+hyper = { version = "1.12", default-features = false, features = ["client", "server", "http1", "http2"] }
+tower = { version = "0.5.3", default-features = false, features = ["util"] }
+tokio = { version = "1.54", default-features = false, features = ["rt", "rt-multi-thread", "macros", "signal", "sync", "time", "net", "io-util"] }
+# TLS nur über rustls mit aws-lc-rs (kein OpenSSL, kein ring).
+rustls = { version = "0.23.35", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+
+# Persistenz (E4): SQLite (gebündelt) Standard, Postgres optional. Ohne Compile-Zeit-Makros
+# (kein DB-Zugriff beim Bauen), ohne SQLite-Erweiterungsladen.
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "sqlite-bundled", "postgres", "migrate"] }
+
+# Admin-API: OpenAPI 3.1 aus Rust-Typen (E3: TS-Typen der UI werden daraus generiert).
+utoipa = { version = "6.0.0", default-features = false, features = ["macros"] }
+# Eingebettete Admin-UI (ui/dist bzw. Fallback, siehe crates/aigw-admin/build.rs).
+rust-embed = { version = "8.14", default-features = false, features = ["debug-embed", "interpolate-folder-path", "mime-guess"] }
+
+clap = { version = "4.6", default-features = false, features = ["std", "derive", "env", "help", "usage", "error-context"] }
+serde = { version = "1.0.220", features = ["derive"] }
+serde_json = "1.0.140"
+thiserror = "2.0.17"
+toml = { version = "1.2", default-features = false, features = ["std", "serde", "parse"] }
+tracing = { version = "0.1.44", default-features = false, features = ["std", "attributes"] }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["std", "fmt", "ansi", "env-filter", "json", "registry"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+dbg_macro = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+mem_forget = "deny"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+
+# Release-Profil auf Effizienz im Hot Path: thin-LTO (guter Kompromiss aus Laufzeit und
+# Bauzeit), eine Codegen-Unit, panic = "abort" (kein Unwinding-Code; ein Panic beendet den
+# Prozess und der Supervisor startet neu – Handler dürfen daher nicht panicen, siehe Lints).
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[profile.dev.package."*"]
+opt-level = 1

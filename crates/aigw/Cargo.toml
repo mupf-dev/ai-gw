@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "aigw"
+description = "ai-gw: AI-Gateway (Gateway und Admin-API in einem Binary)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "aigw"
+path = "src/main.rs"
+
+[dependencies]
+aigw-admin.workspace = true
+aigw-core.workspace = true
+aigw-proxy.workspace = true
+axum.workspace = true
+clap.workspace = true
+rustls.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true
