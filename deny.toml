@@ -1,0 +1,80 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# cargo-deny: Lieferkettenprüfung (Advisories, Lizenzen, Banns, Quellen).
+# Lizenzen: nur AGPL-3.0-kompatible, permissive Lizenzen (bzw. AGPL selbst).
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+]
+all-features = true
+
+[output]
+feature-depth = 1
+
+[advisories]
+unmaintained = "all"
+yanked = "deny"
+# Ausnahmen nur mit Begründung und Ablaufdatum im Kommentar.
+ignore = [
+    # libsqlite3-sys 0.37 (gebündeltes SQLite < 3.54) über sqlx-sqlite 0.9.0, das <0.38 erzwingt.
+    # Ausnutzbar nur, wenn das Gateway eine DB- und -wal-Datei öffnet, die ein weniger
+    # vertrauenswürdiger Dritter geschrieben hat; die DB gehört dem Gateway-Prozess allein.
+    # Entfernen, sobald sqlx libsqlite3-sys >= 0.39 zulässt. Erneut prüfen bis 2027-01-31.
+    { id = "RUSTSEC-2026-0459", reason = "sqlx-sqlite 0.9.0 pinnt libsqlite3-sys <0.38; nur lokale Ausnutzung mit fremden DB/WAL-Dateien" },
+]
+
+[licenses]
+# Erlaubt: permissive Lizenzen und MPL-2.0 (dateibasiertes Copyleft, AGPL-kompatibel).
+# Nicht erlaubt: GPL-2.0-only (inkompatibel), LGPL-* (Relinkbarkeit bei statischem Linken
+# vorerst ungeklärt), proprietäre/unklare Lizenzen.
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+    "Unlicense",
+    "0BSD",
+    "AGPL-3.0-or-later",
+]
+confidence-threshold = 0.93
+unused-allowed-license = "allow"
+
+[licenses.private]
+# Eigene Crates (publish = false) tragen ihre Lizenz im Manifest; REUSE prüft die Dateien.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+deny = [
+    # TLS ausschließlich über rustls mit aws-lc-rs (E2).
+    { crate = "openssl", reason = "C-Abhängigkeit; rustls verwenden" },
+    { crate = "openssl-sys", reason = "C-Abhängigkeit; rustls verwenden" },
+    { crate = "native-tls", reason = "zieht OpenSSL; rustls verwenden" },
+    { crate = "ring", reason = "aws-lc-rs ist einziger Krypto-Provider" },
+    { crate = "serde_yaml", reason = "deprecated" },
+]
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

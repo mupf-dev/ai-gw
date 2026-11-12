@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+version = 1
+SPDX-PackageName = "ai-gw"
+SPDX-PackageSupplier = "ai-gw contributors"
+SPDX-PackageDownloadLocation = "https://github.com/mupf-dev/ai-gw"
+
+# Quelldateien tragen eigene SPDX-Header ("closest" hat Vorrang).
+# Dokumentation (inkl. Konzept) steht ebenfalls unter AGPL-3.0-or-later.
+[[annotations]]
+path = ["docs/**", "README.md"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 ai-gw contributors"
+SPDX-License-Identifier = "AGPL-3.0-or-later"
+
+# Generierte bzw. kommentarlose Dateien (Lockfiles, JSON, generierte Typen, Ignore-Listen)
+[[annotations]]
+path = [
+    "Cargo.lock",
+    ".gitignore",
+    ".buildboxignore",
+    ".dockerignore",
+    "ui/package.json",
+    "ui/pnpm-lock.yaml",
+    "ui/tsconfig.json",
+    "ui/openapi.json",
+    "ui/src/lib/api/schema.d.ts",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 ai-gw contributors"
+SPDX-License-Identifier = "AGPL-3.0-or-later"

@@ -6,7 +6,7 @@
 //! - `aigw serve --config <pfad>` startet Gateway, Admin-API und Admin-UI auf einem Port.
 //! - `aigw openapi` gibt die OpenAPI-Spezifikation der Admin-API aus (für `ui/` → TS-Typen).
 
-use std::io::Write as _;
+use std::io::{IsTerminal as _, Write as _};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -47,6 +47,7 @@ fn init_tracing(format: LogFormat) {
     let filter = EnvFilter::try_from_env("AIGW_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
     let builder = tracing_subscriber::fmt()
         .with_env_filter(filter)
+        .with_ansi(std::io::stderr().is_terminal())
         .with_writer(std::io::stderr);
     match format {
         LogFormat::Text => builder.init(),

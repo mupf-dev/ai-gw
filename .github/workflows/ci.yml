@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# CI für Rust und UI. Das Repo ist privat: um Actions-Minuten zu sparen, läuft der Workflow
+# NICHT bei jedem Push, sondern nur bei Pull Requests und manuell (workflow_dispatch).
+# Die eigentliche Logik steckt in scripts/check.sh – derselbe Einstieg wie auf der Buildbox.
+# Härtung: Actions auf Commit-SHAs gepinnt (Tag als Kommentar), minimale Rechte,
+# keine persistierten Checkout-Credentials.
+name: ci
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  AIGW_STRICT: "1"
+
+jobs:
+  check:
+    name: scripts/check.sh
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ci-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: "12"
+      - name: Werkzeuge (rustup-Toolchain, cargo-deny, reuse)
+        run: scripts/setup-tools.sh
+      - name: Prüfungen
+        run: |
+          . "$HOME/.cargo/env"
+          export PATH="$HOME/.local/bin:$PATH"
+          scripts/check.sh

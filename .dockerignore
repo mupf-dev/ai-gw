@@ -1,0 +1,9 @@
+.git
+.claude
+target
+ui/node_modules
+ui/dist
+**/*.db
+**/*.db-*
+.env
+.env.*
