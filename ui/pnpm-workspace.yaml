@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Lieferketten-Härtung: keine Lifecycle-Skripte, frisch veröffentlichte Versionen erst nach
+# 7 Tagen (minimumReleaseAge in Minuten), Lockfile-Pflicht (--frozen-lockfile in CI/Docker).
+packages:
+  - "."
+ignoreScripts: true
+onlyBuiltDependencies: []
+minimumReleaseAge: 10080

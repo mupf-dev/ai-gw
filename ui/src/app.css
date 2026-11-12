@@ -1,0 +1,13 @@
+/* SPDX-FileCopyrightText: 2026 ai-gw contributors */
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+@import 'tailwindcss';
+
+/* Minimaler Rahmen; das Design-System folgt mit AIGW-48. */
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+  body {
+    @apply bg-white text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+  }
+}

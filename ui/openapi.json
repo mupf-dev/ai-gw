@@ -1,0 +1,71 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ai-gw Admin-API",
+    "description": "Verwaltungs-API von ai-gw",
+    "contact": {
+      "name": "ai-gw contributors"
+    },
+    "license": {
+      "name": "AGPL-3.0-or-later",
+      "identifier": "AGPL-3.0-or-later"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/admin/api/v1/version": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Liefert die Version des Gateways.",
+        "operationId": "version",
+        "responses": {
+          "200": {
+            "description": "Version des Gateways",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "VersionInfo": {
+        "type": "object",
+        "description": "Versionsinformationen des laufenden Gateways.",
+        "required": [
+          "name",
+          "version",
+          "ui"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Produktname."
+          },
+          "ui": {
+            "type": "string",
+            "description": "Art der eingebetteten UI: `ui` (gebaut) oder `fallback` (Platzhalter)."
+          },
+          "version": {
+            "type": "string",
+            "description": "Version (SemVer)."
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "system",
+      "description": "Systeminformationen"
+    }
+  ]
+}

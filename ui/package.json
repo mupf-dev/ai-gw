@@ -1,0 +1,29 @@
+{
+  "name": "aigw-ui",
+  "private": true,
+  "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "packageManager": "pnpm@12.18.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "svelte-check --tsconfig ./tsconfig.json --threshold error",
+    "gen:api": "openapi-typescript openapi.json -o src/lib/api/schema.d.ts"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@tailwindcss/vite": "^4.3.0",
+    "openapi-typescript": "^7.13.0",
+    "svelte": "^5.57.0",
+    "svelte-check": "^4.3.0",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.0"
+  },
+  "dependencies": {
+    "@internationalized/date": "^3.10.0",
+    "bits-ui": "^2.20.0",
+    "openapi-fetch": "^0.17.0"
+  }
+}
