@@ -45,6 +45,7 @@ Wichtige Metriken:
 | `aigw_counter_backend_degraded`, `aigw_counter_replay_*` | Zähler-Backend (Redis-Ausfall, Nachtragen) |
 | `aigw_log_written_total`, `aigw_log_dropped_total`, `aigw_log_write_failed_total`, `aigw_log_export_errors_total` | Request-Log und Export |
 | `aigw_mcp_calls_total`, `aigw_mcp_call_duration_seconds` | MCP-Gateway |
+| `aigw_server_connections_active`, `aigw_server_connections_rejected_total`, `aigw_server_timeouts_total` | Client-Verbindungen je Listener, wegen `max_connections` abgewiesene (`503`), Timeouts (`kind`: header, body, idle, keepalive) |
 
 Vorschläge für Alarme:
 
@@ -53,6 +54,7 @@ Vorschläge für Alarme:
 - `rate(aigw_log_dropped_total[5m]) > 0` – Request-Log-Puffer läuft über (DB zu langsam).
 - `aigw_deployment_breaker_state == 1` länger als einige Minuten – Anbieter gestört.
 - Anteil `aigw_upstream_errors_total` an `aigw_upstream_attempts_total` je Anbieter.
+- `rate(aigw_server_connections_rejected_total[5m]) > 0` – Verbindungsgrenze erreicht (Last oder Angriff; `server.*.max_connections`).
 
 ## 3. OpenTelemetry
 

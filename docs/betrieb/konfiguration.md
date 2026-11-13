@@ -86,10 +86,30 @@ anschließendem Snapshot-Aufbau. Wer ein Feld umbenennt, merkt es dort.
 
 ### Verbindungsgrenzen
 
-*Platzhalter – wird nach Abschluss von AIGW-80 (Server-Verbindungsgrenze und Timeouts)
-ergänzt.* Bis dahin begrenzt der Gateway selbst nur die Body-Größe; Verbindungs- und
-Header-Timeouts sowie Verbindungslimits je Client gehören an den Reverse Proxy
-([haertung.md](haertung.md), S-32).
+Je Listener eine Höchstzahl gleichzeitiger Verbindungen, dazu Lese-Timeouts und
+HTTP/2-Grenzen für beide Listener (S-32, AIGW-80; `0` = aus bzw. unbegrenzt):
+
+```yaml
+server:
+  data:
+    max_connections: 10000   # darüber: sofort 503 + Schließen
+  control:
+    max_connections: 1024
+  http:
+    header_read_timeout_secs: 10    # HTTP/1: erstes Byte bis vollständiger Kopf
+    body_read_timeout_secs: 30      # höchste Pause im Anfragekörper
+    body_min_bytes_per_sec: 1024    # Mindestrate nach body_read_timeout_secs Vorlauf
+    idle_timeout_secs: 120          # Keep-Alive-Leerlauf (> Leerlauf-Timeout des LB)
+    http2_max_concurrent_streams: 256
+    http2_keepalive_interval_secs: 30
+    http2_keepalive_timeout_secs: 20
+```
+
+ENV z. B. `AIGW_SERVER__DATA__MAX_CONNECTIONS=20000`,
+`AIGW_SERVER__HTTP__IDLE_TIMEOUT_SECS=300`. Laufende Antworten (SSE-Streams) brechen die
+Lese-Timeouts nicht ab. `idle_timeout_secs` größer wählen als das Leerlauf-Timeout eines
+vorgeschalteten Load Balancers. Limits **je Client-IP** und TLS bleiben Aufgabe des Reverse
+Proxys. Wirkung, Metriken (`aigw_server_*`) und Hinweise: [haertung.md](haertung.md).
 
 ## 2. Master-Key
 

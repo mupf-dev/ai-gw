@@ -217,6 +217,29 @@ p99 empfindlich für Planungsverzögerungen des Redis-Prozesses. **Q1 ist mit `r
 erreichbar**, solange Limits synchron in Redis geprüft werden – dafür ist `postgres-sync`
 (lokal zählen, periodisch abgleichen) bzw. `local` gedacht (05-zaehler.md).
 
+### 4.2 Eigene Accept-Schleife mit Verbindungsschutz (AIGW-80)
+
+`axum::serve` wurde durch eine eigene Schleife mit Verbindungsgrenze und Lese-Timeouts
+ersetzt (S-32, `aigw/src/serve.rs`): je Verbindung eine Wache (Timer im Abstand ≥ 100 ms,
+höchstens 5 s), je Anfrage ein Zähler im Antwortkörper, beim Lesen eine Atomics-Abfrage.
+A/B auf derselben Box, abwechselnd Basis (main 4041b0e) / AIGW-80, je zweimal
+`RT=1 PARTS=latency` – Gateway-`ttfb` p50 / p99 in µs, OpenAI-Eingang. Rohdaten:
+[80-ab-base-1](messwerte/80-ab-base-1.txt), [80-ab-new-1](messwerte/80-ab-new-1.txt),
+[80-ab-base-2](messwerte/80-ab-base-2.txt), [80-ab-new-2](messwerte/80-ab-new-2.txt).
+
+| Szenario | Basis 1 | AIGW-80 1 | Basis 2 | AIGW-80 2 |
+|---|---|---|---|---|
+| 1 Verbindung, JSON | 97 / 185 | 162 / 283 | 95 / 179 | 93 / 163 |
+| 1 Verbindung, Stream | 111 / 272 | 135 / 258 | 99 / 175 | 105 / 200 |
+| 200 Verb., 2 000 req/s, JSON | 272 / 434 | 193 / 387 | 171 / 378 | 183 / 353 |
+| 200 Verb., 2 000 req/s, Stream | 297 / 528 | 193 / 441 | 194 / 394 | 200 / 411 |
+| 200 Verb., 10 000 req/s, JSON | 292 / 928 | 255 / 771 | 293 / 1 040 | 324 / 1 063 |
+| 200 Verb., 10 000 req/s, Stream | 516 / 1 869 | 525 / 1 728 | 371 / 1 351 | 508 / 1 684 |
+
+Bewertung: **kein messbarer Unterschied** – die Abweichungen zwischen zwei Läufen derselben
+Variante (geteilte Box, Last 5–7) sind größer als zwischen den Varianten; in keinem Lauf
+Fehler. Der Ausreißer „1 Verbindung“ in AIGW-80-Lauf 1 wiederholte sich in Lauf 2 nicht.
+
 ## 5. Kaltstart mit Postgres
 
 `scripts/bench-coldstart.sh`: Postgres 17 (Container, Host-Port), 10 000 API-Keys (mit

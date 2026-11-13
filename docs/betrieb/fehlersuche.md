@@ -36,7 +36,7 @@ Log-Explorer der Admin-UI, im Request-Log und (mit OTLP) als Trace.
 | `404` `model_not_found` | Modellgruppe/Alias existiert nicht oder hat keine aktiven Deployments | `GET /v1/models` mit demselben Key |
 | `413` | Body > `server.data.max_body_bytes` | Limit erhöhen oder Client kürzen |
 | `429` | Limit oder Budget erreicht; `Retry-After`, `x-ratelimit-*` | Analytics/Limit-Warnungen; bei strikten Budgets reserviert eine Anfrage ohne `max_tokens` 4 096 Ausgabe-Tokens (`limits.default_max_tokens`) |
-| `502`/`503`/`504` | Anbieter-Fehler nach Retries/Fallbacks, alle Deployments offen (Breaker) oder Zeitlimit | Header `x-aigw-deployment`, `x-aigw-attempts`; Metriken `aigw_upstream_errors_total`, `aigw_deployment_breaker_state` |
+| `502`/`503`/`504` | Anbieter-Fehler nach Retries/Fallbacks, alle Deployments offen (Breaker) oder Zeitlimit; `503` ohne Body mit `retry-after: 1` = Verbindungsgrenze `server.*.max_connections` erreicht (`aigw_server_connections_rejected_total`) | Header `x-aigw-deployment`, `x-aigw-attempts`; Metriken `aigw_upstream_errors_total`, `aigw_deployment_breaker_state` |
 
 Deployment wird abgelehnt mit „endpoint … nicht erlaubt“: SSRF-Schutz – private Ziele oder
 `http://` müssen in `admin.allow_private_upstreams` bzw. `allow_insecure_upstreams` stehen

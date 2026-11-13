@@ -58,14 +58,16 @@ Erste Version: AI-Gateway, Admin-API und Admin-UI in einem Binary.
   (Master-Key-Rotation), Lizenzübersicht `THIRD-PARTY.md`.
 - **Leistung:** mimalloc als Standard-Allokator (abschaltbar mit `--no-default-features`),
   größere Accept-Warteschlange; Messungen in `docs/betrieb/leistung.md`.
+- **Verbindungsschutz der Listener** (S-32): Höchstzahl gleichzeitiger Verbindungen je
+  Listener (`server.*.max_connections`, darüber sofort `503`), Lese-Timeouts gegen Slowloris
+  (Anfragekopf, Pause und Mindestrate des Anfragekörpers), Keep-Alive-Leerlauf, HTTP/2-Grenzen
+  (`server.http`); laufende Streams bleiben unberührt. Metriken `aigw_server_*`.
 
 ### Bekannte Einschränkungen
 
 - GitOps-Manifeste: höchstens 1 024 YAML-Dokumente je Datei.
 - Azure OpenAI mit Entra ID (`settings.auth: entraId`) ist noch nicht umgesetzt.
 - Container-Image nur für linux/amd64 gebaut und getestet; arm64 vorbereitet.
-- Keine eigene Verbindungsgrenze/Header-Timeouts am Listener (Reverse Proxy davor; Arbeit in
-  AIGW-80).
 - Lizenz der eingebetteten tiktoken-Rangtabellen (MIT) vor einem öffentlichen Release
   rechtlich bestätigen.
 

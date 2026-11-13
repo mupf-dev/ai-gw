@@ -11,8 +11,16 @@
 server:
   data:
     listen: "0.0.0.0:4000"
+    # je Instanz; darüber sofort 503 (Load Balancer versucht eine andere Instanz)
+    max_connections: 10000
   control:
     listen: "0.0.0.0:4001"
+    max_connections: 1024
+  http:
+    # Keep-Alive-Leerlauf länger als das Leerlauf-Timeout des Load Balancers (oft 60 s)
+    idle_timeout_secs: 120
+    header_read_timeout_secs: 10
+    body_read_timeout_secs: 30
 store:
   # ohne Passwort – vollständige URL per AIGW_STORE__URL=postgres://aigw:<passwort>@postgres:5432/aigw
   url: "postgres://aigw@postgres:5432/aigw"
