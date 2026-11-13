@@ -74,9 +74,17 @@ pub(crate) fn auth_span() -> Span {
     )
 }
 
-/// Plugin-Kette (Platzhalter bis AIGW-34 ff.).
-pub(crate) fn plugins_span() -> Span {
-    tracing::info_span!(target: TRACE_TARGET, "plugins", aigw.plugins.count = 0u64)
+/// Plugin-Kette (AIGW-36): eine Phase (`request` bzw. `response`) mit der Zahl der
+/// teilnehmenden Plugins. Stream-Haken laufen synchron je Ereignis und bekommen keinen Span.
+pub(crate) fn plugins_span(phase: &'static str, count: usize) -> Span {
+    tracing::info_span!(
+        target: TRACE_TARGET,
+        "plugins",
+        aigw.plugins.phase = phase,
+        aigw.plugins.count = u64::try_from(count).unwrap_or(u64::MAX),
+        otel.status_code = Empty,
+        error.type = Empty,
+    )
 }
 
 /// Routing-Auswahl.

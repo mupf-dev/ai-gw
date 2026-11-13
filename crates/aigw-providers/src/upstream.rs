@@ -170,12 +170,29 @@ impl Upstream {
             .unwrap_or_else(|_| Err(timeout_error("Anmeldung beim Anbieter")))
     }
 
-    fn build(&self, req: ChatRequest) -> Result<crate::UpstreamRequest, UpstreamError> {
+    fn build(&self, mut req: ChatRequest) -> Result<crate::UpstreamRequest, UpstreamError> {
         let mut losses = Losses::new();
-        let http_req = self
+        let extra_headers = std::mem::take(&mut req.hints.upstream_headers);
+        let mut http_req = self
             .provider
             .build_request(req, &mut losses)
             .map_err(UpstreamError::from)?;
+        // Header aus Plugins (AIGW-36); Header des Adapters (Auth, Signatur, Format) haben
+        // Vorrang, den Trace-Kontext setzt `send` (AIGW-45) – Plugins nie.
+        if !extra_headers.is_empty() {
+            let own = http_req.headers().clone();
+            for (name, value) in extra_headers {
+                if let (Ok(n), Ok(v)) = (
+                    http::HeaderName::from_bytes(name.as_bytes()),
+                    http::HeaderValue::from_str(&value),
+                ) && !own.contains_key(&n)
+                    && n != "traceparent"
+                    && n != "tracestate"
+                {
+                    http_req.headers_mut().append(n, v);
+                }
+            }
+        }
         if !losses.is_empty() {
             tracing::debug!(
                 deployment = %self.info.deployment,

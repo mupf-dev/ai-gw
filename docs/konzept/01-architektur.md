@@ -158,7 +158,7 @@ pub trait Plugin: Send + Sync {
 }
 ```
 
-- **Konfiguration** je Ebene: global, Organisation, Team, Key, Modellgruppe, Route. Die Kette wird beim Snapshot-Aufbau zusammengesetzt und als `Arc<[Box<dyn Plugin>]>` abgelegt.
+- **Konfiguration** je Ebene: global, Organisation, Team, Key, Modellgruppe, Route. Die Kette wird beim Snapshot-Aufbau zusammengesetzt und als `Arc<[Box<dyn Plugin>]>` abgelegt. Umsetzung (AIGW-36, Trait-Details, Vererbung mit `override`/`disable`/`locked`, Fehlermodi, gepufferter Modus): [12-plugins.md](12-plugins.md).
 - **Eingebaute Plugins (MVP):** `pii` (Erkennung per Regex und Prüfsumme: E-Mail, IBAN, Kreditkarte mit Luhn-Prüfung, Telefon, Steuer-ID usw.; Modi maskieren, ablehnen oder pseudonymisieren mit Rückübersetzung in der Antwort), `prompt-filter` (Listen, Regex, Prompt-Injection-Heuristiken), `content-safety` (externe Dienste: Azure Content Safety, OpenAI Moderation, Llama Guard über ein konfiguriertes Modell), `cache`, `header` (Header setzen oder entfernen), `request-transform` (Standardparameter setzen oder überschreiben, z. B. `max_tokens`-Deckel).
 - **Eigene Plugins von Nutzern (Entscheidung 2026-11-13):**
   - **MVP: Webhook-Plugin** `webhook`: ruft einen externen HTTP-Dienst in den Phasen `on_request` / `on_response` auf (JSON mit IR-Anfrage/-Antwort + Kontext ohne Geheimnisse). Antwort: `continue` / `modify` (geänderte IR) / `reject` (Status + Meldung). Konfigurierbar: Timeout (Standard 200 ms), Verhalten bei Fehler (`fail-open` / `fail-closed`), HMAC-Signatur der Aufrufe, Keep-Alive-Pool, SSRF-Schutz. Nicht im Chunk-Pfad (zu teuer pro Token); für Ausgaben nur bei gepufferter Route.

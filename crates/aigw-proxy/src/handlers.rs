@@ -21,11 +21,13 @@ use crate::auth::extract_api_key;
 use crate::error::ErrorFormat;
 use crate::limits::{RateHeaders, TokenEstimate, retry_after_secs};
 use crate::observe::{ObservedStream, Recorder};
+use crate::plugins::{PluginPhase, PluginRun, Pre, response_stream};
 use crate::provider::EventStream;
 use crate::request_id::{RequestId, RequestStart};
 use crate::routing::exec::{self, Outcome};
 use crate::stream::sse_response;
 use crate::{ATTEMPTS_HEADER, DEPLOYMENT_HEADER, FALLBACK_HEADER};
+use aigw_plugins::{BUFFERED_HEADER, ChunkMode, ResponseHeaders};
 
 type St = State<Arc<ProxyState>>;
 
@@ -102,7 +104,7 @@ enum Reply {
     Stream(EventStream, bool),
 }
 
-/// Routing-Informationen für die Antwort-Header.
+/// Routing-Informationen und Plugin-Header für die Antwort.
 #[derive(Default)]
 struct RouteInfo {
     deployment: Option<String>,
@@ -110,6 +112,10 @@ struct RouteInfo {
     fallback: Option<String>,
     /// Rate-Limit-Header (AIGW-30), bei Ablehnung und – falls eingeschaltet – bei Erfolg.
     ratelimit: Option<RateHeaders>,
+    /// Antwort-Header aus Plugins (AIGW-36), zuletzt angewendet.
+    plugin_headers: ResponseHeaders,
+    /// Antwort wegen Ausgabe-Plugins gepuffert.
+    buffered: bool,
 }
 
 impl RouteInfo {
@@ -133,6 +139,16 @@ impl RouteInfo {
             h.insert(FALLBACK_HEADER, v);
         }
     }
+
+    fn apply_plugins(&self, res: &mut Response) {
+        if self.buffered {
+            res.headers_mut()
+                .insert(BUFFERED_HEADER, HeaderValue::from_static("plugins"));
+        }
+        if !self.plugin_headers.is_empty() {
+            self.plugin_headers.apply(res.headers_mut());
+        }
+    }
 }
 
 async fn chat(
@@ -147,7 +163,7 @@ async fn chat(
     let mut info = RouteInfo::default();
     let span = crate::trace::request_span(&rid.0, ingress(format), headers);
     rec.set_span(span.clone());
-    let mut res = match chat_inner(st, headers, body, format, &mut rec, &mut info)
+    let mut res = match chat_inner(st, rid, headers, body, format, &mut rec, &mut info)
         .instrument(span)
         .await
     {
@@ -183,11 +199,13 @@ async fn chat(
     if let Some(h) = &info.ratelimit {
         h.apply(format, res.headers_mut(), std::time::SystemTime::now());
     }
+    info.apply_plugins(&mut res);
     res
 }
 
 async fn chat_inner(
     st: &ProxyState,
+    rid: &RequestId,
     headers: &HeaderMap,
     body: Result<Bytes, BytesRejection>,
     format: ErrorFormat,
@@ -225,8 +243,6 @@ async fn chat_inner(
     // Modellfreigabe (Architektur §3, Schritt 3); die Gruppe nutzt später das Routing.
     let group = auth.authorize_model(&req.model)?;
     rec.set_request(&req);
-    // Platzhalter-Span, bis die Plugin-Kette (Architektur §9) eingehängt wird.
-    drop(crate::trace::plugins_span());
 
     // Limits und Budgets (Architektur §3, Schritt 4; AIGW-30/31): genau eine Reservierung je
     // Client-Anfrage – Retries und Fallbacks laufen darin. Abgeschlossen wird im Recorder
@@ -270,6 +286,41 @@ async fn chat_inner(
         .and_then(|o| o.include_usage)
         .unwrap_or(false);
 
+    // Schritt 5: Pre-Plugins (AIGW-36) – nach der Admission (Schritt 4), vor dem Routing.
+    // Kette je (Org, Team, Key, Modellgruppe) vorberechnet. Reject/Respond schließen die
+    // Admission über den Recorder ab (Reject: Verbrauch 0; Respond: Usage des Plugins, sonst 0)
+    // – es bleibt kein reserviertes Kontingent stehen.
+    let model_group = group
+        .as_ref()
+        .map_or_else(|| route.name(), |g| g.group.metadata.name.as_str());
+    let req_stream = req.is_stream();
+    let mut plugins = PluginRun::new(
+        st,
+        &auth,
+        Some(model_group),
+        &rid.0,
+        ingress(format),
+        req_stream,
+    );
+    let span = crate::trace::plugins_span("request", plugins.hooks(PluginPhase::Request));
+    let mut req = match plugins
+        .run_pre_plugins(req, headers, &mut info.plugin_headers)
+        .instrument(span.clone())
+        .await
+        .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?
+    {
+        Pre::Continue(req) => req,
+        Pre::Respond(resp) => return plugin_reply(resp, req_stream, format, rec, include_usage),
+    };
+    // Gepufferter Modus: Upstream nicht streamen, Antwort-Plugins auf der ganzen Antwort.
+    let buffered = plugins.buffers(&req);
+    if buffered {
+        tracing::debug!(request_id = %rid.0, "Antwort wird für Ausgabe-Plugins gepuffert");
+        req.stream = Some(false);
+        req.stream_options = None;
+        info.buffered = true;
+    }
+
     // Auswahl, Retries, Fallbacks (AIGW-24/25/26).
     let routed = exec::execute(
         st.routes.as_ref(),
@@ -295,9 +346,30 @@ async fn chat_inner(
     rec.set_attempts(routed.attempts);
 
     let resp = match routed.result? {
-        Outcome::Stream(events) => return Ok(Reply::Stream(events, include_usage)),
+        // Schritt 10: Stream-Plugins je Ereignis vor dem Encoder.
+        Outcome::Stream(events) => {
+            return Ok(Reply::Stream(
+                plugins.wrap_stream(events, ChunkMode::Live),
+                include_usage,
+            ));
+        }
         Outcome::Json(resp) => resp,
     };
+    // Schritt 10: Post-Plugins auf der ganzen Antwort, vor dem Encoder.
+    let resp = if plugins.hooks(PluginPhase::Response) > 0 {
+        let span = crate::trace::plugins_span("response", plugins.hooks(PluginPhase::Response));
+        plugins
+            .run_post_plugins(resp, &mut info.plugin_headers)
+            .instrument(span.clone())
+            .await
+            .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?
+    } else {
+        resp
+    };
+    if buffered {
+        let events = plugins.wrap_stream(response_stream(&resp), ChunkMode::Buffered);
+        return Ok(Reply::Stream(events, include_usage));
+    }
     rec.set_response(&resp);
     let mut losses = Losses::new();
     let out = match format {
@@ -307,6 +379,27 @@ async fn chat_inner(
     if !losses.is_empty() {
         tracing::debug!(losses = ?losses.items(), "Antwort mit Übersetzungsverlusten");
     }
+    Ok(Reply::Json(out))
+}
+
+/// Antwort eines Pre-Plugins (`Respond`): ohne Upstream, ohne Antwort-Plugins, im
+/// Eingangsformat – gestreamt, wenn der Client gestreamt angefragt hat.
+fn plugin_reply(
+    resp: aigw_core::ir::ChatResponse,
+    stream: bool,
+    format: ErrorFormat,
+    rec: &mut Recorder,
+    include_usage: bool,
+) -> Result<Reply, UpstreamError> {
+    rec.set_plugin_response(&resp);
+    if stream {
+        return Ok(Reply::Stream(response_stream(&resp), include_usage));
+    }
+    let mut losses = Losses::new();
+    let out = match format {
+        ErrorFormat::OpenAi => openai::encode_response(resp, &mut losses)?,
+        ErrorFormat::Anthropic => anthropic::encode_response(resp, &mut losses)?,
+    };
     Ok(Reply::Json(out))
 }
 

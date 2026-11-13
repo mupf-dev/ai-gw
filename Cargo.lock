@@ -148,6 +148,19 @@ dependencies = [
 [[package]]
 name = "aigw-plugins"
 version = "0.1.0"
+dependencies = [
+ "aigw-core",
+ "arc-swap",
+ "divan",
+ "futures-util",
+ "http",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "aigw-providers"
@@ -177,6 +190,7 @@ dependencies = [
  "aigw-billing",
  "aigw-core",
  "aigw-counters",
+ "aigw-plugins",
  "aigw-providers",
  "aigw-store",
  "arc-swap",

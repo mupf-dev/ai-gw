@@ -23,6 +23,10 @@
 //! Betrieb aus dem Snapshot ([`SnapshotRoutes`]); [`StaticRoutes`] und
 //! [`mock::MockProvider`] dienen Tests und Benchmarks. Limits, Budgets und Kosten je Anfrage
 //! übernimmt [`Limiter`] ([`limits`]) an einer Stelle zwischen Modellfreigabe und Routing.
+//!
+//! Die Plugin-Kette ([`PluginChains`], AIGW-36) hängt nach Auth/Modellfreigabe (und den
+//! Limits) vor dem Routing (Pre-Plugins), vor dem Encoder (Post-Plugins) und im Stream-Pfad
+//! (Stream-Haken je IR-Ereignis); siehe `docs/konzept/12-plugins.md`.
 
 pub mod auth;
 mod error;
@@ -30,6 +34,7 @@ mod handlers;
 pub mod limits;
 pub mod mock;
 mod observe;
+mod plugins;
 pub mod provider;
 mod request_id;
 pub mod routes;
@@ -56,6 +61,7 @@ pub use routes::{ModelRoutes, StaticRoutes};
 pub use routing::{GroupRoute, RoutesTask, SnapshotRoutes};
 
 pub use aigw_core::config::DEFAULT_MAX_BODY_BYTES;
+pub use aigw_plugins::PluginChains;
 
 /// Antwort-Header: gewähltes Deployment (Name).
 pub const DEPLOYMENT_HEADER: &str = "x-aigw-deployment";
@@ -103,6 +109,8 @@ pub struct ProxyState {
     pub observer: Arc<dyn RequestObserver>,
     /// Limits, Budgets und Zähler-Backend (auch für die Deployment-Kapazität).
     pub limits: Arc<Limiter>,
+    /// Plugin-Ketten je (Org, Team, Key, Modellgruppe) (AIGW-36).
+    pub plugins: Arc<PluginChains>,
     /// Einstellungen.
     pub config: ProxyConfig,
 }
@@ -130,6 +138,7 @@ impl ProxyState {
             auth: Arc::new(AllowAll),
             observer: Arc::new(NoopObserver),
             limits: Arc::new(Limiter::local()),
+            plugins: Arc::new(PluginChains::default()),
             config: ProxyConfig::default(),
         }
     }

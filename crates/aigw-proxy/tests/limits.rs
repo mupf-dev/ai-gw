@@ -1017,3 +1017,107 @@ async fn postgres_sync_backend_shares_limits() {
     .await
     .unwrap();
 }
+
+// ---------------------------------------------------------------------------------------------
+// AIGW-36: Plugin-Reject/-Respond nach der Admission
+// ---------------------------------------------------------------------------------------------
+
+/// Lehnt „verboten“ ab und beantwortet „ping“ selbst (ohne Usage).
+struct GatePlugin;
+
+impl aigw_plugins::Plugin for GatePlugin {
+    fn name(&self) -> &'static str {
+        "gate"
+    }
+    fn phases(&self) -> aigw_plugins::Phases {
+        aigw_plugins::Phases::REQUEST
+    }
+    fn on_request<'a>(
+        &'a self,
+        ctx: &'a mut aigw_plugins::ReqCtx<'_>,
+    ) -> aigw_plugins::Hook<'a, aigw_plugins::Flow> {
+        let text = ctx.request.last_user_text().unwrap_or_default();
+        aigw_plugins::Hook::ok(if text.contains("verboten") {
+            aigw_plugins::Flow::Reject(ApiError::new(ErrorKind::PermissionDenied, "nein"))
+        } else if text == "ping" {
+            aigw_plugins::Flow::Respond(Box::new(ChatResponse {
+                id: "p".into(),
+                model: "m".into(),
+                created: None,
+                choices: vec![Choice {
+                    index: 0,
+                    message: Message {
+                        role: Role::Assistant,
+                        content: Content::Text("pong".into()),
+                        name: None,
+                        extra: Default::default(),
+                    },
+                    stop_reason: Some(StopReason::EndTurn),
+                    stop_sequence: None,
+                    extra: Default::default(),
+                }],
+                usage: None,
+                extra: Default::default(),
+                source: None,
+            }))
+        } else {
+            aigw_plugins::Flow::Continue
+        })
+    }
+}
+
+#[tokio::test]
+async fn plugin_reject_and_respond_release_the_token_reservation() {
+    let (snap, ids) = Fixture {
+        key: ApiKeySpec {
+            limits: vec![
+                lim(LimitMetric::Requests, 100),
+                lim(LimitMetric::Tokens, 1000),
+            ],
+            ..ApiKeySpec::default()
+        },
+        ..Fixture::default()
+    }
+    .build();
+    let counters = Arc::new(LocalCounters::new());
+    let provider = TestProvider::new("d");
+    let state = ProxyState {
+        auth: Arc::new(SnapshotAuthenticator::new(snap.clone())),
+        limits: Arc::new(Limiter::new(
+            counters.clone(),
+            None,
+            &LimitsConfig::default(),
+        )),
+        plugins: Arc::new(aigw_proxy::PluginChains::fixed(aigw_plugins::Chain::new(
+            vec![Arc::new(aigw_plugins::Entry::new(
+                "gate",
+                Arc::new(GatePlugin),
+            ))],
+        ))),
+        ..ProxyState::with_routes(single_route(provider.clone()))
+    };
+    let addr = serve(state).await;
+    let k = format!("key:{}", ids.key);
+    for (text, stream, status) in [
+        ("das ist verboten", false, StatusCode::FORBIDDEN),
+        ("ping", false, StatusCode::OK),
+        ("ping", true, StatusCode::OK),
+    ] {
+        let r = post(
+            addr,
+            "/v1/chat/completions",
+            json!({"model": "m", "max_tokens": 10, "stream": stream,
+                   "messages": [{"role": "user", "content": text}]}),
+        )
+        .await;
+        assert_eq!(r.status, status, "{text}");
+    }
+    // Drei Anfragen zählen, die Token-Reservierungen (je ≈ 12) sind vollständig freigegeben.
+    wait_counter(&counters, &format!("{k}:requests"), 3).await;
+    wait_counter(&counters, &format!("{k}:tokens"), 0).await;
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+
+    // Normale Anfrage: Reservierung wird mit der echten Usage abgeglichen (wie ohne Plugin).
+    assert_eq!(chat(addr).await.status, StatusCode::OK);
+    wait_counter(&counters, &format!("{k}:tokens"), 10).await;
+}

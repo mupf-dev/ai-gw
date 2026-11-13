@@ -338,13 +338,16 @@ Felder: `otel.name`, `otel.kind`, `otel.status_code`, `otel.status_message`, am 
 ```
 chat {model}               server   je Anfrage (aigw-proxy), bis zum letzten Byte bzw. Abbruch
 ├── auth                   internal Schlüsselprüfung (Fehler → Status ERROR, error.type)
-├── plugins                internal Platzhalter bis zur Plugin-Kette (aigw.plugins.count = 0)
 ├── route                  internal Modell → Route nachschlagen (aigw.model_group); die
 │                                   Deployment-Wahl je Versuch steckt im Routing (AIGW-24 ff.)
+├── plugins                internal Pre-Plugins (aigw.plugins.phase = request, aigw.plugins.count;
+│                                   Reject → Status ERROR), siehe 12-plugins.md
 ├── chat {provider_model}  client   je Upstream-Versuch inkl. Retries/Fallbacks
 │                                   (aigw-providers; bei Streams bis zu
 │                                   den Antwort-Headern): server.address/port,
 │                                   http.response.status_code, error.type (ErrorClass)
+├── plugins                internal Post-Plugins (aigw.plugins.phase = response), nur wenn die
+│                                   Kette Antwort-Haken hat; Stream-Haken ohne eigenen Span
 └── Ereignis first_token            bei Streams, Attribut aigw.ttft_ms
 ```
 

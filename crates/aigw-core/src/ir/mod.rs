@@ -125,6 +125,10 @@ pub struct RequestHints {
     /// reichen sie weiter, siehe `settings.forwardClientBeta`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub anthropic_beta: Vec<String>,
+    /// Zusätzliche Header an den Upstream (von Plugins, z. B. `header`; Name in
+    /// Kleinbuchstaben). Zugangsdaten- und Rahmen-Header sind schon im Plugin gesperrt.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub upstream_headers: Vec<(String, String)>,
 }
 
 /// Rolle einer Nachricht.

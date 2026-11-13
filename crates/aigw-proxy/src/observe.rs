@@ -231,6 +231,16 @@ impl Recorder {
         }
     }
 
+    /// Antwort eines Pre-Plugins (`Respond`, AIGW-36): kein Upstream-Verbrauch. Es zählt nur
+    /// die Usage, die das Plugin selbst angibt (sonst 0) – die Token-Reservierung der Limits
+    /// wird damit im Abschluss vollständig freigegeben, Kosten fallen keine an.
+    pub(crate) fn set_plugin_response(&mut self, resp: &ChatResponse) {
+        self.span
+            .record("gen_ai.response.model", resp.model.as_str());
+        self.usage = Some(resp.usage.clone().unwrap_or_default());
+        self.usage_final = true;
+    }
+
     /// Fehler vor dem ersten Byte.
     pub(crate) fn fail(&mut self, status: u16, err: &UpstreamError) {
         if let Some(r) = self.rec() {

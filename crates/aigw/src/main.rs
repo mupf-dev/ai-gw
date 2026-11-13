@@ -153,6 +153,9 @@ fn serve(
                 .map_err(|e| format!("Upstream-Client: {e}"))?,
         );
         let routes_task = routes.spawn(runtime_state.snapshot.clone());
+        // Plugin-Ketten je (Org, Team, Key, Modellgruppe), Neuaufbau je config_version (AIGW-36).
+        let plugins = std::sync::Arc::new(aigw_proxy::PluginChains::default());
+        let plugins_task = plugins.spawn(runtime_state.snapshot.clone());
         let state = aigw_proxy::ProxyState {
             routes,
             auth: std::sync::Arc::new(aigw_proxy::SnapshotAuthenticator::new(
@@ -165,6 +168,7 @@ fn serve(
                 Some(std::sync::Arc::clone(&runtime_state.budgets)),
                 &config.limits,
             )),
+            plugins,
             config: aigw_proxy::ProxyConfig::from(&config.server.data),
         };
         // Steuerebene: Admin-API/-UI (Anmeldung: AIGW-28/32), GitOps (AIGW-33) und
@@ -210,6 +214,7 @@ fn serve(
         let control = aigw_admin::read_only::apply(control, config.gitops.read_only_admin);
         server::run(listeners, state, control, shutdown_signal()).await?;
         drop(routes_task);
+        drop(plugins_task);
         runtime_state.shutdown().await;
         tracing::info!("ai-gw beendet");
         Ok(())

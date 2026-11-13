@@ -209,6 +209,47 @@ test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/chat/completions" \
   -H "authorization: Bearer $LIMITED" -H 'content-type: application/json' \
   -d '{"model":"mock","messages":[{"role":"user","content":"Hallo"}]}')" = 403
 curl -fsS "$BASE/v1/models" -H "authorization: Bearer $LIMITED" | grep -q '"rest-model"'
+echo "--- Plugins (AIGW-36): header auf Modellgruppe mock-2, request-transform global, per Apply"
+cat >"$TMP/plugins.yaml" <<'YAML'
+apiVersion: aigw/v1alpha1
+kind: PluginBinding
+metadata: {name: smoke-header}
+spec:
+  scope: {level: model-group, target: mock-2}
+  plugin: header
+  config: {response: {set: {x-smoke-plugin: "on"}}}
+---
+apiVersion: aigw/v1alpha1
+kind: PluginBinding
+metadata: {name: smoke-cap}
+spec:
+  scope: {level: global}
+  plugin: request-transform
+  order: 10
+  config: {caps: {maxTokens: 100}, rejectOverCap: true}
+YAML
+apply "$TMP/plugins.yaml"
+FOUND=0
+for _ in $(seq 1 50); do
+  curl -fsS -D "$TMP/p2.txt" -o /dev/null "$BASE/v1/chat/completions" \
+    -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+    -d '{"model":"mock-2","messages":[{"role":"user","content":"Hallo"}]}'
+  if grep -qi '^x-smoke-plugin: on' "$TMP/p2.txt"; then FOUND=1; break; fi
+  sleep 0.2
+done
+test "$FOUND" = 1
+# Andere Modellgruppe: kein Header; globaler Deckel → 400 (OpenAI-Eingang; der Zähler der
+# Anthropic-4xx unten erwartet genau einen Fehler).
+curl -fsS -D "$TMP/p3.txt" -o /dev/null "$BASE/v1/chat/completions" \
+  -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"model":"mock","messages":[{"role":"user","content":"Hallo"}]}'
+if grep -qi '^x-smoke-plugin' "$TMP/p3.txt"; then exit 1; fi
+CODE=$(curl -s -o "$TMP/p4.json" -w '%{http_code}' "$BASE/v1/chat/completions" -H "authorization: Bearer $KEY" \
+  -H 'content-type: application/json' \
+  -d '{"model":"mock","max_tokens":5000,"messages":[{"role":"user","content":"Hallo"}]}')
+cat "$TMP/p4.json"; echo
+test "$CODE" = 400
+grep -q '"invalid_request_error"' "$TMP/p4.json"
 echo "--- Admin nicht auf Datenebene"
 test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/api/v1/version")" = 404
 echo "--- GET /metrics (Steuerebene)"
