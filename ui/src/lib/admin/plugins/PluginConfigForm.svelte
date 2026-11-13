@@ -24,7 +24,16 @@
     secrets = [],
     credentials = [],
     modelGroups = [],
-  }: { plugin: string; config: Obj; secrets?: string[]; credentials?: string[]; modelGroups?: string[] } = $props();
+    secretRefs = true,
+  }: {
+    plugin: string;
+    config: Obj;
+    secrets?: string[];
+    credentials?: string[];
+    modelGroups?: string[];
+    /** AIGW-58: Verweise auf (globale) Secrets/Zugangsdaten darf nur ein globaler Admin setzen (sonst 403). */
+    secretRefs?: boolean;
+  } = $props();
 
   // ------------------------------------------------------------ Zugriff auf verschachtelte Schlüssel
   function obj(path: string[]): Obj | undefined {
@@ -196,6 +205,12 @@
     {/snippet}
   </Field>
 {/snippet}
+{#snippet refNote(current: string)}
+  <div class="flex flex-col gap-1 sm:col-span-2" data-testid="secret-ref-note">
+    <span class="text-sm font-medium">{current}</span>
+    <span class="text-xs text-fg-muted">Secrets und Zugangsdaten sind global – Bindungen mit Verweis darauf legt nur ein globaler Admin an (AIGW-58). Ohne Verweis speichern oder einen globalen Admin bitten.</span>
+  </div>
+{/snippet}
 {#snippet section(title: string)}<h3 class="label-caps text-fg-subtle sm:col-span-2">{title}</h3>{/snippet}
 
 <div class="grid gap-5 sm:col-span-2 sm:grid-cols-2" data-testid="plugin-config-form">
@@ -282,6 +297,9 @@
       <datalist id="cs-model-groups">{#each modelGroups as g (g)}<option value={g}></option>{/each}</datalist>
     {:else}
       {@render text('Endpunkt', ['endpoint'], { placeholder: 'https://…', hint: 'nur https, SSRF-Regeln wie Deployments' })}
+      {#if !secretRefs}
+        {@render refNote(csAuth ? `Zugang: ${csAuth === 'secret' ? 'Secret' : 'Zugangsdaten'} „${str([csAuth])}“` : 'Zugang: ohne')}
+      {:else}
       <Field label="Zugang" hint="nur als Verweis – nie Klartext (F149)">
         {#snippet children({ id })}
           <Select
@@ -298,6 +316,7 @@
       </Field>
       {#if csAuth === 'secret'}{@render choice('Secret', ['secret'], secretItems)}{/if}
       {#if csAuth === 'credential'}{@render choice('Zugangsdaten', ['credential'], credItems)}{/if}
+      {/if}
       {#if get(['provider']) === 'azure'}{@render text('API-Version', ['apiVersion'], { placeholder: '2024-09-01' })}{/if}
       {#if get(['provider']) === 'openai'}{@render text('Modell', ['model'], { placeholder: 'omni-moderation-latest' })}{/if}
     {/if}
@@ -330,6 +349,9 @@
         {/each}
       </div>
     </fieldset>
+    {#if !secretRefs}
+      {@render refNote(whKind ? `Signatur: ${whKind} „${str(['secret', whKind])}“` : 'Signatur: unsigniert')}
+    {:else}
     <Field label="Signatur (HMAC-Schlüssel)" hint="Verweis auf ein Geheimnis – nie Klartext in der Bindung">
       {#snippet children({ id })}
         <Select
@@ -351,6 +373,7 @@
     {#if whKind === 'secret' || whKind === 'credential'}{@render text('Feld', ['secret', 'field'], { placeholder: 'webhookSecret' })}{/if}
     {#if whKind === 'env'}{@render text('Variable', ['secret', 'env'], { placeholder: 'AIGW_HOOK_SECRET' })}{/if}
     {#if whKind === 'file'}{@render text('Pfad', ['secret', 'file'], { placeholder: '/run/secrets/hook' })}{/if}
+    {/if}
     {@render list('Client-Header im Payload', ['includeHeaders'], 'Allowlist, ein Header je Zeile; Auth-Header sind gesperrt', 'x-client-app')}
     {@render text('Max. Payload (Bytes)', ['maxPayloadBytes'], { numeric: true, hint: 'Standard 1 MiB' })}
     {@render text('Max. Antwort (Bytes)', ['maxResponseBytes'], { numeric: true, hint: 'Standard 1 MiB' })}

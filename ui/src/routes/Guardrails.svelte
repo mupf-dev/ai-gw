@@ -431,7 +431,7 @@
       {#snippet children({ id, describedby, invalid })}<textarea {id} class={[textarea, 'min-h-32 font-mono']} bind:value={cfgText} aria-describedby={describedby} aria-invalid={invalid || undefined} spellcheck="false" data-testid="config-json"></textarea>{/snippet}
     </Field>
   {:else}
-    <PluginConfigForm plugin={f.plugin} bind:config={cfg} secrets={refs.secrets} credentials={refs.credentials} modelGroups={refs.groups} />
+    <PluginConfigForm plugin={f.plugin} bind:config={cfg} secrets={refs.secrets} credentials={refs.credentials} modelGroups={refs.groups} secretRefs={canWrite({ kind: 'catalog' })} />
     {#if errors.config}<p class="text-sm text-danger-fg sm:col-span-2" role="alert" data-testid="config-error">{errors.config}</p>{/if}
   {/if}
   {#if testable(f.plugin)}

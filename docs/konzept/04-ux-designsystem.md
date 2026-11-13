@@ -337,7 +337,8 @@ Allowlist, Entropie, Stream-Fenster), `prompt-filter` (Rollen, Wortliste, Regex-
 `content-safety` (Anbieter, Endpunkt bzw. Modellgruppe, Schwellen, Richtung, Ausgabeprüfung) und `webhook` (URL,
 Phasen, Signatur, Header-Allowlist, Größen); die übrigen (`header`, `request-transform`, `cache`) als JSON. Das
 Formular arbeitet auf dem Konfigurationsobjekt – unbekannte Schlüssel bleiben erhalten, „JSON bearbeiten“ zeigt alles.
-Geheimnisse nur als **Verweis** (Secret bzw. Anbieter-Zugangsdaten aus Auswahllisten, nie Werte). Der Standard-
+Geheimnisse nur als **Verweis** (Secret bzw. Anbieter-Zugangsdaten aus Auswahllisten, nie Werte); diese Auswahl
+sieht nur ein globaler Admin – Org-/Team-Admins sehen den vorhandenen Verweis mit Hinweis (AIGW-58: sonst `403`). Der Standard-
 Fehlermodus und das Standard-Zeitlimit je Plugin-Art kommen aus `GET /plugins` (F148). **Testlauf**: die
 ungespeicherte Konfiguration läuft über `POST /plugin-bindings:test` auf einem Beispieltext (Eingabe oder Ausgabe);
 angezeigt werden Ergebnis (unverändert, verändert, gefiltert, abgelehnt mit Status/Code), der Text danach und die
