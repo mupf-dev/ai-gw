@@ -345,3 +345,9 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 194. [x] Team-Umzug: Keys ziehen per ON UPDATE CASCADE mit → Empfehlung übernommen
 - F193: RBAC-Target InOrganisation für teamlose Keys (Lesen/Schreiben für org-admin/org-gebundene Rollen), Analytics-Sichtbarkeit (F146)
 - Achtung: Test aigw-billing strict_parallel_never_exceeds_locally schlägt auf main fehl – Fix beauftragt (AIGW-71-Agent)
+
+## AIGW-75 – Empfehlungen übernommen (2026-11-13)
+195. [x] Snapshot-Cache Standard aus, in Postgres/HA-Beispielen + Helm setzen → Empfehlung übernommen
+196. [x] Team-/Org-Änderungen < 10 ms erst bei Bedarf → Empfehlung übernommen
+197. [x] degraded nur bei fehlschlagendem Abgleich, nicht bloßes Alter → Empfehlung übernommen
+198. [x] Postgres-Kaltstarttest (gestoppter Container) → in Phase 7 (AIGW-57) nachholen
