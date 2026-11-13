@@ -13,6 +13,7 @@ publish.workspace = true
 build = "build.rs"
 
 [dependencies]
+aigw-billing.workspace = true
 aigw-core.workspace = true
 aigw-proxy.workspace = true
 aigw-store.workspace = true

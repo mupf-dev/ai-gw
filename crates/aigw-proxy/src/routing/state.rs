@@ -2,14 +2,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Laufzeitzustand je Deployment: offene Anfragen, EWMA von TTFT und Latenz, Circuit Breaker,
-//! Sperre nach `Retry-After` und lokale RPM/TPM-Zähler.
+//! Sperre nach `Retry-After` und Sperre wegen erschöpfter Kapazität.
 //!
 //! Der Zustand hängt an der Deployment-ID und überlebt Snapshot-Wechsel, solange sich das
 //! Deployment nicht wesentlich ändert (Anbieter, Endpunkt, Anbieter-Modell, Zugangsdaten-Name,
 //! Einstellungen; siehe [`fingerprint`]). Gewicht, Priorität und Kapazität dürfen sich ändern,
 //! ohne dass EWMA und Breaker verloren gehen.
 //!
-//! Die Kapazitätszähler sind vorerst lokal je Instanz (später über `aigw-counters`).
+//! Die Kapazität (`capacity.rpm`/`tpm`) zählt `aigw-counters` (dasselbe Backend wie die
+//! Limits, also je nach Konfiguration instanzübergreifend, siehe `exec`). Lehnt der Zähler
+//! ab, merkt sich der Zustand die Wartezeit (`capacity_until_ms`), damit die Auswahl solange
+//! ohne Zählerzugriff (nur Atomics) an dem Deployment vorbeigeht.
 
 use std::hash::{Hash as _, Hasher as _};
 use std::sync::OnceLock;
@@ -68,49 +71,6 @@ impl Ewma {
     }
 }
 
-/// Gleitendes Minutenfenster (Näherung aus laufender und voriger Minute, nur Atomics).
-#[derive(Debug, Default)]
-pub(crate) struct MinuteWindow {
-    minute: AtomicU64,
-    current: AtomicU64,
-    previous: AtomicU64,
-}
-
-impl MinuteWindow {
-    fn rotate(&self, now_ms: u64) {
-        let m = now_ms / 60_000;
-        let old = self.minute.load(Ordering::Acquire);
-        if m != old
-            && self
-                .minute
-                .compare_exchange(old, m, Ordering::AcqRel, Ordering::Acquire)
-                .is_ok()
-        {
-            let prev = if m == old + 1 {
-                self.current.swap(0, Ordering::AcqRel)
-            } else {
-                self.current.store(0, Ordering::Release);
-                0
-            };
-            self.previous.store(prev, Ordering::Release);
-        }
-    }
-
-    pub(crate) fn add(&self, now_ms: u64, n: u64) {
-        self.rotate(now_ms);
-        self.current.fetch_add(n, Ordering::AcqRel);
-    }
-
-    /// Geschätzte Summe der letzten 60 s.
-    pub(crate) fn estimate(&self, now_ms: u64) -> u64 {
-        self.rotate(now_ms);
-        let elapsed = now_ms % 60_000;
-        let prev = self.previous.load(Ordering::Acquire);
-        let cur = self.current.load(Ordering::Acquire);
-        cur + prev * (60_000 - elapsed) / 60_000
-    }
-}
-
 /// Zustand eines Deployments.
 #[derive(Debug, Default)]
 pub struct DeploymentState {
@@ -121,8 +81,8 @@ pub struct DeploymentState {
     pub(crate) breaker: Breaker,
     /// Gesperrt bis (ms, `Retry-After` des Anbieters).
     pub(crate) cooldown_until_ms: AtomicU64,
-    pub(crate) rpm: MinuteWindow,
-    pub(crate) tpm: MinuteWindow,
+    /// Kapazität erschöpft bis (ms, Wartezeit laut Zähler).
+    pub(crate) capacity_until_ms: AtomicU64,
     /// Letzter Health Check (ms).
     pub(crate) last_health_ms: AtomicU64,
     /// Aufeinanderfolgende fehlgeschlagene Health Checks.
@@ -157,14 +117,23 @@ impl DeploymentState {
         self.breaker.state()
     }
 
-    /// Anfragen der letzten Minute (lokal gezählt).
-    pub fn requests_last_minute(&self) -> u64 {
-        self.rpm.estimate(now_ms())
+    /// Restliche Sperre wegen erschöpfter Kapazität (`None` = verfügbar).
+    pub fn capacity_blocked_for(&self) -> Option<Duration> {
+        match self.capacity_remaining_ms(now_ms()) {
+            0 => None,
+            ms => Some(Duration::from_millis(ms)),
+        }
     }
 
-    /// Tokens der letzten Minute (lokal gezählt).
-    pub fn tokens_last_minute(&self) -> u64 {
-        self.tpm.estimate(now_ms())
+    pub(crate) fn capacity_remaining_ms(&self, now_ms: u64) -> u64 {
+        self.capacity_until_ms
+            .load(Ordering::Acquire)
+            .saturating_sub(now_ms)
+    }
+
+    pub(crate) fn block_capacity(&self, now_ms: u64, d: Duration) {
+        let until = now_ms.saturating_add(duration_ms(d).max(1));
+        self.capacity_until_ms.fetch_max(until, Ordering::AcqRel);
     }
 
     pub(crate) fn cooldown_remaining_ms(&self, now_ms: u64) -> u64 {
@@ -208,16 +177,14 @@ mod tests {
     }
 
     #[test]
-    fn minute_window_slides() {
-        let w = MinuteWindow::default();
-        w.add(1_000, 10);
-        w.add(59_000, 20);
-        assert_eq!(w.estimate(59_000), 30);
-        // Halbe Minute später zählt die Vorminute zur Hälfte.
-        assert_eq!(w.estimate(90_000), 15);
-        w.add(90_000, 4);
-        assert_eq!(w.estimate(90_000), 19);
-        // Zwei Minuten Pause → leer.
-        assert_eq!(w.estimate(250_000), 0);
+    fn capacity_block() {
+        let s = DeploymentState::default();
+        assert_eq!(s.capacity_remaining_ms(1_000), 0);
+        s.block_capacity(1_000, Duration::from_millis(500));
+        assert_eq!(s.capacity_remaining_ms(1_200), 300);
+        // Kürzere Sperre verkürzt nicht.
+        s.block_capacity(1_200, Duration::from_millis(10));
+        assert_eq!(s.capacity_remaining_ms(1_200), 300);
+        assert_eq!(s.capacity_remaining_ms(2_000), 0);
     }
 }

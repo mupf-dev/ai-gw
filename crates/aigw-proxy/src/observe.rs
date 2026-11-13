@@ -88,6 +88,8 @@ pub(crate) struct Recorder {
     streamed_text: Option<String>,
     /// Wurzel-Span der Anfrage (OpenTelemetry, AIGW-45; `Span::none()`, wenn Tracing aus ist).
     span: Span,
+    /// Reservierung der Limits; am Ende Kosten, Budget und Abgleich (AIGW-30/31).
+    admission: Option<crate::limits::Admission>,
 }
 
 impl Recorder {
@@ -113,6 +115,7 @@ impl Recorder {
             payload: capture.then(Box::default),
             streamed_text: None,
             span: Span::none(),
+            admission: None,
         }
     }
 
@@ -160,6 +163,11 @@ impl Recorder {
             r.team_id = auth.team_id();
             r.organization_id = auth.organization_id();
         }
+    }
+
+    /// Zulassung durch die Limits; wird in [`Recorder::finish`] abgeschlossen.
+    pub(crate) fn set_admission(&mut self, admission: crate::limits::Admission) {
+        self.admission = Some(admission);
     }
 
     pub(crate) fn set_request(&mut self, req: &ChatRequest) {
@@ -315,6 +323,9 @@ impl Recorder {
         };
         r.usage = usage;
         r.usage_estimated = estimated;
+        if let Some(a) = self.admission.take() {
+            a.complete(&mut r);
+        }
         if !self.span.is_disabled() {
             let s = &self.span;
             s.record("http.response.status_code", r.status)

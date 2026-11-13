@@ -150,6 +150,33 @@ impl Reservation {
     pub fn is_local_fallback(&self) -> bool {
         self.origin == Origin::Local
     }
+
+    /// Teilt die Reservierung wie [`Vec::split_off`]: `self` behält die Limits `[0, at)`, das
+    /// Ergebnis enthält `[at, len)` (Indizes wie bei den übergebenen [`LimitCheck`]s).
+    ///
+    /// Damit lassen sich Limits, die in **einem** Aufruf atomar reserviert wurden, mit
+    /// unterschiedlichem tatsächlichem Verbrauch abgleichen (z. B. Tokens gesamt gegen
+    /// Eingabe-Tokens). Jeder Teil muss einzeln mit [`CounterBackend::settle`] abgeglichen
+    /// werden.
+    #[must_use = "Reservierungen müssen mit settle() abgeglichen werden"]
+    pub fn split_off(&mut self, at: usize) -> Reservation {
+        let at = at.min(self.booked.len());
+        Reservation {
+            booked: self.booked.split_off(at),
+            quotas: self.quotas.split_off(at.min(self.quotas.len())),
+            origin: self.origin,
+        }
+    }
+
+    /// Anzahl der Limits in dieser Reservierung.
+    pub fn len(&self) -> usize {
+        self.booked.len()
+    }
+
+    /// `true`, wenn die Reservierung kein Limit enthält.
+    pub fn is_empty(&self) -> bool {
+        self.booked.is_empty()
+    }
 }
 
 /// Ablehnung einer Reservierung. Es wurde nichts gebucht.

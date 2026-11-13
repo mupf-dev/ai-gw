@@ -47,6 +47,10 @@ pub struct Config {
     pub gitops: GitopsConfig,
     /// Admin-API: Regeln für Upstream-Endpunkte (AIGW-65), Anmeldung (AIGW-32).
     pub admin: AdminConfig,
+    /// Limits je Key/Team/Organisation/Modellgruppe (AIGW-30).
+    pub limits: LimitsConfig,
+    /// Kosten und Budgets (AIGW-31).
+    pub billing: BillingConfig,
 }
 
 impl Config {
@@ -333,6 +337,50 @@ pub struct GitopsConfig {
     /// Modus „nur YAML“: Schreibrouten der Admin-API antworten mit `403 read-only`;
     /// Änderungen nur per `aigw config apply` bzw. `POST /admin/api/v1/config:apply`.
     pub read_only_admin: bool,
+}
+
+/// Limits (AIGW-30, `docs/konzept/11-limits-und-budgets.md`).
+///
+/// Die Limits selbst stehen an den Ressourcen (Key, Team, Organisation, Modellgruppe); hier
+/// steht nur, wie der Proxy sie anwendet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LimitsConfig {
+    /// Angenommene Ausgabe-Tokens für die Reservierung, wenn die Anfrage kein `max_tokens`
+    /// enthält (Token-Limits und Deployment-Kapazität).
+    pub default_max_tokens: u64,
+    /// Antwort-Header `x-ratelimit-*` bzw. `anthropic-ratelimit-*` auch bei Erfolg setzen
+    /// (bei `429` immer).
+    pub response_headers: bool,
+}
+
+impl Default for LimitsConfig {
+    fn default() -> Self {
+        Self {
+            default_max_tokens: 4096,
+            response_headers: true,
+        }
+    }
+}
+
+/// Kostenabrechnung und Budgets (AIGW-31).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BillingConfig {
+    /// Zeitzone der Budget-Zeiträume (Kalendertag/-woche/-monat), IANA-Name wie
+    /// `Europe/Berlin` oder `UTC` (Standard).
+    pub timezone: String,
+    /// Abstand des Budget-Abgleichs mit der Datenbank (`budget_usage`) in Millisekunden.
+    pub budget_sync_ms: u64,
+}
+
+impl Default for BillingConfig {
+    fn default() -> Self {
+        Self {
+            timezone: "UTC".to_owned(),
+            budget_sync_ms: 1000,
+        }
+    }
 }
 
 /// Logging.

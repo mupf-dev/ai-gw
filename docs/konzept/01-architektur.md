@@ -144,6 +144,7 @@ pub trait CounterBackend: Send + Sync {
 - **Token-Limits (TPM)** analog zu Azure `llm-token-limit`: Die Reservierung beträgt *geschätzte Prompt-Tokens + `max_tokens`* (ohne `max_tokens`: konfigurierbarer Standard). Abgeglichen wird mit der tatsächlichen Usage. Die Prompt-Tokens werden über die Zeichenzahl geschätzt; ein genauer Tokenizer ist je Modellfamilie optional und kostet Latenz.
 - **Ebenen:** Key, Team, Organisation, Modellgruppe (global) und Deployment (Kapazität, wird für das Routing genutzt).
 - **Budgets:** Betrag je Zeitraum (Tag, Woche, Monat, frei) auf Key, Team oder Organisation, mit Warnschwellen (Ereignis/Webhook) und harter Grenze (`429` bzw. `402`-artiger Fehlercode `budget_exceeded`). Die Kosten stammen aus einer **Preistabelle** je Modell (Input, Output, Cached Input, Reasoning, Bild/Audio). Die Tabelle ist versioniert; Kosten werden mit dem zum Anfragezeitpunkt gültigen Preis berechnet.
+- Umsetzung (AIGW-30/31): [11-limits-und-budgets.md](11-limits-und-budgets.md).
 
 ## 9. Plugin-Kette
 

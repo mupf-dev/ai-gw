@@ -133,6 +133,31 @@ mod tests {
         assert!(c.reserve(&[]).await.unwrap().quotas().is_empty());
     }
 
+    #[tokio::test]
+    async fn split_off_settles_parts_separately() {
+        let c = LocalCounters::new();
+        let mut r = c
+            .try_reserve(&[
+                LimitCheck::fixed("req", Window::Minute, 10, 1),
+                LimitCheck::new("tok", Window::Minute, 1000, 100),
+                LimitCheck::new("in", Window::Minute, 1000, 40),
+            ])
+            .unwrap();
+        assert_eq!(r.len(), 3);
+        let mut tokens = r.split_off(1);
+        let input = tokens.split_off(1);
+        assert_eq!((r.len(), tokens.len(), input.len()), (1, 1, 1));
+        assert_eq!(tokens.quotas()[0].limit, 1000);
+        c.settle_now(r, 0);
+        c.settle_now(tokens, 70);
+        c.settle_now(input, 10);
+        assert_eq!(c.current("req", Window::Minute), 1);
+        assert_eq!(c.current("tok", Window::Minute), 70);
+        assert_eq!(c.current("in", Window::Minute), 10);
+        let mut e = c.try_reserve(&[]).unwrap();
+        assert!(e.split_off(5).is_empty());
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn many_tasks_never_exceed_limit() {
         let c = Arc::new(LocalCounters::new());

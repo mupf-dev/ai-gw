@@ -9,6 +9,7 @@ resolver = "3"
 members = [
     "crates/aigw",
     "crates/aigw-admin",
+    "crates/aigw-billing",
     "crates/aigw-core",
     "crates/aigw-counters",
     "crates/aigw-observe",
@@ -29,6 +30,7 @@ publish = false
 
 [workspace.dependencies]
 aigw-admin = { path = "crates/aigw-admin" }
+aigw-billing = { path = "crates/aigw-billing" }
 aigw-core = { path = "crates/aigw-core" }
 aigw-counters = { path = "crates/aigw-counters" }
 aigw-observe = { path = "crates/aigw-observe" }
@@ -89,6 +91,9 @@ thiserror = "2.0.17"
 # Auswahl begründet in docs/konzept/02-datenmodell.md.
 serde-saphyr = { version = "2.1", default-features = false, features = ["deserialize", "serialize"] }
 time = { version = "0.3.47", default-features = false, features = ["std", "serde", "formatting", "parsing"] }
+# Budget-Zeiträume in konfigurierbarer Zeitzone (AIGW-31): IANA-Zeitzonen mit eingebetteter
+# tzdb (Container-Images ohne /usr/share/zoneinfo), reines Rust.
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 # IDs: UUIDv7 (zeitlich sortierbar, gut für B-Baum-Indizes).
 uuid = { version = "1.18", default-features = false, features = ["std", "v7", "serde"] }
 # Krypto (AES-256-GCM, SHA-256, Zufall) über denselben Provider wie rustls.

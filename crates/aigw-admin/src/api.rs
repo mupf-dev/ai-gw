@@ -42,6 +42,7 @@ use crate::{admin_keys as ak, session as s};
         s::login, s::callback, s::logout, s::session_info, s::auth_info,
         ak::list_admin_api_keys, ak::create_admin_api_key, ak::get_admin_api_key,
         ak::put_admin_api_key, ak::delete_admin_api_key,
+        crate::usage::list_budgets,
     ),
     components(schemas(VersionInfo, Problem)),
     modifiers(&SecuritySchemes),
@@ -58,6 +59,7 @@ use crate::{admin_keys as ak, session as s};
         (name = "gitops", description = "YAML-Export und -Apply aller Ressourcen (aigw/v1alpha1)"),
         (name = "auth", description = "Anmeldung: OIDC-Login, Session, Abmeldung"),
         (name = "admin-api-keys", description = "Admin-API-Keys für Automatisierung"),
+        (name = "usage", description = "Verbrauch und Budgetstände"),
     )
 )]
 pub struct ApiDoc;

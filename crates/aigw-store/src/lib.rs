@@ -11,6 +11,7 @@
 //! Details: `docs/konzept/02-datenmodell.md`.
 
 pub mod admin_auth;
+pub mod budget;
 pub mod crypto;
 pub mod gitops;
 pub mod keys;

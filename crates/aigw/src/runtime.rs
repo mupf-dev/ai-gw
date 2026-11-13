@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Laufzeitzustand des Servers: Datenbank, Master-Key, Konfigurations-Snapshot mit Hot Reload
-//! (§14, AIGW-10), Request-Log (§12, AIGW-43), Metriken und OTLP-Export (AIGW-44/45).
+//! (§14, AIGW-10), Request-Log (§12, AIGW-43), Metriken und OTLP-Export (AIGW-44/45),
+//! Zähler für Limits/Kapazität (AIGW-29/30) und Budgets mit Abgleich gegen `budget_usage`
+//! (AIGW-31).
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use aigw_billing::{BudgetLedger, BudgetSyncTask, Budgets, Calendar};
 use aigw_core::Config;
 use aigw_core::observe::RequestObserver;
 use aigw_core::snapshot::SnapshotHandle;
@@ -29,6 +33,13 @@ pub(crate) struct Runtime {
     pub(crate) observer: Arc<dyn RequestObserver>,
     /// Zähler des Request-Logs (`/metrics`).
     pub(crate) observe_metrics: Arc<ObserveMetrics>,
+    /// Zähler-Backend (`counters.backend`) für Limits und Deployment-Kapazität.
+    pub(crate) counters: Arc<dyn aigw_counters::CounterBackend>,
+    /// Budgetstände (Abgleich mit `budget_usage`).
+    pub(crate) budgets: Arc<Budgets>,
+    /// Kalender der Budget-Zeiträume (`billing.timezone`).
+    pub(crate) calendar: Arc<Calendar>,
+    budget_sync: BudgetSyncTask,
     reloader: ReloaderTask,
     observe: crate::observe::Observe,
 }
@@ -60,7 +71,25 @@ impl Runtime {
             "Konfigurations-Snapshot geladen"
         );
         let observe = crate::observe::start(config, &store, traces)?;
+        let counters =
+            aigw_counters::from_config(config, aigw_counters::CounterOptions::default()).await?;
+        let calendar = Arc::new(
+            Calendar::new(&config.billing.timezone)
+                .map_err(|e| format!("billing.timezone: {e}"))?,
+        );
+        let ledger: Arc<dyn BudgetLedger> = Arc::new(store.clone());
+        let budgets = Arc::new(Budgets::new((*calendar).clone(), Some(ledger)));
+        let budget_sync = budgets.spawn_sync(Duration::from_millis(config.billing.budget_sync_ms));
+        tracing::info!(
+            counters = ?counters.kind(),
+            timezone = calendar.timezone(),
+            "Limits und Budgets bereit"
+        );
         Ok(Self {
+            counters,
+            budgets,
+            calendar,
+            budget_sync,
             observer: observe.log.observer(),
             observe_metrics: Arc::clone(observe.log.metrics()),
             observe,
@@ -92,6 +121,7 @@ impl Runtime {
                 "Request-Log bzw. Traces beim Herunterfahren nicht vollständig geschrieben"
             );
         }
+        self.budget_sync.shutdown().await;
         self.reloader.shutdown().await;
         self.store.close().await;
     }

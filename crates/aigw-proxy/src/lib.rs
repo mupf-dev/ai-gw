@@ -21,11 +21,13 @@
 //! aus dem Snapshot); [`auth::AllowAll`] lässt alles zu (Tests, Entwicklung). Das Routing
 //! ([`routing`]: Strategien, Prioritätsgruppen, Retries, Fallbacks, Circuit Breaker) kommt im
 //! Betrieb aus dem Snapshot ([`SnapshotRoutes`]); [`StaticRoutes`] und
-//! [`mock::MockProvider`] dienen Tests und Benchmarks.
+//! [`mock::MockProvider`] dienen Tests und Benchmarks. Limits, Budgets und Kosten je Anfrage
+//! übernimmt [`Limiter`] ([`limits`]) an einer Stelle zwischen Modellfreigabe und Routing.
 
 pub mod auth;
 mod error;
 mod handlers;
+pub mod limits;
 pub mod mock;
 mod observe;
 pub mod provider;
@@ -47,6 +49,7 @@ pub use auth::{
     AllowAll, ApiKey, AuthContext, Authenticator, KeySource, SnapshotAuthenticator, extract_api_key,
 };
 pub use error::ErrorFormat;
+pub use limits::{Limiter, TokenEstimate};
 pub use provider::{BoxFuture, ChatProvider, Describe, EventStream};
 pub use request_id::{REQUEST_ID_HEADER, RequestId, RequestStart};
 pub use routes::{ModelRoutes, StaticRoutes};
@@ -98,6 +101,8 @@ pub struct ProxyState {
     pub auth: Arc<dyn Authenticator>,
     /// Empfänger der Kennzahlen je Anfrage (Request-Log, Abrechnung).
     pub observer: Arc<dyn RequestObserver>,
+    /// Limits, Budgets und Zähler-Backend (auch für die Deployment-Kapazität).
+    pub limits: Arc<Limiter>,
     /// Einstellungen.
     pub config: ProxyConfig,
 }
@@ -117,12 +122,14 @@ impl ProxyState {
         Self::with_routes(Arc::new(mock::mock_routes()))
     }
 
-    /// Zustand mit den angegebenen Routen, ohne Schlüsselprüfung, ohne Beobachter.
+    /// Zustand mit den angegebenen Routen, ohne Schlüsselprüfung, ohne Beobachter, mit
+    /// lokalen Zählern ohne Budgets.
     pub fn with_routes(routes: Arc<dyn ModelRoutes>) -> Self {
         Self {
             routes,
             auth: Arc::new(AllowAll),
             observer: Arc::new(NoopObserver),
+            limits: Arc::new(Limiter::local()),
             config: ProxyConfig::default(),
         }
     }

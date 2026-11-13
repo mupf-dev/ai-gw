@@ -220,6 +220,35 @@ grep -q '^aigw_upstream_errors_total{class="[a-z_]*"} [1-9]' "$TMP/metrics.txt"
 grep -q '^aigw_inflight_requests 0$' "$TMP/metrics.txt"
 grep -q '^aigw_snapshot_version [1-9]' "$TMP/metrics.txt"
 grep -q '^aigw_snapshot_stale_seconds 0$' "$TMP/metrics.txt"
+# Limits nach der Metrik-Prüfung (erzeugt weitere 4xx).
+echo "--- Limits (AIGW-30): Key mit 1 Anfrage/Minute → zweite Anfrage 429 mit Rate-Limit-Headern"
+RL=$(curl -fsS "$CBASE/admin/api/v1/api-keys" -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"metadata":{"name":"smoke-rl"},"spec":{"limits":[{"metric":"requests","limit":1,"window":"minute"}],"budget":{"amount":"5","period":"month","warnAtPercent":[80]}}}' |
+  grep -o '"secret":"sk-aigw-[^"]*"' | cut -d'"' -f4)
+test -n "$RL"
+CODE=000
+for _ in $(seq 1 50); do # Hot Reload abwarten
+  CODE=$(curl -s -D "$TMP/h3.txt" -o /dev/null -w '%{http_code}' "$BASE/v1/chat/completions" \
+    -H "authorization: Bearer $RL" -H 'content-type: application/json' \
+    -d '{"model":"mock","messages":[{"role":"user","content":"Hallo"}]}')
+  [[ "$CODE" != 401 ]] && break
+  sleep 0.1
+done
+test "$CODE" = 200
+grep -qi '^x-ratelimit-limit-requests: 1' "$TMP/h3.txt"
+CODE=$(curl -s -D "$TMP/h4.txt" -o "$TMP/b4.json" -w '%{http_code}' "$BASE/v1/messages" \
+  -H "x-api-key: $RL" -H 'content-type: application/json' \
+  -d '{"model":"mock","max_tokens":5,"messages":[{"role":"user","content":"Hallo"}]}')
+cat "$TMP/b4.json"; echo
+test "$CODE" = 429
+grep -qi '^retry-after:' "$TMP/h4.txt"
+grep -qi '^anthropic-ratelimit-requests-remaining: 0' "$TMP/h4.txt"
+grep -q '"rate_limit_error"' "$TMP/b4.json"
+echo "--- GET /admin/api/v1/usage/budgets (AIGW-31)"
+curl -fsS "$CBASE/admin/api/v1/usage/budgets?level=api-key" -H "authorization: Bearer $TOKEN" |
+  tee "$TMP/budgets.json"; echo
+grep -q '"targetName":"smoke-rl"' "$TMP/budgets.json"
 if [[ -n "${OTLP_PID:-}" ]]; then
   echo "--- OTLP-Export an den Fake-Collector (Traces + Logs)"
   for _ in $(seq 1 50); do

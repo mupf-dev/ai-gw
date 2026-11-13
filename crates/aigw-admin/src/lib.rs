@@ -14,6 +14,7 @@
 //! - `/admin/api/v1/admin-api-keys` – Admin-API-Keys ([`admin_keys`]),
 //!   `/admin/api/v1/session` – angemeldeter Principal
 //! - `/admin/auth/{login,callback,logout}` – OIDC-Login und Abmeldung ([`session`], [`oidc`])
+//! - `GET /admin/api/v1/usage/budgets` – Budgetstände (siehe [`usage`])
 //! - `GET /admin/…` – eingebettete Svelte-SPA (siehe [`ui`])
 //!
 //! Fehler kommen einheitlich als Problem Details (RFC 9457, [`problem::Problem`]).
@@ -32,6 +33,7 @@ pub mod read_only;
 pub mod resources;
 pub mod session;
 pub mod ui;
+pub mod usage;
 pub use aigw_core::upstream;
 
 use std::fmt;

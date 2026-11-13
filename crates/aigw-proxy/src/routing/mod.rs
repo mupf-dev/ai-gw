@@ -7,7 +7,8 @@
 //!   Gruppen geordnet (0 vor 1), Strategie, [`GroupPolicy`] und Fallback-Kette.
 //! - Auswahl ([`select`]): `weighted`, `least-latency`, `least-busy`, `cost`. Eine
 //!   Prioritätsgruppe ist gesperrt, solange alle ihre Deployments offen (Circuit Breaker), nach
-//!   `Retry-After` gesperrt oder an der Kapazitätsgrenze (RPM/TPM) sind.
+//!   `Retry-After` gesperrt oder an der Kapazitätsgrenze (RPM/TPM, gezählt über
+//!   `aigw-counters`) sind.
 //! - Ausführung (`exec`): Retries vor dem ersten Byte an den Client, anderes Deployment
 //!   bevorzugt, exponentieller Backoff mit Jitter, `Retry-After`, Gesamtbudget, Fallback-Ketten
 //!   über Modellgruppen nach Fehlerklasse.
@@ -49,6 +50,8 @@ pub struct Member {
     pub(crate) weight: u32,
     pub(crate) priority: u32,
     pub(crate) capacity: Capacity,
+    /// Zählerschlüssel der Kapazität (`dep:<id>:requests`, `dep:<id>:tokens`).
+    pub(crate) capacity_keys: (Box<str>, Box<str>),
     /// Preis (Eingabe + Ausgabe je 1 Mio. Tokens, Nano-Einheiten) für `cost`.
     pub(crate) cost: Option<u64>,
     /// Position in [`GroupRoute::members`].
@@ -86,14 +89,10 @@ impl Member {
             && !self.at_capacity(now_ms)
     }
 
+    /// Kapazität laut letzter Ablehnung des Zählers erschöpft (nur Atomics, kein Zählerzugriff;
+    /// geprüft wird beim Start eines Versuchs, siehe `exec`).
     fn at_capacity(&self, now_ms: u64) -> bool {
-        self.capacity
-            .rpm
-            .is_some_and(|l| self.state.rpm.estimate(now_ms) >= l)
-            || self
-                .capacity
-                .tpm
-                .is_some_and(|l| self.state.tpm.estimate(now_ms) >= l)
+        self.state.capacity_remaining_ms(now_ms) > 0
     }
 
     /// Wie lange das Deployment noch gesperrt ist (0 = verfügbar).
@@ -104,11 +103,7 @@ impl Member {
             0
         };
         let c = self.state.cooldown_remaining_ms(now_ms);
-        let cap = if self.at_capacity(now_ms) {
-            60_000 - now_ms % 60_000
-        } else {
-            0
-        };
+        let cap = self.state.capacity_remaining_ms(now_ms);
         b.max(c).max(cap)
     }
 }
@@ -198,12 +193,21 @@ impl GroupRoute {
             .into_iter()
             .enumerate()
             .map(|(idx, m)| {
+                let d = m.provider.describe();
+                let id = d
+                    .deployment_id
+                    .map_or_else(|| d.deployment.to_owned(), |id| id.to_string());
+                let capacity_keys = (
+                    format!("dep:{id}:requests").into_boxed_str(),
+                    format!("dep:{id}:tokens").into_boxed_str(),
+                );
                 Arc::new(Member {
                     provider: m.provider,
                     state: m.state.unwrap_or_default(),
                     weight: m.weight,
                     priority: m.priority,
                     capacity: m.capacity,
+                    capacity_keys,
                     cost: m.cost,
                     idx,
                 })

@@ -21,6 +21,7 @@ use aigw_core::ir::{
 };
 use aigw_core::observe::Attempt;
 use aigw_core::resource::FallbackTrigger;
+use aigw_counters::{CounterBackend, LimitCheck, Reservation};
 use futures_util::{Stream, StreamExt as _};
 
 use super::breaker::Admit;
@@ -41,6 +42,72 @@ pub(crate) enum Outcome {
     Json(ChatResponse),
     /// Stream (erstes Ereignis bereits geprüft).
     Stream(EventStream),
+}
+
+/// Zähler für die Deployment-Kapazität (`capacity.rpm`/`tpm`).
+#[derive(Clone, Copy)]
+pub(crate) struct CapacityCtx<'a> {
+    /// Dasselbe Backend wie die Limits (lokal, `postgres-sync` oder Redis).
+    pub(crate) counters: &'a Arc<dyn CounterBackend>,
+    /// Reservierte Tokens je Versuch (geschätzte Eingabe + `max_tokens`).
+    pub(crate) tokens: u64,
+}
+
+/// Ergebnis der Kapazitätsprüfung eines Versuchs.
+enum CapacityCheck {
+    /// Frei (ggf. mit Reservierung, die am Ende des Versuchs abgeglichen wird).
+    Granted(Option<Reservation>),
+    /// Erschöpft; das Deployment ist bis zur Wartezeit für alle Anfragen gesperrt.
+    Blocked,
+    /// Passt nur für diese Anfrage nicht (zu viele Tokens für den Rest der Minute).
+    TooLarge,
+}
+
+/// Reserviert die Kapazität eines Deployments für einen Versuch (RPM: 1, TPM: Schätzung;
+/// abgeglichen mit der tatsächlichen Usage am Ende des Versuchs).
+async fn reserve_capacity(member: &Member, cap: CapacityCtx<'_>) -> CapacityCheck {
+    let c = member.capacity;
+    if c.rpm.is_none() && c.tpm.is_none() {
+        return CapacityCheck::Granted(None);
+    }
+    let (req_key, tok_key) = (&*member.capacity_keys.0, &*member.capacity_keys.1);
+    let mut checks: [Option<LimitCheck<'_>>; 2] = [None, None];
+    if let Some(rpm) = c.rpm {
+        checks[0] = Some(LimitCheck::fixed(
+            req_key,
+            aigw_counters::Window::Minute,
+            rpm,
+            1,
+        ));
+    }
+    if let Some(tpm) = c.tpm {
+        checks[1] = Some(LimitCheck::new(
+            tok_key,
+            aigw_counters::Window::Minute,
+            tpm,
+            cap.tokens,
+        ));
+    }
+    let checks: Vec<LimitCheck<'_>> = checks.into_iter().flatten().collect();
+    match cap.counters.reserve(&checks).await {
+        Ok(mut r) => {
+            // Nur der Token-Teil wird abgeglichen.
+            let tokens = if c.rpm.is_some() { r.split_off(1) } else { r };
+            CapacityCheck::Granted((!tokens.is_empty()).then_some(tokens))
+        }
+        Err(rej) => {
+            let requests = c.rpm.is_some() && rej.index == 0;
+            let now = now_ms();
+            match rej.retry_after {
+                // Anfragen erschöpft oder Token-Kontingent aufgebraucht: für alle sperren.
+                Some(wait) if requests || rej.used >= rej.limit => {
+                    member.state.block_capacity(now, wait);
+                    CapacityCheck::Blocked
+                }
+                _ => CapacityCheck::TooLarge,
+            }
+        }
+    }
 }
 
 /// Ergebnis der Ausführung inkl. aller Versuche.
@@ -147,6 +214,7 @@ pub(crate) async fn execute(
     routes: &dyn ModelRoutes,
     group: Arc<GroupRoute>,
     req: ChatRequest,
+    cap: CapacityCtx<'_>,
 ) -> Routed {
     let stream = req.is_stream();
     let budget_end = Instant::now() + group.policy.retry.budget;
@@ -174,6 +242,7 @@ pub(crate) async fn execute(
             single_shot,
             stream,
             budget_end,
+            cap,
             &mut routed,
             &mut scratch,
         )
@@ -236,12 +305,14 @@ fn find_fallback(
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_group(
     group: &Arc<GroupRoute>,
     req: &mut Option<ChatRequest>,
     single_shot: bool,
     stream: bool,
     budget_end: Instant,
+    cap: CapacityCtx<'_>,
     routed: &mut Routed,
     scratch: &mut Scratch,
 ) -> Result<Outcome, Failure> {
@@ -270,6 +341,15 @@ async fn run_group(
             break;
         };
         waited = false;
+        // Kapazität über die Zähler (instanzübergreifend je nach Backend).
+        let capacity = match reserve_capacity(&member, cap).await {
+            CapacityCheck::Granted(r) => r,
+            CapacityCheck::Blocked => continue,
+            CapacityCheck::TooLarge => {
+                excluded.push(member.idx);
+                continue;
+            }
+        };
         if n > 0 && tried.contains(&member.idx) {
             let wait =
                 backoff(&policy, n).min(budget_end.saturating_duration_since(Instant::now()));
@@ -281,7 +361,7 @@ async fn run_group(
         };
         routed.last = Some(Arc::clone(&member));
         let started = Instant::now();
-        let mut active = Active::start(Arc::clone(&member), group, admit);
+        let mut active = Active::start(Arc::clone(&member), group, admit, cap, capacity);
         let result = attempt(&member, attempt_req, stream).await;
         let elapsed = started.elapsed();
         let desc = member.provider.describe();
@@ -382,24 +462,33 @@ async fn attempt(
     }
 }
 
-/// Laufende Anfrage auf einem Deployment: zählt offene Anfragen und RPM/TPM, verbucht das
-/// Ergebnis beim Circuit Breaker.
+/// Laufende Anfrage auf einem Deployment: zählt offene Anfragen, gleicht die TPM-Reservierung
+/// am Ende mit der Usage ab und verbucht das Ergebnis beim Circuit Breaker.
 struct Active {
     member: Arc<Member>,
     breaker: super::BreakerConfig,
     tokens: u64,
     done: bool,
+    counters: Option<Arc<dyn CounterBackend>>,
+    capacity: Option<Reservation>,
 }
 
 impl Active {
-    fn start(member: Arc<Member>, group: &GroupRoute, _admit: Admit) -> Self {
+    fn start(
+        member: Arc<Member>,
+        group: &GroupRoute,
+        _admit: Admit,
+        cap: CapacityCtx<'_>,
+        capacity: Option<Reservation>,
+    ) -> Self {
         member.state.in_flight.fetch_add(1, Ordering::AcqRel);
-        member.state.rpm.add(now_ms(), 1);
         Self {
             member,
             breaker: group.policy.breaker,
             tokens: 0,
             done: false,
+            counters: capacity.as_ref().map(|_| Arc::clone(cap.counters)),
+            capacity,
         }
     }
 
@@ -424,8 +513,12 @@ impl Active {
 impl Drop for Active {
     fn drop(&mut self) {
         self.member.state.in_flight.fetch_sub(1, Ordering::AcqRel);
-        if self.tokens > 0 {
-            self.member.state.tpm.add(now_ms(), self.tokens);
+        // TPM-Reservierung auf die gemeldete Usage korrigieren (Fehler/Abbruch ohne Usage: 0).
+        if let (Some(r), Some(counters)) = (self.capacity.take(), self.counters.take())
+            && let Ok(rt) = tokio::runtime::Handle::try_current()
+        {
+            let tokens = self.tokens;
+            rt.spawn(async move { counters.settle(r, tokens).await });
         }
     }
 }

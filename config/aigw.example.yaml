@@ -122,3 +122,17 @@ admin:
       cache_secs: 3600
       http_timeout_secs: 10
       clock_skew_secs: 60
+
+# Limits je Key/Team/Organisation/Modellgruppe (docs/konzept/11-limits-und-budgets.md). Die
+# Limits stehen an den Ressourcen; hier nur, wie der Proxy sie anwendet.
+limits:
+  # Ausgabe-Tokens für die Reservierung, wenn die Anfrage kein max_tokens enthält
+  default_max_tokens: 4096
+  # x-ratelimit-* bzw. anthropic-ratelimit-* auch bei Erfolg (bei 429 immer)
+  response_headers: true
+
+# Kosten und Budgets: Zeitzone der Kalender-Zeiträume (IANA-Name) und Abgleich mit der
+# Datenbank (Tabelle budget_usage, instanzübergreifend).
+billing:
+  timezone: UTC
+  budget_sync_ms: 1000

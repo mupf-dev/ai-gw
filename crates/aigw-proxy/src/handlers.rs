@@ -19,6 +19,7 @@ use tracing::Instrument as _;
 use crate::ProxyState;
 use crate::auth::extract_api_key;
 use crate::error::ErrorFormat;
+use crate::limits::{RateHeaders, TokenEstimate, retry_after_secs};
 use crate::observe::{ObservedStream, Recorder};
 use crate::provider::EventStream;
 use crate::request_id::{RequestId, RequestStart};
@@ -107,6 +108,8 @@ struct RouteInfo {
     deployment: Option<String>,
     attempts: usize,
     fallback: Option<String>,
+    /// Rate-Limit-Header (AIGW-30), bei Ablehnung und – falls eingeschaltet – bei Erfolg.
+    ratelimit: Option<RateHeaders>,
 }
 
 impl RouteInfo {
@@ -164,7 +167,7 @@ async fn chat(
             tracing::debug!(request_id = %rid.0, error = %e, "Anfrage abgelehnt");
             let mut res = format.response(&e.error, Some(&rid.0));
             if let Some(after) = e.retry_after {
-                let secs = after.as_secs() + u64::from(after.subsec_nanos() > 0);
+                let secs = retry_after_secs(after);
                 if let Ok(v) = HeaderValue::from_str(&secs.to_string()) {
                     res.headers_mut().insert(header::RETRY_AFTER, v);
                 }
@@ -176,6 +179,9 @@ async fn chat(
     };
     if st.config.routing_headers {
         info.apply(&mut res);
+    }
+    if let Some(h) = &info.ratelimit {
+        h.apply(format, res.headers_mut(), std::time::SystemTime::now());
     }
     res
 }
@@ -217,10 +223,32 @@ async fn chat_inner(
     drop(body);
     validate(&req)?;
     // Modellfreigabe (Architektur §3, Schritt 3); die Gruppe nutzt später das Routing.
-    let _group = auth.authorize_model(&req.model)?;
+    let group = auth.authorize_model(&req.model)?;
     rec.set_request(&req);
     // Platzhalter-Span, bis die Plugin-Kette (Architektur §9) eingehängt wird.
     drop(crate::trace::plugins_span());
+
+    // Limits und Budgets (Architektur §3, Schritt 4; AIGW-30/31): genau eine Reservierung je
+    // Client-Anfrage – Retries und Fallbacks laufen darin. Abgeschlossen wird im Recorder
+    // (Kosten, Budget, Abgleich mit der tatsächlichen Usage).
+    let est = TokenEstimate::of(&req, st.limits.default_max_tokens());
+    match st
+        .limits
+        .admit(&auth, group.as_ref(), est, std::time::SystemTime::now())
+        .await
+    {
+        Ok(admission) => {
+            if st.limits.response_headers() && !admission.headers().is_empty() {
+                info.ratelimit = Some(admission.headers().clone());
+            }
+            rec.set_admission(admission);
+        }
+        Err(denied) => {
+            let denied = *denied;
+            info.ratelimit = (!denied.headers.is_empty()).then_some(denied.headers);
+            return Err(denied.error);
+        }
+    }
 
     let route_span = crate::trace::route_span(&req.model);
     let route = route_span
@@ -243,7 +271,16 @@ async fn chat_inner(
         .unwrap_or(false);
 
     // Auswahl, Retries, Fallbacks (AIGW-24/25/26).
-    let routed = exec::execute(st.routes.as_ref(), route, req).await;
+    let routed = exec::execute(
+        st.routes.as_ref(),
+        route,
+        req,
+        exec::CapacityCtx {
+            counters: st.limits.counters(),
+            tokens: est.total(),
+        },
+    )
+    .await;
     if let Some(m) = &routed.last {
         let d = m.provider().describe();
         rec.set_deployment(d);

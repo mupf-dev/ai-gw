@@ -4690,6 +4690,76 @@
         ]
       }
     },
+    "/admin/api/v1/usage/budgets": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "Budgets mit Verbrauch im laufenden Zeitraum.",
+        "operationId": "list_budgets",
+        "parameters": [
+          {
+            "name": "level",
+            "in": "query",
+            "description": "Nur diese Ebene.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/BudgetLevelName"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Budgets mit Stand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/users": {
       "get": {
         "tags": [
@@ -5793,6 +5863,41 @@
         },
         "additionalProperties": false
       },
+      "BudgetLevelName": {
+        "type": "string",
+        "description": "Ebene eines Budgets.",
+        "enum": [
+          "organization",
+          "team",
+          "api-key"
+        ]
+      },
+      "BudgetList": {
+        "type": "object",
+        "description": "Budget-Übersicht.",
+        "required": [
+          "timezone",
+          "at",
+          "items"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "description": "Zeitpunkt der Auswertung (RFC 3339)."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BudgetStatus"
+            },
+            "description": "Budgets (Organisationen, Teams, aktive API-Keys; je nach Name sortiert)."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "Zeitzone der Zeiträume (`billing.timezone`)."
+          }
+        }
+      },
       "BudgetPeriod": {
         "type": "string",
         "description": "Zeitraum eines Budgets.",
@@ -5802,6 +5907,89 @@
           "month",
           "total"
         ]
+      },
+      "BudgetStatus": {
+        "type": "object",
+        "description": "Stand eines Budgets im laufenden Zeitraum.",
+        "required": [
+          "level",
+          "targetId",
+          "targetName",
+          "period",
+          "periodStart",
+          "amount",
+          "used",
+          "remaining",
+          "percent",
+          "warnAtPercent",
+          "hardLimit",
+          "exhausted"
+        ],
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "Betrag je Zeitraum."
+          },
+          "exhausted": {
+            "type": "boolean",
+            "description": "Betrag erreicht."
+          },
+          "hardLimit": {
+            "type": "boolean",
+            "description": "Harte Grenze (Ablehnung mit `budget_exceeded`)."
+          },
+          "level": {
+            "$ref": "#/components/schemas/BudgetLevelName",
+            "description": "Ebene."
+          },
+          "percent": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Verbrauch in Prozent des Betrags (ganzzahlig abgerundet; 0 bei Betrag 0).",
+            "minimum": 0
+          },
+          "period": {
+            "$ref": "#/components/schemas/BudgetPeriod",
+            "description": "Zeitraum."
+          },
+          "periodEnd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Ende des laufenden Zeitraums (exklusive; fehlt bei `total`)."
+          },
+          "periodStart": {
+            "type": "string",
+            "description": "Beginn des laufenden Zeitraums (RFC 3339, UTC)."
+          },
+          "remaining": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "Verbleibend (nicht negativ)."
+          },
+          "targetId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID des Ziels."
+          },
+          "targetName": {
+            "type": "string",
+            "description": "Name des Ziels."
+          },
+          "used": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "Verbraucht im laufenden Zeitraum."
+          },
+          "warnAtPercent": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "Warnschwellen in Prozent."
+          }
+        }
       },
       "Capacity": {
         "type": "object",
@@ -7472,6 +7660,10 @@
     {
       "name": "admin-api-keys",
       "description": "Admin-API-Keys für Automatisierung"
+    },
+    {
+      "name": "usage",
+      "description": "Verbrauch und Budgetstände"
     }
   ]
 }

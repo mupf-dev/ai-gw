@@ -23,7 +23,7 @@ SnapshotHandle ─subscribe()─► SnapshotRoutes::rebuild ─► RouteTable (A
 | `exec.rs` | Ausführung: Retries, Backoff mit Jitter, `Retry-After`, Gesamtbudget, Fallback-Ketten, Erfassung der Versuche |
 | `breaker.rs` | Circuit Breaker (gleitendes Fenster, offen, halboffen mit Probe) |
 | `health.rs` | Optionale aktive Health Checks |
-| `state.rs` | `DeploymentState`: offene Anfragen, EWMA TTFT/Latenz, Breaker, Sperre nach `Retry-After`, lokale RPM/TPM-Zähler |
+| `state.rs` | `DeploymentState`: offene Anfragen, EWMA TTFT/Latenz, Breaker, Sperre nach `Retry-After`, Sperre bei erschöpfter Kapazität |
 | `snapshot.rs` | `SnapshotRoutes` (implementiert `ModelRoutes`), `RouteTable`, `RoutesTask` |
 | `policy.rs` | `GroupPolicy` aus `ModelGroup.spec.settings` (`retry`, `circuitBreaker`, `healthCheck`) |
 
@@ -92,8 +92,11 @@ Binary entfällt.
    Eine Gruppe ist **gesperrt**, wenn jedes Deployment darin
    - einen offenen Circuit Breaker hat (bzw. halboffen mit laufender Probe),
    - nach `Retry-After` des Anbieters gesperrt ist, oder
-   - an seiner Kapazitätsgrenze ist (`capacity.rpm`/`capacity.tpm`, gleitende Minute; RPM beim
-     Start eines Versuchs, TPM mit der gemeldeten Usage am Ende gezählt).
+   - an seiner Kapazitätsgrenze ist (`capacity.rpm`/`capacity.tpm`, gleitende Minute über
+     `aigw-counters`, also mit `postgres-sync`/`redis` instanzübergreifend; beim Start jedes
+     Versuchs werden 1 Anfrage und geschätzte Eingabe + `max_tokens` reserviert, die Tokens am
+     Ende des Versuchs auf die Usage korrigiert – Details in
+     [11-limits-und-budgets.md](11-limits-und-budgets.md) §5).
    Dann wird die nächste Gruppe genommen. Sind alle gesperrt: **503**
    `no_deployment_available` mit `Retry-After` = kürzeste verbleibende Sperre.
 2. **Strategie** innerhalb der Gruppe:
@@ -231,7 +234,6 @@ Anthropic-Stream) und danach eine weitere (Hot Reload der Routen).
 
 ## 10. Offene Punkte
 
-- RPM/TPM-Kapazität wird je Instanz gezählt; mit mehreren Instanzen über `aigw-counters`.
 - Health Check per `/models` statt Chat-Request braucht eine Methode im `Provider`-Trait.
 - Versuche (`attempts`) im Request-Log speichern; Kennzahlen (`/metrics`) für Breaker-Zustand,
   Retries und Fallbacks.

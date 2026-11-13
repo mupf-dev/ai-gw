@@ -159,6 +159,12 @@ fn serve(
                 runtime_state.snapshot.clone(),
             )),
             observer: runtime_state.observer.clone(),
+            // Limits, Budgets, Kosten (AIGW-30/31) und Deployment-Kapazität über counters.
+            limits: std::sync::Arc::new(aigw_proxy::Limiter::new(
+                std::sync::Arc::clone(&runtime_state.counters),
+                Some(std::sync::Arc::clone(&runtime_state.budgets)),
+                &config.limits,
+            )),
             config: aigw_proxy::ProxyConfig::from(&config.server.data),
         };
         // Steuerebene: Admin-API/-UI (Anmeldung: AIGW-28/32), GitOps (AIGW-33) und
@@ -191,10 +197,15 @@ fn serve(
             aigw_admin::gitops::GitopsState {
                 store: runtime_state.store.clone(),
                 keyring: std::sync::Arc::clone(&runtime_state.keyring),
-                auth,
+                auth: std::sync::Arc::clone(&auth),
                 upstreams,
             },
         ))
+        .merge(aigw_admin::usage::router(aigw_admin::usage::UsageState {
+            store: runtime_state.store.clone(),
+            calendar: std::sync::Arc::clone(&runtime_state.calendar),
+            auth: std::sync::Arc::clone(&auth),
+        }))
         .merge(observe::metrics_router(runtime_state.metrics_sources()));
         let control = aigw_admin::read_only::apply(control, config.gitops.read_only_admin);
         server::run(listeners, state, control, shutdown_signal()).await?;

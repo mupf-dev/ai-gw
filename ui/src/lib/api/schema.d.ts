@@ -404,6 +404,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/usage/budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Budgets mit Verbrauch im laufenden Zeitraum. */
+        get: operations["list_budgets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/users": {
         parameters: {
             query?: never;
@@ -689,10 +706,59 @@ export interface components {
             warnAtPercent?: number[];
         };
         /**
+         * @description Ebene eines Budgets.
+         * @enum {string}
+         */
+        BudgetLevelName: "organization" | "team" | "api-key";
+        /** @description Budget-Übersicht. */
+        BudgetList: {
+            /** @description Zeitpunkt der Auswertung (RFC 3339). */
+            at: string;
+            /** @description Budgets (Organisationen, Teams, aktive API-Keys; je nach Name sortiert). */
+            items: components["schemas"]["BudgetStatus"][];
+            /** @description Zeitzone der Zeiträume (`billing.timezone`). */
+            timezone: string;
+        };
+        /**
          * @description Zeitraum eines Budgets.
          * @enum {string}
          */
         BudgetPeriod: "day" | "week" | "month" | "total";
+        /** @description Stand eines Budgets im laufenden Zeitraum. */
+        BudgetStatus: {
+            /** @description Betrag je Zeitraum. */
+            amount: components["schemas"]["Amount"];
+            /** @description Betrag erreicht. */
+            exhausted: boolean;
+            /** @description Harte Grenze (Ablehnung mit `budget_exceeded`). */
+            hardLimit: boolean;
+            /** @description Ebene. */
+            level: components["schemas"]["BudgetLevelName"];
+            /**
+             * Format: int64
+             * @description Verbrauch in Prozent des Betrags (ganzzahlig abgerundet; 0 bei Betrag 0).
+             */
+            percent: number;
+            /** @description Zeitraum. */
+            period: components["schemas"]["BudgetPeriod"];
+            /** @description Ende des laufenden Zeitraums (exklusive; fehlt bei `total`). */
+            periodEnd?: string | null;
+            /** @description Beginn des laufenden Zeitraums (RFC 3339, UTC). */
+            periodStart: string;
+            /** @description Verbleibend (nicht negativ). */
+            remaining: components["schemas"]["Amount"];
+            /**
+             * Format: uuid
+             * @description ID des Ziels.
+             */
+            targetId: string;
+            /** @description Name des Ziels. */
+            targetName: string;
+            /** @description Verbraucht im laufenden Zeitraum. */
+            used: components["schemas"]["Amount"];
+            /** @description Warnschwellen in Prozent. */
+            warnAtPercent: number[];
+        };
         /** @description Kapazität eines Deployments (für das Routing). */
         Capacity: {
             /**
@@ -4415,6 +4481,56 @@ export interface operations {
             };
             /** @description ETag passt nicht */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_budgets: {
+        parameters: {
+            query?: {
+                /** @description Nur diese Ebene. */
+                level?: components["schemas"]["BudgetLevelName"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Budgets mit Stand */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetList"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
