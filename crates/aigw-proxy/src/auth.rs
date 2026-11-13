@@ -122,22 +122,22 @@ impl AuthContext {
     /// Prüft, ob der Key das angefragte Modell (Name oder Alias) nutzen darf, und liefert die
     /// Modellgruppe. Ohne Snapshot findet keine Prüfung statt (`Ok(None)`).
     ///
-    /// Damit eingeschränkte Keys nicht erkunden können, welche Modelle es gibt, erhalten sie
-    /// für unbekannte und nicht freigegebene Modelle dieselbe Antwort (`403`). Nur Keys ohne
-    /// jede Einschränkung (Key und Team) bekommen für unbekannte Modelle `404`.
+    /// Immer präzise (F39), auch für eingeschränkte Keys: `404 model_not_found`, wenn es das
+    /// Modell (bzw. den Alias) nicht gibt, `403 model_not_allowed`, wenn es existiert, aber für
+    /// Key oder Team nicht freigegeben ist.
     pub fn authorize_model(&self, model: &str) -> Result<Option<Arc<ModelGroupCtx>>, ApiError> {
         let (Some(snap), Some(key)) = (&self.snapshot, &self.key) else {
             return Ok(None);
         };
         match snap.model_group(model) {
             Some(group) if key.allows_model(group) => Ok(Some(Arc::clone(group))),
-            None if is_unrestricted(key) => Err(ApiError::new(
+            None => Err(ApiError::new(
                 ErrorKind::NotFound,
                 format!("Das Modell {model:?} existiert nicht"),
             )
             .with_param("model")
             .with_code("model_not_found")),
-            _ => Err(ApiError::new(
+            Some(_) => Err(ApiError::new(
                 ErrorKind::PermissionDenied,
                 format!("Das Modell {model:?} ist für diesen API-Key nicht freigegeben"),
             )
@@ -171,13 +171,32 @@ impl AuthContext {
     }
 }
 
-fn is_unrestricted(key: &KeyCtx) -> bool {
-    key.key.spec.allowed_models.is_empty()
-        && key
-            .team
-            .as_ref()
-            .is_none_or(|t| t.spec.allowed_models.is_empty())
+impl AuthContext {
+    /// Darf der Key die Modellgruppe `name` (kanonischer Name) nutzen? Ohne Snapshot oder Key
+    /// immer `true`. Grundlage der Freigabeprüfung von Fallback-Gruppen (F80).
+    pub fn allows_group(&self, name: &str) -> bool {
+        let (Some(snap), Some(key)) = (&self.snapshot, &self.key) else {
+            return true;
+        };
+        snap.model_group(name).is_some_and(|g| key.allows_model(g))
+    }
+
+    /// Reasoning für diesen Key ausblenden? Schalter je Key über das Metadatum
+    /// `aigw.exposeReasoning: "false"` (F10; ergänzt `settings.exposeReasoning` der
+    /// Modellgruppe).
+    pub fn hides_reasoning(&self) -> bool {
+        self.key.as_ref().is_some_and(|k| {
+            k.key
+                .spec
+                .metadata
+                .get(EXPOSE_REASONING_META)
+                .is_some_and(|v| v.trim().eq_ignore_ascii_case("false"))
+        })
+    }
 }
+
+/// Metadatum eines API-Keys, das Reasoning für OpenAI-Clients abschaltet (`"false"`).
+pub const EXPOSE_REASONING_META: &str = "aigw.exposeReasoning";
 
 /// Schlüsselprüfung. Synchron: die Prüfung läuft im RAM (Hash-Lookup, Q7).
 pub trait Authenticator: Send + Sync + 'static {
@@ -439,15 +458,14 @@ mod tests {
                 ctx.authorize_model("claude").unwrap_err().kind,
                 ErrorKind::PermissionDenied
             );
-            // Eingeschränkt: unbekannt sieht aus wie verboten.
-            assert_eq!(
-                ctx.authorize_model("nope").unwrap_err(),
-                ctx.authorize_model("nope").unwrap_err()
-            );
-            assert_eq!(
-                ctx.authorize_model("nope").unwrap_err().kind,
-                ErrorKind::PermissionDenied
-            );
+            // Eingeschränkt: trotzdem präzise (F39) – unbekannt = 404, gesperrt = 403.
+            let e = ctx.authorize_model("nope").unwrap_err();
+            assert_eq!(e.kind, ErrorKind::NotFound);
+            assert_eq!(e.code.as_deref(), Some("model_not_found"));
+            let e = ctx.authorize_model("claude").unwrap_err();
+            assert_eq!(e.code.as_deref(), Some("model_not_allowed"));
+            assert!(ctx.allows_group("gpt-4o") && !ctx.allows_group("claude"));
+            assert!(!ctx.hides_reasoning());
             assert_eq!(ctx.visible_models().unwrap().len(), 1);
 
             // Team schränkt ein, Key nicht.

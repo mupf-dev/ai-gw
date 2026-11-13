@@ -49,7 +49,8 @@ impl Encoder {
 /// Höchstens so viele Bytes werden zu einem Body-Frame zusammengefasst.
 const MAX_FRAME: usize = 16 * 1024;
 
-/// Baut die SSE-Antwort. `include_usage` gilt nur für OpenAI (`stream_options`).
+/// Baut die SSE-Antwort. `include_usage` gilt nur für OpenAI (`stream_options`), ebenso
+/// `expose_reasoning` (`delta.reasoning_content`, F10).
 ///
 /// Jedes Ereignis wird sofort kodiert. Liegen bereits weitere Ereignisse bereit (z. B.
 /// mehrere aus einem Upstream-Frame), werden sie ohne Warten in denselben Frame gepackt
@@ -58,9 +59,12 @@ pub(crate) fn sse_response(
     format: ErrorFormat,
     events: EventStream,
     include_usage: bool,
+    expose_reasoning: bool,
 ) -> Response {
     let encoder = match format {
-        ErrorFormat::OpenAi => Encoder::OpenAi(openai::StreamEncoder::new(include_usage)),
+        ErrorFormat::OpenAi => Encoder::OpenAi(
+            openai::StreamEncoder::new(include_usage).with_reasoning(expose_reasoning),
+        ),
         ErrorFormat::Anthropic => Encoder::Anthropic(anthropic::StreamEncoder::new()),
     };
     encode_sse(events, encoder)

@@ -455,10 +455,12 @@ async fn scenario(store: Store) {
     env.chat(&restricted, "gpt-4o")
         .await
         .expect(StatusCode::FORBIDDEN);
-    // Eingeschränkt: unbekanntes Modell sieht aus wie verboten.
-    env.chat(&restricted, "nope")
+    // Eingeschränkt, aber präzise (F39): unbekanntes Modell = 404.
+    let r = env
+        .chat(&restricted, "nope")
         .await
-        .expect(StatusCode::FORBIDDEN);
+        .expect(StatusCode::NOT_FOUND);
+    assert_eq!(r.json()["error"]["code"], "model_not_found");
     assert_eq!(env.models(&restricted).await, ["claude"]);
     let (free, _) = create_key(&env, json!({"metadata": {"name": "free"}, "spec": {}})).await;
     env.wait_chat(&free, "claude", StatusCode::OK).await;

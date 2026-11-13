@@ -216,7 +216,12 @@ admin:
   # Einträge: Hostname, Muster *.endung, IP-Adresse oder CIDR-Bereich
   allow_insecure_upstreams: [localhost, ollama, "*.lan"]
   allow_private_upstreams: [localhost, ollama, "*.lan", 192.168.0.0/16, "fd00::/8"]
+  allow_mock: true   # false: Deployments mit provider: mock werden abgelehnt (F85)
 ```
+
+`admin.allow_mock` (Standard `true`, F85): Mit `false` lehnen Admin-API und GitOps Deployments
+mit `provider: mock` ab (`422`), und das Routing lässt bereits gespeicherte aus (Warnung im
+Log; die Gruppe antwortet ohne weitere Deployments mit `503`).
 
 ENV: `AIGW_ADMIN__ALLOW_INSECURE_UPSTREAMS=localhost,ollama`. Ein lokaler Ollama per `http`
 braucht beide Listen. Ungültige Einträge brechen den Start ab.
@@ -659,9 +664,8 @@ GET /admin/api/v1/analytics/timeseries?metric=cost&groupBy=model_group&from=2026
    `team_id()`, `organization_id()`, `user()` für Limits und Request-Log.
 5. Modellfreigabe (`AuthContext::authorize_model`): Modell (Name oder Alias) → Modellgruppe;
    erlaubt, wenn Key- **und** Team-Liste passen (leere Liste = alle). Nicht freigegeben →
-   `403 model_not_allowed`. Unbekanntes Modell → `404 model_not_found`, aber **nur** für Keys ohne
-   jede Einschränkung; eingeschränkte Keys erhalten auch hier `403`, damit sie nicht erkunden
-   können, welche Modelle es gibt.
+   `403 model_not_allowed`. Unbekanntes Modell → `404 model_not_found` – für alle Keys, auch
+   eingeschränkte (F39: präzise Fehler gehen vor dem Verbergen des Katalogs).
 6. `GET /v1/models` listet nur die freigegebenen Modellgruppen (kanonische Namen, sortiert).
 
 Modellgruppen, Deployments, Zugangsdaten und Preise sind über die Admin-API pflegbar (§2.2 ff.)

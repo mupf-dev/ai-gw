@@ -141,6 +141,7 @@ fn fast() -> Timeouts {
         first_byte: Duration::from_secs(5),
         idle: Duration::from_millis(500),
         total: Duration::from_secs(10),
+        ..Timeouts::default()
     }
 }
 

@@ -22,6 +22,7 @@ use aigw_core::ir::{
 use aigw_core::observe::Attempt;
 use aigw_core::resource::FallbackTrigger;
 use aigw_counters::{CounterBackend, LimitCheck, Reservation};
+use futures_util::stream::SelectAll;
 use futures_util::{Stream, StreamExt as _};
 
 use super::breaker::Admit;
@@ -35,8 +36,9 @@ use crate::routes::ModelRoutes;
 
 /// Längste beachtete Sperre nach `Retry-After`.
 const MAX_COOLDOWN: Duration = Duration::from_secs(300);
-/// Höchstens so viele Modellgruppen je Anfrage (Ursprung + Fallbacks).
-const MAX_GROUPS: usize = 8;
+/// Höchstens so viele Modellgruppen je Anfrage (Ursprung + Fallbacks, F69); die Admin-API
+/// und GitOps lehnen längere Ketten ab.
+const MAX_GROUPS: usize = aigw_core::validate::MAX_FALLBACKS + 1;
 
 /// Erfolgreiche Antwort.
 pub(crate) enum Outcome<T = ChatResponse> {
@@ -89,6 +91,11 @@ impl Operation for ChatOp {
         provider: Arc<dyn ChatProvider>,
         req: ChatRequest,
     ) -> BoxFuture<Result<Outcome, UpstreamError>> {
+        let n = req.choices();
+        if n > 1 && !provider.native_choices() {
+            // Anbieter ohne `n` (F12): n parallele Anfragen, Ergebnis zusammengeführt.
+            return Box::pin(fan_out(provider, req, n, self.stream));
+        }
         Box::pin(attempt(provider, req, self.stream))
     }
 
@@ -97,13 +104,19 @@ impl Operation for ChatOp {
     }
 }
 
-/// Zähler für die Deployment-Kapazität (`capacity.rpm`/`tpm`).
+/// Prüft, ob der Key eine Modellgruppe (kanonischer Name) nutzen darf (F80).
+pub(crate) type Grants<'a> = &'a (dyn Fn(&str) -> bool + Sync);
+
+/// Kontext der Ausführung: Zähler für die Deployment-Kapazität (`capacity.rpm`/`tpm`) und
+/// Freigaben des Keys für Fallback-Gruppen.
 #[derive(Clone, Copy)]
 pub(crate) struct CapacityCtx<'a> {
     /// Dasselbe Backend wie die Limits (lokal, `postgres-sync` oder Redis).
     pub(crate) counters: &'a Arc<dyn CounterBackend>,
     /// Reservierte Tokens je Versuch (geschätzte Eingabe + `max_tokens`).
     pub(crate) tokens: u64,
+    /// Freigaben des Keys (`None` = keine Prüfung, z. B. ohne Snapshot oder intern).
+    pub(crate) grants: Option<Grants<'a>>,
 }
 
 /// Ergebnis der Kapazitätsprüfung eines Versuchs.
@@ -171,6 +184,9 @@ pub(crate) struct Routed<T = ChatResponse> {
     pub(crate) last: Option<Arc<Member>>,
     /// Modellgruppe des letzten Versuchs, falls sie per Fallback erreicht wurde.
     pub(crate) fallback: Option<String>,
+    /// Fallback-Gruppen, die übersprungen wurden, weil sie für Key/Team nicht freigegeben
+    /// sind (F80, Header `x-aigw-fallback-skipped`).
+    pub(crate) fallback_skipped: Vec<String>,
 }
 
 /// Fehlschlag einer Modellgruppe; `class = None`: kein Deployment verfügbar.
@@ -244,20 +260,40 @@ pub(crate) fn backoff(policy: &RetryPolicy, n: u32) -> Duration {
     half + Duration::from_nanos(rand_below(jitter.saturating_add(1)))
 }
 
+/// Kein Deployment verfügbar. Sind alle nur wegen `Retry-After` oder erschöpfter Kapazität
+/// gesperrt (F83), ist das eine Drosselung: `429` mit `Retry-After`; sonst (offene Circuit
+/// Breaker) `503`.
 fn unavailable(group: &GroupRoute, excluded: &[usize]) -> UpstreamError {
-    let mut e = UpstreamError::new(
-        ErrorClass::Overloaded,
-        ApiError::new(
-            ErrorKind::Overloaded,
-            format!(
-                "Modellgruppe {:?}: kein Deployment verfügbar (Circuit Breaker offen, \
-                 Kapazität erschöpft oder vom Anbieter gesperrt)",
-                group.name
-            ),
+    let now = now_ms();
+    let retry_after = group.wait_hint(excluded, now);
+    let mut e = if group.throttled_only(excluded, now) {
+        UpstreamError::new(
+            ErrorClass::RateLimit,
+            ApiError::new(
+                ErrorKind::RateLimit,
+                format!(
+                    "Modellgruppe {:?}: alle Deployments ausgelastet (Kapazität erschöpft oder \
+                     vom Anbieter gedrosselt) – später erneut versuchen",
+                    group.name
+                ),
+            )
+            .with_code("deployments_rate_limited"),
         )
-        .with_code("no_deployment_available"),
-    )
-    .with_retry_after(group.wait_hint(excluded, now_ms()));
+    } else {
+        UpstreamError::new(
+            ErrorClass::Overloaded,
+            ApiError::new(
+                ErrorKind::Overloaded,
+                format!(
+                    "Modellgruppe {:?}: kein Deployment verfügbar (Circuit Breaker offen, \
+                     Kapazität erschöpft oder vom Anbieter gesperrt)",
+                    group.name
+                ),
+            )
+            .with_code("no_deployment_available"),
+        )
+    }
+    .with_retry_after(retry_after);
     e.retryable = false;
     e
 }
@@ -291,6 +327,7 @@ pub(crate) async fn execute_op<O: Operation>(
             attempts: Vec::new(),
             last: None,
             fallback: None,
+            fallback_skipped: Vec::new(),
         };
     }
     let budget_end = Instant::now() + group.policy.retry.budget;
@@ -305,6 +342,7 @@ pub(crate) async fn execute_op<O: Operation>(
         attempts: Vec::new(),
         last: None,
         fallback: None,
+        fallback_skipped: Vec::new(),
     };
     let mut scratch = Scratch::default();
     let mut visited: Vec<String> = vec![group.name.clone()];
@@ -339,6 +377,8 @@ pub(crate) async fn execute_op<O: Operation>(
                         &visited,
                         failure.class,
                         O::CAPABILITY,
+                        cap.grants,
+                        &mut routed.fallback_skipped,
                     )
                 };
                 match next {
@@ -363,6 +403,10 @@ pub(crate) async fn execute_op<O: Operation>(
     }
 }
 
+/// Nächste passende Fallback-Gruppe der Ursprungsgruppe. Gruppen, die für Key/Team nicht
+/// freigegeben sind, werden übersprungen und gemerkt (F80) – außer die Ursprungsgruppe setzt
+/// `settings.fallbackIgnoresGrants`.
+#[allow(clippy::too_many_arguments)]
 fn find_fallback(
     routes: &dyn ModelRoutes,
     origin: &GroupRoute,
@@ -370,6 +414,8 @@ fn find_fallback(
     visited: &[String],
     class: Option<ErrorClass>,
     need: Capability,
+    grants: Option<Grants<'_>>,
+    skipped: &mut Vec<String>,
 ) -> Option<Arc<GroupRoute>> {
     while let Some(f) = origin.fallbacks.get(*next) {
         *next += 1;
@@ -378,6 +424,20 @@ fn find_fallback(
         }
         match routes.route(&f.model_group) {
             Some(g) if !visited.iter().any(|v| *v == g.name) && g.supports(need) => {
+                if !origin.policy.fallback_ignores_grants
+                    && let Some(allowed) = grants
+                    && !allowed(&g.name)
+                {
+                    tracing::debug!(
+                        model_group = %origin.name,
+                        fallback = %g.name,
+                        "Fallback-Gruppe für den Key nicht freigegeben – übersprungen"
+                    );
+                    if !skipped.contains(&g.name) {
+                        skipped.push(g.name.clone());
+                    }
+                    continue;
+                }
                 return Some(g);
             }
             Some(_) => {}
@@ -554,6 +614,151 @@ async fn attempt(
     }
 }
 
+/// `n > 1` bei Anbietern ohne `n` (F12): `n` Anfragen (je ohne `n`) parallel an dasselbe
+/// Deployment. Schlägt eine vor der Antwort bzw. dem ersten Ereignis fehl, gilt der ganze
+/// Versuch als fehlgeschlagen (Retry/Fallback wie bei einer Einzelanfrage). Varianten tragen
+/// `index` 0…n-1, die Usage ist die Summe.
+async fn fan_out(
+    provider: Arc<dyn ChatProvider>,
+    mut req: ChatRequest,
+    n: u32,
+    stream: bool,
+) -> Result<Outcome, UpstreamError> {
+    req.n = None;
+    let calls = (0..n).map(|_| attempt(Arc::clone(&provider), req.clone(), stream));
+    let results = futures_util::future::join_all(calls).await;
+    if stream {
+        let mut streams = Vec::with_capacity(results.len());
+        for r in results {
+            match r? {
+                Outcome::Stream(s) => streams.push(s),
+                Outcome::Json(_) => {
+                    return Err(UpstreamError::from(ApiError::new(
+                        ErrorKind::Internal,
+                        "unerwartete Antwort ohne Stream",
+                    )));
+                }
+            }
+        }
+        return Ok(Outcome::Stream(Box::pin(MergeChoices::new(streams))));
+    }
+    let mut merged: Option<ChatResponse> = None;
+    let mut usage: Option<Usage> = None;
+    let mut choices = Vec::new();
+    for r in results {
+        let Outcome::Json(mut resp) = r? else {
+            return Err(UpstreamError::from(ApiError::new(
+                ErrorKind::Internal,
+                "unerwartete Stream-Antwort",
+            )));
+        };
+        if let Some(u) = resp.usage.take() {
+            usage.get_or_insert_with(Usage::default).add(&u);
+        }
+        choices.append(&mut resp.choices);
+        if merged.is_none() {
+            merged = Some(resp);
+        }
+    }
+    let mut resp = merged.unwrap_or_default();
+    for (i, c) in choices.iter_mut().enumerate() {
+        c.index = u32::try_from(i).unwrap_or(u32::MAX);
+    }
+    resp.choices = choices;
+    resp.usage = usage;
+    Ok(Outcome::Json(resp))
+}
+
+type IndexedStream = Pin<Box<dyn Stream<Item = (u32, StreamEvent)> + Send>>;
+
+/// Führt `n` Ereignisströme (je eine Variante) zu einem Strom mit [`StreamEvent::Choice`]
+/// zusammen (verschränkt, wie sie eintreffen): ein `Start` (des ersten Stroms), je Variante
+/// ihre Deltas und ihr `Stop`, am Ende die summierte Usage. Ein Fehler in einer Variante
+/// beendet den ganzen Strom (die übrigen Anfragen werden abgebrochen).
+pub(crate) struct MergeChoices {
+    inner: SelectAll<IndexedStream>,
+    usage: Vec<Option<Usage>>,
+    current: u32,
+    started: bool,
+    pending: Option<StreamEvent>,
+    done: bool,
+}
+
+impl MergeChoices {
+    pub(crate) fn new(streams: Vec<EventStream>) -> Self {
+        let n = streams.len();
+        let inner = futures_util::stream::select_all(streams.into_iter().enumerate().map(
+            |(i, s)| -> IndexedStream {
+                let i = u32::try_from(i).unwrap_or(u32::MAX);
+                Box::pin(s.map(move |ev| (i, ev)))
+            },
+        ));
+        Self {
+            inner,
+            usage: vec![None; n],
+            current: 0,
+            started: false,
+            pending: None,
+            done: false,
+        }
+    }
+}
+
+impl Stream for MergeChoices {
+    type Item = StreamEvent;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<StreamEvent>> {
+        let this = self.get_mut();
+        if let Some(ev) = this.pending.take() {
+            return Poll::Ready(Some(ev));
+        }
+        loop {
+            if this.done {
+                return Poll::Ready(None);
+            }
+            match this.inner.poll_next_unpin(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(None) => {
+                    this.done = true;
+                    let mut total: Option<Usage> = None;
+                    for u in this.usage.iter().flatten() {
+                        total.get_or_insert_with(Usage::default).add(u);
+                    }
+                    return Poll::Ready(total.map(StreamEvent::Usage));
+                }
+                Poll::Ready(Some((i, ev))) => match ev {
+                    StreamEvent::Start { .. } => {
+                        if !std::mem::replace(&mut this.started, true) {
+                            return Poll::Ready(Some(ev));
+                        }
+                    }
+                    StreamEvent::Usage(u) => {
+                        if let Some(slot) =
+                            usize::try_from(i).ok().and_then(|i| this.usage.get_mut(i))
+                        {
+                            *slot = Some(u);
+                        }
+                    }
+                    StreamEvent::Error(_) => {
+                        this.done = true;
+                        return Poll::Ready(Some(ev));
+                    }
+                    // Einzelanfragen haben nur Variante 0.
+                    StreamEvent::Choice { .. } => {}
+                    ev => {
+                        if i != this.current {
+                            this.current = i;
+                            this.pending = Some(ev);
+                            return Poll::Ready(Some(StreamEvent::Choice { index: i }));
+                        }
+                        return Poll::Ready(Some(ev));
+                    }
+                },
+            }
+        }
+    }
+}
+
 /// Laufende Anfrage auf einem Deployment: zählt offene Anfragen, gleicht die TPM-Reservierung
 /// am Ende mit der Usage ab und verbucht das Ergebnis beim Circuit Breaker.
 struct Active {
@@ -632,6 +837,7 @@ impl Stream for Tracked {
             Poll::Ready(Some(ev)) => {
                 match &ev {
                     StreamEvent::Usage(u) => this.active.tokens = u.total_tokens(),
+                    StreamEvent::Choice { .. } => {}
                     StreamEvent::Error(e) => {
                         this.failed = Some(ErrorClass::from_kind(e.kind));
                     }

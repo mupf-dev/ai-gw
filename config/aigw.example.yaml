@@ -98,6 +98,9 @@ admin:
   allow_insecure_upstreams: []
   # private/lokale Ziele (LAN, Loopback, Docker-Dienstnamen), z. B. ["192.168.0.0/16", "ollama"]
   allow_private_upstreams: []
+  # Deployments mit `provider: mock` (eingebauter Echo-Anbieter für Demos/Smoke-Tests) erlauben.
+  # false: Admin-API/GitOps lehnen sie ab, das Routing lässt vorhandene aus (F85).
+  allow_mock: true
   # Anmeldung an Admin-API und Admin-UI (§5).
   auth:
     # Bootstrap-Token für die Erstinstallation (AIGW_BOOTSTRAP_TOKEN oder Startausgabe):

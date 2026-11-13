@@ -33,7 +33,7 @@ ChatResponse { id, model, created, choices: Vec<Choice{index, message, stop_reas
 Usage { input_tokens (inkl. Cache), output_tokens (inkl. Reasoning), cache_read_tokens, cache_write_tokens, reasoning_tokens, extra }
 StreamEvent = Start{id, model, created} | TextDelta{index} | ReasoningDelta{index} | ReasoningSignature{index}
             | RedactedReasoning{index} | ToolCallStart{index, id, name} | ToolCallDelta{index, arguments}
-            | Stop{reason, stop_sequence} | Usage(Usage) | Error(ApiError)
+            | Stop{reason, stop_sequence} | Usage(Usage) | Error(ApiError) | Choice{index}
 ApiError { kind: ErrorKind, message, param, code }
 ```
 
@@ -106,11 +106,27 @@ Kreuzkonvertierung (wird als `Losses` gemeldet):
 
 | Richtung | Verlust |
 |---|---|
-| OpenAI → Anthropic | `extra` (z. B. `n`, `logprobs`, `logit_bias`, `service_tier`, `store`), `frequency_penalty`, `presence_penalty`, `seed`, Audio-Teile, Bild-`detail`, `name` von Nachrichten, `metadata` (außer `user`), Name/Beschreibung/`strict` des JSON-Schemas, `json_object` wird zu Schema `{"type":"object"}`, `reasoning_effort` `minimal`/`none` → `low`, fehlendes `max_tokens` → 4096 (`DEFAULT_MAX_TOKENS`), Reasoning ohne Signatur (kompatible Anbieter) |
+| OpenAI → Anthropic | `extra` (z. B. `logprobs`, `logit_bias`, `service_tier`, `store`), `frequency_penalty`, `presence_penalty`, `seed`, Audio-Teile, Bild-`detail`, `name` von Nachrichten, `metadata` (außer `user`), Name/Beschreibung/`strict` des JSON-Schemas, `json_object` wird zu Schema `{"type":"object"}`, `reasoning_effort` `minimal`/`none` → `low`, fehlendes `max_tokens` → 4096 (`DEFAULT_MAX_TOKENS`), Reasoning ohne Signatur (kompatible Anbieter) |
 | Anthropic → OpenAI | `thinking`/`redacted_thinking`-Blöcke und `thinking`-Konfiguration, `cache_control` (überall), `top_k`, `is_error` von Tool-Ergebnissen, Nicht-Text-Inhalte in Tool-Ergebnissen, Server-Tools und unbekannte Blöcke (`search_result`, `server_tool_use` …), `citations`/`context` von Dokumenten, URL-Dokumente, `cache_write_tokens` in der Usage, `effort` `max` → `high` |
-| Antwort Anthropic → OpenAI | Reasoning-Blöcke, `stop_details`, `stop_sequence`, Usage-Details (`cache_creation`, `service_tier`) |
+| Antwort Anthropic → OpenAI | Reasoning-Signaturen und `redacted_thinking` (der Text geht als `reasoning_content`, F10), `stop_details`, `stop_sequence`, Usage-Details (`cache_creation`, `service_tier`) |
 | Antwort OpenAI → Anthropic | `n > 1` (nur erste Variante), `logprobs`, `system_fingerprint`, `annotations`, Details der Usage außer `cached_tokens` |
-| Stream → OpenAI | Reasoning-Deltas (Chat Completions hat dafür kein Feld) |
+
+**Reasoning für OpenAI-Clients (F10):** Der Chat-Completions-Encoder gibt Reasoning-Text als
+`message.reasoning_content` bzw. `delta.reasoning_content` aus (Konvention von DeepSeek, vLLM
+und anderen kompatiblen Servern) – nicht gestreamt und gestreamt, Standard an. Abschaltbar je
+Modellgruppe (`settings.exposeReasoning: false`) und je API-Key (Metadatum
+`aigw.exposeReasoning: "false"`). Signaturen gehen nicht an OpenAI-Clients. Die Responses API
+gibt Reasoning weiterhin als `reasoning`-Items aus.
+
+**Mehrere Antwortvarianten (`n`, F12):** `ChatRequest.n` (OpenAI `n`, 1–16; in der Responses
+API als ai-gw-Erweiterung). Im Stream schaltet `StreamEvent::Choice{index}` die Variante um
+(ohne Marker gilt Variante 0; Blockindizes zählen je Variante, jede Variante hat ihr `Stop`,
+`Usage` gilt für alle). Der OpenAI-Decoder setzt die Marker bei `choices[].index > 0`, der
+Encoder schreibt Chunks mit dem jeweiligen `index`. Anbieter ohne natives `n`
+(`Capabilities::n_choices`) bekommen vom Routing `n` parallele Anfragen; das Ergebnis wird
+zusammengeführt (Varianten 0…n-1, Usage summiert). Für Ausgaben, die Varianten nur nacheinander
+darstellen können (Responses API, Stream-Plugins), ordnet `aigw-proxy` den Strom
+(`choices::sequential`).
 
 ## 4. Datenebene (aigw-proxy)
 

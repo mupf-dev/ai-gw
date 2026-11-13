@@ -23,8 +23,18 @@
 //!     unhealthyThreshold: 2   # aufeinanderfolgende Fehlschläge → Breaker offen
 //!   capabilities: [chat]      # AIGW-21: chat, embeddings, images, audio-transcription,
 //!                             # audio-speech; ohne Angabe nur chat
+//!   fallbackIgnoresGrants: false  # F80: Fallbacks auch auf für Key/Team nicht freigegebene Gruppen
+//!   responseModel: upstream   # F49: upstream | requested (Modellname im Antwort-Body)
+//!   clientBetas: allow-all    # F60: allow-all | allowlist | deny (anthropic-beta der Clients)
+//!   betaAllowlist: []         # F60: erlaubte Kennungen bei clientBetas: allowlist
+//!   exposeReasoning: true     # F10: Reasoning an OpenAI-Clients (reasoning_content)
+//!   # Von den Deployments geerbt (dort überschreibbar), geprüft wie bei Deployments:
+//!   timeouts: {connectMs: 10000, firstByteMs: 120000, idleMs: 120000, totalMs: 600000}  # F44
+//!   thinkingBudgetPolicy: raise-max-tokens   # F59: raise-max-tokens | cap-budget
+//!   propagateTraceContext: false             # F98: Standard je Anbieterart
 //! ```
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use aigw_core::resource::JsonObject;
@@ -117,8 +127,47 @@ pub struct HealthCheckConfig {
     pub unhealthy_threshold: u32,
 }
 
+/// Modellname im Antwort-Body (`settings.responseModel`, F49).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ResponseModel {
+    /// Wie vom Anbieter gemeldet (Standard).
+    #[default]
+    Upstream,
+    /// Der vom Client angefragte Name (Modellgruppe bzw. Alias).
+    Requested,
+}
+
+/// Umgang mit `anthropic-beta` der Clients (`settings.clientBetas`, F60).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ClientBetas {
+    /// Alle Kennungen weitergeben (Standard).
+    #[default]
+    AllowAll,
+    /// Nur Kennungen aus `settings.betaAllowlist`; andere werden verworfen.
+    Allowlist(Arc<[String]>),
+    /// Keine Kennungen des Clients (nur die des Deployments).
+    Deny,
+}
+
+impl ClientBetas {
+    /// Filtert die Kennungen des Clients; liefert die verworfenen.
+    pub fn filter(&self, betas: &mut Vec<String>) -> Vec<String> {
+        match self {
+            Self::AllowAll => Vec::new(),
+            Self::Deny => std::mem::take(betas),
+            Self::Allowlist(allowed) => {
+                let (keep, drop): (Vec<String>, Vec<String>) = std::mem::take(betas)
+                    .into_iter()
+                    .partition(|b| allowed.contains(b));
+                *betas = keep;
+                drop
+            }
+        }
+    }
+}
+
 /// Alle Routing-Einstellungen einer Modellgruppe.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GroupPolicy {
     /// Retries.
     pub retry: RetryPolicy,
@@ -129,6 +178,15 @@ pub struct GroupPolicy {
     /// Arten von Anfragen, die die Gruppe annimmt (`settings.capabilities`, AIGW-21;
     /// Standard nur Chat). Anfragen anderer Art → `400`.
     pub capabilities: CapabilitySet,
+    /// Fallback-Kette dieser Gruppe auch auf Gruppen, die für Key/Team nicht freigegeben sind
+    /// (`settings.fallbackIgnoresGrants`, F80; Standard: überspringen).
+    pub fallback_ignores_grants: bool,
+    /// Modellname im Antwort-Body (F49).
+    pub response_model: ResponseModel,
+    /// `anthropic-beta` der Clients (F60).
+    pub client_betas: ClientBetas,
+    /// Reasoning an OpenAI-Clients ausgeben (`settings.exposeReasoning`, F10; Standard an).
+    pub expose_reasoning: bool,
 }
 
 impl Default for GroupPolicy {
@@ -138,6 +196,10 @@ impl Default for GroupPolicy {
             breaker: BreakerConfig::default(),
             health: None,
             capabilities: CapabilitySet::CHAT,
+            fallback_ignores_grants: false,
+            response_model: ResponseModel::Upstream,
+            client_betas: ClientBetas::AllowAll,
+            expose_reasoning: true,
         }
     }
 }
@@ -151,6 +213,7 @@ impl GroupPolicy {
             breaker: BreakerConfig::disabled(),
             health: None,
             capabilities: CapabilitySet::ALL,
+            ..Self::default()
         }
     }
 
@@ -160,6 +223,56 @@ impl GroupPolicy {
     /// in der Admin-API gedacht.
     pub fn from_settings(settings: &JsonObject) -> Result<Self, String> {
         let mut p = Self::default();
+        // Von den Deployments geerbte Einstellungen (F44/F59/F98) wie bei Deployments prüfen.
+        aigw_core::validate::deployment_settings(settings)?;
+        if let Some(b) = section::<bool>(settings, "fallbackIgnoresGrants")? {
+            p.fallback_ignores_grants = b;
+        }
+        if let Some(b) = section::<bool>(settings, "exposeReasoning")? {
+            p.expose_reasoning = b;
+        }
+        if let Some(m) = section::<String>(settings, "responseModel")? {
+            p.response_model = match m.as_str() {
+                "upstream" => ResponseModel::Upstream,
+                "requested" => ResponseModel::Requested,
+                other => {
+                    return Err(format!(
+                        "settings.responseModel {other:?} unbekannt (upstream, requested)"
+                    ));
+                }
+            };
+        }
+        let allowlist = section::<Vec<String>>(settings, "betaAllowlist")?;
+        if let Some(list) = &allowlist
+            && let Some(bad) = list.iter().find(|b| !valid_beta(b))
+        {
+            return Err(format!("settings.betaAllowlist: {bad:?} ungültig"));
+        }
+        match section::<String>(settings, "clientBetas")?.as_deref() {
+            None | Some("allow-all") => {
+                if allowlist.is_some() {
+                    return Err(
+                        "settings.betaAllowlist wirkt nur mit clientBetas: allowlist".into(),
+                    );
+                }
+            }
+            Some("deny") => {
+                if allowlist.is_some() {
+                    return Err(
+                        "settings.betaAllowlist wirkt nur mit clientBetas: allowlist".into(),
+                    );
+                }
+                p.client_betas = ClientBetas::Deny;
+            }
+            Some("allowlist") => {
+                p.client_betas = ClientBetas::Allowlist(allowlist.unwrap_or_default().into());
+            }
+            Some(other) => {
+                return Err(format!(
+                    "settings.clientBetas {other:?} unbekannt (allow-all, allowlist, deny)"
+                ));
+            }
+        }
         if let Some(list) = section::<Vec<String>>(settings, "capabilities")? {
             p.capabilities = list
                 .iter()
@@ -230,6 +343,14 @@ impl GroupPolicy {
         }
         Ok(p)
     }
+}
+
+/// Zeichen einer `anthropic-beta`-Kennung.
+fn valid_beta(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 128
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
 }
 
 fn ms(v: u64) -> Duration {
@@ -337,6 +458,52 @@ mod tests {
             json!({"capabilities": ["chat", "video"]}),
             json!({"capabilities": []}),
             json!({"capabilities": "chat"}),
+        ] {
+            assert!(
+                GroupPolicy::from_settings(&obj(bad.clone())).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn data_plane_settings() {
+        let p = GroupPolicy::from_settings(&obj(json!({
+            "fallbackIgnoresGrants": true,
+            "responseModel": "requested",
+            "clientBetas": "allowlist",
+            "betaAllowlist": ["prompt-caching-2024-07-31"],
+            "exposeReasoning": false,
+            "timeouts": {"connectMs": 2000, "totalMs": 30000},
+            "thinkingBudgetPolicy": "cap-budget",
+            "propagateTraceContext": true
+        })))
+        .unwrap();
+        assert!(p.fallback_ignores_grants);
+        assert_eq!(p.response_model, ResponseModel::Requested);
+        assert!(!p.expose_reasoning);
+        let mut betas = vec!["prompt-caching-2024-07-31".to_owned(), "x-1".to_owned()];
+        assert_eq!(p.client_betas.filter(&mut betas), ["x-1"]);
+        assert_eq!(betas, ["prompt-caching-2024-07-31"]);
+        let mut betas = vec!["a".to_owned()];
+        let deny = GroupPolicy::from_settings(&obj(json!({"clientBetas": "deny"}))).unwrap();
+        assert_eq!(deny.client_betas.filter(&mut betas), ["a"]);
+        assert!(betas.is_empty());
+        let d = GroupPolicy::default();
+        assert!(d.expose_reasoning && !d.fallback_ignores_grants);
+        assert_eq!(d.response_model, ResponseModel::Upstream);
+        for bad in [
+            json!({"responseModel": "alias"}),
+            json!({"clientBetas": "some"}),
+            json!({"betaAllowlist": ["a"]}),
+            json!({"clientBetas": "allowlist", "betaAllowlist": ["a b"]}),
+            json!({"exposeReasoning": "nein"}),
+            json!({"fallbackIgnoresGrants": 1}),
+            json!({"timeouts": {"connectMs": 0}}),
+            json!({"timeouts": {"readMs": 10}}),
+            json!({"timeouts": 5}),
+            json!({"thinkingBudgetPolicy": "max"}),
+            json!({"propagateTraceContext": "ja"}),
         ] {
             assert!(
                 GroupPolicy::from_settings(&obj(bad.clone())).is_err(),

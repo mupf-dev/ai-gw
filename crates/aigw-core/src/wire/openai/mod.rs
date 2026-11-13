@@ -18,8 +18,8 @@ pub mod stream;
 
 pub use convert::{
     decode_error, decode_request, decode_response, encode_error, encode_models, encode_request,
-    encode_response, error_type, request_from_wire, request_to_wire, response_from_wire,
-    response_to_wire,
+    encode_response, encode_response_with, error_type, request_from_wire, request_to_wire,
+    response_from_wire, response_to_wire, response_to_wire_with,
 };
 pub use stream::{StreamDecoder, StreamEncoder};
 
@@ -74,6 +74,9 @@ pub struct ChatCompletionRequest {
     /// Reasoning-Aufwand.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Anzahl der Antwortvarianten.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n: Option<u32>,
     /// Endnutzer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
@@ -86,7 +89,7 @@ pub struct ChatCompletionRequest {
     /// Streaming-Optionen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_options: Option<Map<String, Value>>,
-    /// Unbekannte Felder (`n`, `logprobs`, `logit_bias`, `service_tier`, `store` …).
+    /// Unbekannte Felder (`logprobs`, `logit_bias`, `service_tier`, `store` …).
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }

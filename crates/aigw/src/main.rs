@@ -157,9 +157,30 @@ fn serve(
             aigw_proxy::SnapshotRoutes::with_policy(aigw_admin::UpstreamPolicy::from_config(
                 &config.admin,
             )?)
-            .map_err(|e| format!("Upstream-Client: {e}"))?,
+            .map_err(|e| format!("Upstream-Client: {e}"))?
+            // `admin.allow_mock: false` lässt Mock-Deployments aus (F85).
+            .with_mock(config.admin.allow_mock),
         );
         let routes_task = routes.spawn(runtime_state.snapshot.clone());
+        // Breaker-Zustand und offene Anfragen je Deployment in /metrics (F86).
+        if let Some(g) = runtime_state.metrics_sources().gateway {
+            let r = std::sync::Arc::clone(&routes);
+            g.set_deployment_source(move || {
+                r.deployment_status()
+                    .into_iter()
+                    .map(|d| aigw_observe::DeploymentGauge {
+                        model_group: d.model_group,
+                        deployment: d.deployment,
+                        breaker: match d.breaker {
+                            aigw_proxy::routing::BreakerState::Closed => 0,
+                            aigw_proxy::routing::BreakerState::Open => 1,
+                            aigw_proxy::routing::BreakerState::HalfOpen => 2,
+                        },
+                        in_flight: d.in_flight,
+                    })
+                    .collect()
+            });
+        }
         // Plugin-Ketten je (Org, Team, Key, Modellgruppe), Neuaufbau je config_version (AIGW-36).
         // Guardrails mit externen Diensten (AIGW-38): Zugangsdaten aus dem Snapshot, SSRF-Regeln
         // wie für Deployments, Prüfmodelle über das eigene Routing.

@@ -65,12 +65,16 @@ impl fmt::Debug for SpeechStream {
 /// Höchstens so viele Teilanfragen einer Embedding-Anfrage laufen gleichzeitig.
 const EMBEDDING_CONCURRENCY: usize = 8;
 
-/// Zeitlimits je Deployment (`settings.timeouts`, Architektur §6).
+/// Zeitlimits je Deployment (`settings.timeouts`, Architektur §6; an der Modellgruppe
+/// gesetzt, gelten sie für alle ihre Deployments ohne eigene Angabe, F44).
 ///
-/// Der Verbindungsaufbau ist im [`ClientConfig`](crate::ClientConfig) geregelt (gilt für den
-/// gemeinsamen Pool).
+/// Den Verbindungsaufbau regelt derzeit der [`ClientConfig`](crate::ClientConfig) für den
+/// gemeinsamen Pool; `connect` wird gelesen und geprüft, je Deployment wirksam wird es mit
+/// einer eigenen Pool-Variante (Folgepunkt).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Timeouts {
+    /// Verbindungsaufbau (`connectMs`, Standard 10 s).
+    pub connect: Duration,
     /// Bis zu den Antwort-Headern (nur Streams; nicht gestreamte Antworten kommen erst nach
     /// der vollständigen Generierung, dort gilt nur `total`).
     pub first_byte: Duration,
@@ -83,6 +87,7 @@ pub struct Timeouts {
 impl Default for Timeouts {
     fn default() -> Self {
         Self {
+            connect: Duration::from_secs(10),
             first_byte: Duration::from_secs(120),
             idle: Duration::from_secs(120),
             total: Duration::from_secs(600),
@@ -105,6 +110,20 @@ pub struct UpstreamInfo {
     pub provider_model: String,
 }
 
+/// Standard der Trace-Weitergabe je Anbieterart (F98): an für selbst betriebene Ziele
+/// (`vllm`, `ollama`, `openai-compatible`, `mock`), aus für externe Cloud-Anbieter (die den
+/// Header nicht auswerten; Trace-IDs sollen das eigene Netz nicht verlassen). Überschreibbar
+/// je Deployment bzw. Modellgruppe mit `settings.propagateTraceContext`.
+pub fn default_propagation(kind: ProviderKind) -> bool {
+    matches!(
+        kind,
+        ProviderKind::Vllm
+            | ProviderKind::Ollama
+            | ProviderKind::OpenAiCompatible
+            | ProviderKind::Mock
+    )
+}
+
 /// Größte gelesene Fehlerantwort (Rest wird verworfen).
 const MAX_ERROR_BODY: usize = 64 * 1024;
 /// Größte nicht gestreamte Antwort.
@@ -117,6 +136,8 @@ pub struct Upstream {
     provider: Arc<dyn Provider>,
     client: UpstreamClient,
     timeouts: Timeouts,
+    /// W3C-`traceparent` an diesen Anbieter weitergeben (F98).
+    propagate_trace: bool,
 }
 
 impl fmt::Debug for Upstream {
@@ -144,6 +165,7 @@ impl Upstream {
                 provider: provider.kind(),
                 provider_model: provider.provider_model().to_owned(),
             },
+            propagate_trace: default_propagation(provider.kind()),
             provider,
             client,
             timeouts,
@@ -160,6 +182,7 @@ impl Upstream {
         let provider = registry.build(dep)?;
         let settings = Settings::of(dep);
         let timeouts = settings.timeouts()?;
+        let propagate = settings.bool("propagateTraceContext")?;
         // Eigene CA je Deployment (`settings.caFile`, F48): Variante mit eigenem Pool.
         let client = match settings.str("caFile")? {
             Some(path) if !path.trim().is_empty() => client
@@ -175,7 +198,22 @@ impl Upstream {
         );
         up.info.deployment_id = Some(dep.deployment.id);
         up.info.model_group = Some(dep.deployment.spec.model_group.clone());
+        if let Some(p) = propagate {
+            up.propagate_trace = p;
+        }
         Ok(up)
+    }
+
+    /// `traceparent` an den Anbieter weitergeben (überschreibt den Standard der Anbieterart).
+    #[must_use]
+    pub fn with_trace_propagation(mut self, on: bool) -> Self {
+        self.propagate_trace = on;
+        self
+    }
+
+    /// Wird der Trace-Kontext an den Anbieter weitergegeben (F98)?
+    pub fn propagates_trace(&self) -> bool {
+        self.propagate_trace
     }
 
     /// Beschreibung.
@@ -281,8 +319,10 @@ impl Upstream {
         mut req: crate::UpstreamRequest,
         deadline: Instant,
     ) -> Result<http::Response<Incoming>, UpstreamError> {
-        // W3C-Trace-Kontext weitergeben (nur bei aktivem Tracing und `propagate`).
-        if let Some(tp) = aigw_core::observe::current_traceparent()
+        // W3C-Trace-Kontext weitergeben (nur bei aktivem Tracing, `observe.otel.propagate` und
+        // für diesen Anbieter freigegeben, F98).
+        if self.propagate_trace
+            && let Some(tp) = aigw_core::observe::current_traceparent()
             && let Ok(v) = http::HeaderValue::from_str(&tp)
         {
             req.headers_mut().insert("traceparent", v);

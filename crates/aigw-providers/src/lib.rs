@@ -53,7 +53,9 @@ use http::{HeaderMap, StatusCode};
 
 pub use client::{ClientConfig, UpstreamClient};
 pub use settings::{GROUP_INHERITED_SETTINGS, with_group_defaults};
-pub use upstream::{ByteStream, EventStream, SpeechStream, Timeouts, Upstream, UpstreamInfo};
+pub use upstream::{
+    ByteStream, EventStream, SpeechStream, Timeouts, Upstream, UpstreamInfo, default_propagation,
+};
 
 /// Fertig gebaute Upstream-Anfrage (Body vollständig im Speicher).
 pub type UpstreamRequest = http::Request<Bytes>;
@@ -103,6 +105,9 @@ pub struct Capabilities {
     pub audio_transcription: bool,
     /// Sprachausgabe (`/v1/audio/speech`, AIGW-21).
     pub audio_speech: bool,
+    /// Mehrere Antwortvarianten (`n > 1`) in einer Anfrage (F12). Sonst schickt der Proxy
+    /// `n` parallele Anfragen und führt sie zusammen.
+    pub n_choices: bool,
 }
 
 impl Capabilities {

@@ -157,6 +157,7 @@ impl PluginHost for GatewayHost {
                 CapacityCtx {
                     counters: &inner.counters,
                     tokens,
+                    grants: None,
                 },
             )
             .await;

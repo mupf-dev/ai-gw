@@ -234,6 +234,8 @@ impl StreamEncoder {
                 write_error(out, &e);
                 self.finished = true;
             }
+            // Anthropic kennt nur eine Variante (`n` gibt es nur bei OpenAI-Clients).
+            StreamEvent::Choice { .. } => {}
         }
     }
 

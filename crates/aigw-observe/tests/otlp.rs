@@ -370,7 +370,11 @@ fn deployment(endpoint: &str) -> DeploymentCtx {
                 priority: 0,
                 capacity: Default::default(),
                 enabled: true,
-                settings: JsonObject::new(),
+                // Cloud-Anbieter geben den Trace-Kontext standardmäßig nicht weiter (F98).
+                settings: JsonObject::from_iter([(
+                    "propagateTraceContext".to_owned(),
+                    Value::Bool(true),
+                )]),
             },
         },
         credential: Some(Arc::new(CredentialData(BTreeMap::from([(

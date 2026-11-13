@@ -13,8 +13,14 @@ use crate::ConfigError;
 use crate::upstream::Timeouts;
 
 /// Einstellungen, die ein Deployment von seiner Modellgruppe erbt, wenn es sie nicht selbst
-/// setzt (`ModelGroup.spec.settings`).
-pub const GROUP_INHERITED_SETTINGS: &[&str] = &["defaultMaxTokens"];
+/// setzt (`ModelGroup.spec.settings`): `defaultMaxTokens`, `timeouts` (F44, als Ganzes),
+/// `thinkingBudgetPolicy` (F59), `propagateTraceContext` (F98).
+pub const GROUP_INHERITED_SETTINGS: &[&str] = &[
+    "defaultMaxTokens",
+    "timeouts",
+    "thinkingBudgetPolicy",
+    "propagateTraceContext",
+];
 
 /// Deployment mit den von der Modellgruppe geerbten Einstellungen
 /// ([`GROUP_INHERITED_SETTINGS`]); unverändert (ohne Kopie), wenn nichts zu erben ist.
@@ -136,7 +142,11 @@ impl<'a> Settings<'a> {
         }
     }
 
-    /// `settings.timeouts` = `{firstByteMs, idleMs, totalMs}` (alle optional).
+    /// `settings.timeouts` = `{connectMs, firstByteMs, idleMs, totalMs}` (alle optional).
+    ///
+    /// `connectMs` wird gelesen und geprüft; wirksam ist derzeit der Verbindungsaufbau-Wert
+    /// des gemeinsamen Outbound-Pools (10 s) – je Deployment bräuchte es eine Pool-Variante
+    /// wie bei `caFile` (Folgepunkt).
     pub(crate) fn timeouts(&self) -> Result<Timeouts, ConfigError> {
         let mut t = Timeouts::default();
         let Some(o) = self.object("timeouts")? else {
@@ -149,12 +159,13 @@ impl<'a> Settings<'a> {
                 .ok_or_else(|| self.invalid(format!("settings.timeouts.{key} muss > 0 sein")))?;
             let d = Duration::from_millis(ms);
             match key.as_str() {
+                "connectMs" => t.connect = d,
                 "firstByteMs" => t.first_byte = d,
                 "idleMs" => t.idle = d,
                 "totalMs" => t.total = d,
                 other => {
                     return Err(self.invalid(format!(
-                        "settings.timeouts.{other} unbekannt (erlaubt: firstByteMs, idleMs, totalMs)"
+                        "settings.timeouts.{other} unbekannt (erlaubt: connectMs, firstByteMs, idleMs, totalMs)"
                     )));
                 }
             }

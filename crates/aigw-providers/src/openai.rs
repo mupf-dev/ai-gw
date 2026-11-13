@@ -79,6 +79,8 @@ pub struct OpenAiAdapter {
     default_max_tokens: Option<u64>,
     /// Mistral: `settings.safePrompt`.
     safe_prompt: Option<bool>,
+    /// Mistral: Abbildung von `reasoning_effort` (`settings.reasoningMode`, F61).
+    mistral_reasoning: crate::mistral::MistralReasoning,
     /// URLs der weiteren Endpunkte (AIGW-21); `None` = nicht unterstützt.
     ops: Ops,
 }
@@ -128,6 +130,15 @@ fn set_op_caps(kind: ProviderKind, c: &mut Capabilities) {
         _ => (false, false, false, false),
     };
     c.embeddings = emb;
+    // `n > 1` nativ (F12); generisch kompatible Server und Ollama ignorieren `n` teils still –
+    // dort schickt der Proxy n parallele Anfragen.
+    c.n_choices = matches!(
+        kind,
+        ProviderKind::OpenAi
+            | ProviderKind::AzureOpenAi
+            | ProviderKind::Vllm
+            | ProviderKind::Mistral
+    );
     c.images = img;
     c.audio_transcription = stt;
     c.audio_speech = tts;
@@ -147,6 +158,7 @@ fn caps(max_tokens_field: MaxTokensField, reasoning: bool) -> Capabilities {
         images: false,
         audio_transcription: false,
         audio_speech: false,
+        n_choices: false,
     }
 }
 
@@ -225,6 +237,7 @@ impl OpenAiAdapter {
                     caps: c,
                     default_max_tokens: None,
                     safe_prompt: None,
+                    mistral_reasoning: crate::mistral::MistralReasoning::default(),
                     ops,
                 }
             }
@@ -267,6 +280,7 @@ impl OpenAiAdapter {
                     caps: c,
                     default_max_tokens: None,
                     safe_prompt: None,
+                    mistral_reasoning: crate::mistral::MistralReasoning::default(),
                     ops,
                 }
             }
@@ -312,6 +326,7 @@ impl OpenAiAdapter {
                     caps: c,
                     default_max_tokens: None,
                     safe_prompt: None,
+                    mistral_reasoning: crate::mistral::MistralReasoning::default(),
                     ops,
                 }
             }
@@ -334,6 +349,14 @@ impl OpenAiAdapter {
         adapter.default_max_tokens = s.positive_u64("defaultMaxTokens")?;
         if adapter.kind == ProviderKind::Mistral {
             adapter.safe_prompt = s.bool("safePrompt")?;
+            if let Some(m) = s.str("reasoningMode")? {
+                adapter.mistral_reasoning =
+                    crate::mistral::MistralReasoning::parse(m).ok_or_else(|| {
+                        s.invalid(format!(
+                            "settings.reasoningMode = {m:?} unbekannt (prompt-mode, effort, off)"
+                        ))
+                    })?;
+            }
         }
         Ok(adapter)
     }
@@ -364,6 +387,7 @@ impl OpenAiAdapter {
             caps: c,
             default_max_tokens: Settings::of(dep).positive_u64("defaultMaxTokens")?,
             safe_prompt: None,
+            mistral_reasoning: crate::mistral::MistralReasoning::default(),
             ops,
         })
     }
@@ -498,7 +522,13 @@ impl Provider for OpenAiAdapter {
             wire.extra.insert("top_k".into(), Value::from(k));
         }
         if self.kind == ProviderKind::Mistral {
-            crate::mistral::adjust_request(&mut wire, seed, self.safe_prompt, losses);
+            crate::mistral::adjust_request(
+                &mut wire,
+                seed,
+                self.safe_prompt,
+                self.mistral_reasoning,
+                losses,
+            );
         }
         let body = serde_json::to_vec(&wire).map_err(internal)?;
         self.post(
@@ -514,11 +544,17 @@ impl Provider for OpenAiAdapter {
     }
 
     fn parse_response(&self, body: &[u8]) -> Result<ChatResponse, ApiError> {
+        if self.kind == ProviderKind::Mistral {
+            // Magistral: `content` als Liste mit `thinking`-Blöcken (F61).
+            let normalized = crate::mistral::normalize_response(body);
+            let mut resp = openai::decode_response(normalized.as_deref().unwrap_or(body))?;
+            crate::local::lift_reasoning(&mut resp);
+            crate::mistral::adjust_response(&mut resp);
+            return Ok(resp);
+        }
         let mut resp = openai::decode_response(body)?;
-        match self.kind {
-            ProviderKind::Ollama | ProviderKind::Vllm => crate::local::lift_reasoning(&mut resp),
-            ProviderKind::Mistral => crate::mistral::adjust_response(&mut resp),
-            _ => {}
+        if matches!(self.kind, ProviderKind::Ollama | ProviderKind::Vllm) {
+            crate::local::lift_reasoning(&mut resp);
         }
         Ok(resp)
     }
@@ -893,7 +929,15 @@ impl OpenAiSseDecoder {
             self.done = true;
             return;
         }
-        match self.inner.decode(data) {
+        // Magistral: `delta.content` als Liste mit `thinking`-Blöcken (F61).
+        let normalized = if self.mistral
+            && (data.contains("\"content\":[") || data.contains("\"content\": ["))
+        {
+            crate::mistral::normalize_chunk(data)
+        } else {
+            None
+        };
+        match self.inner.decode(normalized.as_deref().unwrap_or(data)) {
             Ok(events) => {
                 for mut ev in events {
                     if let StreamEvent::Stop { reason, .. } = &mut ev {
@@ -1489,5 +1533,23 @@ mod tests {
         assert!(
             matches!(&out[0], StreamEvent::Error(e) if e.code.as_deref() == Some("upstream_protocol_error"))
         );
+    }
+
+    #[test]
+    fn mistral_stream_thinking_blocks() {
+        let mut d = OpenAiSseDecoder::new();
+        d.mistral = true;
+        let mut out = Vec::new();
+        let chunks = [
+            r#"{"id":"c","model":"magistral","created":1,"choices":[{"index":0,"delta":{"role":"assistant","content":[{"type":"thinking","thinking":[{"type":"text","text":"erst denken"}]}]}}]}"#,
+            r#"{"id":"c","model":"magistral","created":1,"choices":[{"index":0,"delta":{"content":"42"},"finish_reason":"stop"}]}"#,
+        ];
+        for c in chunks {
+            d.push(format!("data: {c}\n\n").as_bytes(), &mut out);
+        }
+        assert!(
+            matches!(&out[1], StreamEvent::ReasoningDelta { text, .. } if text == "erst denken")
+        );
+        assert!(matches!(&out[2], StreamEvent::TextDelta { text, .. } if text == "42"));
     }
 }

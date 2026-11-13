@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use aigw_core::ir::{ApiError, ChatRequest, ErrorKind, UpstreamError};
+use aigw_core::ir::{ApiError, ChatRequest, ErrorKind, StreamEvent, UpstreamError};
 use aigw_core::observe::error_type;
 use aigw_core::wire::{Losses, WireFormat, anthropic, openai};
 use axum::body::Body;
@@ -24,10 +24,14 @@ use crate::observe::{ObservedStream, Recorder};
 use crate::plugins::{PluginPhase, PluginRun, Pre, response_stream};
 use crate::provider::EventStream;
 use crate::request_id::{RequestId, RequestStart};
+use crate::routing::ResponseModel;
 use crate::routing::exec::{self, Outcome};
 use crate::stream::sse_response;
-use crate::{ATTEMPTS_HEADER, DEPLOYMENT_HEADER, FALLBACK_HEADER};
+use crate::{
+    ATTEMPTS_HEADER, DEPLOYMENT_HEADER, FALLBACK_HEADER, FALLBACK_SKIPPED_HEADER, MODEL_HEADER,
+};
 use aigw_plugins::{BUFFERED_HEADER, ChunkMode, ResponseHeaders};
+use futures_util::StreamExt as _;
 
 type St = State<Arc<ProxyState>>;
 
@@ -64,7 +68,21 @@ fn validate(req: &ChatRequest) -> Result<(), ApiError> {
             ApiError::invalid_request("messages darf nicht leer sein").with_param("messages")
         );
     }
-    Ok(())
+    validate_choices(req)
+}
+
+/// `n` (F12): 1 bis [`MAX_CHOICES`](crate::choices::MAX_CHOICES).
+pub(crate) fn validate_choices(req: &ChatRequest) -> Result<(), ApiError> {
+    match req.n {
+        Some(n) if n == 0 || n > crate::choices::MAX_CHOICES => {
+            Err(ApiError::invalid_request(format!(
+                "n muss zwischen 1 und {} liegen",
+                crate::choices::MAX_CHOICES
+            ))
+            .with_param("n"))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// `POST /v1/chat/completions`.
@@ -118,6 +136,13 @@ pub(crate) struct RouteInfo {
     pub(crate) buffered: bool,
     /// Ergebnis des Antwort-Caches (AIGW-39/40), Header `x-aigw-cache`.
     pub(crate) cache: Option<aigw_core::observe::CacheOutcome>,
+    /// Übersprungene, nicht freigegebene Fallback-Gruppen (F80).
+    pub(crate) fallback_skipped: Vec<String>,
+    /// Modell laut Anbieter (Header `x-aigw-model`, F49).
+    pub(crate) model: Option<String>,
+    /// Reasoning nicht an OpenAI-Clients ausgeben (`settings.exposeReasoning: false` bzw.
+    /// Key-Metadatum, F10).
+    pub(crate) hide_reasoning: bool,
 }
 
 impl RouteInfo {
@@ -140,6 +165,19 @@ impl RouteInfo {
         {
             h.insert(FALLBACK_HEADER, v);
         }
+        if !self.fallback_skipped.is_empty()
+            && let Ok(v) = HeaderValue::from_str(&self.fallback_skipped.join(","))
+        {
+            h.insert(FALLBACK_SKIPPED_HEADER, v);
+        }
+        if let Some(v) = self
+            .model
+            .as_deref()
+            .filter(|m| !m.is_empty())
+            .and_then(|m| HeaderValue::from_str(m).ok())
+        {
+            h.insert(MODEL_HEADER, v);
+        }
     }
 
     pub(crate) fn apply_plugins(&self, res: &mut Response) {
@@ -157,6 +195,80 @@ impl RouteInfo {
             self.plugin_headers.apply(res.headers_mut());
         }
     }
+
+    /// Routing-Ergebnis übernehmen (Deployment, Versuche, Fallback, übersprungene Gruppen).
+    pub(crate) fn take_routed<T>(
+        &mut self,
+        routed: &mut exec::Routed<T>,
+        rec: &mut Recorder,
+        span: &tracing::Span,
+    ) {
+        if let Some(m) = &routed.last {
+            let d = m.provider().describe();
+            rec.set_deployment(d);
+            self.deployment = Some(d.deployment.to_owned());
+            if self.model.is_none() {
+                self.model = Some(d.provider_model.to_owned());
+            }
+        }
+        self.attempts = routed.attempts.len();
+        self.fallback.clone_from(&routed.fallback);
+        if let Some(f) = &routed.fallback {
+            // Wurzel-Span (OpenTelemetry): Ausweichgruppe.
+            span.record("aigw.fallback", f.as_str());
+        }
+        if !routed.fallback_skipped.is_empty() {
+            span.record("aigw.fallback_skipped", routed.fallback_skipped.join(","));
+            self.fallback_skipped = std::mem::take(&mut routed.fallback_skipped);
+        }
+        rec.set_attempts(std::mem::take(&mut routed.attempts));
+    }
+}
+
+/// Modellname der Antwort (F49): Header `x-aigw-model` = Modell laut Anbieter (sonst das
+/// Anbieter-Modell des Deployments); mit `settings.responseModel: requested` trägt der Body
+/// den angefragten Namen. Bei Streams wird dafür das erste Ereignis (`Start`) gelesen – es liegt
+/// bereits vor (das Routing wartet es ab).
+pub(crate) async fn apply_response_model(
+    outcome: Outcome,
+    requested: &str,
+    mode: ResponseModel,
+    info: &mut RouteInfo,
+) -> Outcome {
+    match outcome {
+        Outcome::Json(mut resp) => {
+            if !resp.model.is_empty() {
+                info.model = Some(resp.model.clone());
+            }
+            if mode == ResponseModel::Requested {
+                requested.clone_into(&mut resp.model);
+            }
+            Outcome::Json(resp)
+        }
+        Outcome::Stream(mut events) => {
+            let first = events.next().await;
+            if let Some(StreamEvent::Start { model, .. }) = &first
+                && !model.is_empty()
+            {
+                info.model = Some(model.clone());
+            }
+            let head = futures_util::stream::iter(first);
+            let events: EventStream = if mode == ResponseModel::Requested {
+                let requested = requested.to_owned();
+                Box::pin(head.chain(events).map(move |ev| match ev {
+                    StreamEvent::Start { id, created, .. } => StreamEvent::Start {
+                        id,
+                        model: requested.clone(),
+                        created,
+                    },
+                    ev => ev,
+                }))
+            } else {
+                Box::pin(head.chain(events))
+            };
+            Outcome::Stream(events)
+        }
+    }
 }
 
 async fn chat(
@@ -171,6 +283,7 @@ async fn chat(
     let mut info = RouteInfo::default();
     let span = crate::trace::request_span(&rid.0, ingress(format), headers);
     rec.set_span(span.clone());
+    rec.set_client_request_id(headers);
     let mut res = match chat_inner(st, rid, headers, body, format, &mut rec, &mut info)
         .instrument(span)
         .await
@@ -185,7 +298,7 @@ async fn chat(
         }
         Ok(Reply::Stream(events, include_usage)) => {
             let events: EventStream = Box::pin(ObservedStream::new(events, rec));
-            sse_response(format, events, include_usage)
+            sse_response(format, events, include_usage, !info.hide_reasoning)
         }
         Err(e) => {
             tracing::debug!(request_id = %rid.0, error = %e, "Anfrage abgelehnt");
@@ -288,6 +401,16 @@ async fn chat_inner(
         })?;
     route_span.record("aigw.model_group", route.name());
     drop(route_span);
+    let policy = route.policy();
+    // anthropic-beta des Clients nach settings.clientBetas (F60).
+    let dropped = policy.client_betas.filter(&mut req.hints.anthropic_beta);
+    if !dropped.is_empty() {
+        tracing::debug!(request_id = %rid.0, betas = ?dropped, "anthropic-beta des Clients verworfen");
+    }
+    info.hide_reasoning = !policy.expose_reasoning || auth.hides_reasoning();
+    let response_model = policy.response_model;
+    let requested = req.model.clone();
+    let choices = req.choices();
     let include_usage = req
         .stream_options
         .as_ref()
@@ -321,7 +444,10 @@ async fn chat_inner(
         .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?
     {
         Pre::Continue(req) => req,
-        Pre::Respond(resp) => return plugin_reply(resp, req_stream, format, rec, include_usage),
+        Pre::Respond(resp) => {
+            info.model = Some(resp.model.clone());
+            return plugin_reply(resp, req_stream, format, rec, include_usage, info);
+        }
     };
     // Gepufferter Modus: Upstream nicht streamen, Antwort-Plugins auf der ganzen Antwort.
     let buffered = plugins.buffers(&req);
@@ -335,7 +461,8 @@ async fn chat_inner(
     // Schritt 6: Antwort-Cache (AIGW-39/40) – nach allen Pre-Plugins, vor dem Routing.
     // Treffer laufen wie Upstream-Antworten durch Post-/Stream-Plugins; gespeichert wird die
     // rohe Upstream-Antwort (vor den Post-Plugins).
-    let mut cache = match st.cache.as_ref() {
+    // Mehrere Varianten (`n > 1`) werden nicht gecacht.
+    let mut cache = match st.cache.as_ref().filter(|_| choices <= 1) {
         Some(c) => {
             crate::cache::CacheStep::begin(
                 Some(c),
@@ -367,29 +494,21 @@ async fn chat_inner(
             }
         }
         None => {
-            // Auswahl, Retries, Fallbacks (AIGW-24/25/26).
-            let routed = exec::execute(
+            // Auswahl, Retries, Fallbacks (AIGW-24/25/26); Fallbacks nur auf für Key/Team
+            // freigegebene Gruppen (F80).
+            let grants = |name: &str| auth.allows_group(name);
+            let mut routed = exec::execute(
                 st.routes.as_ref(),
-                route,
+                Arc::clone(&route),
                 req,
                 exec::CapacityCtx {
                     counters: st.limits.counters(),
                     tokens: est.total(),
+                    grants: auth.key.is_some().then_some(&grants as exec::Grants<'_>),
                 },
             )
             .await;
-            if let Some(m) = &routed.last {
-                let d = m.provider().describe();
-                rec.set_deployment(d);
-                info.deployment = Some(d.deployment.to_owned());
-            }
-            info.attempts = routed.attempts.len();
-            info.fallback.clone_from(&routed.fallback);
-            if let Some(f) = &routed.fallback {
-                // Wurzel-Span (OpenTelemetry): Ausweichgruppe.
-                tracing::Span::current().record("aigw.fallback", f.as_str());
-            }
-            rec.set_attempts(routed.attempts);
+            info.take_routed(&mut routed, rec, &tracing::Span::current());
             match (routed.result?, cache.as_mut()) {
                 (Outcome::Stream(events), Some(c)) => Outcome::Stream(c.tee(events)),
                 (Outcome::Json(resp), Some(c)) => {
@@ -401,9 +520,14 @@ async fn chat_inner(
         }
     };
 
+    let outcome = apply_response_model(outcome, &requested, response_model, info).await;
     let resp = match outcome {
-        // Schritt 10: Stream-Plugins je Ereignis vor dem Encoder.
-        Outcome::Stream(events) => {
+        // Schritt 10: Stream-Plugins je Ereignis vor dem Encoder; mehrere Varianten dafür
+        // nacheinander (F12).
+        Outcome::Stream(mut events) => {
+            if choices > 1 && plugins.streams_live() {
+                events = crate::choices::sequential(events);
+            }
             return Ok(Reply::Stream(
                 plugins.wrap_stream(events, ChunkMode::Live),
                 include_usage,
@@ -429,7 +553,9 @@ async fn chat_inner(
     rec.set_response(&resp);
     let mut losses = Losses::new();
     let out = match format {
-        ErrorFormat::OpenAi => openai::encode_response(resp, &mut losses)?,
+        ErrorFormat::OpenAi => {
+            openai::encode_response_with(resp, !info.hide_reasoning, &mut losses)?
+        }
         ErrorFormat::Anthropic => anthropic::encode_response(resp, &mut losses)?,
     };
     if !losses.is_empty() {
@@ -446,6 +572,7 @@ fn plugin_reply(
     format: ErrorFormat,
     rec: &mut Recorder,
     include_usage: bool,
+    info: &RouteInfo,
 ) -> Result<Reply, UpstreamError> {
     rec.set_plugin_response(&resp);
     if stream {
@@ -453,7 +580,9 @@ fn plugin_reply(
     }
     let mut losses = Losses::new();
     let out = match format {
-        ErrorFormat::OpenAi => openai::encode_response(resp, &mut losses)?,
+        ErrorFormat::OpenAi => {
+            openai::encode_response_with(resp, !info.hide_reasoning, &mut losses)?
+        }
         ErrorFormat::Anthropic => anthropic::encode_response(resp, &mut losses)?,
     };
     Ok(Reply::Json(out))

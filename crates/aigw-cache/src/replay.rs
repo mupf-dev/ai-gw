@@ -207,6 +207,8 @@ impl StreamCollector {
             } => self.stop = Some((reason.clone(), stop_sequence.clone())),
             StreamEvent::Usage(u) => self.usage = Some(u.clone()),
             StreamEvent::Error(_) => self.failed = true,
+            // Mehrere Antwortvarianten (`n > 1`) werden nicht gecacht.
+            StreamEvent::Choice { index } => self.failed |= *index > 0,
         }
     }
 

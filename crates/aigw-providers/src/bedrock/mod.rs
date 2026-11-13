@@ -225,6 +225,7 @@ impl BedrockAdapter {
                 audio_speech: false,
                 stream_usage: true,
                 max_tokens_field: MaxTokensField::MaxTokens,
+                n_choices: false,
             },
         })
     }

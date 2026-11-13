@@ -79,6 +79,10 @@ pub struct ChatRequest {
     /// Weitere Metadaten (OpenAI `metadata`, Anthropic `metadata` ohne `user_id`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Extra>,
+    /// Anzahl der Antwortvarianten (OpenAI `n`; `None` = 1). Anbieter ohne `n` bekommen vom
+    /// Proxy `n` parallele Anfragen (F12); die Varianten tragen dann `index` 0…n-1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n: Option<u32>,
     /// Antwort als Stream (`None` = Feld fehlte, gilt als `false`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
@@ -100,6 +104,11 @@ impl ChatRequest {
     /// `true`, wenn eine gestreamte Antwort angefordert ist.
     pub fn is_stream(&self) -> bool {
         self.stream.unwrap_or(false)
+    }
+
+    /// Angeforderte Anzahl der Antwortvarianten (mindestens 1).
+    pub fn choices(&self) -> u32 {
+        self.n.unwrap_or(1).max(1)
     }
 
     /// `true`, wenn `extra` beim Serialisieren nach `target` ausgegeben werden soll.
@@ -625,6 +634,24 @@ impl Usage {
     /// Summe aus Ein- und Ausgabe.
     pub fn total_tokens(&self) -> u64 {
         self.input_tokens.saturating_add(self.output_tokens)
+    }
+
+    /// Addiert `other` (z. B. Usage paralleler Anfragen bei `n > 1`, F12). Optionale Felder
+    /// bleiben `None`, wenn sie in beiden fehlen; `extra` wird nicht zusammengeführt.
+    pub fn add(&mut self, other: &Usage) {
+        fn opt(a: &mut Option<u64>, b: Option<u64>) {
+            if let Some(b) = b {
+                *a = Some(a.unwrap_or(0).saturating_add(b));
+            }
+        }
+        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
+        opt(&mut self.cache_read_tokens, other.cache_read_tokens);
+        opt(&mut self.cache_write_tokens, other.cache_write_tokens);
+        opt(&mut self.reasoning_tokens, other.reasoning_tokens);
+        opt(&mut self.images, other.images);
+        opt(&mut self.audio_ms, other.audio_ms);
+        opt(&mut self.characters, other.characters);
     }
 }
 

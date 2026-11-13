@@ -319,7 +319,9 @@ fn ir_shapes_for_tool_messages() {
     assert!(
         matches!(&parts[0].kind, PartKind::ToolResult { tool_call_id, .. } if tool_call_id == "call_1")
     );
-    assert_eq!(ir.extra.get("n"), Some(&json!(1)));
+    // `n` ist ein IR-Feld (F12).
+    assert_eq!(ir.n, Some(1));
+    assert!(!ir.extra.contains_key("n"));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -425,7 +427,9 @@ fn anthropic_stream_encode_decode_roundtrip() {
 
 #[test]
 fn openai_stream_encode_decode_roundtrip() {
-    let mut enc = openai::StreamEncoder::new(true);
+    // Reasoning (Standard: `reasoning_content`, F10) hier abgeschaltet; siehe
+    // `openai_stream_reasoning_roundtrip`.
+    let mut enc = openai::StreamEncoder::new(true).with_reasoning(false);
     let mut buf = Vec::new();
     for ev in sample_events() {
         enc.encode(ev, &mut buf);
@@ -480,6 +484,37 @@ fn openai_stream_encode_decode_roundtrip() {
         }),
     ];
     assert_eq!(events, expected);
+}
+
+#[test]
+fn openai_stream_reasoning_roundtrip() {
+    let mut enc = openai::StreamEncoder::new(false);
+    let mut buf = Vec::new();
+    for ev in sample_events() {
+        enc.encode(ev, &mut buf);
+    }
+    enc.finish(&mut buf);
+    let mut dec = openai::StreamDecoder::new();
+    let mut events = Vec::new();
+    for f in &parse_sse(&buf) {
+        events.extend(dec.decode(&f.data).unwrap());
+    }
+    let sent: String = sample_events()
+        .into_iter()
+        .filter_map(|e| match e {
+            StreamEvent::ReasoningDelta { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    let got: String = events
+        .into_iter()
+        .filter_map(|e| match e {
+            StreamEvent::ReasoningDelta { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert!(!sent.is_empty());
+    assert_eq!(got, sent);
 }
 
 #[test]

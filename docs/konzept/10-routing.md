@@ -86,6 +86,26 @@ Start-Config: `server.data.routing_headers: true` (Standard) setzt die Antwort-H
 Smoke-Tests und Demos ohne echte Anbieter; der Mock-Fallback für beliebige Modellnamen im
 Binary entfällt.
 
+## 2b. Weitere Einstellungen der Modellgruppe (AIGW-70)
+
+Alle Felder prüft `GroupPolicy::from_settings` (damit Admin-API und GitOps beim Schreiben):
+
+| Einstellung | Werte (Standard fett) | Wirkung |
+|---|---|---|
+| `fallbackIgnoresGrants` | **false** \| true | Fallbacks ohne Freigabeprüfung (§5, F80) |
+| `responseModel` | **upstream** \| requested | `model` im Antwort-Body: wie vom Anbieter gemeldet oder der angefragte Name (Gruppe/Alias); Header `x-aigw-model` trägt immer das Anbieter-Modell (F49) |
+| `clientBetas` / `betaAllowlist` | **allow-all** \| allowlist \| deny / Liste | `anthropic-beta` der Clients weitergeben, filtern oder verwerfen (F60; die Betas des Deployments bleiben) |
+| `exposeReasoning` | **true** \| false | Reasoning als `reasoning_content` an OpenAI-Clients (F10); je Key zusätzlich über das Metadatum `aigw.exposeReasoning: "false"` |
+| `timeouts` | `{connectMs, firstByteMs, idleMs, totalMs}` | gilt für alle Deployments ohne eigenen Abschnitt (F44, 06 §3) |
+| `thinkingBudgetPolicy` | **raise-max-tokens** \| cap-budget | Erbwert für Anthropic-Deployments (F59, 06 §3a) |
+| `propagateTraceContext` | true \| false (Standard je Anbieterart) | Erbwert für die Trace-Weitergabe (F98, 07 §12) |
+
+`n > 1` (F12): Anbieter mit nativem `n` (OpenAI, Azure, vLLM, Mistral) bekommen eine Anfrage;
+sonst schickt die Ausführung `n` parallele Anfragen an **dasselbe** Deployment (ein Versuch;
+schlägt eine fehl, wird der Versuch wie üblich wiederholt bzw. fällt zurück). RPM zählt einen
+Versuch, TPM die geschätzten Tokens × `n` bzw. die summierte Usage; Limits/Budgets reservieren die
+Ausgabe × `n` und rechnen die summierte Usage ab. Antworten mit `n > 1` werden nicht gecacht.
+
 ## 2a. Fähigkeiten einer Modellgruppe (AIGW-21)
 
 ```yaml
@@ -121,7 +141,10 @@ für alle Arten gleich (TPM zählt Embedding-Tokens bzw. gemeldete Bild-/Audio-T
      Ende des Versuchs auf die Usage korrigiert – Details in
      [11-limits-und-budgets.md](11-limits-und-budgets.md) §5).
    Dann wird die nächste Gruppe genommen. Sind alle gesperrt: **503**
-   `no_deployment_available` mit `Retry-After` = kürzeste verbleibende Sperre.
+   `no_deployment_available` mit `Retry-After` = kürzeste verbleibende Sperre – außer alle
+   (nicht ausgeschlossenen) Deployments sind **nur** wegen `Retry-After` des Anbieters oder
+   erschöpfter Kapazität gesperrt (kein offener Breaker): dann **429**
+   `deployments_rate_limited` mit `Retry-After` (F83; Drosselung, kein Ausfall).
 2. **Strategie** innerhalb der Gruppe:
    - `weighted`: gewichtet zufällig nach `weight` (alle 0 → gleichverteilt).
    - `least-latency`: kleinste EWMA (α = 0,3) der TTFT (Streams) bzw. Antwortzeit (sonst; fehlt
@@ -184,7 +207,16 @@ Ist eine Modellgruppe erschöpft (Versuche, Budget oder alle Deployments gesperr
 Proxy die `fallbacks` der **Ursprungsgruppe** in Reihenfolge durch und nimmt die erste, deren
 Auslöser zur Klasse des letzten Fehlers passt und die noch nicht besucht wurde. Jede
 Fallback-Gruppe nutzt ihre eigenen Deployments, ihre Strategie und ihr `maxAttempts`; die
-`fallbacks` der Fallback-Gruppen werden nicht verfolgt. Höchstens 8 Gruppen je Anfrage.
+`fallbacks` der Fallback-Gruppen werden nicht verfolgt. Höchstens 8 Gruppen je Anfrage
+(Ursprung + 7); Admin-API und GitOps lehnen längere Ketten und Zyklen ab (F69,
+`aigw_core::validate::MAX_FALLBACKS`).
+
+**Freigaben (F80):** Eine Fallback-Gruppe wird nur genommen, wenn der API-Key (und sein Team)
+sie nutzen darf (`allowedModels`, wie bei der direkten Anfrage). Nicht freigegebene Gruppen
+werden übersprungen und im Header `x-aigw-fallback-skipped` (kommagetrennt) sowie am
+Wurzel-Span (`aigw.fallback_skipped`) genannt. `settings.fallbackIgnoresGrants: true` an der
+**Ursprungsgruppe** schaltet die Prüfung für ihre Kette ab (z. B. interne Ausweichmodelle, die
+Keys nicht direkt ansprechen sollen).
 
 | Auslöser (`on`) | greift bei |
 |---|---|
@@ -218,6 +250,8 @@ Fallback-Gruppe nutzt ihre eigenen Deployments, ihre Strategie und ihr `maxAttem
 | `x-aigw-deployment` | Name des Deployments, das die Antwort lieferte (bzw. zuletzt versucht wurde) |
 | `x-aigw-attempts` | Anzahl der Versuche (fehlt, wenn kein Deployment angefragt wurde) |
 | `x-aigw-fallback` | Modellgruppe, falls die Antwort über eine Fallback-Kette kam |
+| `x-aigw-fallback-skipped` | übersprungene, für den Key nicht freigegebene Fallback-Gruppen (F80) |
+| `x-aigw-model` | Modell, das geantwortet hat – wie vom Anbieter gemeldet, sonst `providerModel` (F49; bei jeder erfolgreichen Antwort) |
 
 Abschaltbar mit `server.data.routing_headers: false`. Im `RequestRecord` stehen zusätzlich
 (additiv) alle Versuche: `attempts: Vec<Attempt>` mit Modellgruppe, Deployment (Name, ID),
@@ -258,6 +292,6 @@ Anthropic-Stream) und danach eine weitere (Hot Reload der Routen).
 ## 10. Offene Punkte
 
 - Health Check per `/models` statt Chat-Request braucht eine Methode im `Provider`-Trait.
-- Versuche (`attempts`) im Request-Log speichern; Kennzahlen (`/metrics`) für Breaker-Zustand,
-  Retries und Fallbacks.
+- Kennzahlen je Modellgruppe für Retries/Fallbacks (derzeit global, F86); Breaker-Zustand ist je
+  Deployment in `/metrics`.
 - Statusanzeige der Deployments (Breaker, EWMA, offene Anfragen) in Admin-API/UI.

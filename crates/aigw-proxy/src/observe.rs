@@ -164,6 +164,28 @@ impl Recorder {
         }
     }
 
+    /// Vom Client mitgegebene Request-ID (`x-client-request-id`, sonst `x-request-id`; F11) –
+    /// im Request-Log suchbar und als Span-Attribut `aigw.client_request_id`. Der Writer kürzt
+    /// und filtert sie.
+    pub(crate) fn set_client_request_id(&mut self, headers: &HeaderMap) {
+        let Some(id) = ["x-client-request-id", "x-request-id"]
+            .iter()
+            .find_map(|h| headers.get(*h))
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        else {
+            return;
+        };
+        let id: String = id.chars().take(256).collect();
+        if !self.span.is_disabled() {
+            self.span.record("aigw.client_request_id", id.as_str());
+        }
+        if let Some(r) = self.rec() {
+            r.client_request_id = Some(id);
+        }
+    }
+
     /// Key, Team und Organisation aus der Schlüsselprüfung.
     pub(crate) fn set_key(&mut self, auth: &AuthContext) {
         if let Some(r) = self.rec() {
@@ -398,6 +420,7 @@ impl Recorder {
             StreamEvent::Start { model, .. } => {
                 self.span.record("gen_ai.response.model", model.as_str());
             }
+            StreamEvent::Choice { .. } => {}
         }
     }
 

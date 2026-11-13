@@ -26,7 +26,7 @@ use aigw_core::ir::{ApiError, ChatRequest, ChatResponse};
 use aigw_core::wire::WireFormat;
 use aigw_plugins::{
     CallInfo, Chain, ChunkMode, ChunkRunner, Flow, Meta, PluginStream, ReqCtx, RespCtx,
-    ResponseHeaders, response_events,
+    ResponseHeaders,
 };
 use axum::http::HeaderMap;
 
@@ -155,6 +155,11 @@ impl PluginRun {
         }
     }
 
+    /// Laufen Stream-Haken (live) auf der Antwort?
+    pub(crate) fn streams_live(&self) -> bool {
+        self.info.is_some() && self.chain.has_chunk(ChunkMode::Live)
+    }
+
     /// Gepufferter Modus (Ausgabe-Plugins brauchen die ganze Antwort)?
     pub(crate) fn buffers(&self, req: &ChatRequest) -> bool {
         req.is_stream() && self.chain.needs_buffered_output()
@@ -199,5 +204,8 @@ impl PluginRun {
 
 /// Antwort → Ereignisstrom (gepufferter Modus, `Respond` bei gestreamter Anfrage).
 pub(crate) fn response_stream(resp: &ChatResponse) -> EventStream {
-    Box::pin(futures_util::stream::iter(response_events(resp)))
+    // Mehrere Varianten (`n > 1`, F12) mit `Choice`-Markern.
+    Box::pin(futures_util::stream::iter(crate::choices::response_events(
+        resp,
+    )))
 }

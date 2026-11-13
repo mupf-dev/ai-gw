@@ -23,7 +23,7 @@ use arc_swap::ArcSwap;
 use time::OffsetDateTime;
 
 use super::state::{DeploymentState, fingerprint};
-use super::{GroupPolicy, GroupRoute, MemberSpec, health};
+use super::{BreakerState, GroupPolicy, GroupRoute, MemberSpec, health};
 use crate::mock::MockProvider;
 use crate::provider::ChatProvider;
 use crate::routes::ModelRoutes;
@@ -62,6 +62,21 @@ pub struct SnapshotRoutes {
     states: Mutex<HashMap<Id, Arc<DeploymentState>>>,
     registry: Registry,
     client: UpstreamClient,
+    /// Deployments mit `provider: mock` aufnehmen (`admin.allow_mock`, F85).
+    allow_mock: bool,
+}
+
+/// Zustand eines Deployments für Kennzahlen (`aigw_deployment_breaker_state`, F86).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeploymentStatus {
+    /// Modellgruppe.
+    pub model_group: String,
+    /// Name des Deployments.
+    pub deployment: String,
+    /// Circuit Breaker.
+    pub breaker: BreakerState,
+    /// Offene Anfragen dieser Instanz.
+    pub in_flight: u32,
 }
 
 impl fmt::Debug for SnapshotRoutes {
@@ -83,7 +98,33 @@ impl SnapshotRoutes {
             states: Mutex::new(HashMap::new()),
             registry,
             client,
+            allow_mock: true,
         }
+    }
+
+    /// Deployments mit `provider: mock` zulassen (Standard) oder auslassen
+    /// (`admin.allow_mock: false`, F85).
+    #[must_use]
+    pub fn with_mock(mut self, allow: bool) -> Self {
+        self.allow_mock = allow;
+        self
+    }
+
+    /// Zustand aller Deployments der aktuellen Tabelle (für `/metrics`, F86).
+    pub fn deployment_status(&self) -> Vec<DeploymentStatus> {
+        let table = self.table.load();
+        let mut out = Vec::new();
+        for g in &table.groups {
+            for m in g.members() {
+                out.push(DeploymentStatus {
+                    model_group: g.name().to_owned(),
+                    deployment: m.provider().describe().deployment.to_owned(),
+                    breaker: m.state().breaker_state(),
+                    in_flight: m.state().in_flight(),
+                });
+            }
+        }
+        out
     }
 
     /// Mit allen eingebauten Adaptern und dem Standard-HTTP-Client mit strengen SSRF-Regeln.
@@ -239,6 +280,9 @@ impl SnapshotRoutes {
     fn build_provider(&self, d: &DeploymentCtx) -> Result<Arc<dyn ChatProvider>, String> {
         let kind = d.deployment.spec.provider;
         if kind == ProviderKind::Mock {
+            if !self.allow_mock {
+                return Err("provider: mock ist gesperrt (admin.allow_mock: false)".into());
+            }
             return Ok(Arc::new(MockProvider::for_deployment(d)));
         }
         if !self.registry.supports(kind) {

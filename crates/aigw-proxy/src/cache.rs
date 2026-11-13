@@ -373,6 +373,7 @@ impl aigw_cache::Embedder for RoutedEmbedder {
             crate::routing::exec::CapacityCtx {
                 counters: &self.counters,
                 tokens: crate::observe::estimate_tokens(text.len()),
+                grants: None,
             },
         )
         .await;

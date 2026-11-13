@@ -532,7 +532,7 @@ async fn group_capabilities_are_enforced() {
     );
     let emb =
         GroupPolicy::from_settings(&settings(json!({"capabilities": ["embeddings"]}))).unwrap();
-    routes.insert_route("emb-only", group("emb-only", emb, mock.clone()));
+    routes.insert_route("emb-only", group("emb-only", emb.clone(), mock.clone()));
     // Anthropic-Deployment in einer Gruppe, die Embeddings freigibt: kein Deployment kann sie.
     let anthropic = deployment(
         "claude",

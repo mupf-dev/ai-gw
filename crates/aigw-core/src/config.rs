@@ -735,15 +735,29 @@ pub struct UpstreamConfig {
 /// privaten/lokalen Adressen. Ausnahmen (z. B. Ollama/vLLM im LAN) werden hier freigeschaltet.
 /// Einträge: Hostname (`ollama`, `localhost`), Muster `*.lan`, IP-Adresse oder CIDR-Bereich
 /// (`192.168.0.0/16`, `fd00::/8`).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminConfig {
     /// Hosts, die per `http://` (ohne TLS) angesprochen werden dürfen.
     pub allow_insecure_upstreams: Vec<String>,
     /// Private, lokale oder interne Ziele, die trotzdem erlaubt sind.
     pub allow_private_upstreams: Vec<String>,
+    /// Deployments mit `provider: mock` (eingebauter Echo-Anbieter) erlauben (Standard `true`,
+    /// F85). `false`: Admin-API und GitOps lehnen sie ab, das Routing lässt vorhandene aus.
+    pub allow_mock: bool,
     /// Anmeldung an Admin-API und Admin-UI (AIGW-32).
     pub auth: AdminAuthConfig,
+}
+
+impl Default for AdminConfig {
+    fn default() -> Self {
+        Self {
+            allow_insecure_upstreams: Vec::new(),
+            allow_private_upstreams: Vec::new(),
+            allow_mock: true,
+            auth: AdminAuthConfig::default(),
+        }
+    }
 }
 
 /// Request-Log und Auswertung (AIGW-43, `docs/konzept/07-beobachtung.md`).

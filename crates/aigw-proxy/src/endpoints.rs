@@ -472,9 +472,12 @@ async fn responses_inner(
             .with_param("input")
             .into());
     }
+    crate::handlers::validate_choices(&req)?;
     p.rec.set_request(&req);
     let est = TokenEstimate::of(&req, p.state().limits.default_max_tokens());
     let route = p.route(&auth, &req.model, Capability::Chat, est).await?;
+    let response_model = route.policy().response_model;
+    let requested = req.model.clone();
 
     // Plugin-Kette (AIGW-36) wie im Chat-Pfad: nach der Admission, vor dem Routing.
     let req_stream = req.is_stream();
@@ -518,8 +521,18 @@ async fn responses_inner(
     let op = ChatOp {
         stream: req.is_stream(),
     };
-    let resp = match p.execute(route, &op, req).await? {
-        Outcome::Stream(events) => {
+    let choices = req.choices();
+    let outcome = p.execute(route, &op, req).await?;
+    // Modellname (F49): Header x-aigw-model, ggf. angefragter Name im Body.
+    let outcome =
+        crate::handlers::apply_response_model(outcome, &requested, response_model, p.info_mut())
+            .await;
+    let resp = match outcome {
+        Outcome::Stream(mut events) => {
+            // Die Responses-Ausgabe braucht die Varianten nacheinander (F12).
+            if choices > 1 {
+                events = crate::choices::sequential(events);
+            }
             return Ok(ResponsesReply::Stream(
                 plugins.wrap_stream(events, ChunkMode::Live),
                 Box::new(echo),

@@ -119,6 +119,8 @@ impl fmt::Display for Host {
 pub struct UpstreamPolicy {
     insecure: Vec<HostRule>,
     private: Vec<HostRule>,
+    /// `admin.allow_mock: false` (F85).
+    deny_mock: bool,
 }
 
 impl UpstreamPolicy {
@@ -137,7 +139,13 @@ impl UpstreamPolicy {
         Ok(Self {
             insecure: parse("allow_insecure_upstreams", &cfg.allow_insecure_upstreams)?,
             private: parse("allow_private_upstreams", &cfg.allow_private_upstreams)?,
+            deny_mock: !cfg.allow_mock,
         })
+    }
+
+    /// Sind Deployments mit `provider: mock` erlaubt (`admin.allow_mock`, F85)?
+    pub fn allows_mock(&self) -> bool {
+        !self.deny_mock
     }
 
     /// Prüft einen Endpunkt (Basis-URL eines Deployments). Fehlertext für `422`.

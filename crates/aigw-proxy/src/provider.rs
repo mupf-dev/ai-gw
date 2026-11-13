@@ -63,6 +63,12 @@ pub trait ChatProvider: Send + Sync + 'static {
         cap == Capability::Chat
     }
 
+    /// Kann das Deployment mehrere Antwortvarianten (`n > 1`) in einer Anfrage liefern? Sonst
+    /// schickt das Routing `n` parallele Anfragen (F12).
+    fn native_choices(&self) -> bool {
+        false
+    }
+
     /// Embeddings.
     fn embeddings(
         self: Arc<Self>,
@@ -133,6 +139,10 @@ impl ChatProvider for Upstream {
 
     fn supports(&self, cap: Capability) -> bool {
         self.provider().capabilities().supports(cap)
+    }
+
+    fn native_choices(&self) -> bool {
+        self.provider().capabilities().n_choices
     }
 
     fn embeddings(

@@ -9,6 +9,12 @@
 //! optional [`StreamEvent::Stop`], optional [`StreamEvent::Usage`] (darf mehrfach kommen,
 //! der letzte Wert gilt, Felder sind kumulativ). Das Ende des Streams signalisiert der
 //! Aufrufer dem Encoder über dessen `finish`.
+//!
+//! **Mehrere Antwortvarianten** (`n > 1`, F12): [`StreamEvent::Choice`] schaltet die Variante
+//! um; alle folgenden Ereignisse bis zum nächsten `Choice` gehören zu ihr (ohne `Choice` gilt
+//! Variante 0). Blockindizes zählen je Variante, jede Variante hat ihr eigenes `Stop`. Die
+//! Varianten dürfen sich abwechseln (verschränkt); `Start` und `Usage` (Summe über alle
+//! Varianten) gelten für die ganze Antwort.
 
 use serde::{Deserialize, Serialize};
 
@@ -77,6 +83,11 @@ pub enum StreamEvent {
     Usage(Usage),
     /// Fehler mitten im Stream (beendet den Stream).
     Error(ApiError),
+    /// Die folgenden Ereignisse gehören zur Antwortvariante `index` (nur bei `n > 1`).
+    Choice {
+        /// Index der Variante (0 … n-1).
+        index: u32,
+    },
 }
 
 /// Beginn eines Tool-Aufrufs.

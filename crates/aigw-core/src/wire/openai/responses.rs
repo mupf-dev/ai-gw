@@ -221,6 +221,18 @@ pub fn decode_responses_request(body: &[u8]) -> Result<(ChatRequest, ResponsesEc
             extra.insert("reasoning".into(), Value::Object(r));
         }
     }
+    // `n` kennt die Responses API nicht; ai-gw nimmt es als Erweiterung an (F12): mehrere
+    // Varianten erscheinen nacheinander als eigene Ausgabe-Items.
+    let n = match extra.remove("n") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| {
+                    ApiError::invalid_request("n muss eine positive Ganzzahl sein").with_param("n")
+                })?,
+        ),
+    };
     let stream = w.stream;
     if let Some(so) = w.stream_options {
         extra.insert("stream_options".into(), Value::Object(so));
@@ -242,6 +254,7 @@ pub fn decode_responses_request(body: &[u8]) -> Result<(ChatRequest, ResponsesEc
         reasoning,
         user: w.user,
         metadata: w.metadata.filter(|m| !m.is_empty()),
+        n,
         // Responses liefert die Usage immer (in `response.completed`).
         stream_options: stream.filter(|s| *s).map(|_| StreamOptions {
             include_usage: Some(true),
@@ -650,14 +663,14 @@ fn function_call_item(id: &str, call_id: &str, name: &str, args: &str, status: &
 
 /// Übersetzt eine IR-Antwort in ein Responses-Objekt.
 pub fn response_to_wire(resp: ChatResponse, echo: &ResponsesEcho, losses: &mut Losses) -> Value {
-    if resp.choices.len() > 1 {
-        losses.note("responses: nur die erste Variante wird ausgegeben");
-    }
     losses.extra("responses response", &resp.extra);
     let mut output = Vec::new();
     let mut reason = None;
-    if let Some(choice) = resp.choices.into_iter().next() {
-        reason = choice.stop_reason;
+    // Mehrere Varianten (`n > 1`, F12) nacheinander; der Status folgt der ersten.
+    for (i, choice) in resp.choices.into_iter().enumerate() {
+        if i == 0 {
+            reason = choice.stop_reason;
+        }
         let mut content: Vec<Value> = Vec::new();
         let flush = |content: &mut Vec<Value>, output: &mut Vec<Value>| {
             if !content.is_empty() {
@@ -1100,10 +1113,17 @@ impl ResponsesStreamEncoder {
                     self.emit(out, "response.function_call_arguments.delta", d);
                 }
             }
+            StreamEvent::Choice { .. } => {
+                // Varianten kommen nacheinander (der Proxy ordnet sie); jede beginnt neue Items.
+                self.close(out);
+            }
             StreamEvent::Stop { reason, .. } => {
                 self.ensure_started(out);
                 self.close(out);
-                self.reason = Some(reason);
+                // Bei mehreren Varianten bestimmt die erste den Status.
+                if self.reason.is_none() {
+                    self.reason = Some(reason);
+                }
             }
             StreamEvent::Usage(u) => self.usage = Some(u),
             StreamEvent::Error(e) => {

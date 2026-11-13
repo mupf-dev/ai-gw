@@ -47,7 +47,7 @@ pub use logger::RequestLogger;
 pub use mask::{PayloadMasker, PiiMasker};
 pub use metrics::{MetricsSnapshot, ObserveMetrics};
 pub use process::LogEntry;
-pub use prom::{GatewayMetrics, MetricsObserver};
+pub use prom::{DeploymentGauge, GatewayMetrics, MetricsObserver};
 
 use crate::process::Processor;
 use crate::writer::Writer;

@@ -153,6 +153,7 @@ pub fn request_from_wire(w: MessagesRequest) -> Result<ChatRequest, ApiError> {
         reasoning: (reasoning != Reasoning::default()).then_some(reasoning),
         user,
         metadata,
+        n: None,
         stream: w.stream,
         stream_options: None,
         hints: RequestHints::default(),

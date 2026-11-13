@@ -142,6 +142,7 @@ cat "$TMP/b1.json"; echo
 grep -i '^x-aigw-' "$TMP/h1.txt"
 grep -qi '^x-aigw-deployment: mock-echo' "$TMP/h1.txt"
 grep -qi '^x-aigw-attempts: 2' "$TMP/h1.txt"
+grep -qi '^x-aigw-model: ' "$TMP/h1.txt"
 grep -q 'Echo: Hallo' "$TMP/b1.json"
 echo "--- POST /v1/messages (Stream) über Modellgruppe mock"
 curl -fsS -N "$BASE/v1/messages" -H "x-api-key: $KEY" -H 'content-type: application/json' \
@@ -250,6 +251,10 @@ grep -qi '^x-aigw-deployment: rest-echo' "$TMP/h2.txt"
 test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/chat/completions" \
   -H "authorization: Bearer $LIMITED" -H 'content-type: application/json' \
   -d '{"model":"mock","messages":[{"role":"user","content":"Hallo"}]}')" = 403
+# Eingeschränkter Key, unbekanntes Modell: trotzdem präzise 404 (F39).
+test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/chat/completions" \
+  -H "authorization: Bearer $LIMITED" -H 'content-type: application/json' \
+  -d '{"model":"gibt-es-nicht","messages":[{"role":"user","content":"Hallo"}]}')" = 404
 curl -fsS "$BASE/v1/models" -H "authorization: Bearer $LIMITED" | grep -q '"rest-model"'
 echo "--- Plugins (AIGW-36): header auf Modellgruppe mock-2, request-transform global, per Apply"
 cat >"$TMP/plugins.yaml" <<'YAML'

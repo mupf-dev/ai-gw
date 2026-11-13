@@ -92,7 +92,12 @@ lehnt `max_tokens` bei Reasoning-Modellen ab, viele kompatible Server kennen nur
 Übersteuerbar je Deployment mit `settings.maxTokensField`.
 
 Weitere Einstellungen (`spec.settings`): `streamUsage: false` (Server ohne `stream_options`),
-`timeouts: {firstByteMs, idleMs, totalMs}`. `stream_options` wird bei nicht gestreamten Anfragen
+`timeouts: {connectMs, firstByteMs, idleMs, totalMs}` (Standard 10/120/120/600 s; an der
+Modellgruppe gesetzt gilt der Abschnitt für alle Deployments ohne eigenen, F44 – `connectMs`
+wird geprüft; wirksam ist derzeit der Wert des gemeinsamen Outbound-Pools von 10 s, je Deployment
+bräuchte es eine Pool-Variante wie bei `caFile` – Folgepunkt), `propagateTraceContext` (F98, siehe 07). `n > 1` schicken OpenAI, Azure,
+vLLM und Mistral nativ; generisch kompatible Server und Ollama bekommen n parallele Anfragen
+(F12, siehe 03). `stream_options` wird bei nicht gestreamten Anfragen
 entfernt (OpenAI lehnt es sonst ab). Azure-Deployment-Namen werden auf `[A-Za-z0-9._-]` geprüft
 (Pfadsegment).
 
@@ -100,6 +105,13 @@ entfernt (OpenAI lehnt es sonst ab). Azure-Deployment-Namen werden auf `[A-Za-z0
 Token im RAM und erneuern es im Hintergrund (kein Netzwerkzugriff je Anfrage). Eingebaut ist nur
 `StaticToken`; `settings.auth: entraId` wird bis zur Implementierung mit einer klaren
 Fehlermeldung abgelehnt (`OpenAiAdapter::azure_with_token_source` für programmatische Nutzung).
+
+**Mistral/Magistral (F61):** Reasoning-Modelle liefern `content` als Liste
+(`{"type":"thinking","thinking":[{"type":"text",…}]}` + `{"type":"text",…}`); der Adapter fasst
+sie – nicht gestreamt und je Stream-Chunk – zu Text + `reasoning_content` zusammen, daraus wird
+IR-Reasoning. `reasoning_effort` bildet `settings.reasoningMode` ab: `prompt-mode` (Standard;
+`prompt_mode: "reasoning"`, bei `none` ohne), `effort` (`reasoning_effort` unverändert, für
+Modelle mit Effort-Steuerung) oder `off` (verwerfen).
 
 ## 3a. Anthropic (`anthropic`, AIGW-16)
 
@@ -112,7 +124,7 @@ der Adapter ergänzt Pflichtfelder, Header und die Abbildung von OpenAI-Reasonin
 | URL | `{endpoint}/v1/messages`, Standard `https://api.anthropic.com`; endet `endpoint` auf `/v1`, wird nur `/messages` angehängt |
 | Auth | `x-api-key` aus Zugangsdaten `apiKey` (Pflicht, als *sensitive* markiert) |
 | `anthropic-version` | `settings.anthropicVersion`, Standard `2023-06-01` |
-| `anthropic-beta` | `settings.anthropicBeta` (String mit Kommas oder Liste) + Betas aus dem `anthropic-beta`-Header von Anthropic-Clients (`settings.forwardClientBeta`, Standard `true`), ohne Duplikate; nur Zeichen `[A-Za-z0-9._-]` |
+| `anthropic-beta` | `settings.anthropicBeta` (String mit Kommas oder Liste) + Betas aus dem `anthropic-beta`-Header von Anthropic-Clients (`settings.forwardClientBeta`, Standard `true`), ohne Duplikate; nur Zeichen `[A-Za-z0-9._-]`. Welche Client-Betas überhaupt ankommen, regelt die Modellgruppe: `settings.clientBetas` `allow-all` (Standard) \| `allowlist` (nur `settings.betaAllowlist`) \| `deny`; verworfene Kennungen nur im Debug-Log (F60) |
 | `max_tokens` (Pflicht) | aus der Anfrage, sonst `settings.defaultMaxTokens` des Deployments, sonst der Modellgruppe (geerbt über `aigw_providers::with_group_defaults`), sonst 4096 |
 | Tools | `tools` (`input_schema`, `strict`, `cache_control`), `tool_choice` `auto`/`none`/`any` (OpenAI `required`)/`tool`, `parallel_tool_calls: false` → `disable_parallel_tool_use` |
 | Vision/Dokumente | Bilder Base64 (OpenAI Data-URL) und URL, Dokumente (`document`), `cache_control` je Block, Tool und (Anthropic-Clients) oben |
@@ -127,7 +139,7 @@ Anthropic-Format stammt und keine eigene `thinking`-Konfiguration hat) nach
 |---|---|---|
 | `adaptive` (Standard) | `thinking: {type: adaptive}` + `output_config.effort` | Claude 4.6 und neuer |
 | `effort` | nur `output_config.effort` | Modelle mit Thinking ohne Schalter (z. B. Opus 5.5) |
-| `budget` | `thinking: {type: enabled, budget_tokens}` nach Tabelle, kein `effort` | ältere Modelle (Sonnet 4.5, Haiku 4.5 …) |
+| `budget` | `thinking: {type: enabled, budget_tokens}` nach Tabelle, kein `effort`; ist `max_tokens` ≤ Budget, entscheidet `settings.thinkingBudgetPolicy` (F59): `raise-max-tokens` (Standard: `max_tokens` += Budget) oder `cap-budget` (Budget = `max_tokens`/2; unter 1 024 ohne Thinking) – je Deployment, von der Modellgruppe erbbar | ältere Modelle (Sonnet 4.5, Haiku 4.5 …) |
 | `off` | Reasoning verworfen | Modelle ohne Thinking |
 
 | `reasoning_effort` | `budget_tokens` (`budget`) | `effort` (`adaptive`/`effort`) |
@@ -542,11 +554,10 @@ HTTP plus Übersetzung). Optimierungen (Profiling, Allokationen im Encoder, `Byt
   wäre möglich.
 - `client_ip` füllt der Proxy noch nicht (braucht `ConnectInfo` im Listener).
 - Entra-ID-`TokenSource`.
-- OpenAI-Clients bekommen gestreamtes Reasoning (vLLM/Ollama/Anthropic) nicht zu sehen
-  (`ReasoningDelta` wird im OpenAI-Encoder verworfen, siehe 03); nicht gestreamt bleibt
-  `reasoning_content` kompatibler Anbieter erhalten.
-- Mistral-Reasoning-Modelle (Magistral) liefern `content` als Liste von Blöcken
-  (`thinking`/`text`); das wird noch nicht gelesen.
+- Reasoning in Assistant-Nachrichten des Verlaufs von OpenAI-Clients (`reasoning_content`)
+  wird noch nicht zurück in die IR übernommen (Anthropic bräuchte ohnehin die Signatur).
+- Mistral: Reasoning im Verlauf (`thinking`-Blöcke in Assistant-Nachrichten) wird nicht an
+  Mistral zurückgegeben.
 - Bedrock: IMDSv2/ECS/Web-Identity-`AwsCredentialsProvider`, strukturierte Ausgabe
   (`response_format`), Application-Inference-Profiles/Prompt-Router nur als Modell-ID getestet.
 - Vertex: Workload Identity/Metadaten-Server als `TokenSource`, Vertex-Express-Modus (API-Key auf

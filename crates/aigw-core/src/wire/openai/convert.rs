@@ -116,6 +116,7 @@ pub fn request_from_wire(w: ChatCompletionRequest) -> Result<ChatRequest, ApiErr
         }),
         user: w.user,
         metadata: w.metadata,
+        n: w.n,
         stream: w.stream,
         stream_options,
         hints,
@@ -585,6 +586,7 @@ pub fn request_to_wire(
         stop,
         response_format,
         reasoning_effort,
+        n: req.n,
         user: req.user,
         metadata: req.metadata,
         stream: req.stream,
@@ -1044,14 +1046,39 @@ pub(crate) fn usage_to_wire(u: Usage, k: bool, losses: &mut Losses) -> WireUsage
     }
 }
 
-/// Serialisiert eine IR-Antwort als OpenAI-Response-Body.
+/// Serialisiert eine IR-Antwort als OpenAI-Response-Body (Reasoning als
+/// `reasoning_content`, F10).
 pub fn encode_response(resp: ChatResponse, losses: &mut Losses) -> Result<Vec<u8>, ApiError> {
-    let wire = response_to_wire(resp, losses);
+    encode_response_with(resp, true, losses)
+}
+
+/// Wie [`encode_response`]; `expose_reasoning = false` verwirft Reasoning-Text
+/// (`settings.exposeReasoning`, F10).
+pub fn encode_response_with(
+    resp: ChatResponse,
+    expose_reasoning: bool,
+    losses: &mut Losses,
+) -> Result<Vec<u8>, ApiError> {
+    let wire = response_to_wire_with(resp, expose_reasoning, losses);
     serde_json::to_vec(&wire).map_err(|e| ApiError::new(ErrorKind::Internal, e.to_string()))
 }
 
-/// Übersetzt eine IR-Antwort in den OpenAI-Wire-Typ.
+/// Übersetzt eine IR-Antwort in den OpenAI-Wire-Typ (Reasoning als `reasoning_content`).
 pub fn response_to_wire(resp: ChatResponse, losses: &mut Losses) -> ChatCompletion {
+    response_to_wire_with(resp, true, losses)
+}
+
+/// Übersetzt eine IR-Antwort in den OpenAI-Wire-Typ.
+///
+/// Reasoning-Text (`PartKind::Reasoning`) geht – wie bei DeepSeek, vLLM und anderen
+/// kompatiblen Servern – als `message.reasoning_content` an den Client, wenn
+/// `expose_reasoning` gesetzt ist (Standard, F10). Signaturen und verschlüsseltes Reasoning
+/// haben in Chat Completions keine Entsprechung und werden verworfen.
+pub fn response_to_wire_with(
+    resp: ChatResponse,
+    expose_reasoning: bool,
+    losses: &mut Losses,
+) -> ChatCompletion {
     let k = resp.source == Some(FMT);
     let choices = resp
         .choices
@@ -1059,6 +1086,7 @@ pub fn response_to_wire(resp: ChatResponse, losses: &mut Losses) -> ChatCompleti
         .map(|c| {
             let mut text: Option<String> = None;
             let mut refusal: Option<String> = None;
+            let mut reasoning: Option<String> = None;
             let mut tool_calls = Vec::new();
             for p in c.message.content.into_parts() {
                 match p.kind {
@@ -1080,8 +1108,23 @@ pub fn response_to_wire(resp: ChatResponse, losses: &mut Losses) -> ChatCompleti
                         function: FunctionCall { name, arguments },
                         extra: keep(p.extra, k, losses, "tool_calls[]"),
                     }),
-                    _ => losses.note("Antwortteil (Reasoning/Medien) in OpenAI nicht abbildbar"),
+                    PartKind::Reasoning { text: t, .. } if expose_reasoning => match &mut reasoning
+                    {
+                        Some(s) => s.push_str(&t),
+                        None => reasoning = Some(t),
+                    },
+                    PartKind::Reasoning { .. } | PartKind::RedactedReasoning { .. } => {}
+                    _ => losses.note("Antwortteil (Medien) in OpenAI nicht abbildbar"),
                 }
+            }
+            let mut extra = keep(c.message.extra, k, losses, "message");
+            // Vom Anbieter durchgereichte Felder nicht doppelt bzw. trotz Abschaltung ausgeben.
+            extra.remove("reasoning_content");
+            if matches!(extra.get("reasoning"), Some(Value::String(_))) {
+                extra.remove("reasoning");
+            }
+            if let Some(r) = reasoning {
+                extra.insert("reasoning_content".into(), Value::String(r));
             }
             CompletionChoice {
                 index: c.index,
@@ -1090,7 +1133,7 @@ pub fn response_to_wire(resp: ChatResponse, losses: &mut Losses) -> ChatCompleti
                     content: text,
                     refusal,
                     tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
-                    extra: keep(c.message.extra, k, losses, "message"),
+                    extra,
                 },
                 finish_reason: c.stop_reason.as_ref().map(stop_reason_to_wire),
                 extra: keep(c.extra, k, losses, "choices[]"),

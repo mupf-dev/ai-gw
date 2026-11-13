@@ -104,6 +104,34 @@ pub fn budget_for_effort(effort: &str) -> u64 {
     }
 }
 
+/// Umgang mit `max_tokens` ≤ Thinking-Budget im Modus [`ReasoningMode::Budget`]
+/// (`settings.thinkingBudgetPolicy`, F59). Anthropic verlangt `budget_tokens < max_tokens`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThinkingBudgetPolicy {
+    /// `max_tokens` um das Budget erhöhen (die Antwort behält ihren Platz; Standard). Kosten
+    /// und Laufzeit können über das vom Client gesetzte `max_tokens` steigen.
+    #[default]
+    RaiseMaxTokens,
+    /// `max_tokens` des Clients bleibt die harte Obergrenze: das Budget wird auf
+    /// `max_tokens / 2` gekürzt (Hälfte für Denken, Hälfte für die Antwort). Liegt das unter
+    /// dem API-Minimum von 1 024 Tokens, wird ohne Thinking angefragt.
+    CapBudget,
+}
+
+impl ThinkingBudgetPolicy {
+    /// Aus `settings.thinkingBudgetPolicy` (`raise-max-tokens` | `cap-budget`).
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "raise-max-tokens" => Some(Self::RaiseMaxTokens),
+            "cap-budget" => Some(Self::CapBudget),
+            _ => None,
+        }
+    }
+}
+
+/// Kleinstes Thinking-Budget der Anthropic-API.
+const MIN_THINKING_BUDGET: u64 = 1024;
+
 /// Wie eine IR-Anfrage für Anthropic vorbereitet wird (wiederverwendbar für Anthropic-Modelle
 /// auf anderen Plattformen, z. B. Bedrock/Vertex).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +142,8 @@ pub struct RequestOptions {
     pub reasoning_mode: ReasoningMode,
     /// `temperature`/`top_p`/`top_k` verwerfen (API-Version ≥ 2026-10-21).
     pub drop_sampling: bool,
+    /// Budget größer als `max_tokens` (F59).
+    pub thinking_budget_policy: ThinkingBudgetPolicy,
 }
 
 impl Default for RequestOptions {
@@ -122,6 +152,7 @@ impl Default for RequestOptions {
             default_max_tokens: anthropic::DEFAULT_MAX_TOKENS,
             reasoning_mode: ReasoningMode::Adaptive,
             drop_sampling: false,
+            thinking_budget_policy: ThinkingBudgetPolicy::RaiseMaxTokens,
         }
     }
 }
@@ -182,17 +213,37 @@ impl RequestOptions {
                 true
             }
             ReasoningMode::Budget => {
-                let budget = budget_for_effort(&effort);
+                let mut budget = budget_for_effort(&effort);
                 r.effort = None;
-                r.thinking = Some(thinking("enabled", Some(budget)));
-                // budget_tokens muss kleiner als max_tokens sein; die Antwort behält ihr Budget.
+                // budget_tokens muss kleiner als max_tokens sein (F59).
                 let max = req.max_tokens.unwrap_or(self.default_max_tokens);
                 if max <= budget {
-                    req.max_tokens = Some(budget.saturating_add(max));
-                    losses.note(format!(
-                        "max_tokens {max} um das Thinking-Budget {budget} erhöht"
-                    ));
+                    match self.thinking_budget_policy {
+                        ThinkingBudgetPolicy::RaiseMaxTokens => {
+                            // Die Antwort behält ihren Platz.
+                            req.max_tokens = Some(budget.saturating_add(max));
+                            losses.note(format!(
+                                "max_tokens {max} um das Thinking-Budget {budget} erhöht"
+                            ));
+                        }
+                        ThinkingBudgetPolicy::CapBudget if max / 2 >= MIN_THINKING_BUDGET => {
+                            losses.note(format!(
+                                "Thinking-Budget {budget} auf {} gekürzt (max_tokens {max})",
+                                max / 2
+                            ));
+                            budget = max / 2;
+                        }
+                        ThinkingBudgetPolicy::CapBudget => {
+                            losses.note(format!(
+                                "reasoning_effort '{effort}' verworfen: max_tokens {max} lässt \
+                                 kein Thinking-Budget ≥ {MIN_THINKING_BUDGET} zu"
+                            ));
+                            req.reasoning = None;
+                            return;
+                        }
+                    }
                 }
+                r.thinking = Some(thinking("enabled", Some(budget)));
                 true
             }
         };
@@ -304,6 +355,15 @@ impl AnthropicAdapter {
                     .unwrap_or(anthropic::DEFAULT_MAX_TOKENS),
                 reasoning_mode,
                 drop_sampling,
+                thinking_budget_policy: match s.str("thinkingBudgetPolicy")? {
+                    None => ThinkingBudgetPolicy::default(),
+                    Some(p) => ThinkingBudgetPolicy::parse(p).ok_or_else(|| {
+                        s.invalid(format!(
+                            "settings.thinkingBudgetPolicy = {p:?} unbekannt \
+                             (raise-max-tokens, cap-budget)"
+                        ))
+                    })?,
+                },
             },
             caps: Capabilities {
                 chat: true,
@@ -318,6 +378,7 @@ impl AnthropicAdapter {
                 audio_speech: false,
                 stream_usage: true,
                 max_tokens_field: MaxTokensField::MaxTokens,
+                n_choices: false,
             },
         })
     }
@@ -817,6 +878,44 @@ mod tests {
         assert_eq!(content[1]["cache_control"]["type"], "ephemeral");
         assert_eq!(content[2]["source"]["type"], "base64");
         assert_eq!(content[2]["source"]["media_type"], "image/jpeg");
+    }
+
+    #[test]
+    fn thinking_budget_policy() {
+        let build = |policy: Option<&str>, max: u64| {
+            let mut settings = json!({"reasoningMode": "budget"});
+            if let Some(p) = policy {
+                settings["thinkingBudgetPolicy"] = json!(p);
+            }
+            let a = AnthropicAdapter::from_deployment(&dep(None, Some("k"), settings)).unwrap();
+            let mut req = with_effort("high");
+            req.max_tokens = Some(max);
+            body(&a.build_request(req, &mut Losses::new()).unwrap())
+        };
+        // Standard: max_tokens wird erhöht.
+        let b = build(None, 4000);
+        assert_eq!(b["max_tokens"], 16384 + 4000);
+        assert_eq!(b["thinking"]["budget_tokens"], 16384);
+        // cap-budget: max_tokens bleibt, Budget = Hälfte.
+        let b = build(Some("cap-budget"), 4000);
+        assert_eq!(b["max_tokens"], 4000);
+        assert_eq!(b["thinking"]["budget_tokens"], 2000);
+        // Zu klein für das API-Minimum: ohne Thinking.
+        let b = build(Some("cap-budget"), 1500);
+        assert_eq!(b["max_tokens"], 1500);
+        assert!(b.get("thinking").is_none());
+        // Budget passt ohnehin: unverändert.
+        let b = build(Some("cap-budget"), 40_000);
+        assert_eq!(b["max_tokens"], 40_000);
+        assert_eq!(b["thinking"]["budget_tokens"], 16384);
+        assert!(
+            AnthropicAdapter::from_deployment(&dep(
+                None,
+                Some("k"),
+                json!({"thinkingBudgetPolicy": "viel"})
+            ))
+            .is_err()
+        );
     }
 
     fn with_effort(effort: &str) -> ChatRequest {

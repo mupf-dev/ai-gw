@@ -39,8 +39,10 @@ use aigw_providers::Capability;
 use crate::provider::ChatProvider;
 
 pub use breaker::BreakerState;
-pub use policy::{BreakerConfig, GroupPolicy, HealthCheckConfig, RetryPolicy};
-pub use snapshot::{RouteTable, RoutesTask, SnapshotRoutes};
+pub use policy::{
+    BreakerConfig, ClientBetas, GroupPolicy, HealthCheckConfig, ResponseModel, RetryPolicy,
+};
+pub use snapshot::{DeploymentStatus, RouteTable, RoutesTask, SnapshotRoutes};
 pub use state::DeploymentState;
 
 use breaker::Admit;
@@ -345,6 +347,25 @@ impl GroupRoute {
             .filter(|ms| *ms > 0)
             .min()
             .map(Duration::from_millis)
+    }
+
+    /// Sind alle (nicht ausgeschlossenen) Deployments nur wegen `Retry-After` des Anbieters
+    /// oder erschöpfter Kapazität gesperrt – keines mit offenem Circuit Breaker (F83)? Dann
+    /// antwortet der Proxy mit `429` statt `503`.
+    pub(crate) fn throttled_only(&self, excluded: &[usize], now_ms: u64) -> bool {
+        let breaker = &self.policy.breaker;
+        let mut any = false;
+        for m in self.members.iter().filter(|m| !excluded.contains(&m.idx)) {
+            if breaker.enabled && !m.state.breaker.available(now_ms) {
+                return false;
+            }
+            if m.state.cooldown_remaining_ms(now_ms) == 0 && !m.at_capacity(now_ms) {
+                // Eigentlich verfügbar (z. B. Probe eines halboffenen Breakers läuft).
+                return false;
+            }
+            any = true;
+        }
+        any
     }
 
     /// Kürzeste `Retry-After`-Sperre unter Deployments, die sonst verfügbar wären (Breaker zu,

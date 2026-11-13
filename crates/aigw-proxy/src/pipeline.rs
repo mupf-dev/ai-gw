@@ -50,6 +50,8 @@ pub(crate) struct Pipeline<'a> {
     pub(crate) span: Span,
     /// Geschätzter Token-Bedarf (Limits und Deployment-Kapazität).
     est: TokenEstimate,
+    /// Geprüfter Key (Freigaben der Fallback-Gruppen, F80).
+    auth: Option<AuthContext>,
 }
 
 impl<'a> Pipeline<'a> {
@@ -65,6 +67,7 @@ impl<'a> Pipeline<'a> {
         let span = crate::trace::request_span_op(&rid.0, ingress, headers, operation);
         let mut rec = Recorder::new(st.observer.clone(), rid.0.clone(), started, ingress);
         rec.set_span(span.clone());
+        rec.set_client_request_id(headers);
         Self {
             st,
             rid,
@@ -72,6 +75,7 @@ impl<'a> Pipeline<'a> {
             info: RouteInfo::default(),
             span,
             est: TokenEstimate::default(),
+            auth: None,
         }
     }
 
@@ -104,6 +108,7 @@ impl<'a> Pipeline<'a> {
                 .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?
         };
         self.rec.set_key(&auth);
+        self.auth = Some(auth.clone());
         Ok(auth)
     }
 
@@ -189,22 +194,18 @@ impl<'a> Pipeline<'a> {
         op: &O,
         req: O::Req,
     ) -> Result<Outcome<O::Out>, UpstreamError> {
+        let auth = self.auth.as_ref();
+        let grants = |name: &str| auth.is_none_or(|a| a.allows_group(name));
         let cap = exec::CapacityCtx {
             counters: self.st.limits.counters(),
             tokens: self.est.total(),
+            grants: auth
+                .is_some_and(|a| a.key.is_some())
+                .then_some(&grants as exec::Grants<'_>),
         };
-        let routed = exec::execute_op(self.st.routes.as_ref(), route, op, req, cap).await;
-        if let Some(m) = &routed.last {
-            let d = m.provider().describe();
-            self.rec.set_deployment(d);
-            self.info.deployment = Some(d.deployment.to_owned());
-        }
-        self.info.attempts = routed.attempts.len();
-        self.info.fallback.clone_from(&routed.fallback);
-        if let Some(f) = &routed.fallback {
-            self.span.record("aigw.fallback", f.as_str());
-        }
-        self.rec.set_attempts(routed.attempts);
+        let mut routed = exec::execute_op(self.st.routes.as_ref(), route, op, req, cap).await;
+        self.info
+            .take_routed(&mut routed, &mut self.rec, &self.span);
         routed.result
     }
 

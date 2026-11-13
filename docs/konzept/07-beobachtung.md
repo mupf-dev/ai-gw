@@ -290,6 +290,11 @@ Label-Schlüssel braucht und ein `RwLock` nimmt).
 | `aigw_cost_total` | counter | model_group, deployment, provider, ingress | `cost` – Platzhalter bis AIGW-31 |
 | `aigw_stream_client_aborts_total` | counter | model_group, deployment, provider, ingress | `stream && client_aborted` |
 | `aigw_upstream_errors_total` | counter | class (`ErrorClass`: `rate_limit`, `timeout`, `connect`, `server_error` …) | jeder fehlgeschlagene Upstream-Versuch aus `RequestRecord::attempts` (Retries, Fallbacks) sowie ein Fehler im Stream nach erfolgreichem Versuch |
+| `aigw_upstream_attempts_total` | counter | – | alle Upstream-Versuche (F86) |
+| `aigw_upstream_retries_total` | counter | – | erneute Versuche in derselben Modellgruppe (aus `attempts`) |
+| `aigw_fallbacks_total` | counter | – | Wechsel auf eine Fallback-Modellgruppe |
+| `aigw_deployment_breaker_state` | gauge | model_group, deployment (Name) | Circuit Breaker: 0 geschlossen, 1 offen, 2 halboffen (beim Abruf aus dem Routing, höchstens `max_deployments` Serien) |
+| `aigw_deployment_inflight_requests` | gauge | model_group, deployment | offene Upstream-Anfragen dieser Instanz |
 | `aigw_inflight_requests` | gauge | – | `request_started` − `record` |
 | `aigw_snapshot_version` | gauge | – | aktive `config_version` |
 | `aigw_snapshot_reload_total` | counter | result (`ok`, `failed`, `check_failed`) | `ReloadMetrics` |
@@ -376,7 +381,13 @@ Antwortinhalte in Spans.
   `sampling_ratio`, deterministisch nach Trace-ID (untere 63 Bit, wie `TraceIdRatioBased`).
   Nicht gesampelte Spans tragen nur ihren Kontext und werden nicht exportiert.
 - **Ausgehend** (`propagate: true`): Der Adapter setzt `traceparent` mit der Span-ID des
-  Upstream-Versuchs und dem Sampling-Flag (`aigw_core::observe::current_traceparent`).
+  Upstream-Versuchs und dem Sampling-Flag (`aigw_core::observe::current_traceparent`) – je
+  Anbieterart (F98): standardmäßig nur an selbst betriebene Ziele (`vllm`, `ollama`,
+  `openai-compatible`), nicht an externe Clouds (OpenAI, Azure, Anthropic, Bedrock, Vertex,
+  Mistral). Überschreibbar je Deployment bzw. Modellgruppe mit
+  `settings.propagateTraceContext: true|false`; `propagate: false` schaltet global ab.
+- **Client-Request-ID** (F11): `x-client-request-id` (sonst `x-request-id`) des Clients steht als
+  `aigw.client_request_id` am Wurzel-Span und in `request_log.client_request_id`.
 - **Export:** fertige Spans per `try_send` in einen begrenzten Kanal (`queue_capacity`); voll →
   verwerfen + `aigw_otlp_spans_dropped_total`. Ein Task sendet Batches (`batch_size`,
   spätestens nach `flush_interval_ms`); Fehler werden gezählt und geloggt.

@@ -36,6 +36,7 @@
 
 pub mod auth;
 pub mod cache;
+mod choices;
 mod endpoints;
 mod error;
 mod guard_host;
@@ -84,14 +85,20 @@ pub const DEPLOYMENT_HEADER: &str = "x-aigw-deployment";
 pub const ATTEMPTS_HEADER: &str = "x-aigw-attempts";
 /// Antwort-Header: Modellgruppe, falls die Antwort über eine Fallback-Kette kam.
 pub const FALLBACK_HEADER: &str = "x-aigw-fallback";
+/// Antwort-Header: Fallback-Gruppen, die übersprungen wurden, weil sie für Key/Team nicht
+/// freigegeben sind (kommagetrennt, F80).
+pub const FALLBACK_SKIPPED_HEADER: &str = "x-aigw-fallback-skipped";
+/// Antwort-Header: Modell, das die Antwort erzeugt hat (wie vom Anbieter gemeldet, F49) –
+/// auch wenn der Body mit `settings.responseModel: requested` den angefragten Namen trägt.
+pub const MODEL_HEADER: &str = "x-aigw-model";
 
 /// Einstellungen der Datenebene.
 #[derive(Debug, Clone)]
 pub struct ProxyConfig {
     /// Maximale Größe eines Request-Bodys in Bytes (`server.data.max_body_bytes`).
     pub max_body_bytes: usize,
-    /// Antwort-Header `x-aigw-deployment`, `x-aigw-attempts`, `x-aigw-fallback`
-    /// (`server.data.routing_headers`).
+    /// Antwort-Header `x-aigw-deployment`, `x-aigw-attempts`, `x-aigw-fallback`,
+    /// `x-aigw-fallback-skipped`, `x-aigw-model` (`server.data.routing_headers`).
     pub routing_headers: bool,
     /// Maximale Größe eines Audio-Uploads (`/v1/audio/transcriptions|translations`) in Bytes
     /// (`server.data.max_audio_bytes`, Standard 25 MiB; höchstens `max_body_bytes`).

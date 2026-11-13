@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use serde_json::Value;
 use time::OffsetDateTime;
 
-use crate::resource::{Amount, DeploymentSpec, ModelGroupSpec, PriceSpec};
+use crate::resource::{Amount, DeploymentSpec, JsonObject, ModelGroupSpec, PriceSpec};
 use crate::types::ProviderKind;
 use crate::upstream::UpstreamPolicy;
 
@@ -63,14 +63,27 @@ pub fn aliases(name: &str, spec: &ModelGroupSpec) -> Res {
     Ok(())
 }
 
+/// Höchstzahl der Fallbacks einer Modellgruppe. Die Datenebene probiert je Anfrage höchstens
+/// die Ursprungsgruppe plus so viele Fallbacks (8 Gruppen; nur die Kette der Ursprungsgruppe,
+/// F69/F81).
+pub const MAX_FALLBACKS: usize = 7;
+
 /// Fallbacks der Gruppe `own` (mit neuer `spec`) gegen den Gesamtbestand `groups`
-/// (Name → Spezifikation; `own` darf fehlen oder veraltet sein): Ziel existiert (kanonischer
-/// Name), nicht die Gruppe selbst, keine Doppelungen, keine Zyklen.
+/// (Name → Spezifikation; `own` darf fehlen oder veraltet sein): höchstens
+/// [`MAX_FALLBACKS`], Ziel existiert (kanonischer Name), nicht die Gruppe selbst, keine
+/// Doppelungen, keine Zyklen.
 pub fn fallbacks(
     groups: &BTreeMap<&str, &ModelGroupSpec>,
     own: &str,
     spec: &ModelGroupSpec,
 ) -> Res {
+    if spec.fallbacks.len() > MAX_FALLBACKS {
+        return Err(format!(
+            "fallbacks: höchstens {MAX_FALLBACKS} Einträge (je Anfrage werden höchstens \
+             {} Modellgruppen versucht)",
+            MAX_FALLBACKS + 1
+        ));
+    }
     let mut seen = HashSet::new();
     for f in &spec.fallbacks {
         let target = f.model_group.as_str();
@@ -127,6 +140,52 @@ pub fn fallbacks(
 // Deployments
 // ---------------------------------------------------------------------------------------------
 
+/// Schlüssel in `settings.timeouts` (Millisekunden, je > 0; F44).
+pub const TIMEOUT_KEYS: &[&str] = &["connectMs", "firstByteMs", "idleMs", "totalMs"];
+
+/// Werte von `settings.thinkingBudgetPolicy` (F59).
+pub const THINKING_BUDGET_POLICIES: &[&str] = &["raise-max-tokens", "cap-budget"];
+
+/// Einstellungen, die je Deployment gelten und auch an der Modellgruppe stehen dürfen (dann
+/// erben die Deployments sie): `timeouts` (F44), `thinkingBudgetPolicy` (F59),
+/// `propagateTraceContext` (F98). Geprüft beim Schreiben von Deployments und – für die
+/// Modellgruppe – über `GroupPolicy::from_settings` der Datenebene.
+pub fn deployment_settings(settings: &JsonObject) -> Res {
+    match settings.get("timeouts") {
+        None | Some(Value::Null) => {}
+        Some(Value::Object(o)) => {
+            for (k, v) in o {
+                if !TIMEOUT_KEYS.contains(&k.as_str()) {
+                    return Err(format!(
+                        "settings.timeouts.{k} unbekannt (erlaubt: {})",
+                        TIMEOUT_KEYS.join(", ")
+                    ));
+                }
+                if v.as_u64().is_none_or(|ms| ms == 0) {
+                    return Err(format!(
+                        "settings.timeouts.{k} muss eine Zahl > 0 (Millisekunden) sein"
+                    ));
+                }
+            }
+        }
+        Some(_) => return Err("settings.timeouts muss ein Objekt sein".into()),
+    }
+    match settings.get("thinkingBudgetPolicy") {
+        None | Some(Value::Null) => {}
+        Some(Value::String(p)) if THINKING_BUDGET_POLICIES.contains(&p.as_str()) => {}
+        Some(other) => {
+            return Err(format!(
+                "settings.thinkingBudgetPolicy {other} unbekannt (raise-max-tokens, cap-budget)"
+            ));
+        }
+    }
+    match settings.get("propagateTraceContext") {
+        None | Some(Value::Null | Value::Bool(_)) => {}
+        Some(_) => return Err("settings.propagateTraceContext muss true/false sein".into()),
+    }
+    Ok(())
+}
+
 /// Anbieter ohne Standard-Endpunkt (Basis-URL ist Pflicht).
 pub fn endpoint_required(p: ProviderKind) -> bool {
     matches!(
@@ -182,6 +241,13 @@ pub fn deployment(upstreams: &UpstreamPolicy, spec: &DeploymentSpec) -> Res {
         }
         (None, None) => {}
     }
+    if spec.provider == ProviderKind::Mock && !upstreams.allows_mock() {
+        return Err(
+            "provider: mock ist gesperrt (admin.allow_mock: false in der Startkonfiguration)"
+                .into(),
+        );
+    }
+    deployment_settings(&spec.settings)?;
     if spec.provider == ProviderKind::AzureOpenAi {
         azure(spec)?;
     }
@@ -490,6 +556,58 @@ mod tests {
         let mut d = dep(ProviderKind::OpenAi, None, json!({}));
         d.provider_model = " ".into();
         assert!(deployment(&p, &d).is_err());
+    }
+
+    #[test]
+    fn mock_and_data_plane_settings() {
+        // F85: mock standardmäßig erlaubt, mit admin.allow_mock: false gesperrt.
+        let p = UpstreamPolicy::strict();
+        assert!(deployment(&p, &dep(ProviderKind::Mock, None, json!({}))).is_ok());
+        let no_mock = UpstreamPolicy::from_config(&crate::config::AdminConfig {
+            allow_mock: false,
+            ..crate::config::AdminConfig::default()
+        })
+        .unwrap();
+        assert!(!no_mock.allows_mock());
+        assert!(deployment(&no_mock, &dep(ProviderKind::Mock, None, json!({}))).is_err());
+        assert!(deployment(&no_mock, &dep(ProviderKind::OpenAi, None, json!({}))).is_ok());
+        // F44/F59/F98: Einstellungen je Deployment.
+        let ok = json!({"timeouts": {"connectMs": 1000, "firstByteMs": 5000, "idleMs": 5000,
+                                     "totalMs": 60000},
+                        "thinkingBudgetPolicy": "cap-budget", "propagateTraceContext": false});
+        assert!(deployment(&p, &dep(ProviderKind::OpenAi, None, ok)).is_ok());
+        for bad in [
+            json!({"timeouts": {"totalMs": 0}}),
+            json!({"timeouts": {"readMs": 1}}),
+            json!({"timeouts": []}),
+            json!({"thinkingBudgetPolicy": "raise"}),
+            json!({"propagateTraceContext": "yes"}),
+        ] {
+            assert!(
+                deployment(&p, &dep(ProviderKind::OpenAi, None, bad.clone())).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn fallback_chain_length_is_limited() {
+        let target = ModelGroupSpec::default();
+        let names: Vec<String> = (0..=MAX_FALLBACKS).map(|i| format!("g{i}")).collect();
+        let groups: BTreeMap<&str, &ModelGroupSpec> =
+            names.iter().map(|n| (n.as_str(), &target)).collect();
+        let chain = |n: usize| ModelGroupSpec {
+            fallbacks: names[..n]
+                .iter()
+                .map(|g| Fallback {
+                    model_group: g.clone(),
+                    on: Vec::new(),
+                })
+                .collect(),
+            ..ModelGroupSpec::default()
+        };
+        assert!(fallbacks(&groups, "own", &chain(MAX_FALLBACKS)).is_ok());
+        assert!(fallbacks(&groups, "own", &chain(MAX_FALLBACKS + 1)).is_err());
     }
 
     #[test]

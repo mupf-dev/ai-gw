@@ -56,11 +56,17 @@ pub struct TokenEstimate {
 }
 
 impl TokenEstimate {
-    /// Schätzung für `req`; ohne `max_tokens` gilt `default_max_tokens`.
+    /// Schätzung für `req`; ohne `max_tokens` gilt `default_max_tokens`. Bei `n > 1` (F12)
+    /// zählt die Ausgabe je Variante (Anbieter ohne `n` bekommen zudem die Eingabe je
+    /// Variante; abgerechnet wird ohnehin die gemeldete Usage).
     pub fn of(req: &ChatRequest, default_max_tokens: u64) -> Self {
+        let n = u64::from(req.choices());
         Self {
             input: estimate_tokens(request_bytes(req)),
-            output: req.max_tokens.unwrap_or(default_max_tokens),
+            output: req
+                .max_tokens
+                .unwrap_or(default_max_tokens)
+                .saturating_mul(n),
         }
     }
 

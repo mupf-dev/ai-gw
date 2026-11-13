@@ -304,6 +304,23 @@ struct Admission {
 /// Serie von `aigw_guardrail_hits_total`: (Plugin, Kategorie, Aktion).
 type GuardrailKey = (&'static str, Box<str>, &'static str);
 
+/// Zustand eines Deployments für `aigw_deployment_breaker_state` und
+/// `aigw_deployment_inflight_requests` (F86); geliefert vom Routing beim Abruf von `/metrics`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeploymentGauge {
+    /// Modellgruppe.
+    pub model_group: String,
+    /// Name des Deployments.
+    pub deployment: String,
+    /// Circuit Breaker: 0 = geschlossen, 1 = offen, 2 = halboffen.
+    pub breaker: u8,
+    /// Offene Anfragen dieser Instanz.
+    pub in_flight: u32,
+}
+
+/// Quelle der Deployment-Zustände.
+type DeploymentSource = Box<dyn Fn() -> Vec<DeploymentGauge> + Send + Sync>;
+
 /// Prometheus-Metriken des Gateways.
 pub struct GatewayMetrics {
     max_model_groups: usize,
@@ -316,6 +333,11 @@ pub struct GatewayMetrics {
     admission: Mutex<Admission>,
     inflight: AtomicI64,
     upstream_errors: [AtomicU64; ERROR_CLASSES.len()],
+    /// Upstream-Versuche insgesamt, davon Retries (gleiche Gruppe) und Fallbacks (F86).
+    attempts: AtomicU64,
+    retries: AtomicU64,
+    fallbacks: AtomicU64,
+    deployments: OnceLock<DeploymentSource>,
     counter_degraded: OnceLock<Box<dyn Fn() -> bool + Send + Sync>>,
     /// `aigw_guardrail_hits_total{plugin,category,action}` (nur angefasst bei Erkennungen).
     guardrails: Mutex<BTreeMap<GuardrailKey, u64>>,
@@ -360,6 +382,10 @@ impl GatewayMetrics {
             admission: Mutex::new(Admission::default()),
             inflight: AtomicI64::new(0),
             upstream_errors: Default::default(),
+            attempts: AtomicU64::new(0),
+            retries: AtomicU64::new(0),
+            fallbacks: AtomicU64::new(0),
+            deployments: OnceLock::new(),
             counter_degraded: OnceLock::new(),
             guardrails: Mutex::new(BTreeMap::new()),
             mcp: Mutex::new(BTreeMap::new()),
@@ -370,6 +396,41 @@ impl GatewayMetrics {
     /// `aigw-counters`); einmal setzbar. Ohne Quelle entfällt die Metrik.
     pub fn set_counter_health(&self, degraded: impl Fn() -> bool + Send + Sync + 'static) {
         let _ = self.counter_degraded.set(Box::new(degraded));
+    }
+
+    /// Quelle für `aigw_deployment_breaker_state` und `aigw_deployment_inflight_requests`
+    /// (z. B. `SnapshotRoutes::deployment_status`); einmal setzbar (F86).
+    pub fn set_deployment_source(
+        &self,
+        source: impl Fn() -> Vec<DeploymentGauge> + Send + Sync + 'static,
+    ) {
+        let _ = self.deployments.set(Box::new(source));
+    }
+
+    /// Versuche, Retries und Fallbacks einer Anfrage zählen (F86).
+    #[inline]
+    fn count_attempts(&self, attempts: &[aigw_core::observe::Attempt]) {
+        if attempts.is_empty() {
+            return;
+        }
+        self.attempts.fetch_add(
+            u64::try_from(attempts.len()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
+        let (mut retries, mut fallbacks) = (0u64, 0u64);
+        for w in attempts.windows(2) {
+            if w[0].model_group == w[1].model_group {
+                retries += 1;
+            } else {
+                fallbacks += 1;
+            }
+        }
+        if retries > 0 {
+            self.retries.fetch_add(retries, Ordering::Relaxed);
+        }
+        if fallbacks > 0 {
+            self.fallbacks.fetch_add(fallbacks, Ordering::Relaxed);
+        }
     }
 
     /// Eine Anfrage beginnt.
@@ -426,6 +487,7 @@ impl GatewayMetrics {
         for class in r.attempts.iter().filter_map(|a| a.error) {
             self.count_upstream_error(class);
         }
+        self.count_attempts(&r.attempts);
         if let Some(kind) = r.error_kind
             && r.attempts.last().is_some_and(|a| a.error.is_none())
         {
@@ -667,6 +729,63 @@ impl GatewayMetrics {
                         escape(category)
                     );
                 }
+            }
+        }
+        for (name, help, c) in [
+            (
+                "aigw_upstream_attempts_total",
+                "Upstream-Versuche (erster Versuch, Retries und Fallbacks)",
+                &self.attempts,
+            ),
+            (
+                "aigw_upstream_retries_total",
+                "Erneute Versuche innerhalb derselben Modellgruppe",
+                &self.retries,
+            ),
+            (
+                "aigw_fallbacks_total",
+                "Wechsel auf eine Fallback-Modellgruppe",
+                &self.fallbacks,
+            ),
+        ] {
+            header(out, name, "counter", help);
+            let _ = writeln!(out, "{name} {}", c.load(Ordering::Relaxed));
+        }
+        if let Some(f) = self.deployments.get() {
+            let mut deps = f();
+            deps.sort_by(|a, b| {
+                (&a.model_group, &a.deployment).cmp(&(&b.model_group, &b.deployment))
+            });
+            deps.truncate(self.max_deployments);
+            header(
+                out,
+                "aigw_deployment_breaker_state",
+                "gauge",
+                "Circuit Breaker je Deployment (0 geschlossen, 1 offen, 2 halboffen)",
+            );
+            for d in &deps {
+                let _ = writeln!(
+                    out,
+                    "aigw_deployment_breaker_state{{model_group=\"{}\",deployment=\"{}\"}} {}",
+                    escape(&d.model_group),
+                    escape(&d.deployment),
+                    d.breaker
+                );
+            }
+            header(
+                out,
+                "aigw_deployment_inflight_requests",
+                "gauge",
+                "Offene Upstream-Anfragen je Deployment (diese Instanz)",
+            );
+            for d in &deps {
+                let _ = writeln!(
+                    out,
+                    "aigw_deployment_inflight_requests{{model_group=\"{}\",deployment=\"{}\"}} {}",
+                    escape(&d.model_group),
+                    escape(&d.deployment),
+                    d.in_flight
+                );
             }
         }
         header(
@@ -981,6 +1100,34 @@ mod tests {
         assert!(out.contains("aigw_upstream_errors_total{class=\"rate_limit\"} 2\n"));
         assert!(out.contains("aigw_upstream_errors_total{class=\"auth\"} 0\n"));
         assert!(out.contains("aigw_inflight_requests 1\n"));
+        // Versuche: 2 + 2, davon 2 Retries in derselben Gruppe, kein Fallback (F86).
+        assert!(out.contains("aigw_upstream_attempts_total 4\n"));
+        assert!(out.contains("aigw_upstream_retries_total 2\n"));
+        assert!(out.contains("aigw_fallbacks_total 0\n"));
+        assert!(!out.contains("aigw_deployment_breaker_state"));
+        m.set_deployment_source(|| {
+            vec![DeploymentGauge {
+                model_group: "gpt-4o".into(),
+                deployment: "d\"1".into(),
+                breaker: 1,
+                in_flight: 2,
+            }]
+        });
+        let mut fb = rec("gpt-4o", dep, 200);
+        let mut other = attempt(None);
+        other.model_group = Some("claude".into());
+        fb.attempts = vec![attempt(Some(ErrorClass::ServerError)), other];
+        obs.request_started();
+        obs.record(fb);
+        let mut out = String::new();
+        m.render_prometheus(&mut out);
+        assert!(out.contains("aigw_fallbacks_total 1\n"));
+        assert!(out.contains(
+            "aigw_deployment_breaker_state{model_group=\"gpt-4o\",deployment=\"d\\\"1\"} 1\n"
+        ));
+        assert!(out.contains(
+            "aigw_deployment_inflight_requests{model_group=\"gpt-4o\",deployment=\"d\\\"1\"} 2\n"
+        ));
         assert!(!out.contains("aigw_counter_backend_degraded"));
         m.set_counter_health(|| true);
         let mut out = String::new();
