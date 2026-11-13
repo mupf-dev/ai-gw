@@ -47,6 +47,8 @@ allow = [
     "Unlicense",
     "0BSD",
     "AGPL-3.0-or-later",
+    # Boost Software License: permissiv, OSI/FSF-frei, GPL-kompatibel (xxhash-rust über redis, AIGW-29).
+    "BSL-1.0",
 ]
 confidence-threshold = 0.93
 unused-allowed-license = "allow"

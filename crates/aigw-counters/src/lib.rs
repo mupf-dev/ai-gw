@@ -1,29 +1,294 @@
 // SPDX-FileCopyrightText: 2026 ai-gw contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Zähler-Backends (E4).
+//! Zähler-Backends für Limits und Budgets (Architektur §8, E4, AIGW-29).
 //!
-//! [`CounterBackend`] abstrahiert Zählerstände für Token-/Request-Limits und Budgets.
-//! Vorgesehen sind `local` (im Prozess), `postgres-sync` (lokal zählen, alle 1–2 s mit
-//! Postgres abgleichen) und `redis` (exakt, verteilt). Umgesetzt ist bisher nur [`LocalCounters`].
+//! [`CounterBackend`] reserviert Kontingent in gleitenden Fenstern (Sliding Window mit zwei
+//! gewichteten Buckets, siehe [`window`]) und gleicht Reservierungen später mit dem
+//! tatsächlichen Verbrauch ab. Mehrere Limits (Key, Team, Organisation, Modellgruppe …) werden
+//! in **einem** Aufruf atomar geprüft: Entweder werden alle gebucht oder keines.
+//!
+//! | Backend | Typ | Genauigkeit |
+//! |---|---|---|
+//! | `local` | [`LocalCounters`] | exakt je Instanz |
+//! | `postgres-sync` | [`PgSyncCounters`] | lokal exakt, im Cluster ±Abgleichintervall |
+//! | `redis` | [`RedisCounters`] | exakt im Cluster; bei Ausfall Rückfall auf lokal |
+//!
+//! Auswahl über `counters.backend` mit [`from_config`]. Ausführlich:
+//! `docs/konzept/05-zaehler.md`.
 
-pub mod local;
+mod clock;
+mod engine;
+mod local;
+mod pgsync;
+mod redis_backend;
+pub mod window;
 
+use std::fmt;
+use std::sync::Arc;
+use std::time::Duration;
+
+use aigw_core::config::{Config, CounterBackendKind};
+
+pub use clock::{Clock, ManualClock, SystemClock};
 pub use local::LocalCounters;
+pub use pgsync::{PgSyncCounters, PgSyncOptions, SyncReport};
+pub use redis_backend::{RedisCounters, RedisOptions};
+pub use window::Window;
 
-/// Schlüssel eines Zählers, z. B. `key:<id>:tokens:minute`.
-pub type CounterKey = str;
+/// Ob eine Buchung beim Abgleich ([`CounterBackend::settle`]) korrigiert wird.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettleMode {
+    /// Auf den tatsächlichen Verbrauch korrigieren (Token-Limits).
+    #[default]
+    Adjust,
+    /// Unverändert lassen (z. B. Anfragezähler: eine Anfrage bleibt eine Anfrage).
+    Keep,
+}
 
-/// Abstraktion über Zählerstände.
+/// Ein zu prüfendes Limit innerhalb einer Reservierung.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LimitCheck<'a> {
+    /// Zählerschlüssel, z. B. `key:<id>:tokens` (das Fenster gehört nicht hinein).
+    pub key: &'a str,
+    /// Fenster.
+    pub window: Window,
+    /// Höchstwert im gleitenden Fenster.
+    pub limit: u64,
+    /// Zu reservierende Menge (z. B. geschätzte Prompt-Tokens + `max_tokens`, oder 1 Anfrage).
+    pub amount: u64,
+    /// Verhalten beim Abgleich.
+    pub settle: SettleMode,
+}
+
+impl<'a> LimitCheck<'a> {
+    /// Limit mit [`SettleMode::Adjust`].
+    pub const fn new(key: &'a str, window: Window, limit: u64, amount: u64) -> Self {
+        Self {
+            key,
+            window,
+            limit,
+            amount,
+            settle: SettleMode::Adjust,
+        }
+    }
+
+    /// Wie [`LimitCheck::new`], aber ohne Korrektur beim Abgleich ([`SettleMode::Keep`]).
+    pub const fn fixed(key: &'a str, window: Window, limit: u64, amount: u64) -> Self {
+        Self {
+            key,
+            window,
+            limit,
+            amount,
+            settle: SettleMode::Keep,
+        }
+    }
+}
+
+/// Kontingentstand eines Limits nach erfolgreicher Reservierung (für `x-ratelimit-*`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Quota {
+    /// Limit.
+    pub limit: u64,
+    /// Verbleibend nach dieser Reservierung (geschätzt).
+    pub remaining: u64,
+    /// Zeit, bis der geschätzte Verbrauch ohne weitere Buchungen auf 0 gefallen ist.
+    pub reset_after: Duration,
+}
+
+/// Wo eine Reservierung gebucht wurde (relevant für den Abgleich).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Origin {
+    /// Prozesslokale Engine.
+    Local,
+    /// Redis.
+    Redis,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Booked {
+    pub(crate) key: Box<str>,
+    pub(crate) window: Window,
+    pub(crate) bucket: u64,
+    pub(crate) amount: u64,
+    pub(crate) settle: SettleMode,
+}
+
+/// Erfolgreiche Reservierung. Muss mit [`CounterBackend::settle`] abgeglichen werden; wird
+/// sie ohne Abgleich verworfen, bleibt die reservierte Menge gebucht (konservativ).
+#[must_use = "Reservierungen müssen mit settle() abgeglichen werden"]
+#[derive(Debug, Clone)]
+pub struct Reservation {
+    pub(crate) booked: Vec<Booked>,
+    pub(crate) quotas: Vec<Quota>,
+    pub(crate) origin: Origin,
+}
+
+impl Reservation {
+    pub(crate) fn empty(origin: Origin) -> Self {
+        Self {
+            booked: Vec::new(),
+            quotas: Vec::new(),
+            origin,
+        }
+    }
+
+    /// Kontingentstände in der Reihenfolge der übergebenen [`LimitCheck`]s.
+    pub fn quotas(&self) -> &[Quota] {
+        &self.quotas
+    }
+
+    /// Das knappste Limit (kleinster Rest) – Kandidat für die `x-ratelimit-*`-Header.
+    pub fn tightest(&self) -> Option<(usize, &Quota)> {
+        self.quotas
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, q)| q.remaining)
+    }
+
+    /// `true`, wenn die Reservierung im lokalen Rückfall gebucht wurde (nur `redis`).
+    pub fn is_local_fallback(&self) -> bool {
+        self.origin == Origin::Local
+    }
+}
+
+/// Ablehnung einer Reservierung. Es wurde nichts gebucht.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rejection {
+    /// Index des maßgeblichen Limits in den übergebenen [`LimitCheck`]s (bei mehreren
+    /// überschrittenen das mit der längsten Wartezeit).
+    pub index: usize,
+    /// Dessen Schlüssel.
+    pub key: String,
+    /// Dessen Fenster.
+    pub window: Window,
+    /// Dessen Limit.
+    pub limit: u64,
+    /// Geschätzter Verbrauch im Fenster vor der (abgelehnten) Reservierung.
+    pub used: u64,
+    /// Wartezeit, bis die Reservierung bei unverändertem Verbrauch passen würde
+    /// (`Retry-After`). `None`: Menge größer als das Limit – passt nie.
+    pub retry_after: Option<Duration>,
+}
+
+impl Rejection {
+    /// Restkontingent (für `x-ratelimit-remaining-*`).
+    pub fn remaining(&self) -> u64 {
+        self.limit.saturating_sub(self.used)
+    }
+}
+
+impl fmt::Display for Rejection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Limit {} je {:?} für {:?} erreicht (verbraucht {})",
+            self.limit, self.window, self.key, self.used
+        )
+    }
+}
+
+/// Betriebszustand eines Backends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Health {
+    /// Normalbetrieb.
+    Ok,
+    /// Eingeschränkt (z. B. Redis/Postgres nicht erreichbar, lokaler Rückfall aktiv).
+    Degraded(String),
+}
+
+/// Abstraktion über Zählerstände (E4).
 ///
-/// Die Methoden sind bewusst synchron und billig: Im Hot Path wird lokal gezählt; verteilte
-/// Backends gleichen asynchron im Hintergrund ab bzw. bekommen eigene async-Varianten,
-/// sobald `redis` umgesetzt wird.
-pub trait CounterBackend: Send + Sync + std::fmt::Debug {
-    /// Erhöht den Zähler um `delta` und liefert den neuen Stand.
-    fn incr(&self, key: &CounterKey, delta: u64) -> aigw_core::Result<u64>;
-    /// Liefert den aktuellen Stand (0, wenn unbekannt).
-    fn get(&self, key: &CounterKey) -> aigw_core::Result<u64>;
-    /// Setzt den Zähler zurück (z. B. beim Fensterwechsel).
-    fn reset(&self, key: &CounterKey) -> aigw_core::Result<()>;
+/// Alle Methoden sind unfehlbar: Fällt ein externes Backend aus, zählt es lokal weiter
+/// (siehe [`Health`]). Abgelehnt wird nur wegen erreichter Limits.
+#[async_trait::async_trait]
+pub trait CounterBackend: Send + Sync + fmt::Debug {
+    /// Prüft alle `checks` und bucht sie, wenn **jedes** Limit die Menge noch zulässt
+    /// (alle oder keines). Ein leeres `checks` ist immer erfolgreich.
+    async fn reserve(&self, checks: &[LimitCheck<'_>]) -> Result<Reservation, Rejection>;
+
+    /// Gleicht eine Reservierung mit dem tatsächlichen Verbrauch ab: Für jede Buchung mit
+    /// [`SettleMode::Adjust`] wird `actual − amount` (±) im ursprünglichen Bucket verrechnet.
+    /// Buchungen in Buckets, die nicht mehr zum Fenster zählen, bleiben unverändert.
+    async fn settle(&self, reservation: Reservation, actual: u64);
+
+    /// Geschätzter Verbrauch im gleitenden Fenster.
+    async fn get(&self, key: &str, window: Window) -> u64;
+
+    /// Art des Backends.
+    fn kind(&self) -> CounterBackendKind;
+
+    /// Betriebszustand.
+    fn health(&self) -> Health {
+        Health::Ok
+    }
+}
+
+/// Fehler beim Aufbau eines Backends.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum CounterError {
+    /// `counters.backend: redis` ohne `counters.redis_url`.
+    #[error("counters.backend = redis erfordert counters.redis_url")]
+    MissingRedisUrl,
+    /// `postgres-sync` ohne Postgres-Datenbank.
+    #[error(
+        "counters.backend = postgres-sync erfordert eine Postgres-Datenbank (store.url), nicht {0:?}"
+    )]
+    PostgresRequired(String),
+    /// Ungültige Redis-URL o. Ä.
+    #[error("Redis: {0}")]
+    Redis(String),
+    /// Datenbankfehler.
+    #[error(transparent)]
+    Db(#[from] sqlx::Error),
+}
+
+/// Laufzeit-Einstellungen der Backends, die (noch) nicht in der Startkonfiguration stehen.
+#[derive(Debug, Clone, Default)]
+pub struct CounterOptions {
+    /// Einstellungen für `postgres-sync`.
+    pub pg: PgSyncOptions,
+    /// Einstellungen für `redis`.
+    pub redis: RedisOptions,
+    /// Intervall der Speicherbereinigung abgelaufener Fenster (Standard 30 s).
+    pub janitor_interval: Option<Duration>,
+}
+
+pub(crate) const DEFAULT_JANITOR: Duration = Duration::from_secs(30);
+
+/// Baut das in `counters.backend` gewählte Backend. Muss innerhalb einer Tokio-Laufzeit
+/// aufgerufen werden (Hintergrund-Tasks für Bereinigung, Abgleich und Wiederverbindung).
+///
+/// `postgres-sync` verwendet die Datenbank aus `store.url` (muss Postgres sein; die Tabelle
+/// `counter_state` legt die Store-Migration an).
+pub async fn from_config(
+    cfg: &Config,
+    opts: CounterOptions,
+) -> Result<Arc<dyn CounterBackend>, CounterError> {
+    let janitor = opts.janitor_interval.unwrap_or(DEFAULT_JANITOR);
+    Ok(match cfg.counters.backend {
+        CounterBackendKind::Local => {
+            let c = Arc::new(LocalCounters::new());
+            c.spawn_janitor(janitor);
+            c
+        }
+        CounterBackendKind::PostgresSync => {
+            let url = &cfg.store.url;
+            if !(url.starts_with("postgres:") || url.starts_with("postgresql:")) {
+                return Err(CounterError::PostgresRequired(
+                    url.split(':').next().unwrap_or_default().to_owned(),
+                ));
+            }
+            PgSyncCounters::connect(url, opts.pg).await?
+        }
+        CounterBackendKind::Redis => {
+            let url = cfg
+                .counters
+                .redis_url
+                .as_deref()
+                .ok_or(CounterError::MissingRedisUrl)?;
+            RedisCounters::connect(url, opts.redis).await?
+        }
+    })
 }

@@ -13,6 +13,8 @@
 #   AIGW_TEST_POSTGRES_URL=postgres://…   Store-Tests zusätzlich gegen Postgres (legt je Lauf
 #                      eine Wegwerf-Datenbank an; der Benutzer braucht CREATEDB)
 #   AIGW_TEST_POSTGRES=docker   startet dafür selbst einen postgres:17-Container
+#   AIGW_TEST_REDIS_URL=redis://…   Zähler-Tests (aigw-counters) zusätzlich gegen Redis/Valkey
+#   AIGW_TEST_REDIS=docker      startet dafür selbst einen redis:7-Container
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -51,7 +53,21 @@ if [[ "${AIGW_TEST_POSTGRES:-}" == docker && -z "${AIGW_TEST_POSTGRES_URL:-}" ]]
   export AIGW_TEST_POSTGRES_URL="postgres://postgres:aigw-test@127.0.0.1:${PG_PORT}/postgres"
 fi
 
-step "cargo test${AIGW_TEST_POSTGRES_URL:+ (inkl. Postgres)}"
+if [[ "${AIGW_TEST_REDIS:-}" == docker && -z "${AIGW_TEST_REDIS_URL:-}" ]]; then
+  step "Redis 7 für Zähler-Tests starten (Docker, Wegwerf-Container)"
+  REDIS_NAME="aigw-check-redis-$$"
+  # Bestehenden EXIT-Trap (Postgres) erhalten.
+  trap 'docker rm -f "${PG_NAME:-}" "$REDIS_NAME" >/dev/null 2>&1 || true' EXIT
+  docker run -d --rm --name "$REDIS_NAME" -p 127.0.0.1::6379 redis:7 >/dev/null
+  for _ in $(seq 1 30); do
+    docker exec "$REDIS_NAME" redis-cli ping 2>/dev/null | grep -q PONG && break
+    sleep 1
+  done
+  REDIS_PORT=$(docker port "$REDIS_NAME" 6379/tcp | head -1 | sed 's/.*://')
+  export AIGW_TEST_REDIS_URL="redis://127.0.0.1:${REDIS_PORT}/0"
+fi
+
+step "cargo test${AIGW_TEST_POSTGRES_URL:+ (inkl. Postgres)}${AIGW_TEST_REDIS_URL:+ (inkl. Redis)}"
 cargo test --workspace "${LOCKED[@]}"
 
 step "cargo deny check"

@@ -17,7 +17,7 @@ Entscheidungen: [docs/konzept/00-entscheidungen.md](docs/konzept/00-entscheidung
 | `crates/aigw-proxy` | Hot Path (OpenAI-kompatible Endpunkte, `/healthz`) |
 | `crates/aigw-providers` | Anbieter-Adapter (Trait `Provider`) |
 | `crates/aigw-store` | Persistenz (sqlx: SQLite, Postgres) |
-| `crates/aigw-counters` | Zähler-Backends (Trait `CounterBackend`, `local`) |
+| `crates/aigw-counters` | Zähler-Backends (Trait `CounterBackend`: `local`, `postgres-sync`, `redis`) |
 | `crates/aigw-plugins` | Plugin-Kette |
 | `crates/aigw-admin` | Admin-API (axum + utoipa/OpenAPI) und eingebettete UI |
 | `ui/` | Admin-UI (Svelte 5, Vite, TypeScript, Bits UI, Tailwind 4, pnpm) |
