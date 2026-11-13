@@ -1017,7 +1017,9 @@ async fn openai_client_to_mistral_and_errors() {
             json!({"model": "mistral-422", "messages": [{"role": "user", "content": "x"}]}),
         )
         .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // F152: sonstige 4xx des Anbieters mit exaktem Status (Klasse invalid_request_error).
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(json(&body)["error"]["type"], "invalid_request_error");
     assert_eq!(
         json(&body)["error"]["message"],
         "body.foo: Extra inputs are not permitted"

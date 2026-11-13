@@ -356,6 +356,7 @@ async fn run(store: Store) {
             ACTOR,
             meta("github"),
             McpServerSpec {
+                secret: None,
                 url: "https://mcp.example.org/mcp".into(),
                 transport: Default::default(),
                 credential: None,

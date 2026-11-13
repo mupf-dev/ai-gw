@@ -211,6 +211,9 @@ pub fn validate_server(
     if spec.transport == McpTransport::Stdio && !settings.headers.is_empty() {
         return Err("settings.headers gelten nur für HTTP-Transporte".into());
     }
+    if spec.credential.is_some() && spec.secret.is_some() {
+        return Err("credential und secret: höchstens eines angeben (bevorzugt secret)".into());
+    }
     Ok(())
 }
 
@@ -332,6 +335,7 @@ mod tests {
 
     fn server(url: &str, transport: McpTransport, settings: serde_json::Value) -> McpServerSpec {
         McpServerSpec {
+            secret: None,
             url: url.into(),
             transport,
             credential: None,

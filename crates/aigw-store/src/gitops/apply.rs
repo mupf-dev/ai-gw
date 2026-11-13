@@ -170,6 +170,33 @@ async fn upsert(
             };
             upsert_credential(tx, keyring, existing, meta, s, values).await
         }
+        ResourceSpec::Secret(s) => {
+            let Resolved::Credential(values) = resolved else {
+                return Err(StoreError::Invalid(format!(
+                    "Geheimnis {:?}: Werte nicht aufgelöst",
+                    meta.name
+                )));
+            };
+            // Bereits aufgelöste Werte; Verweise des Manifests mitspeichern (F54).
+            let refs = crate::repo::secret::refs_of(&s);
+            let plain = aigw_core::resource::SecretSpec {
+                description: s.description,
+                data: values
+                    .iter()
+                    .map(|(k, v)| (k.clone(), SecretRef::value(v.expose())))
+                    .collect(),
+            };
+            crate::repo::secret::write_secret(
+                tx,
+                keyring,
+                existing.map(|c| (c.id, &c.audit)),
+                meta,
+                &plain,
+                &refs,
+            )
+            .await
+            .map(drop)
+        }
         ResourceSpec::ApiKey(s) => {
             let secret = match resolved {
                 Resolved::ApiKey(s) => s,

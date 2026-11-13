@@ -217,6 +217,7 @@ mod tests {
             let server: McpServer = obj(
                 n,
                 McpServerSpec {
+                    secret: None,
                     url: "https://x.example/mcp".into(),
                     transport: Default::default(),
                     credential: None,

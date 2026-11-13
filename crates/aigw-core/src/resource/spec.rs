@@ -427,6 +427,37 @@ pub struct ProviderCredentialInfo {
     pub key_id: String,
 }
 
+/// Allgemeines Geheimnis (F149), z. B. HMAC-Schlüssel eines Webhooks, API-Key eines
+/// Guardrail-Dienstes oder Token eines MCP-Servers. Werte werden mit dem Master-Key
+/// verschlüsselt gespeichert; in YAML nur als `valueFrom`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SecretSpec {
+    /// Beschreibung (Zweck, Besitzer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Felder (mindestens eines), z. B. `value` (Standardfeld der Verweise) oder `apiKey`.
+    pub data: BTreeMap<String, SecretRef>,
+}
+
+impl SecretSpec {
+    /// Standardfeld, wenn ein Verweis kein Feld nennt.
+    pub const DEFAULT_FIELD: &'static str = "value";
+}
+
+/// Geheimnis (gelesene Sicht, **ohne** Werte).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretInfo {
+    /// Beschreibung.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Namen der gespeicherten Felder.
+    pub fields: Vec<String>,
+    /// ID des Master-Keys, mit dem verschlüsselt wurde (Rotation).
+    pub key_id: String,
+}
+
 /// Routing-Strategie einer Modellgruppe (§6).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -949,9 +980,12 @@ pub struct McpServerSpec {
     /// Transport.
     #[serde(default, skip_serializing_if = "is_default")]
     pub transport: McpTransport,
-    /// Zugangsdaten (Name einer `ProviderCredential`).
+    /// Zugangsdaten (Name einer `ProviderCredential`; älterer Weg, bevorzugt `secret`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential: Option<String>,
+    /// Geheimnis (Name eines `Secret`, F149); höchstens eines von `credential`/`secret`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret: Option<String>,
     /// Aktiv?
     #[serde(default = "default_true")]
     pub enabled: bool,

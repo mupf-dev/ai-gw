@@ -197,6 +197,52 @@ async fn load_once(store: &Store, keyring: Option<&Keyring>) -> Result<State, St
                     );
                 }
             }
+            // F149: wie Zugangsdaten (Verweise originalgetreu, sonst Platzhalter).
+            ResourceKind::Secret => {
+                let mut plain_values = match keyring {
+                    Some(k) => Some(store.decrypt_secrets(k).await?),
+                    None => None,
+                };
+                let mut all_refs = store.secret_refs().await?;
+                for s in store.list_secrets().await? {
+                    let name = s.metadata.name.clone();
+                    let refs = all_refs.remove(&name).unwrap_or_default();
+                    let data = s
+                        .spec
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            let r = match refs.get(f) {
+                                Some(v) => SecretRef {
+                                    value: None,
+                                    value_from: Some(v.clone()),
+                                },
+                                None => SecretRef::env(secret_env_name(&name, f)),
+                            };
+                            (f.clone(), r)
+                        })
+                        .collect();
+                    let values = plain_values
+                        .as_mut()
+                        .and_then(|m| m.remove(&name))
+                        .map(|(_, data)| data.0);
+                    out.insert(
+                        name,
+                        Current {
+                            id: s.id,
+                            manifest: Manifest {
+                                metadata: plain_meta(&s.metadata),
+                                spec: ResourceSpec::Secret(aigw_core::resource::SecretSpec {
+                                    description: s.spec.description.clone(),
+                                    data,
+                                }),
+                            },
+                            audit: serde_json::to_value(&s)?,
+                            extra: Extra::Credential(values, refs),
+                        },
+                    );
+                }
+            }
         }
     }
     Ok(State { version, objects })
@@ -229,8 +275,13 @@ pub async fn export_yaml(store: &Store, api_keys: ApiKeyMode) -> Result<String, 
             continue;
         }
         for (name, cur) in state.of(kind) {
-            if let ResourceSpec::ProviderCredential(c) = &cur.manifest.spec {
-                for (field, r) in &c.data {
+            let data = match &cur.manifest.spec {
+                ResourceSpec::ProviderCredential(c) => Some(&c.data),
+                ResourceSpec::Secret(s) => Some(&s.data),
+                _ => None,
+            };
+            if let Some(data) = data {
+                for (field, r) in data {
                     // Nur Platzhalter auflisten; gespeicherte Verweise (F54) stehen original im
                     // Export.
                     if let Some(aigw_core::resource::ValueFrom::Env(env)) = &r.value_from
@@ -249,7 +300,8 @@ pub async fn export_yaml(store: &Store, api_keys: ApiKeyMode) -> Result<String, 
     let mut notes = Vec::new();
     if !placeholders.is_empty() {
         notes.push(
-            "Zugangsdaten stehen nur als Verweis im Export. Vor `apply` diese Variablen setzen \
+            "Zugangsdaten und Geheimnisse stehen nur als Verweis im Export. Vor `apply` diese \
+             Variablen setzen \
              oder die Verweise anpassen (valueFrom: {env: …} bzw. {file: …}):"
                 .to_owned(),
         );

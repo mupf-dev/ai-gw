@@ -431,10 +431,10 @@ impl PlainResource for PluginBindingSpec {}
 
 impl Resource for McpServerSpec {
     const KIND: ResourceKind = ResourceKind::McpServer;
-    const REFS: &'static [RefCol] = &[RefCol::Fixed(
-        "credential_id",
-        ResourceKind::ProviderCredential,
-    )];
+    const REFS: &'static [RefCol] = &[
+        RefCol::Fixed("credential_id", ResourceKind::ProviderCredential),
+        RefCol::Fixed("secret_id", ResourceKind::Secret),
+    ];
     const SEARCH: &'static [&'static str] = &["url"];
 
     fn to_columns(&self) -> Result<Vec<(&'static str, Col)>, StoreError> {
@@ -444,6 +444,10 @@ impl Resource for McpServerSpec {
             (
                 "credential_id",
                 Col::reference(ResourceKind::ProviderCredential, self.credential.as_deref()),
+            ),
+            (
+                "secret_id",
+                Col::reference(ResourceKind::Secret, self.secret.as_deref()),
             ),
             ("enabled", Col::bool(self.enabled)),
             ("settings", Col::json(&self.settings)?),
@@ -455,6 +459,7 @@ impl Resource for McpServerSpec {
             url: row.text("url")?,
             transport: enum_text(row, "transport")?,
             credential: row.ref_name("credential_id")?,
+            secret: row.ref_name("secret_id")?,
             enabled: row.bool("enabled")?,
             settings: row.json("settings")?,
         })

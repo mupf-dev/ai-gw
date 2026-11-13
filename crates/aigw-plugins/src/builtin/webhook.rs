@@ -9,7 +9,7 @@
 //! config:
 //!   url: https://policy.example.org/aigw      # SSRF-Regeln wie Deployments
 //!   phases: [request]                          # request | response (Standard: request)
-//!   secret: {credential: hooks}                # HMAC-Schlüssel: credential(+field) | env | file
+//!   secret: {secret: hooks}                    # HMAC-Schlüssel: secret(+field, F149) | credential | env | file
 //!   includeHeaders: [x-client-app]             # Client-Header im Payload (nie Auth/Cookies)
 //!   maxPayloadBytes: 1048576                   # Größe des Aufrufs (Standard 1 MiB)
 //!   maxResponseBytes: 1048576                  # Größe der Antwort (Standard 1 MiB)

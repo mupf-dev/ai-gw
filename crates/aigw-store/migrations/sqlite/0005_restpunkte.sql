@@ -47,3 +47,20 @@ INSERT INTO audit_chain (id, seq, head, anchor_seq, anchor_hash) VALUES (
     0,
     '0000000000000000000000000000000000000000000000000000000000000000'
 );
+
+-- F149: allgemeine Geheimnisse (Webhook-HMAC, Guardrail-Dienste, MCP-Token) statt
+-- ProviderCredential-Behelf. Werte verschlüsselt wie bei provider_credential.
+CREATE TABLE secret (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE,
+    labels      TEXT NOT NULL DEFAULT '{}',
+    description TEXT,
+    fields      TEXT NOT NULL DEFAULT '[]', -- nur Feldnamen
+    refs        TEXT NOT NULL DEFAULT '{}', -- valueFrom-Verweise (F54)
+    key_id      TEXT NOT NULL,
+    nonce       BLOB NOT NULL,
+    ciphertext  BLOB NOT NULL,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+ALTER TABLE mcp_server ADD COLUMN secret_id TEXT REFERENCES secret (id);

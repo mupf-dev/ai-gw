@@ -47,6 +47,11 @@ pub trait PluginHost: Send + Sync + fmt::Debug + 'static {
     /// Entschlüsselte Zugangsdaten zum Namen (aktueller Snapshot).
     fn credential(&self, name: &str) -> Option<Arc<CredentialData>>;
 
+    /// Entschlüsseltes Geheimnis (`Secret`, F149) zum Namen (aktueller Snapshot).
+    fn secret(&self, _name: &str) -> Option<Arc<CredentialData>> {
+        None
+    }
+
     /// Prüft eine Endpunkt-URL gegen die SSRF-Regeln (beim Bau der Bindung).
     fn check_endpoint(&self, url: &str) -> Result<(), String>;
 

@@ -177,6 +177,9 @@ pub struct Snapshot {
     /// Entschlüsselte Zugangsdaten nach Name (nur im RAM; nie ausgeben oder loggen) – für
     /// Plugins mit Credential-Referenz: Webhook-Geheimnisse (AIGW-61), `content-safety` (AIGW-38).
     pub credential_data: HashMap<String, Arc<CredentialData>>,
+    /// Entschlüsselte Geheimnisse (`Secret`, F149) nach Name (nur im RAM; nie ausgeben oder
+    /// loggen) – für Webhook-Geheimnisse, `content-safety` und MCP-Server.
+    pub secret_data: HashMap<String, Arc<CredentialData>>,
     /// Preise je (Anbieter, Anbieter-Modell), aufsteigend nach `validFrom`.
     /// Einträge ohne Anbieter stehen unter `None`.
     pub prices: HashMap<(Option<ProviderKind>, String), Vec<Arc<Price>>>,

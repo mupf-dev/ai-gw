@@ -16,6 +16,7 @@ mod api_key;
 pub mod audit;
 pub mod audit_chain;
 pub(crate) mod credential;
+pub(crate) mod secret;
 mod extras;
 mod kinds;
 pub mod list;
@@ -44,6 +45,7 @@ pub(crate) fn table(kind: ResourceKind) -> &'static str {
         ResourceKind::User => "app_user",
         ResourceKind::ApiKey => "api_key",
         ResourceKind::ProviderCredential => "provider_credential",
+        ResourceKind::Secret => "secret",
         ResourceKind::ModelGroup => "model_group",
         ResourceKind::Deployment => "deployment",
         ResourceKind::Price => "price",
@@ -978,6 +980,7 @@ impl Store {
             ResourceKind::ProviderCredential => {
                 serde_json::to_value(self.get_credential(name).await?)
             }
+            ResourceKind::Secret => serde_json::to_value(self.get_secret(name).await?),
             ResourceKind::ModelGroup => {
                 serde_json::to_value(self.get::<r::ModelGroupSpec>(name).await?)
             }

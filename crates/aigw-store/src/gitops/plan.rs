@@ -289,9 +289,12 @@ pub(crate) fn prepare(
         let key = (d.kind(), d.name().to_owned());
         let issue = |m: String| Issue::at(Some(d.index), d.kind(), d.name(), m);
         match &d.manifest.spec {
-            ResourceSpec::ProviderCredential(c) => {
+            ResourceSpec::ProviderCredential(aigw_core::resource::ProviderCredentialSpec {
+                data, ..
+            })
+            | ResourceSpec::Secret(aigw_core::resource::SecretSpec { data, .. }) => {
                 let mut values = BTreeMap::new();
-                for (field, r) in &c.data {
+                for (field, r) in data {
                     match resolve(src, &opts.secrets, r) {
                         Ok(v) => {
                             values.insert(field.clone(), v);
@@ -506,7 +509,10 @@ fn diff(
     diff_json("metadata.labels", &labels(&a), &labels(&b), out);
     let (mut sa, mut sb) = (a["spec"].clone(), b["spec"].clone());
     if let (Some(x), Some(y)) = (sa.as_object_mut(), sb.as_object_mut())
-        && matches!(want.spec, ResourceSpec::ProviderCredential(_))
+        && matches!(
+            want.spec,
+            ResourceSpec::ProviderCredential(_) | ResourceSpec::Secret(_)
+        )
     {
         // Werte werden unten über den Klartext verglichen.
         x.remove("data");
@@ -523,8 +529,12 @@ fn diff(
                 secret: true,
             };
             // F54: geänderte Verweise (Namen, keine Werte) sind sichtbare Änderungen.
-            if let ResourceSpec::ProviderCredential(w) = &want.spec {
-                let new_refs = crate::repo::credential::refs_of(w);
+            let new_refs = match &want.spec {
+                ResourceSpec::ProviderCredential(w) => Some(crate::repo::credential::refs_of(w)),
+                ResourceSpec::Secret(w) => Some(crate::repo::secret::refs_of(w)),
+                _ => None,
+            };
+            if let Some(new_refs) = new_refs {
                 let fields: BTreeSet<&String> = old_refs.keys().chain(new_refs.keys()).collect();
                 for f in fields {
                     let (a, b) = (old_refs.get(f), new_refs.get(f));
@@ -720,7 +730,7 @@ fn collect_refs(
             }
             limit_models(&k.limits, models);
         }
-        ResourceSpec::ProviderCredential(_) | ResourceSpec::Price(_) => {}
+        ResourceSpec::ProviderCredential(_) | ResourceSpec::Secret(_) | ResourceSpec::Price(_) => {}
         ResourceSpec::ModelGroup(g) => {
             for f in &g.fallbacks {
                 models.push(("spec.fallbacks.modelGroup", f.model_group.clone()));
@@ -741,6 +751,9 @@ fn collect_refs(
         ResourceSpec::McpServer(s) => {
             if let Some(c) = &s.credential {
                 refs.push(r("spec.credential", ResourceKind::ProviderCredential, c));
+            }
+            if let Some(c) = &s.secret {
+                refs.push(r("spec.secret", ResourceKind::Secret, c));
             }
         }
         ResourceSpec::McpGrant(g) => {
@@ -821,6 +834,10 @@ fn check_rules(
                             _ => Ok(()),
                         })
                 }
+                ResourceSpec::Secret(s) => crate::repo::secret::validate_secret(
+                    s.description.as_deref(),
+                    s.data.keys().map(String::as_str),
+                ),
                 ResourceSpec::Price(pr) => validate::price(pr).and_then(|()| {
                     match state
                         .get(ResourceKind::Price, name)

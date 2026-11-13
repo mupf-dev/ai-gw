@@ -38,6 +38,7 @@ pub mod mcp;
 pub mod oidc;
 pub mod plugin_bindings;
 pub mod prices;
+pub mod secrets;
 pub mod problem;
 pub mod rbac;
 pub mod read_only;
@@ -228,6 +229,7 @@ pub fn router_with(state: AdminState) -> Router {
     let protected = resources::router()
         .merge(deployments::router())
         .merge(credentials::router())
+        .merge(secrets::router())
         .merge(prices::router())
         .merge(mcp::router())
         .merge(plugin_bindings::router())

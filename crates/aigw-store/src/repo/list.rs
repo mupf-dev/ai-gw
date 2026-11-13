@@ -188,6 +188,7 @@ fn scope_sql(kind: ResourceKind, scope: &AuditScope, q: &mut Q) -> Option<String
         | ResourceKind::Deployment
         | ResourceKind::Price
         | ResourceKind::ProviderCredential
+        | ResourceKind::Secret
         | ResourceKind::McpServer
         | ResourceKind::PluginBinding => return None,
         ResourceKind::User => "1 = 0".to_owned(),
@@ -432,6 +433,19 @@ impl Store {
             let c = super::credential::credential_from_row(r)?;
             let name = c.metadata.name.clone();
             Ok((c, name))
+        })
+        .await
+    }
+
+    /// Seite der Geheimnisse (`Secret`, F149; nur Metadaten und Feldnamen).
+    pub async fn list_secrets_page(
+        &self,
+        lq: &ListQuery,
+    ) -> Result<Page<aigw_core::resource::Secret>, StoreError> {
+        self.list_rows(ResourceKind::Secret, &[], &[], lq, |r| {
+            let s = super::secret::secret_from_row(r)?;
+            let name = s.metadata.name.clone();
+            Ok((s, name))
         })
         .await
     }

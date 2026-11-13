@@ -57,6 +57,8 @@ pub enum ResourceKind {
     ApiKey,
     /// [`ProviderCredentialSpec`]
     ProviderCredential,
+    /// [`SecretSpec`] (F149)
+    Secret,
     /// [`ModelGroupSpec`]
     ModelGroup,
     /// [`DeploymentSpec`]
@@ -73,11 +75,12 @@ pub enum ResourceKind {
 
 impl ResourceKind {
     /// Alle Arten in Abhängigkeitsreihenfolge (Verweisziele zuerst) – für Import und Export.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Organization,
         Self::Team,
         Self::User,
         Self::ProviderCredential,
+        Self::Secret,
         Self::ModelGroup,
         Self::Deployment,
         Self::Price,
@@ -95,6 +98,7 @@ impl ResourceKind {
             Self::User => "User",
             Self::ApiKey => "ApiKey",
             Self::ProviderCredential => "ProviderCredential",
+            Self::Secret => "Secret",
             Self::ModelGroup => "ModelGroup",
             Self::Deployment => "Deployment",
             Self::Price => "Price",
@@ -114,6 +118,7 @@ impl ResourceKind {
             Self::User => "user",
             Self::ApiKey => "api-key",
             Self::ProviderCredential => "provider-credential",
+            Self::Secret => "secret",
             Self::ModelGroup => "model-group",
             Self::Deployment => "deployment",
             Self::Price => "price",
@@ -228,6 +233,8 @@ pub type McpServer = Object<McpServerSpec>;
 pub type McpGrant = Object<McpGrantSpec>;
 /// Zugangsdaten (gelesene Sicht ohne Werte).
 pub type ProviderCredential = Object<ProviderCredentialInfo>;
+/// Geheimnis (gelesene Sicht ohne Werte, F149).
+pub type Secret = Object<SecretInfo>;
 
 /// API-Key (gelesene Sicht): Spezifikation plus vom Server verwaltete Felder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

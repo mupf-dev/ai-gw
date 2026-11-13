@@ -82,8 +82,17 @@ pub(crate) fn seal_spec(
     id: Id,
     spec: &ProviderCredentialSpec,
 ) -> Result<(Vec<String>, Sealed), StoreError> {
+    seal_data(keyring, id, &spec.data)
+}
+
+/// Wie [`seal_spec`] für beliebige Felder (auch `Secret`, F149).
+pub(crate) fn seal_data(
+    keyring: &Keyring,
+    id: Id,
+    data: &BTreeMap<String, aigw_core::resource::SecretRef>,
+) -> Result<(Vec<String>, Sealed), StoreError> {
     let mut plain = BTreeMap::new();
-    for (field, r) in &spec.data {
+    for (field, r) in data {
         let v = r
             .resolve()
             .map_err(|e| StoreError::Invalid(format!("Feld {field:?}: {e}")))?;
@@ -323,9 +332,19 @@ impl Store {
         Ok(out)
     }
 
-    /// Verschlüsselt alle Zugangsdaten, die nicht mit dem aktuellen Key verschlüsselt sind,
-    /// neu (Rotation). Gibt die Anzahl umgeschlüsselter Datensätze zurück.
+    /// Verschlüsselt alle Zugangsdaten und Geheimnisse (F149), die nicht mit dem aktuellen
+    /// Key verschlüsselt sind, neu (Rotation). Gibt die Anzahl umgeschlüsselter Datensätze
+    /// zurück.
     pub async fn rotate_credentials(
+        &self,
+        actor: &str,
+        keyring: &Keyring,
+    ) -> Result<usize, StoreError> {
+        let n = self.rotate_provider_credentials(actor, keyring).await?;
+        Ok(n + self.rotate_secrets(actor, keyring).await?)
+    }
+
+    async fn rotate_provider_credentials(
         &self,
         actor: &str,
         keyring: &Keyring,

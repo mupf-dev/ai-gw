@@ -8,7 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::spec::{
     ApiKeySpec, DeploymentSpec, McpGrantSpec, McpServerSpec, ModelGroupSpec, OrganizationSpec,
-    PluginBindingSpec, PriceSpec, ProviderCredentialSpec, TeamSpec, UserSpec,
+    PluginBindingSpec, PriceSpec, ProviderCredentialSpec, SecretSpec, TeamSpec, UserSpec,
 };
 use super::{ObjectMeta, ResourceKind, validate_name};
 
@@ -29,6 +29,8 @@ pub enum ResourceSpec {
     ApiKey(ApiKeySpec),
     /// Zugangsdaten.
     ProviderCredential(ProviderCredentialSpec),
+    /// Geheimnis (F149).
+    Secret(SecretSpec),
     /// Modellgruppe.
     ModelGroup(ModelGroupSpec),
     /// Deployment.
@@ -52,6 +54,7 @@ impl ResourceSpec {
             Self::User(_) => ResourceKind::User,
             Self::ApiKey(_) => ResourceKind::ApiKey,
             Self::ProviderCredential(_) => ResourceKind::ProviderCredential,
+            Self::Secret(_) => ResourceKind::Secret,
             Self::ModelGroup(_) => ResourceKind::ModelGroup,
             Self::Deployment(_) => ResourceKind::Deployment,
             Self::Price(_) => ResourceKind::Price,
@@ -68,6 +71,7 @@ impl ResourceSpec {
             Self::User(s) => serde_json::to_value(s),
             Self::ApiKey(s) => serde_json::to_value(s),
             Self::ProviderCredential(s) => serde_json::to_value(s),
+            Self::Secret(s) => serde_json::to_value(s),
             Self::ModelGroup(s) => serde_json::to_value(s),
             Self::Deployment(s) => serde_json::to_value(s),
             Self::Price(s) => serde_json::to_value(s),
@@ -85,6 +89,7 @@ impl ResourceSpec {
             ResourceKind::User => Self::User(f(v)?),
             ResourceKind::ApiKey => Self::ApiKey(f(v)?),
             ResourceKind::ProviderCredential => Self::ProviderCredential(f(v)?),
+            ResourceKind::Secret => Self::Secret(f(v)?),
             ResourceKind::ModelGroup => Self::ModelGroup(f(v)?),
             ResourceKind::Deployment => Self::Deployment(f(v)?),
             ResourceKind::Price => Self::Price(f(v)?),
@@ -197,13 +202,16 @@ impl Manifest {
             message,
         };
         validate_name(&self.metadata.name).map_err(invalid)?;
-        if let ResourceSpec::ProviderCredential(c) = &self.spec {
-            for (field, r) in &c.data {
-                if r.value.is_some() || r.value_from.is_none() {
-                    return Err(invalid(format!(
-                        "Feld {field:?}: in YAML nur `valueFrom` (env/file) erlaubt, kein Klartext"
-                    )));
-                }
+        let data = match &self.spec {
+            ResourceSpec::ProviderCredential(c) => Some(&c.data),
+            ResourceSpec::Secret(s) => Some(&s.data),
+            _ => None,
+        };
+        for (field, r) in data.into_iter().flatten() {
+            if r.value.is_some() || r.value_from.is_none() {
+                return Err(invalid(format!(
+                    "Feld {field:?}: in YAML nur `valueFrom` (env/file) erlaubt, kein Klartext"
+                )));
             }
         }
         Ok(())

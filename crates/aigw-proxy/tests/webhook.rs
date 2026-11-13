@@ -442,11 +442,11 @@ async fn response_phase_is_buffered() {
     assert_eq!(r.sse_text(), "ECHO: HALLO");
     let r = post(gw, ANT, anthropic("hallo", true)).await;
     assert_eq!(r.sse_text(), "ECHO: HALLO");
-    // Ausgabe sperren (422 bleibt eine 4xx-Ablehnung).
+    // Ausgabe sperren: 422 wird unverändert durchgereicht (F152).
     let r = post(gw, OAI, openai("verboten", false)).await;
-    assert!(r.status.is_client_error(), "{}", r.status);
+    assert_eq!(r.status.as_u16(), 422, "{}", r.status);
     let r = post(gw, ANT, anthropic("verboten", true)).await;
-    assert!(r.status.is_client_error(), "{}", r.status);
+    assert_eq!(r.status.as_u16(), 422, "{}", r.status);
     assert_eq!(r.json()["type"], "error");
 
     let s = seen.lock().unwrap();

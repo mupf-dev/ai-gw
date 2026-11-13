@@ -175,7 +175,7 @@ pub(crate) fn validate_spec(spec: &ResourceSpec) -> Result<(), String> {
         ResourceSpec::Team(s) => <TeamSpec as Resource>::validate(s),
         ResourceSpec::User(s) => <UserSpec as Resource>::validate(s),
         ResourceSpec::ApiKey(s) => <ApiKeySpec as Resource>::validate(s),
-        ResourceSpec::ProviderCredential(_) => Ok(()),
+        ResourceSpec::ProviderCredential(_) | ResourceSpec::Secret(_) => Ok(()),
         ResourceSpec::ModelGroup(s) => <ModelGroupSpec as Resource>::validate(s),
         ResourceSpec::Deployment(s) => <DeploymentSpec as Resource>::validate(s),
         ResourceSpec::Price(s) => <PriceSpec as Resource>::validate(s),

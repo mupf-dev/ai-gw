@@ -95,6 +95,16 @@ impl PluginHost for GatewayHost {
             .cloned()
     }
 
+    fn secret(&self, name: &str) -> Option<Arc<CredentialData>> {
+        self.0
+            .snapshot
+            .as_ref()?
+            .load()
+            .secret_data
+            .get(name)
+            .cloned()
+    }
+
     fn check_endpoint(&self, url: &str) -> Result<(), String> {
         self.0.policy.check_endpoint(url)
     }

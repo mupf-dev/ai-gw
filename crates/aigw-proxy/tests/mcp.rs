@@ -304,6 +304,7 @@ fn server(name: &str, url: String, transport: McpTransport) -> (String, Arc<McpS
             server: obj(
                 name,
                 McpServerSpec {
+                    secret: None,
                     url,
                     transport,
                     credential: Some("c".into()),

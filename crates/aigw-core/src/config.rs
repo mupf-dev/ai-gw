@@ -536,10 +536,14 @@ impl Default for BillingConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WebhookSecret {
-    /// Name einer `ProviderCredential`.
+    /// Name eines `Secret` (F149, bevorzugt).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret: Option<String>,
+    /// Name einer `ProviderCredential` (älterer Weg).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential: Option<String>,
-    /// Feld der `ProviderCredential` (Standard [`WebhookSecret::DEFAULT_FIELD`]).
+    /// Feld (Standard bei `secret`: `value`, bei `credential`:
+    /// [`WebhookSecret::DEFAULT_FIELD`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,
     /// Umgebungsvariable.
@@ -556,21 +560,28 @@ impl WebhookSecret {
 
     /// Prüft, dass genau eine Quelle angegeben ist.
     pub fn validate(&self) -> std::result::Result<(), String> {
-        let n = usize::from(self.credential.is_some())
+        let n = usize::from(self.secret.is_some())
+            + usize::from(self.credential.is_some())
             + usize::from(self.env.is_some())
             + usize::from(self.file.is_some());
         if n != 1 {
-            return Err("secret: genau eines von credential, env oder file angeben".into());
+            return Err(
+                "secret: genau eines von secret, credential, env oder file angeben".into(),
+            );
         }
-        if self.field.is_some() && self.credential.is_none() {
-            return Err("secret.field gilt nur zusammen mit secret.credential".into());
+        if self.field.is_some() && self.credential.is_none() && self.secret.is_none() {
+            return Err("secret.field gilt nur zusammen mit secret.secret/credential".into());
         }
         Ok(())
     }
 
-    /// Feldname bei `credential`.
+    /// Feldname bei `secret` bzw. `credential`.
     pub fn field(&self) -> &str {
-        self.field.as_deref().unwrap_or(Self::DEFAULT_FIELD)
+        match (&self.field, &self.secret) {
+            (Some(f), _) => f,
+            (None, Some(_)) => crate::resource::SecretSpec::DEFAULT_FIELD,
+            (None, None) => Self::DEFAULT_FIELD,
+        }
     }
 }
 

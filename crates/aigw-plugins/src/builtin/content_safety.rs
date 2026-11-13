@@ -8,7 +8,8 @@
 //! config:
 //!   provider: azure                 # azure | openai | model
 //!   endpoint: https://acme.cognitiveservices.azure.com
-//!   credential: azure-content-safety  # ProviderCredential (Feld apiKey/api_key)
+//!   secret: azure-content-safety    # Secret (F149; Feld value, apiKey oder api_key)
+//!   # credential: …                 # älter: ProviderCredential (Feld apiKey/api_key)
 //!   thresholds: {hate: 2, violence: 4} # azure: Schweregrad 0–7 (Standard 4);
 //!                                      # openai: Score 0–1 (ohne Angabe: flagged des Dienstes)
 //!   categories: [hate, violence]    # nur diese blockieren (Standard: alle)
@@ -98,6 +99,8 @@ struct Config {
     #[serde(default)]
     credential: Option<String>,
     #[serde(default)]
+    secret: Option<String>,
+    #[serde(default)]
     model: Option<String>,
     #[serde(default)]
     api_version: Option<String>,
@@ -162,6 +165,7 @@ struct Inner {
     provider: Provider,
     url: String,
     credential: Option<String>,
+    secret: Option<String>,
     model: String,
     model_group: String,
     template: String,
@@ -239,17 +243,18 @@ impl Inner {
     }
 
     fn api_key(&self) -> Result<String, PluginError> {
-        let Some(name) = &self.credential else {
-            return Err(PluginError::new("keine Zugangsdaten konfiguriert"));
+        // F149: bevorzugt ein `Secret`, sonst (älter) eine `ProviderCredential`.
+        let (name, data, what) = match (&self.secret, &self.credential) {
+            (Some(n), _) => (n, self.host.secret(n), "Geheimnis"),
+            (None, Some(n)) => (n, self.host.credential(n), "Zugangsdaten"),
+            (None, None) => return Err(PluginError::new("keine Zugangsdaten konfiguriert")),
         };
-        let data = self
-            .host
-            .credential(name)
-            .ok_or_else(|| PluginError::new(format!("Zugangsdaten {name:?} nicht gefunden")))?;
+        let data = data.ok_or_else(|| PluginError::new(format!("{what} {name:?} nicht gefunden")))?;
         data.get("apiKey")
             .or_else(|| data.get("api_key"))
+            .or_else(|| data.get(aigw_core::resource::SecretSpec::DEFAULT_FIELD))
             .map(|s| s.expose().to_owned())
-            .ok_or_else(|| PluginError::new(format!("Zugangsdaten {name:?} ohne apiKey")))
+            .ok_or_else(|| PluginError::new(format!("{what} {name:?} ohne apiKey/value")))
     }
 
     async fn post(
@@ -405,9 +410,13 @@ impl ContentSafety {
             Ok(e)
         };
         let needs_credential = || -> Result<(), String> {
-            match &c.credential {
-                Some(n) if !n.trim().is_empty() => Ok(()),
-                _ => Err("credential: Name einer ProviderCredential angeben".into()),
+            match (&c.secret, &c.credential) {
+                (Some(_), Some(_)) => Err("secret und credential: nur eines angeben".into()),
+                (Some(n), None) | (None, Some(n)) if !n.trim().is_empty() => Ok(()),
+                _ => Err(
+                    "secret: Name eines Secret angeben (oder credential: ProviderCredential)"
+                        .into(),
+                ),
             }
         };
         let url = match c.provider {
@@ -433,9 +442,10 @@ impl ContentSafety {
                 if c.model_group.as_deref().is_none_or(str::is_empty) {
                     return Err("modelGroup: Modellgruppe des Prüfmodells angeben".into());
                 }
-                if c.endpoint.is_some() || c.credential.is_some() {
+                if c.endpoint.is_some() || c.credential.is_some() || c.secret.is_some() {
                     return Err(
-                        "provider model: endpoint/credential kommen aus der Modellgruppe".into(),
+                        "provider model: endpoint/credential/secret kommen aus der Modellgruppe"
+                            .into(),
                     );
                 }
                 String::new()
@@ -465,6 +475,7 @@ impl ContentSafety {
                 provider: c.provider,
                 url,
                 credential: c.credential,
+                secret: c.secret,
                 model: c.model.unwrap_or_else(|| "omni-moderation-latest".into()),
                 model_group: c.model_group.unwrap_or_default(),
                 template,
@@ -847,6 +858,8 @@ mod tests {
         let f = Factory::default();
         let ok = |v: Value| f.build(&v).map(drop);
         assert!(ok(json!({"provider": "openai", "credential": "oai"})).is_ok());
+        assert!(ok(json!({"provider": "openai", "secret": "oai"})).is_ok());
+        assert!(ok(json!({"provider": "openai", "secret": "a", "credential": "b"})).is_err());
         assert!(ok(json!({"provider": "openai"})).is_err()); // Zugangsdaten fehlen
         assert!(ok(json!({"provider": "azure", "credential": "c"})).is_err()); // endpoint
         assert!(

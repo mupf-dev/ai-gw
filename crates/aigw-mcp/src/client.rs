@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use aigw_core::mcp::McpServerSettings;
-use aigw_core::resource::{CredentialData, McpTransport};
+use aigw_core::resource::{CredentialData, McpTransport, SecretString};
 use aigw_core::snapshot::McpServerCtx;
 use aigw_core::wire::sse::SseParser;
 use bytes::Bytes;
@@ -1025,6 +1025,24 @@ impl Upstream {
     }
 }
 
+/// Token aus Zugangsdaten bzw. `Secret` (F149): Feld `credentialField` (Standard `apiKey`);
+/// ohne ausdrückliches Feld ersatzweise das Standardfeld eines `Secret` (`value`).
+fn token<'a>(
+    settings: &McpServerSettings,
+    c: &'a CredentialData,
+) -> Result<&'a SecretString, ClientError> {
+    let field = settings.credential_field();
+    c.get(field)
+        .or_else(|| {
+            settings
+                .credential_field
+                .is_none()
+                .then(|| c.get(aigw_core::resource::SecretSpec::DEFAULT_FIELD))
+                .flatten()
+        })
+        .ok_or_else(|| ClientError::Blocked(format!("Zugangsdaten enthalten kein Feld {field:?}")))
+}
+
 /// Header für HTTP-Transporte: statische Header plus Token aus den Zugangsdaten.
 fn http_headers(
     settings: &McpServerSettings,
@@ -1039,10 +1057,7 @@ fn http_headers(
         h.insert(name, value);
     }
     if let Some(c) = cred {
-        let field = settings.credential_field();
-        let secret = c.get(field).ok_or_else(|| {
-            ClientError::Blocked(format!("Zugangsdaten enthalten kein Feld {field:?}"))
-        })?;
+        let secret = token(settings, c)?;
         let header = settings
             .credential_header
             .as_deref()
@@ -1172,10 +1187,7 @@ fn spawn_stdio(
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
     if let (Some(var), Some(c)) = (&settings.credential_env, cred) {
-        let field = settings.credential_field();
-        let secret = c.get(field).ok_or_else(|| {
-            ClientError::Blocked(format!("Zugangsdaten enthalten kein Feld {field:?}"))
-        })?;
+        let secret = token(settings, c)?;
         cmd.env(var, secret.expose());
     }
     let mut child = cmd.spawn().map_err(|e| {
