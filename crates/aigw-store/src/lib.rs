@@ -14,6 +14,7 @@ pub mod admin_auth;
 pub mod analytics;
 pub mod budget;
 pub mod crypto;
+pub mod events;
 pub mod gitops;
 pub mod keys;
 pub mod observe;
@@ -153,6 +154,13 @@ pub fn migrator() -> Migrator {
             "analytics".into(),
             MigrationType::Simple,
             include_str!("../migrations/0005_analytics.sql").into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            6,
+            "event_dedup".into(),
+            MigrationType::Simple,
+            include_str!("../migrations/0006_event_dedup.sql").into_sql_str(),
             false,
         ),
     ])

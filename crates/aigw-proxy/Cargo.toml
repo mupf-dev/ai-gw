@@ -32,6 +32,7 @@ uuid.workspace = true
 [dev-dependencies]
 # Tests gegen postgres-sync (Migration der Wegwerf-Datenbank).
 aigw-store.workspace = true
+aigw-webhook.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true

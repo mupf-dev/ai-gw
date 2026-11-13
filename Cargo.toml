@@ -17,6 +17,7 @@ members = [
     "crates/aigw-providers",
     "crates/aigw-proxy",
     "crates/aigw-store",
+    "crates/aigw-webhook",
 ]
 
 [workspace.package]
@@ -38,6 +39,7 @@ aigw-plugins = { path = "crates/aigw-plugins" }
 aigw-providers = { path = "crates/aigw-providers" }
 aigw-proxy = { path = "crates/aigw-proxy" }
 aigw-store = { path = "crates/aigw-store" }
+aigw-webhook = { path = "crates/aigw-webhook" }
 
 # HTTP-Stack (E2): axum 0.8 auf hyper 1, tower, tokio.
 axum = { version = "0.8.9", default-features = false, features = ["http1", "http2", "json", "query", "tokio", "tracing"] }
@@ -70,6 +72,8 @@ hyper-rustls = { version = "0.27.10", default-features = false, features = ["aws
 rustls-native-certs = "0.8.5"
 base64 = "0.22.1"
 url = "2.5.8"
+# Eigener DNS-Resolver mit SSRF-Filter für ausgehende Webhooks (AIGW-61; ohnehin über hyper-util im Baum).
+tower-service = "0.3.3"
 # Mikro-Benchmarks (nur dev).
 divan = "0.1.21"
 

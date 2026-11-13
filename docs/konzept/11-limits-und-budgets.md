@@ -211,9 +211,8 @@ Anfragestarts.
   (auch ohne harte Grenze).
 - **Warnschwellen** (`warnAtPercent`) und das Erreichen des Betrags lösen je Zeitraum, Schwelle
   und Instanz einmal ein `BudgetEvent` aus. Empfänger ist ein `BudgetEventSink`; Standard ist
-  das Log (`warn`, Felder level/target/period/percent/used/amount). Der Webhook ist als
-  Empfänger vorbereitet (Trait, nicht blockierend; die Zustellung mit Puffer/Wiederholung folgt
-  mit dem Webhook-Export).
+  das Log (`warn`, Felder level/target/period/percent/used/amount). Mit `events.webhooks`
+  gehen die Ereignisse zusätzlich als Webhook hinaus (§6.5, AIGW-61).
 - Es wird **keine** geschätzte Kostenreservierung vorgenommen: Gleichzeitig laufende Anfragen
   können ein Budget um ihre Kosten überschreiten (wie bei LiteLLM). Siehe offene Fragen.
 
@@ -236,6 +235,59 @@ Anfragestarts.
   vorgemerkt und werden beim nächsten erfolgreichen Abgleich nachgeholt (`info`).
 - `budget_usage` (Migration 0001) bleibt unverändert, **keine Migration 0004 nötig**.
   `Store::prune_budget_usage(before)` löscht alte Zeiträume (Aufruf durch die Aufbewahrung folgt).
+
+### 6.5 Ereignis-Webhooks (AIGW-61)
+
+Budget-Ereignisse gehen über `aigw_billing::WebhookEvents` (ein `BudgetEventSink`, der
+zusätzlich loggt) an den gemeinsamen Ereignis-Zusteller `aigw_webhook::EventDispatcher`. Er ist
+für weitere Ereignistypen vorbereitet (`Event {id, kind, data, dedup}`).
+
+```yaml
+events:
+  queue_capacity: 1024      # Puffer; voll → Ereignis verworfen (Zähler dropped, warn)
+  concurrency: 8            # gleichzeitige Zustellungen
+  retry_initial_ms: 1000    # Backoff: verdoppelt, Zufallsanteil 50–100 %, Retry-After beachtet
+  retry_max_ms: 60000
+  dedup: true               # im Cluster nur einmal (Tabelle event_dedup)
+  webhooks:
+    - name: finance
+      url: https://hooks.example.org/aigw      # SSRF-Regeln wie Deployments (admin.allow_*)
+      events: [budget.warning, budget.exhausted] # auch budget.* oder *; leer = alle
+      secret: {credential: hooks}                # oder {env: NAME} / {file: /pfad}
+      timeout_ms: 5000
+      max_attempts: 6
+```
+
+**Typen und Nutzdaten:** `budget.warning` (`data.percent`) und `budget.exhausted`. Body:
+
+```json
+{"id": "<uuidv7>", "type": "budget.warning", "occurredAt": "2026-11-13T10:00:00Z",
+ "data": {"level": "team", "targetId": "<id>", "period": "month",
+          "periodStartMs": 1793491200000, "periodEndMs": 1796083200000,
+          "percent": 80, "amount": "100", "used": "80.5", "hardLimit": true}}
+```
+
+Header: `x-aigw-event-type`, `x-aigw-delivery` (= Ereignis-ID, gleich über Wiederholungen →
+Idempotenz beim Empfänger), `x-aigw-attempt`, `x-aigw-signature` (HMAC-SHA256 wie beim Plugin,
+siehe [12-plugins.md](12-plugins.md) §5 `webhook`).
+
+**Zustellung:** asynchron (der Hot Path ruft nur `try_send`), 2xx = zugestellt.
+Zeitüberschreitung, Verbindungsfehler, 408/425/429/5xx werden wiederholt; nach `max_attempts`
+bzw. bei anderen 4xx zählt `aigw_event_webhook_dead_letter_total` (Log `error` mit
+Ereignis-ID). Ereignisse werden **nicht** persistiert: Puffer und laufende Wiederholungen gehen
+bei einem Absturz verloren; beim geordneten Herunterfahren wird bis zu 5 s weiter zugestellt.
+Zähler unter `/metrics`: `aigw_event_webhook_{enqueued,delivered,retries,dead_letter,dropped,
+deduplicated,dedup_errors}_total`.
+
+**Deduplizierung im Cluster:** Jede Instanz meldet eine Schwelle je Zeitraum einmal (RAM), nach
+einem Neustart oder auf mehreren Instanzen also mehrfach. Deshalb beansprucht die Instanz vor
+dem Senden den Schlüssel `budget:<ebene>:<ziel-id>:<zeitraum>:<beginn-ms>:<warning-<p>|exhausted>`
+in `event_dedup` (Migration 0006, `INSERT … ON CONFLICT DO NOTHING`, SQLite und Postgres). Nur
+die Instanz, deren Zeile angelegt wurde, sendet; die anderen zählen `deduplicated`. Gültig bis
+Ende des Zeitraums + 1 Tag (`total`: 100 Jahre); abgelaufene Zeilen löscht der nächste Anspruch.
+Ist die Datenbank nicht erreichbar, wird trotzdem gesendet (lieber doppelt als gar nicht,
+`dedup_errors`). Grenze: Stirbt die beanspruchende Instanz vor der Zustellung, fällt das
+Ereignis aus (höchstens einmal statt mindestens einmal – siehe offene Fragen in AIGW-61).
 
 ### 6.4 Admin-Lesezugriff
 
@@ -351,7 +403,7 @@ zusätzlich je Budget einen Map-Zugriff und eine Mutex-Sperre (keine I/O).
 - `concurrency`-Limits (gleichzeitig offene Anfragen) sind im Ressourcenmodell vorgesehen, aber
   nicht umgesetzt (brauchen einen eigenen Zählertyp ohne Fenster bzw. mit Lease-Ablauf).
 - Budgets ohne Reservierung geschätzter Kosten (siehe Fragen).
-- Webhook-Zustellung der Budget-Ereignisse; Deduplizierung der Ereignisse über Instanzen.
+- Budget-Ereignisse tragen nur die Ziel-ID (kein Name); Anreicherung aus dem Snapshot folgt bei Bedarf.
 - Audio-/Bildpreise, sobald die IR-Usage diese Mengen führt.
 - Budgets je Nutzer (`user`) und je Modellgruppe sind im Ressourcenmodell nicht vorgesehen.
 - Rate-Limit-Header für Budgets (z. B. `x-aigw-budget-remaining`) – bisher nur im Fehlertext.

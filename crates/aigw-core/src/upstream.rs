@@ -231,6 +231,26 @@ impl UpstreamPolicy {
         }
         !is_private_ip(ip) || self.private.iter().any(|r| r.matches(&Host::Ip(ip)))
     }
+
+    /// Wie [`UpstreamPolicy::ip_allowed`], berücksichtigt aber den Hostnamen, über den `ip`
+    /// aufgelöst wurde: Ist der **Name** in `admin.allow_private_upstreams` freigeschaltet
+    /// (z. B. `hooks.internal`), sind auch private Adressen erlaubt (nie die immer
+    /// verbotenen). Für Clients mit eigener Namensauflösung (Webhooks, AIGW-61).
+    pub fn resolved_ip_allowed(&self, host: &str, ip: IpAddr) -> bool {
+        let ip = canonical(ip);
+        if always_forbidden(ip) {
+            return false;
+        }
+        if let Some(name) = normalize_name(host)
+            && self
+                .private
+                .iter()
+                .any(|r| r.matches(&Host::Name(name.clone())))
+        {
+            return true;
+        }
+        self.ip_allowed(ip)
+    }
 }
 
 /// Hostname normalisieren (klein, ohne abschließenden Punkt) und prüfen.

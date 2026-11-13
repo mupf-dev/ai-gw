@@ -139,3 +139,22 @@ limits:
 billing:
   timezone: UTC
   budget_sync_ms: 1000
+
+# Ereignis-Webhooks (Budget-Warnung/-Erschöpfung; docs/konzept/11-limits-und-budgets.md):
+# asynchron, gepuffert, Wiederholung mit Backoff, im Cluster je Ereignis nur einmal
+# (Tabelle event_dedup). Geheimnis nie als Klartext: credential (ProviderCredential-Feld),
+# env oder file.
+events:
+  queue_capacity: 1024
+  concurrency: 8
+  retry_initial_ms: 1000
+  retry_max_ms: 60000
+  dedup: true
+  webhooks: []
+  # webhooks:
+  #   - name: finance
+  #     url: https://hooks.example.org/aigw
+  #     events: [budget.warning, budget.exhausted]   # leer = alle
+  #     secret: {credential: hooks, field: webhookSecret}
+  #     timeout_ms: 5000
+  #     max_attempts: 6

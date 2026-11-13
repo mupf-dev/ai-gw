@@ -1,6 +1,7 @@
 # ai-gw – Plugin-Kette (AIGW-36)
 
-Stand: 2026-11-13 · Status: umgesetzt (Kette, Vererbung, `header`, `request-transform`),
+Stand: 2026-11-13 · Status: umgesetzt (Kette, Vererbung, `header`, `request-transform`,
+`webhook` – AIGW-61),
 Grundlage: [01-architektur.md](01-architektur.md) §3, §7, §9 · Code: `crates/aigw-plugins`,
 Einhängepunkte `crates/aigw-proxy/src/plugins.rs`
 
@@ -192,6 +193,91 @@ Reihenfolge: `remove` → `defaults` (nur wenn der Client nichts angibt) → `ov
 Das Modell lässt sich nicht setzen (unbekanntes Feld → Konfigurationsfehler); Umleitungen sind
 generell gesperrt (§2).
 
+### `webhook` (AIGW-61)
+
+Ruft einen externen HTTP-Dienst in der Anfrage- und/oder Antwort-Phase auf (eigene Plugins
+ohne Gateway-Code, Architektur §9 / §17 Nr. 3). Code: `aigw-plugins/src/builtin/webhook.rs`,
+HTTP/Signatur/SSRF in der Crate `aigw-webhook` (gemeinsam mit den Ereignis-Webhooks,
+[11-limits-und-budgets.md](11-limits-und-budgets.md) §6.5).
+
+```yaml
+apiVersion: aigw/v1alpha1
+kind: PluginBinding
+metadata: {name: acme-policy}
+spec:
+  scope: {level: organization, target: acme}
+  plugin: webhook
+  order: 30
+  config:
+    url: https://policy.acme.example/aigw
+    phases: [request, response]          # Standard [request]
+    secret: {credential: acme-hooks}     # Feld webhookSecret; alternativ {credential, field} | {env} | {file}
+    includeHeaders: [x-client-app]       # Client-Header im Payload (Allowlist)
+    maxPayloadBytes: 1048576             # Standard 1 MiB, höchstens 16 MiB
+    maxResponseBytes: 1048576
+    timeoutMs: 200                       # Kettensteuerung, Standard 200 ms
+    failMode: closed                     # Kettensteuerung, Standard closed
+```
+
+| Feld | Bedeutung |
+|---|---|
+| `url` | Ziel; **SSRF-Regeln wie Deployments** (`https`, keine privaten/lokalen Ziele, keine Zugangsdaten in der URL; Ausnahmen über `admin.allow_insecure_upstreams` / `allow_private_upstreams`). Zusätzlich prüft der Client **jede aufgelöste IP-Adresse** beim Verbindungsaufbau (Schutz vor DNS-Rebinding und Namen, die auf private Adressen zeigen); Weiterleitungen werden nicht verfolgt. |
+| `phases` | `request` (vor Cache/Routing) und/oder `response` (ganze Antwort). Mit `response` werden gestreamte Anfragen der Route **gepuffert** (`x-aigw-buffered: plugins`, TTFT = Gesamtdauer). Nie im Chunk-Pfad. |
+| `secret` | HMAC-Schlüssel, **nie Klartext** in der Bindung: `credential` (Feld einer `ProviderCredential`, verschlüsselt in der DB, z. B. Anbieter `openai-compatible` mit Feld `webhookSecret`; bei jedem Aufruf aus dem aktuellen Snapshot gelesen → Rotation ohne Neustart), `env` bzw. `file` (beim Laden der Bindung gelesen). Ohne `secret` unsigniert. |
+| `includeHeaders` | Client-Header, die in den Payload dürfen. `authorization`, `proxy-authorization`, `api-key`, `x-api-key`, `x-goog-api-key`, `cookie` sind gesperrt. |
+| `maxPayloadBytes` / `maxResponseBytes` | Größenlimits (Überschreitung = Plugin-Fehler). |
+
+**Aufruf** (`POST`, `content-type: application/json`, `user-agent: ai-gw/<version>`):
+
+```json
+{"version": 1, "phase": "request", "requestId": "…", "ingress": "open-ai-chat",
+ "modelGroup": "gpt-4o", "stream": false,
+ "key": {"id": "…", "name": "ci-key"}, "team": {"id": "…", "name": "research"},
+ "organization": {"id": "…", "name": "acme"},
+ "headers": {"x-client-app": "…"},
+ "request": { …IR-Anfrage (03-ir-und-formate.md)… }}
+```
+
+In der Antwort-Phase steht statt `request` die IR-Antwort unter `response`. Nie enthalten:
+Gateway-Keys und andere Zugangsdaten-Header, Upstream-Header früherer Plugins
+(`request.hints.upstream_headers` wird entfernt), Anbieter-Zugangsdaten. `ingress` ist
+`open-ai-chat` bzw. `anthropic-messages`; die IR ist formatneutral, ein Webhook bedient beide
+Eingangsformate.
+
+Header: `x-aigw-request-id`, `x-aigw-delivery` (`<request-id>:<phase>`), mit Geheimnis
+`x-aigw-signature: t=<unix-sekunden>,v1=<hex>`.
+
+**Signatur und Replay-Schutz:** `v1 = HMAC-SHA256(secret, "<t>." + roher Body)` (hex). Der
+Empfänger prüft (Referenz: `aigw_webhook::sign::verify`):
+
+1. `|jetzt − t| ≤ 300 s` (empfohlenes Zeitfenster; `sign::DEFAULT_TOLERANCE`),
+2. die Signatur in konstanter Zeit (mehrere `v1=` erlaubt, für Schlüsselrotation beim
+   Empfänger),
+3. optional `x-aigw-delivery` als Nonce: innerhalb des Zeitfensters nur einmal annehmen. Da
+   `t` signiert ist, genügt es, Nonces 300 s lang zu merken.
+
+**Antwortprotokoll** (Status 2xx, JSON; `204` bzw. leerer Body = `continue`):
+
+| `action` | Felder | Wirkung |
+|---|---|---|
+| `continue` | – | unverändert weiter |
+| `modify` | `request` (Anfrage-Phase) bzw. `response` (Antwort-Phase), vollständige IR | ersetzt Anfrage/Antwort. Geprüft: gültige IR (serde), `messages` bzw. `choices` nicht leer, **`model` und `stream` unverändert** (sonst Plugin-Fehler). `hints`, `source`, `stream_options` übernimmt das Gateway aus dem Original – ein Webhook kann so keine Upstream-Header einschleusen. |
+| `reject` | `status` (400–499, Standard 400), `message` (≤ 1024 Byte), `code` (Standard `webhook_rejected`) | Ablehnung im Format des Eingangs; der Status wird auf die Fehlerklasse abgebildet (401, 403, 404, 413, 429 bleiben, andere 4xx → 400). |
+| `respond` | `response` (IR) | Anfrage-Phase: feste Antwort ohne Upstream (Usage wie bei anderen Plugins nur, wenn angegeben); fehlende `id`/`model` ergänzt das Gateway. Antwort-Phase: wie `modify`. |
+
+Alles andere ist ein **Plugin-Fehler** und folgt `failMode` (§3): Zeitüberschreitung
+(`timeoutMs`, Standard 200 ms – die Kette bricht den Aufruf ab), Verbindungs-/SSRF-Fehler,
+Status ≠ 2xx, ungültiges JSON bzw. unbekannte `action`, verbotene Änderung, Größenlimit, nicht
+auflösbares Geheimnis. Fehlerdetails stehen nur im Log (mit Request-ID).
+
+**Transport:** eigener Keep-Alive-Pool (hyper-util, rustls/aws-lc-rs, HTTP/2 und HTTP/1.1,
+webpki-roots), getrennt von den Anbieter-Verbindungen und von allen Bindungen geteilt. Die
+SSRF-Regeln kommen im Server aus `admin.*`; `Registry::with_builtin()` (Tests,
+`Registry::validate`) nutzt strenge Regeln und kennt keine Credential-Quelle (Referenzen
+scheitern dann erst beim Aufruf). **mTLS-Client-Zertifikat:** Erweiterungspunkt
+`aigw_webhook::ClientOptions::tls` (beliebige rustls-Konfiguration, z. B.
+`with_client_auth_cert`); eine Konfigurationsoberfläche je Bindung ist noch offen.
+
 ## 6. Vorberechnung und Hot Reload
 
 `PluginIndex::build` läuft einmal je `config_version`:
@@ -244,8 +330,8 @@ Plugins im Sub-µs-Bereich.
   `needs_buffered_output`.
 - **Cache (AIGW-39):** `on_request` → `Flow::Respond` bei Treffer; Speichern in `on_response`
   bzw. über `Meta` + `on_stream_end`.
-- **Webhook (AIGW-61):** `Hook::Pending` mit eigenem Zeitlimit/Fehlermodus der Bindung; nicht im
-  Chunk-Pfad (keine `chunk`-Phase), für Ausgaben `needs_buffered_output`.
+- **Webhook (AIGW-61):** umgesetzt (§5 `webhook`): `Hook::Pending` mit Zeitlimit/Fehlermodus
+  der Bindung; nicht im Chunk-Pfad (keine `chunk`-Phase), für Ausgaben `needs_buffered_output`.
 - **WASM (nach MVP):** Die Schnittstelle ist auf WIT abbildbar: `Meta` und IR sind JSON-fähig,
   `on_chunk` ist synchron, Zustand je Stream liegt beim Host (`ChunkCtx::state`).
 - Neue Plugins registrieren eine `PluginFactory` in der `Registry`

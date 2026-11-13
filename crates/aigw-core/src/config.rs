@@ -51,6 +51,8 @@ pub struct Config {
     pub limits: LimitsConfig,
     /// Kosten und Budgets (AIGW-31).
     pub billing: BillingConfig,
+    /// Ereignis-Webhooks (Budget-Warnungen usw., AIGW-61).
+    pub events: EventsConfig,
 }
 
 impl Config {
@@ -387,6 +389,114 @@ impl Default for BillingConfig {
             budget_sync_ms: 1000,
         }
     }
+}
+
+/// Geheimnis eines Webhooks (HMAC-Schlüssel), **nie** als Klartext in der Konfiguration.
+///
+/// Genau eines von `credential` (Feld `field` einer `ProviderCredential`, Standard
+/// `webhookSecret`; verschlüsselt in der Datenbank, Rotation ohne Neustart), `env`
+/// (Umgebungsvariable) oder `file` (Datei, ohne abschließenden Zeilenumbruch).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WebhookSecret {
+    /// Name einer `ProviderCredential`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential: Option<String>,
+    /// Feld der `ProviderCredential` (Standard [`WebhookSecret::DEFAULT_FIELD`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
+    /// Umgebungsvariable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<String>,
+    /// Datei.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<PathBuf>,
+}
+
+impl WebhookSecret {
+    /// Standardfeld einer `ProviderCredential`.
+    pub const DEFAULT_FIELD: &'static str = "webhookSecret";
+
+    /// Prüft, dass genau eine Quelle angegeben ist.
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        let n = usize::from(self.credential.is_some())
+            + usize::from(self.env.is_some())
+            + usize::from(self.file.is_some());
+        if n != 1 {
+            return Err("secret: genau eines von credential, env oder file angeben".into());
+        }
+        if self.field.is_some() && self.credential.is_none() {
+            return Err("secret.field gilt nur zusammen mit secret.credential".into());
+        }
+        Ok(())
+    }
+
+    /// Feldname bei `credential`.
+    pub fn field(&self) -> &str {
+        self.field.as_deref().unwrap_or(Self::DEFAULT_FIELD)
+    }
+}
+
+/// Ereignis-Webhooks (AIGW-61, `docs/konzept/11-limits-und-budgets.md`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EventsConfig {
+    /// Empfänger.
+    pub webhooks: Vec<EventWebhookConfig>,
+    /// Plätze im Puffer; ist er voll, werden neue Ereignisse verworfen (Zähler `dropped`).
+    pub queue_capacity: usize,
+    /// Gleichzeitige Zustellungen.
+    pub concurrency: usize,
+    /// Erste Wartezeit vor einer Wiederholung (verdoppelt sich, mit Zufallsanteil).
+    pub retry_initial_ms: u64,
+    /// Längste Wartezeit zwischen zwei Versuchen.
+    pub retry_max_ms: u64,
+    /// Ereignisse im Cluster nur einmal senden (Tabelle `event_dedup`).
+    pub dedup: bool,
+}
+
+impl Default for EventsConfig {
+    fn default() -> Self {
+        Self {
+            webhooks: Vec::new(),
+            queue_capacity: 1024,
+            concurrency: 8,
+            retry_initial_ms: 1000,
+            retry_max_ms: 60_000,
+            dedup: true,
+        }
+    }
+}
+
+/// Ein Empfänger von Ereignissen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EventWebhookConfig {
+    /// Name (Log, Metriken).
+    pub name: String,
+    /// Ziel-URL (SSRF-Regeln wie Deployments, `admin.allow_*_upstreams`).
+    pub url: String,
+    /// Ereignistypen (z. B. `budget.warning`, `budget.exhausted`, Präfix `budget.*`);
+    /// leer = alle.
+    #[serde(default)]
+    pub events: Vec<String>,
+    /// HMAC-Schlüssel (ohne: unsigniert, Warnung beim Start).
+    #[serde(default)]
+    pub secret: Option<WebhookSecret>,
+    /// Zeitlimit je Versuch.
+    #[serde(default = "default_event_timeout_ms")]
+    pub timeout_ms: u64,
+    /// Versuche insgesamt (danach Dead-Letter-Zähler + Log).
+    #[serde(default = "default_event_attempts")]
+    pub max_attempts: u32,
+}
+
+fn default_event_timeout_ms() -> u64 {
+    5000
+}
+
+fn default_event_attempts() -> u32 {
+    6
 }
 
 /// Logging.

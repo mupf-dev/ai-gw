@@ -20,8 +20,10 @@ dependencies = [
  "aigw-core",
  "aigw-counters",
  "aigw-observe",
+ "aigw-plugins",
  "aigw-proxy",
  "aigw-store",
+ "aigw-webhook",
  "axum",
  "bytes",
  "clap",
@@ -72,9 +74,11 @@ name = "aigw-billing"
 version = "0.1.0"
 dependencies = [
  "aigw-core",
+ "aigw-webhook",
  "async-trait",
  "dashmap",
  "jiff",
+ "serde_json",
  "thiserror",
  "time",
  "tokio",
@@ -150,7 +154,9 @@ name = "aigw-plugins"
 version = "0.1.0"
 dependencies = [
  "aigw-core",
+ "aigw-webhook",
  "arc-swap",
+ "bytes",
  "divan",
  "futures-util",
  "http",
@@ -193,6 +199,7 @@ dependencies = [
  "aigw-plugins",
  "aigw-providers",
  "aigw-store",
+ "aigw-webhook",
  "arc-swap",
  "aws-lc-rs",
  "axum",
@@ -217,8 +224,11 @@ version = "0.1.0"
 dependencies = [
  "aigw-billing",
  "aigw-core",
+ "aigw-webhook",
  "async-trait",
  "aws-lc-rs",
+ "axum",
+ "bytes",
  "serde",
  "serde-saphyr",
  "serde_json",
@@ -228,6 +238,31 @@ dependencies = [
  "tokio",
  "tracing",
  "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "aigw-webhook"
+version = "0.1.0"
+dependencies = [
+ "aigw-core",
+ "async-trait",
+ "aws-lc-rs",
+ "axum",
+ "bytes",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "rustls",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time",
+ "tokio",
+ "tower-service",
+ "tracing",
  "uuid",
 ]
 

@@ -39,6 +39,11 @@ pub(crate) struct Runtime {
     pub(crate) budgets: Arc<Budgets>,
     /// Kalender der Budget-Zeiträume (`billing.timezone`).
     pub(crate) calendar: Arc<Calendar>,
+    /// Client für ausgehende Webhooks (Plugin `webhook`, Ereignisse; AIGW-61), SSRF-Regeln
+    /// aus `admin.allow_*_upstreams`.
+    pub(crate) webhooks: aigw_webhook::WebhookClient,
+    /// Ereignis-Webhooks (nur mit `events.webhooks`).
+    events: Option<(aigw_webhook::EventDispatcher, aigw_webhook::EventTask)>,
     budget_sync: BudgetSyncTask,
     reloader: ReloaderTask,
     observe: crate::observe::Observe,
@@ -78,7 +83,20 @@ impl Runtime {
                 .map_err(|e| format!("billing.timezone: {e}"))?,
         );
         let ledger: Arc<dyn BudgetLedger> = Arc::new(store.clone());
-        let budgets = Arc::new(Budgets::new((*calendar).clone(), Some(ledger)));
+        let webhooks = aigw_webhook::WebhookClient::new(
+            aigw_core::upstream::UpstreamPolicy::from_config(&config.admin)?,
+            aigw_webhook::ClientOptions::default(),
+        )
+        .map_err(|e| format!("Webhook-Client: {e}"))?;
+        let events = start_events(config, &webhooks, &store, &snapshot)?;
+        let mut budgets = Budgets::new((*calendar).clone(), Some(ledger));
+        if let Some((d, _)) = &events {
+            budgets = budgets.with_events(Arc::new(aigw_billing::WebhookEvents::new(
+                d.clone(),
+                (*calendar).clone(),
+            )));
+        }
+        let budgets = Arc::new(budgets);
         let budget_sync = budgets.spawn_sync(Duration::from_millis(config.billing.budget_sync_ms));
         tracing::info!(
             counters = ?counters.kind(),
@@ -89,6 +107,8 @@ impl Runtime {
             counters,
             budgets,
             calendar,
+            webhooks,
+            events,
             budget_sync,
             observer: observe.log.observer(),
             observe_metrics: Arc::clone(observe.log.metrics()),
@@ -109,6 +129,7 @@ impl Runtime {
             otlp: Arc::clone(&self.observe.otlp_metrics),
             snapshot: self.snapshot.clone(),
             reload: Arc::clone(&self.reload_metrics),
+            events: self.events.as_ref().map(|(d, _)| Arc::clone(d.metrics())),
         }
     }
 
@@ -122,7 +143,44 @@ impl Runtime {
             );
         }
         self.budget_sync.shutdown().await;
+        if let Some((d, task)) = self.events {
+            drop(d);
+            task.shutdown(Duration::from_secs(5)).await;
+        }
         self.reloader.shutdown().await;
         self.store.close().await;
     }
+}
+
+/// Startet die Ereignis-Webhooks (`events.webhooks`, AIGW-61); `None` ohne Empfänger.
+fn start_events(
+    config: &Config,
+    client: &aigw_webhook::WebhookClient,
+    store: &Store,
+    snapshot: &SnapshotHandle,
+) -> Result<Option<(aigw_webhook::EventDispatcher, aigw_webhook::EventTask)>, String> {
+    let cfg = &config.events;
+    if cfg.webhooks.is_empty() {
+        return Ok(None);
+    }
+    let source: Arc<dyn aigw_webhook::CredentialSource> = Arc::new(snapshot.clone());
+    let targets = cfg
+        .webhooks
+        .iter()
+        .map(|w| aigw_webhook::EventTarget::from_config(client, w, Some(Arc::clone(&source))))
+        .collect::<Result<Vec<_>, _>>()?;
+    let dedup: Option<Arc<dyn aigw_webhook::EventDedup>> = cfg
+        .dedup
+        .then(|| Arc::new(store.clone()) as Arc<dyn aigw_webhook::EventDedup>);
+    tracing::info!(
+        webhooks = targets.len(),
+        dedup = cfg.dedup,
+        "Ereignis-Webhooks bereit"
+    );
+    Ok(Some(aigw_webhook::EventDispatcher::start(
+        client.clone(),
+        targets,
+        dedup,
+        aigw_webhook::DispatcherOptions::from_config(cfg),
+    )))
 }

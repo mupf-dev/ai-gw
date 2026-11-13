@@ -154,7 +154,19 @@ fn serve(
         );
         let routes_task = routes.spawn(runtime_state.snapshot.clone());
         // Plugin-Ketten je (Org, Team, Key, Modellgruppe), Neuaufbau je config_version (AIGW-36).
-        let plugins = std::sync::Arc::new(aigw_proxy::PluginChains::default());
+        // Plugin `webhook` (AIGW-61) mit SSRF-Regeln aus `admin.*` und Credential-Referenzen
+        // über den Snapshot.
+        let mut registry = aigw_plugins::Registry::with_builtin();
+        registry.register(std::sync::Arc::new(
+            aigw_plugins::builtin::webhook::Factory::new(
+                runtime_state.webhooks.clone(),
+                Some(std::sync::Arc::new(runtime_state.snapshot.clone())),
+            ),
+        ));
+        let plugins = std::sync::Arc::new(aigw_proxy::PluginChains::new(
+            registry,
+            aigw_plugins::IndexOptions::default(),
+        ));
         let plugins_task = plugins.spawn(runtime_state.snapshot.clone());
         let state = aigw_proxy::ProxyState {
             routes,

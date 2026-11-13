@@ -84,6 +84,8 @@ pub(crate) struct MetricsSources {
     pub(crate) otlp: Arc<OtlpMetrics>,
     pub(crate) snapshot: SnapshotHandle,
     pub(crate) reload: Arc<ReloadMetrics>,
+    /// Ereignis-Webhooks (AIGW-61), falls konfiguriert.
+    pub(crate) events: Option<Arc<aigw_webhook::EventMetrics>>,
 }
 
 impl MetricsSources {
@@ -95,6 +97,9 @@ impl MetricsSources {
         aigw_observe::prom::render_snapshot(&mut out, self.snapshot.version(), &self.reload);
         self.log.render_prometheus(&mut out);
         self.otlp.render_prometheus(&mut out);
+        if let Some(e) = &self.events {
+            e.render_prometheus(&mut out);
+        }
         out
     }
 }

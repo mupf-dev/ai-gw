@@ -110,6 +110,7 @@ async fn build(store: &Store, keyring: &Keyring, version: i64) -> Result<Snapsho
         creds.insert(name.clone(), Arc::new(data));
         snap.credentials.insert(name, info);
     }
+    snap.credential_data.clone_from(&creds);
 
     // Modellgruppen + Deployments
     let mut deployments: HashMap<String, Vec<DeploymentCtx>> = HashMap::new();

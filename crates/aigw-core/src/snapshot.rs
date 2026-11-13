@@ -131,6 +131,9 @@ pub struct Snapshot {
     pub teams: HashMap<Id, Arc<Team>>,
     /// Zugangsdaten (Metadaten) nach Name.
     pub credentials: HashMap<String, ProviderCredential>,
+    /// Entschlüsselte Zugangsdaten nach Name (nur im RAM; z. B. Webhook-Geheimnisse über eine
+    /// Credential-Referenz, AIGW-61).
+    pub credential_data: HashMap<String, Arc<CredentialData>>,
     /// Preise je (Anbieter, Anbieter-Modell), aufsteigend nach `validFrom`.
     /// Einträge ohne Anbieter stehen unter `None`.
     pub prices: HashMap<(Option<ProviderKind>, String), Vec<Arc<Price>>>,
