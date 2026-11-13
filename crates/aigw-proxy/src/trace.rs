@@ -25,11 +25,26 @@ fn ingress_name(f: WireFormat) -> &'static str {
         WireFormat::AnthropicMessages => "anthropic-messages",
         WireFormat::BedrockConverse => "bedrock-converse",
         WireFormat::Gemini => "gemini",
+        WireFormat::OpenAiResponses => "openai-responses",
+        WireFormat::OpenAiEmbeddings => "openai-embeddings",
+        WireFormat::OpenAiImages => "openai-images",
+        WireFormat::OpenAiAudio => "openai-audio",
     }
 }
 
 /// Wurzel-Span einer Chat-Anfrage.
 pub(crate) fn request_span(request_id: &str, ingress: WireFormat, headers: &HeaderMap) -> Span {
+    request_span_op(request_id, ingress, headers, "chat")
+}
+
+/// Wurzel-Span einer Anfrage mit GenAI-Operation `operation` (`chat`, `embeddings`,
+/// `image_generation`, `audio_transcription`, `audio_speech`; AIGW-21).
+pub(crate) fn request_span_op(
+    request_id: &str,
+    ingress: WireFormat,
+    headers: &HeaderMap,
+    operation: &'static str,
+) -> Span {
     let traceparent = headers
         .get(TRACEPARENT)
         .and_then(|v| v.to_str().ok())
@@ -37,11 +52,11 @@ pub(crate) fn request_span(request_id: &str, ingress: WireFormat, headers: &Head
     tracing::info_span!(
         target: TRACE_TARGET,
         "request",
-        otel.name = "chat",
+        otel.name = operation,
         otel.kind = "server",
         otel.traceparent = traceparent,
         otel.status_code = Empty,
-        gen_ai.operation.name = "chat",
+        gen_ai.operation.name = operation,
         gen_ai.system = Empty,
         gen_ai.request.model = Empty,
         gen_ai.request.max_tokens = Empty,

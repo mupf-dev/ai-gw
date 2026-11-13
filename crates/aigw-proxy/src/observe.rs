@@ -199,6 +199,11 @@ impl Recorder {
             r.model_alias = Some(model.to_owned());
             r.stream = stream;
         }
+        if !self.span.is_disabled() {
+            self.span
+                .record("gen_ai.request.model", model)
+                .record("aigw.stream", stream);
+        }
     }
 
     /// Usage einer Antwort anderer Endpunkte; `estimated` = Anbieter meldete keine Tokens

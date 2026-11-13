@@ -24,6 +24,7 @@ use axum::extract::{Extension, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use bytes::Bytes;
+use tracing::Instrument as _;
 
 use crate::ProxyState;
 use crate::observe::{ObservedBytes, ObservedStream};
@@ -151,8 +152,19 @@ pub(crate) async fn embeddings(
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
-    let mut p = Pipeline::new(&st, &rid, started, WireFormat::OpenAiEmbeddings);
-    match embeddings_inner(&mut p, &headers, body).await {
+    let mut p = Pipeline::new(
+        &st,
+        &rid,
+        started,
+        WireFormat::OpenAiEmbeddings,
+        &headers,
+        "embeddings",
+    );
+    let span = p.span.clone();
+    match embeddings_inner(&mut p, &headers, body)
+        .instrument(span)
+        .await
+    {
         Ok(out) => p.reply("application/json", out),
         Err(e) => p.fail(e),
     }
@@ -193,8 +205,16 @@ pub(crate) async fn images_generations(
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
-    let mut p = Pipeline::new(&st, &rid, started, WireFormat::OpenAiImages);
-    match images_inner(&mut p, &headers, body).await {
+    let mut p = Pipeline::new(
+        &st,
+        &rid,
+        started,
+        WireFormat::OpenAiImages,
+        &headers,
+        "image_generation",
+    );
+    let span = p.span.clone();
+    match images_inner(&mut p, &headers, body).instrument(span).await {
         Ok(out) => p.reply("application/json", out),
         Err(e) => p.fail(e),
     }
@@ -269,8 +289,19 @@ async fn audio_text(
     body: Result<Bytes, BytesRejection>,
     task: AudioTask,
 ) -> Response {
-    let mut p = Pipeline::new(st, rid, started, WireFormat::OpenAiAudio);
-    match audio_text_inner(&mut p, headers, body, task).await {
+    let mut p = Pipeline::new(
+        st,
+        rid,
+        started,
+        WireFormat::OpenAiAudio,
+        headers,
+        "audio_transcription",
+    );
+    let span = p.span.clone();
+    match audio_text_inner(&mut p, headers, body, task)
+        .instrument(span)
+        .await
+    {
         Ok((ct, out)) => p.reply(ct, out),
         Err(e) => p.fail(e),
     }
@@ -307,8 +338,16 @@ pub(crate) async fn audio_speech(
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
-    let mut p = Pipeline::new(&st, &rid, started, WireFormat::OpenAiAudio);
-    match speech_inner(&mut p, &headers, body).await {
+    let mut p = Pipeline::new(
+        &st,
+        &rid,
+        started,
+        WireFormat::OpenAiAudio,
+        &headers,
+        "audio_speech",
+    );
+    let span = p.span.clone();
+    match speech_inner(&mut p, &headers, body).instrument(span).await {
         Ok(speech) => p.stream(|rec| {
             let SpeechStream { content_type, body } = speech;
             ok_with(
@@ -368,8 +407,19 @@ pub(crate) async fn responses(
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
-    let mut p = Pipeline::new(&st, &rid, started, WireFormat::OpenAiResponses);
-    match responses_inner(&mut p, &headers, body).await {
+    let mut p = Pipeline::new(
+        &st,
+        &rid,
+        started,
+        WireFormat::OpenAiResponses,
+        &headers,
+        "chat",
+    );
+    let span = p.span.clone();
+    match responses_inner(&mut p, &headers, body)
+        .instrument(span)
+        .await
+    {
         Ok(ResponsesReply::Json(out)) => p.reply("application/json", out),
         Ok(ResponsesReply::Stream(events, echo)) => p.stream(|rec| {
             let events: EventStream = Box::pin(ObservedStream::new(events, rec));

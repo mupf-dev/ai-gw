@@ -17,12 +17,14 @@
 use std::sync::Arc;
 
 use aigw_core::ir::{ApiError, ErrorKind, UpstreamError};
+use aigw_core::observe::error_type;
 use aigw_core::wire::WireFormat;
 use axum::body::Body;
 use axum::extract::rejection::BytesRejection;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Response;
 use bytes::Bytes;
+use tracing::Span;
 
 use crate::ProxyState;
 use crate::auth::{AuthContext, extract_api_key};
@@ -40,6 +42,8 @@ pub(crate) struct Pipeline<'a> {
     rid: &'a RequestId,
     pub(crate) rec: Recorder,
     info: RouteInfo,
+    /// Wurzel-Span (OpenTelemetry, AIGW-45); der Handler führt die Anfrage darin aus.
+    pub(crate) span: Span,
 }
 
 impl<'a> Pipeline<'a> {
@@ -49,12 +53,18 @@ impl<'a> Pipeline<'a> {
         rid: &'a RequestId,
         started: RequestStart,
         ingress: WireFormat,
+        headers: &HeaderMap,
+        operation: &'static str,
     ) -> Self {
+        let span = crate::trace::request_span_op(&rid.0, ingress, headers, operation);
+        let mut rec = Recorder::new(st.observer.clone(), rid.0.clone(), started, ingress);
+        rec.set_span(span.clone());
         Self {
             st,
             rid,
-            rec: Recorder::new(st.observer.clone(), rid.0.clone(), started, ingress),
+            rec,
             info: RouteInfo::default(),
+            span,
         }
     }
 
@@ -68,10 +78,14 @@ impl<'a> Pipeline<'a> {
         &mut self,
         headers: &HeaderMap,
     ) -> Result<AuthContext, UpstreamError> {
-        let auth = self
-            .st
-            .auth
-            .authenticate(extract_api_key(headers).as_ref())?;
+        let auth = {
+            let span = crate::trace::auth_span();
+            let _g = span.enter();
+            self.st
+                .auth
+                .authenticate(extract_api_key(headers).as_ref())
+                .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?
+        };
         self.rec.set_key(&auth);
         Ok(auth)
     }
@@ -107,15 +121,23 @@ impl<'a> Pipeline<'a> {
             ));
         }
         let _group = auth.authorize_model(model)?;
-        let route = self.st.routes.route(model).ok_or_else(|| {
-            ApiError::new(
-                ErrorKind::NotFound,
-                format!("Modell {model:?} ist nicht konfiguriert"),
-            )
-            .with_param("model")
-            .with_code("model_not_found")
-        })?;
+        // Platzhalter-Span wie im Chat-Pfad, bis die Plugin-Kette eingehängt wird.
+        drop(crate::trace::plugins_span());
+        let route_span = crate::trace::route_span(model);
+        let route = route_span
+            .in_scope(|| self.st.routes.route(model))
+            .ok_or_else(|| {
+                crate::trace::fail(&route_span, "not_found");
+                ApiError::new(
+                    ErrorKind::NotFound,
+                    format!("Modell {model:?} ist nicht konfiguriert"),
+                )
+                .with_param("model")
+                .with_code("model_not_found")
+            })?;
+        route_span.record("aigw.model_group", route.name());
         if !route.supports(cap) {
+            crate::trace::fail(&route_span, "unsupported_capability");
             return Err(UpstreamError::from(route.unsupported_error(cap)));
         }
         Ok(route)
@@ -140,6 +162,9 @@ impl<'a> Pipeline<'a> {
         }
         self.info.attempts = routed.attempts.len();
         self.info.fallback.clone_from(&routed.fallback);
+        if let Some(f) = &routed.fallback {
+            self.span.record("aigw.fallback", f.as_str());
+        }
         self.rec.set_attempts(routed.attempts);
         routed.result
     }
