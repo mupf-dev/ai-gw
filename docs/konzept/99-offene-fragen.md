@@ -106,7 +106,7 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 79. [x] Bedrock http(s)-Bild-URLs ablehnen (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 
 ## AIGW-24–26 Routing
-80. [ ] Fallback auf nicht freigegebene Gruppe erlaubt (Empf. ja)
+80. [x] Fallback: B nur auf freigegebene Gruppen, sonst überspringen (Header x-aigw-fallback-skipped), Ausnahme settings.fallbackIgnoresGrants (Umsetzung nötig)
 81. [x] Nur Kette der Ursprungsgruppe (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 82. [x] Stream-Header erst nach erstem Event (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 83. [x] Alle gesperrt wegen Retry-After/Kapazität → 429 statt 503 (Empf. ja)  → Empfehlung übernommen (2026-11-13)
@@ -118,7 +118,7 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 87. [x] Höchstlaufzeit Admin-Keys konfigurierbar (Empf.)  → Empfehlung übernommen (2026-11-13)
 88. [x] Admin-Keys nur globale Admins (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 89. [x] org-admin darf eigene Org nicht ändern (Empf. ja)  → Empfehlung übernommen (2026-11-13)
-90. [ ] link_by_email + provision_users an (Empf. ja)
+90. [x] OIDC-Verknüpfung: B provision_users an, link_by_email aus (keine E-Mail-Verknüpfung als Standard) – Verknüpfung über unveränderliche ID: iss+sub, bei Entra tid+oid (konfigurierbarer identity_claim), Einladungslink (Umsetzung nötig)
 91. [x] Bootstrap aus erst bei globaler Admin-Rolle (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 92. [x] IdP-Gruppen erst beim nächsten Login (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 93. [x] Eingeschränkte Rollen sehen Credential-Metadaten (Empf. ja)  → Empfehlung übernommen (2026-11-13)
@@ -128,7 +128,7 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 95. [x] nur HTTP/protobuf, gzip später (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 96. [x] sampling_ratio 1.0 wenn an (Empf.)  → Empfehlung übernommen (2026-11-13)
 97. [x] parent_based true (Empf.)  → Empfehlung übernommen (2026-11-13)
-98. [ ] propagate an externe Anbieter (Empf. global true, je Deployment abschaltbar)
+98. [x] traceparent: B Standard je Anbietertyp (an: vllm/ollama/openai-compatible; aus: externe Cloud), settings.propagateTraceContext je Deployment (Umsetzung nötig)
 99. [x] deployment-Label als Name (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 100. [x] trace_id im Request-Log (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 101. [x] gen_ai.provider.name zusätzlich (Empf. ja)  → Empfehlung übernommen (2026-11-13)
@@ -287,3 +287,18 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 - F143/F144/F146/F147: Analytics 1d nach billing.timezone, deltaPoints, Org-Rollen sehen teamlose Keys ihrer Org (F3), clientIp nur admin/auditor
 - F149/F152/F154: Ressource Secret (verschlüsselt, GitOps valueFrom); ApiError mit optionalem exaktem Status; Budget-Ereignisse mit Namen
 - F161/F162/F164: guardrails-Spalte request_log; aigw.*-Meta nie an externe Plugins (läuft in AIGW-37/38); entropy.enabled je Bindung
+- F80: Fallback prüft Freigaben (Key/Team) der Zielgruppe; Ausnahme settings.fallbackIgnoresGrants; Header x-aigw-fallback-skipped
+- F90: OIDC-Identität = (issuer, identity_claim); Standard sub, Profil entra: oid + tid (Tenant-Prüfung); Nutzer vorab mit dieser ID anlegbar (UI/API/GitOps); Einladungslink (einmalig, Ablauf); link_by_email Standard aus
+- F98: propagate-Standard je ProviderKind (intern an, Cloud aus), Override settings.propagateTraceContext
+
+## AIGW-39/40 Cache – Empfehlungen übernommen (2026-11-13)
+167. [x] Cache als Pipeline-Schritt statt Plugin-Respond → Empfehlung übernommen
+168. [x] Usage im Body bei Treffer = Original, Header kennzeichnet Treffer → Empfehlung übernommen
+169. [x] Embedding-Kosten des semantischen Caches auf den Key buchen → Empfehlung übernommen (Umsetzung nötig)
+170. [x] Partition über ganzen Verlauf → Empfehlung übernommen
+171. [x] fehlende temperature = nicht cachen → Empfehlung übernommen
+172. [x] Warmstart-Persistenz Standard an (verschlüsselt) → Empfehlung übernommen
+173. [x] check.sh mit pgvector/redis-stack-Images → Empfehlung übernommen; Redis-Stack-Image auf feste Version pinnen (Umsetzung nötig)
+174. [x] Cache für Embeddings/Responses als Folgeaufgabe → Empfehlung übernommen
+175. [x] ef_search 64 Standard, 128 dokumentiert → Empfehlung übernommen
+- F169/F173/F174: Embedding-Kosten des Caches auf Key buchen; redis-stack-server-Image versionieren; Cache für Embeddings (exakt) + Responses
