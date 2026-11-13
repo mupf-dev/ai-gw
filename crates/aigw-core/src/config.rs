@@ -42,6 +42,8 @@ pub struct Config {
     pub observe: ObserveConfig,
     /// GitOps (AIGW-33).
     pub gitops: GitopsConfig,
+    /// Admin-API: Regeln für Upstream-Endpunkte (AIGW-65).
+    pub admin: AdminConfig,
 }
 
 impl Config {
@@ -349,6 +351,21 @@ impl Default for LogConfig {
     }
 }
 
+/// Einstellungen der Admin-API (AIGW-65, `docs/konzept/08-admin-api.md`).
+///
+/// Endpunkte von Deployments werden gegen SSRF-Grundregeln geprüft: nur `https`, keine
+/// privaten/lokalen Adressen. Ausnahmen (z. B. Ollama/vLLM im LAN) werden hier freigeschaltet.
+/// Einträge: Hostname (`ollama`, `localhost`), Muster `*.lan`, IP-Adresse oder CIDR-Bereich
+/// (`192.168.0.0/16`, `fd00::/8`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AdminConfig {
+    /// Hosts, die per `http://` (ohne TLS) angesprochen werden dürfen.
+    pub allow_insecure_upstreams: Vec<String>,
+    /// Private, lokale oder interne Ziele, die trotzdem erlaubt sind.
+    pub allow_private_upstreams: Vec<String>,
+}
+
 /// Request-Log und Auswertung (AIGW-43, `docs/konzept/07-beobachtung.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -574,6 +591,18 @@ counters:
         assert_eq!(cfg.observe.flush_interval_ms, 500);
         assert!(cfg.observe.jsonl.enabled);
         assert!(Config::from_yaml("observe:\n  payload: everything\n").is_err());
+    }
+
+    #[test]
+    fn admin_section() {
+        let cfg = Config::from_yaml_with_env(
+            "admin:\n  allow_private_upstreams: [\"192.168.0.0/16\"]\n",
+            env(&[("AIGW_ADMIN__ALLOW_INSECURE_UPSTREAMS", "localhost, ollama")]),
+        )
+        .unwrap();
+        assert_eq!(cfg.admin.allow_private_upstreams, ["192.168.0.0/16"]);
+        assert_eq!(cfg.admin.allow_insecure_upstreams, ["localhost", "ollama"]);
+        assert!(Config::from_yaml("admin:\n  allow_all: true\n").is_err());
     }
 
     #[test]

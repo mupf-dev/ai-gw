@@ -255,7 +255,7 @@ async fn upsert_credential(
     };
     let (fields, sealed) = seal_spec(keyring, id, &plain)?;
     let key_id = sealed.key_id.clone();
-    let cols = sealed_cols(&plain, &fields, sealed)?;
+    let cols = sealed_cols(plain.provider, &fields, sealed)?;
     let action = match existing {
         Some(_) => {
             tx.update_row(kind, id, &meta, cols).await?;

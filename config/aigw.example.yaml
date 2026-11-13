@@ -78,3 +78,12 @@ gitops:
   # Modus „nur YAML“: Schreibrouten der Admin-API (und damit der UI) antworten mit 403;
   # Änderungen nur per `aigw config apply` bzw. POST /admin/api/v1/config:apply.
   read_only_admin: false
+
+# Admin-API: Prüfung der Upstream-Endpunkte von Deployments (SSRF-Schutz,
+# docs/konzept/08-admin-api.md). Standard: nur https, keine privaten/lokalen Ziele.
+# Einträge: Hostname, Muster `*.lan`, IP-Adresse oder CIDR-Bereich.
+admin:
+  # http:// (ohne TLS) nur für diese Hosts, z. B. ["localhost", "ollama"]
+  allow_insecure_upstreams: []
+  # private/lokale Ziele (LAN, Loopback, Docker-Dienstnamen), z. B. ["192.168.0.0/16", "ollama"]
+  allow_private_upstreams: []

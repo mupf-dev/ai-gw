@@ -64,6 +64,7 @@ dependencies = [
  "arc-swap",
  "bytes",
  "divan",
+ "http",
  "serde",
  "serde-saphyr",
  "serde_json",

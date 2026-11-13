@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 ai-gw contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Ressourcen der Admin-API (AIGW-28): Organisationen, Teams, Nutzer, API-Keys,
-//! Modellgruppen (lesend).
+//! Ressourcen der Admin-API: Organisationen, Teams, Nutzer, API-Keys (AIGW-28) und
+//! Modellgruppen (AIGW-65) sowie die generischen CRUD-Abläufe, die auch
+//! [`crate::deployments`] und [`crate::prices`] nutzen.
 //!
 //! Konventionen (Details: `docs/konzept/08-admin-api.md`):
 //! - Ressourcen werden über ihren **Namen** adressiert (`/organizations/{name}`), Körper wie
@@ -17,11 +18,13 @@
 
 use std::collections::HashSet;
 use std::fmt::Write as _;
+use std::future::Future;
 
 use aigw_core::resource::{
     ApiKey, ApiKeySpec, ApiKeyState, CreatedApiKey, Id, ModelGroupSpec, Object, ObjectMeta,
     OrganizationSpec, TeamSpec, UserSpec,
 };
+use aigw_core::validate;
 use aigw_store::{PlainResource, Store};
 use aws_lc_rs::digest;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
@@ -39,8 +42,8 @@ use crate::AdminState;
 use crate::auth::{Permission, Principal};
 use crate::problem::Problem;
 
-type St = State<AdminState>;
-type ApiResult = Result<Response, Problem>;
+pub(crate) type St = State<AdminState>;
+pub(crate) type ApiResult = Result<Response, Problem>;
 
 /// Basis aller Ressourcenpfade.
 pub const BASE: &str = "/admin/api/v1";
@@ -83,7 +86,7 @@ fn key_etag(k: &ApiKey) -> String {
 }
 
 /// Prüft `If-Match` (fehlt der Header, wird ohne Prüfung geschrieben).
-fn check_if_match(headers: &HeaderMap, current: &str) -> Result<(), Problem> {
+pub(crate) fn check_if_match(headers: &HeaderMap, current: &str) -> Result<(), Problem> {
     let Some(v) = headers.get(header::IF_MATCH) else {
         return Ok(());
     };
@@ -100,7 +103,11 @@ fn check_if_match(headers: &HeaderMap, current: &str) -> Result<(), Problem> {
     }
 }
 
-fn json_with<T: Serialize>(status: StatusCode, etag: Option<String>, body: &T) -> Response {
+pub(crate) fn json_with<T: Serialize>(
+    status: StatusCode,
+    etag: Option<String>,
+    body: &T,
+) -> Response {
     let mut res = (status, Json(body)).into_response();
     if let Some(tag) = etag.and_then(|t| HeaderValue::from_str(&t).ok()) {
         res.headers_mut().insert(header::ETAG, tag);
@@ -108,14 +115,14 @@ fn json_with<T: Serialize>(status: StatusCode, etag: Option<String>, body: &T) -
     res
 }
 
-fn created_at(mut res: Response, location: &str) -> Response {
+pub(crate) fn created_at(mut res: Response, location: &str) -> Response {
     if let Ok(v) = HeaderValue::from_str(location) {
         res.headers_mut().insert(header::LOCATION, v);
     }
     res
 }
 
-fn no_store(mut res: Response) -> Response {
+pub(crate) fn no_store(mut res: Response) -> Response {
     res.headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     res
@@ -123,10 +130,10 @@ fn no_store(mut res: Response) -> Response {
 
 /// Gemeinsame Listenparameter.
 pub(crate) struct ListArgs<'a> {
-    limit: Option<u32>,
-    cursor: Option<&'a str>,
-    q: Option<&'a str>,
-    label: Option<&'a str>,
+    pub(crate) limit: Option<u32>,
+    pub(crate) cursor: Option<&'a str>,
+    pub(crate) q: Option<&'a str>,
+    pub(crate) label: Option<&'a str>,
 }
 
 /// Label-Selektor `k=v,k2` (alle müssen passen; ohne `=` genügt das Vorhandensein).
@@ -149,7 +156,7 @@ fn parse_labels(sel: Option<&str>) -> Result<Vec<(String, Option<String>)>, Prob
 
 /// Filtert nach `q`/`label` und schneidet die Seite nach `cursor`/`limit` aus.
 /// `items` muss nach Name sortiert sein (so liefert sie der Store).
-fn paginate<T>(
+pub(crate) fn paginate<T>(
     items: Vec<T>,
     meta: impl Fn(&T) -> &ObjectMeta,
     args: &ListArgs<'_>,
@@ -213,7 +220,7 @@ async fn check_models(store: &Store, models: &[String]) -> Result<(), Problem> {
 }
 
 /// Name aus dem Körper muss zum Pfad passen (Umbenennen wird nicht unterstützt).
-fn same_name(path: &str, mut meta: ObjectMeta) -> Result<ObjectMeta, Problem> {
+pub(crate) fn same_name(path: &str, mut meta: ObjectMeta) -> Result<ObjectMeta, Problem> {
     if meta.name.is_empty() {
         meta.name = path.to_owned();
     }
@@ -251,9 +258,41 @@ pub(crate) trait AdminResource: PlainResource {
     fn allowed_models(&self) -> &[String] {
         &[]
     }
+
+    /// Filter über die ganze (nach Name sortierte) Liste, z. B. „nur gültige Preisversion“.
+    fn post_filter(
+        items: Vec<Object<Self>>,
+        _q: &Self::Query,
+    ) -> Result<Vec<Object<Self>>, Problem> {
+        Ok(items)
+    }
+
+    /// Name beim Anlegen ohne `metadata.name` (`None` = Name ist Pflicht).
+    fn default_name(_spec: &Self) -> Option<String> {
+        None
+    }
+
+    /// Inhaltliche Prüfung vor dem Schreiben (unter der Schreibsperre); `current` ist beim
+    /// Ersetzen der bisherige Stand.
+    fn check<'a>(
+        _st: &'a AdminState,
+        _name: &'a str,
+        _spec: &'a Self,
+        _current: Option<&'a Object<Self>>,
+    ) -> impl Future<Output = Result<(), Problem>> + Send + 'a {
+        async { Ok(()) }
+    }
+
+    /// Prüfung vor dem Löschen (unter der Schreibsperre), z. B. Verweise ohne Fremdschlüssel.
+    fn check_delete<'a>(
+        _st: &'a AdminState,
+        _current: &'a Object<Self>,
+    ) -> impl Future<Output = Result<(), Problem>> + Send + 'a {
+        async { Ok(()) }
+    }
 }
 
-async fn list_impl<R: AdminResource>(
+pub(crate) async fn list_impl<R: AdminResource>(
     st: &AdminState,
     q: &R::Query,
 ) -> Result<(Vec<R::Res>, Option<String>), Problem> {
@@ -264,24 +303,32 @@ async fn list_impl<R: AdminResource>(
         .into_iter()
         .filter(|o| R::filter(o, q))
         .collect();
+    let items = R::post_filter(items, q)?;
     let (page, next) = paginate(items, |o| &o.metadata, &R::list_args(q))?;
     Ok((page.into_iter().map(R::Res::from).collect(), next))
 }
 
-async fn get_impl<R: AdminResource>(st: &AdminState, name: &str) -> ApiResult {
+pub(crate) async fn get_impl<R: AdminResource>(st: &AdminState, name: &str) -> ApiResult {
     let obj: Object<R> = st.store.get(name).await?;
     let tag = etag_of(&obj);
     Ok(json_with(StatusCode::OK, Some(tag), &R::Res::from(obj)))
 }
 
-async fn create_impl<R: AdminResource>(
+pub(crate) async fn create_impl<R: AdminResource>(
     st: &AdminState,
     p: &Principal,
-    meta: ObjectMeta,
+    mut meta: ObjectMeta,
     spec: R,
 ) -> ApiResult {
     p.require(Permission::Write)?;
+    if meta.name.is_empty()
+        && let Some(name) = R::default_name(&spec)
+    {
+        meta.name = name;
+    }
     check_models(&st.store, spec.allowed_models()).await?;
+    let _guard = st.write_lock.lock().await;
+    R::check(st, &meta.name, &spec, None).await?;
     let obj = st.store.create(p.actor(), meta, spec).await?;
     let tag = etag_of(&obj);
     let location = format!("{BASE}/{}/{}", R::COLLECTION, obj.metadata.name);
@@ -291,7 +338,7 @@ async fn create_impl<R: AdminResource>(
     ))
 }
 
-async fn put_impl<R: AdminResource>(
+pub(crate) async fn put_impl<R: AdminResource>(
     st: &AdminState,
     p: &Principal,
     name: &str,
@@ -305,12 +352,13 @@ async fn put_impl<R: AdminResource>(
     let _guard = st.write_lock.lock().await;
     let current: Object<R> = st.store.get(name).await?;
     check_if_match(headers, &etag_of(&current))?;
+    R::check(st, name, &spec, Some(&current)).await?;
     let obj = st.store.update(p.actor(), meta, spec).await?;
     let tag = etag_of(&obj);
     Ok(json_with(StatusCode::OK, Some(tag), &R::Res::from(obj)))
 }
 
-async fn delete_impl<R: AdminResource>(
+pub(crate) async fn delete_impl<R: AdminResource>(
     st: &AdminState,
     p: &Principal,
     name: &str,
@@ -320,6 +368,7 @@ async fn delete_impl<R: AdminResource>(
     let _guard = st.write_lock.lock().await;
     let current: Object<R> = st.store.get(name).await?;
     check_if_match(headers, &etag_of(&current))?;
+    R::check_delete(st, &current).await?;
     st.store.delete(p.actor(), R::KIND, name).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -331,6 +380,7 @@ macro_rules! plain_resource {
         query = $query:ident, tag = $tag:tt,
         path = $path:tt, item_path = $item:tt, what = $what:tt,
         handlers = [$list_fn:ident, $create_fn:ident, $get_fn:ident, $put_fn:ident, $delete_fn:ident]
+        $(, input_meta = [$($iattr:meta),*])?
     ) => {
         #[doc = concat!($what, " (gelesen).")]
         #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -360,6 +410,7 @@ macro_rules! plain_resource {
         #[serde(rename_all = "camelCase", deny_unknown_fields)]
         pub struct $input {
             /// Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert).
+            $($(#[$iattr])*)?
             pub metadata: ObjectMeta,
             /// Spezifikation.
             pub spec: $spec,
@@ -500,6 +551,8 @@ macro_rules! plain_resource {
         }
     };
 }
+
+pub(crate) use plain_resource;
 
 // ---------------------------------------------------------------------------------------------
 // Organisationen
@@ -672,32 +725,8 @@ impl AdminResource for UserSpec {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Modellgruppen (lesend, für Freigaben)
+// Modellgruppen
 // ---------------------------------------------------------------------------------------------
-
-/// Modellgruppe (gelesen).
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelGroup {
-    /// ID (UUIDv7).
-    #[schema(value_type = String, format = Uuid)]
-    pub id: Id,
-    /// Metadaten.
-    pub metadata: ObjectMeta,
-    /// Spezifikation.
-    pub spec: ModelGroupSpec,
-}
-
-/// Seite einer Liste: Modellgruppen.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelGroupList {
-    /// Einträge (nach Name sortiert).
-    pub items: Vec<ModelGroup>,
-    /// Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_cursor: Option<String>,
-}
 
 /// Filter für Modellgruppen.
 #[derive(Debug, Clone, Default, Deserialize, IntoParams)]
@@ -714,88 +743,90 @@ pub struct ModelGroupQuery {
     pub label: Option<String>,
 }
 
-/// Listet Modellgruppen (Namen und Aliasse für Modellfreigaben).
-#[utoipa::path(
-    get, path = "/admin/api/v1/model-groups", tag = "model-groups", params(ModelGroupQuery),
-    responses(
-        (status = 200, description = "Seite", body = ModelGroupList),
-        (status = 400, description = "Ungültige Parameter", body = Problem, content_type = "application/problem+json"),
-        (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
-        (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
-    ),
-    security(("bearer" = []))
-)]
-pub(crate) async fn list_model_groups(
-    State(st): St,
-    Extension(p): Extension<Principal>,
-    q: Result<Query<ModelGroupQuery>, QueryRejection>,
-) -> ApiResult {
-    p.require(Permission::Read)?;
-    let Query(q) = q?;
-    // `q` sucht auch in Aliassen, daher hier statt in `paginate`.
-    let items: Vec<_> = st
-        .store
-        .list::<ModelGroupSpec>()
-        .await?
-        .into_iter()
-        .filter(|g| {
-            q.q.as_deref().is_none_or(|s| {
-                g.metadata.name.contains(s) || g.spec.aliases.iter().any(|a| a.contains(s))
-            })
+plain_resource!(
+    spec = ModelGroupSpec,
+    res = ModelGroup,
+    input = ModelGroupInput,
+    list = ModelGroupList,
+    query = ModelGroupQuery,
+    tag = "model-groups",
+    path = "/admin/api/v1/model-groups",
+    item_path = "/admin/api/v1/model-groups/{name}",
+    what = "Modellgruppe",
+    handlers = [
+        list_model_groups,
+        create_model_group,
+        get_model_group,
+        put_model_group,
+        delete_model_group
+    ]
+);
+
+impl AdminResource for ModelGroupSpec {
+    type Res = ModelGroup;
+    type Query = ModelGroupQuery;
+    const COLLECTION: &'static str = "model-groups";
+
+    fn list_args(q: &Self::Query) -> ListArgs<'_> {
+        // `q` sucht auch in Aliassen, daher in `filter` statt in `paginate`.
+        ListArgs {
+            limit: q.limit,
+            cursor: q.cursor.as_deref(),
+            q: None,
+            label: q.label.as_deref(),
+        }
+    }
+
+    fn filter(g: &Object<Self>, q: &Self::Query) -> bool {
+        q.q.as_deref().is_none_or(|s| {
+            g.metadata.name.contains(s) || g.spec.aliases.iter().any(|a| a.contains(s))
         })
-        .collect();
-    let args = ListArgs {
-        limit: q.limit,
-        cursor: q.cursor.as_deref(),
-        q: None,
-        label: q.label.as_deref(),
-    };
-    let (page, next_cursor) = paginate(items, |g| &g.metadata, &args)?;
-    let items = page
-        .into_iter()
-        .map(|g| ModelGroup {
-            id: g.id,
-            metadata: g.metadata,
-            spec: g.spec,
-        })
-        .collect();
-    Ok(json_with(
-        StatusCode::OK,
-        None,
-        &ModelGroupList { items, next_cursor },
-    ))
+    }
+
+    async fn check(
+        st: &AdminState,
+        name: &str,
+        spec: &Self,
+        _current: Option<&Object<Self>>,
+    ) -> Result<(), Problem> {
+        validate::aliases(name, spec).map_err(Problem::invalid)?;
+        group_settings(&spec.settings).map_err(Problem::invalid)?;
+        let groups = st.store.list::<ModelGroupSpec>().await?;
+        let by_name = groups
+            .iter()
+            .map(|g| (g.metadata.name.as_str(), &g.spec))
+            .collect();
+        validate::fallbacks(&by_name, name, spec).map_err(Problem::invalid)
+    }
+
+    async fn check_delete(st: &AdminState, current: &Object<Self>) -> Result<(), Problem> {
+        let name = &current.metadata.name;
+        let users: Vec<String> = st
+            .store
+            .list::<ModelGroupSpec>()
+            .await?
+            .into_iter()
+            .filter(|g| g.spec.fallbacks.iter().any(|f| f.model_group == *name))
+            .map(|g| g.metadata.name)
+            .collect();
+        if users.is_empty() {
+            Ok(())
+        } else {
+            Err(Problem::conflict(format!(
+                "Modellgruppe {name:?} ist Fallback-Ziel von {users:?}"
+            )))
+        }
+    }
 }
 
-/// Liest eine Modellgruppe.
-#[utoipa::path(
-    get, path = "/admin/api/v1/model-groups/{name}", tag = "model-groups",
-    params(("name" = String, Path, description = "Name")),
-    responses(
-        (status = 200, description = "Gefunden", body = ModelGroup,
-            headers(("ETag" = String, description = "Version"))),
-        (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
-        (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
-        (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
-    ),
-    security(("bearer" = []))
-)]
-pub(crate) async fn get_model_group(
-    State(st): St,
-    Extension(p): Extension<Principal>,
-    Path(name): Path<String>,
-) -> ApiResult {
-    p.require(Permission::Read)?;
-    let g = st.store.get::<ModelGroupSpec>(&name).await?;
-    let tag = etag_of(&g);
-    Ok(json_with(
-        StatusCode::OK,
-        Some(tag),
-        &ModelGroup {
-            id: g.id,
-            metadata: g.metadata,
-            spec: g.spec,
-        },
-    ))
+/// Prüft `settings` einer Modellgruppe (`retry`, `circuitBreaker`, `healthCheck`) mit dem
+/// Parser der Datenebene ([`aigw_proxy::routing::GroupPolicy::from_settings`]), damit
+/// Tippfehler beim Schreiben auffallen statt still durch Standardwerte ersetzt zu werden.
+/// Auch als `ApplyOptions::group_settings` für GitOps.
+pub fn group_settings(settings: &aigw_core::resource::JsonObject) -> Result<(), String> {
+    aigw_proxy::routing::GroupPolicy::from_settings(settings)
+        .map(drop)
+        .map_err(|e| format!("settings: {e}"))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1270,8 +1301,16 @@ pub(crate) fn router() -> Router<AdminState> {
             post(reactivate_api_key),
         )
         .route("/admin/api/v1/api-keys/{name}/rotate", post(rotate_api_key))
-        .route("/admin/api/v1/model-groups", get(list_model_groups))
-        .route("/admin/api/v1/model-groups/{name}", get(get_model_group))
+        .route(
+            "/admin/api/v1/model-groups",
+            get(list_model_groups).post(create_model_group),
+        )
+        .route(
+            "/admin/api/v1/model-groups/{name}",
+            get(get_model_group)
+                .put(put_model_group)
+                .delete(delete_model_group),
+        )
 }
 
 #[cfg(test)]

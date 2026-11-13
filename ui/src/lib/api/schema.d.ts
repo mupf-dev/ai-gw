@@ -132,6 +132,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/deployments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_deployments"];
+        put?: never;
+        post: operations["create_deployment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/deployments/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_deployment"];
+        put: operations["put_deployment"];
+        post?: never;
+        delete: operations["delete_deployment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/model-groups": {
         parameters: {
             query?: never;
@@ -139,10 +171,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Listet Modellgruppen (Namen und Aliasse für Modellfreigaben). */
         get: operations["list_model_groups"];
         put?: never;
-        post?: never;
+        post: operations["create_model_group"];
         delete?: never;
         options?: never;
         head?: never;
@@ -156,11 +187,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Liest eine Modellgruppe. */
         get: operations["get_model_group"];
-        put?: never;
+        put: operations["put_model_group"];
         post?: never;
-        delete?: never;
+        delete: operations["delete_model_group"];
         options?: never;
         head?: never;
         patch?: never;
@@ -196,6 +226,79 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_prices"];
+        put?: never;
+        post: operations["create_price"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/prices/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_price"];
+        put: operations["put_price"];
+        post?: never;
+        delete: operations["delete_price"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/provider-credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listet Zugangsdaten (ohne Werte). */
+        get: operations["list_credentials"];
+        put?: never;
+        /** Legt Zugangsdaten an (Werte werden verschlüsselt, Antwort ohne Werte). */
+        post: operations["create_credential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/provider-credentials/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Liest Zugangsdaten (ohne Werte). */
+        get: operations["get_credential"];
+        /** Ersetzt Labels, Anbieter und **alle** Werte. */
+        put: operations["put_credential"];
+        post?: never;
+        /** Löscht Zugangsdaten (`409`, solange Deployments oder MCP-Server sie nutzen). */
+        delete: operations["delete_credential"];
+        options?: never;
+        head?: never;
+        /**
+         * Ändert einzelne Felder (JSON Merge Patch): angegebene Werte ersetzen, `null` entfernt,
+         *     nicht genannte Felder behalten ihren gespeicherten Wert.
+         */
+        patch: operations["patch_credential"];
         trace?: never;
     };
     "/admin/api/v1/teams": {
@@ -388,6 +491,19 @@ export interface components {
          * @enum {string}
          */
         BudgetPeriod: "day" | "week" | "month" | "total";
+        /** @description Kapazität eines Deployments (für das Routing). */
+        Capacity: {
+            /**
+             * Format: int64
+             * @description Anfragen je Minute.
+             */
+            rpm?: number | null;
+            /**
+             * Format: int64
+             * @description Tokens je Minute.
+             */
+            tpm?: number | null;
+        };
         /** @description Eine Ressource im Plan. */
         Change: {
             /** @description Aktion. */
@@ -412,6 +528,80 @@ export interface components {
             key: components["schemas"]["ApiKey"];
             /** @description Klartext `sk-aigw-…` (nicht wiederherstellbar). */
             secret: string;
+        };
+        /** @description Metadaten im `PATCH`. */
+        CredentialPatchMeta: {
+            /** @description Ersetzt die Labels vollständig (weglassen = unverändert). */
+            labels?: {
+                [key: string]: string;
+            } | null;
+            /** @description Muss, falls angegeben, zum Pfad passen. */
+            name?: string | null;
+        };
+        /** @description Spezifikation im `PATCH`. */
+        CredentialPatchSpec: {
+            /** @description Zu ändernde Felder: Wert setzt, `null` entfernt; nicht genannte Felder bleiben. */
+            data?: {
+                [key: string]: components["schemas"]["CredentialValue"];
+            };
+            provider?: components["schemas"]["ProviderKind"] | null;
+        };
+        /** @description Ein Geheimwert in der Eingabe. */
+        CredentialValue: {
+            /** @description Klartext (wird sofort verschlüsselt, nie wieder ausgegeben). */
+            value: components["schemas"]["SecretString"];
+        };
+        Deployment: {
+            /**
+             * Format: uuid
+             * @description ID (UUIDv7).
+             */
+            id: string;
+            /** @description Metadaten. */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Spezifikation. */
+            spec: components["schemas"]["DeploymentSpec"];
+        };
+        DeploymentInput: {
+            /** @description Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert). */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Spezifikation. */
+            spec: components["schemas"]["DeploymentSpec"];
+        };
+        DeploymentList: {
+            /** @description Einträge (nach Name sortiert). */
+            items: components["schemas"]["Deployment"][];
+            /** @description Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite. */
+            nextCursor?: string | null;
+        };
+        /** @description Deployment: konkretes Anbieter-Modell hinter einer Modellgruppe. */
+        DeploymentSpec: {
+            /** @description Kapazitätsgrenzen. */
+            capacity?: components["schemas"]["Capacity"];
+            /** @description Zugangsdaten (Name einer `ProviderCredential`). */
+            credential?: string | null;
+            /** @description Deaktivierte Deployments werden nicht geroutet. */
+            enabled?: boolean;
+            /** @description Basis-URL; ohne Angabe der Standard des Anbieters. */
+            endpoint?: string | null;
+            /** @description Modellgruppe (Name). */
+            modelGroup: string;
+            /**
+             * Format: int32
+             * @description Prioritätsgruppe; 0 wird vor 1 genutzt (z. B. PTU vor PAYG).
+             */
+            priority?: number;
+            /** @description Anbieter. */
+            provider: components["schemas"]["ProviderKind"];
+            /** @description Modellname beim Anbieter (bzw. Azure-Deployment-Name). */
+            providerModel: string;
+            /** @description Anbieterspezifische Einstellungen (z. B. `apiVersion`, `region`). */
+            settings?: Record<string, never>;
+            /**
+             * Format: int32
+             * @description Gewicht für `weighted` (Standard 1).
+             */
+            weight?: number;
         };
         /** @description Fallback auf eine andere Modellgruppe. */
         Fallback: {
@@ -460,7 +650,6 @@ export interface components {
          * @enum {string}
          */
         LimitWindow: "second" | "minute" | "hour" | "day";
-        /** @description Modellgruppe (gelesen). */
         ModelGroup: {
             /**
              * Format: uuid
@@ -472,7 +661,12 @@ export interface components {
             /** @description Spezifikation. */
             spec: components["schemas"]["ModelGroupSpec"];
         };
-        /** @description Seite einer Liste: Modellgruppen. */
+        ModelGroupInput: {
+            /** @description Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert). */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Spezifikation. */
+            spec: components["schemas"]["ModelGroupSpec"];
+        };
         ModelGroupList: {
             /** @description Einträge (nach Name sortiert). */
             items: components["schemas"]["ModelGroup"][];
@@ -562,6 +756,44 @@ export interface components {
             /** @description Warnungen (z. B. übersprungene Keys). */
             warnings: string[];
         };
+        Price: {
+            /**
+             * Format: uuid
+             * @description ID (UUIDv7).
+             */
+            id: string;
+            /** @description Metadaten. */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Spezifikation. */
+            spec: components["schemas"]["PriceSpec"];
+        };
+        PriceInput: {
+            /** @description Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert). */
+            metadata?: components["schemas"]["ObjectMeta"];
+            /** @description Spezifikation. */
+            spec: components["schemas"]["PriceSpec"];
+        };
+        PriceList: {
+            /** @description Einträge (nach Name sortiert). */
+            items: components["schemas"]["Price"][];
+            /** @description Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite. */
+            nextCursor?: string | null;
+        };
+        /** @description Preis eines Anbieter-Modells ab einem Zeitpunkt (versioniert). */
+        PriceSpec: {
+            /** @description Modellname beim Anbieter (wie `Deployment.providerModel`). */
+            model: string;
+            perImage?: components["schemas"]["Amount"] | null;
+            /** @description Preise je 1 Mio. Tokens. */
+            perMillionTokens?: components["schemas"]["TokenPrices"];
+            perRequest?: components["schemas"]["Amount"] | null;
+            provider?: components["schemas"]["ProviderKind"] | null;
+            /**
+             * Format: date-time
+             * @description Gültig ab (RFC 3339); es gilt der jüngste Preis mit `validFrom` ≤ Anfragezeitpunkt.
+             */
+            validFrom: string;
+        };
         /** @description Problem Details (RFC 9457). */
         Problem: {
             /** @description Maschinenlesbarer Code (`not-found`, `conflict`, `precondition-failed` …). */
@@ -580,6 +812,74 @@ export interface components {
             /** @description Problemtyp (`urn:aigw:problem:<code>`). */
             type: string;
         };
+        /** @description Zugangsdaten (gelesen) – **ohne** Werte. */
+        ProviderCredential: {
+            /**
+             * Format: uuid
+             * @description ID (UUIDv7).
+             */
+            id: string;
+            /**
+             * @description Metadaten (mit `createdAt`/`updatedAt`; `updatedAt` ändert sich auch beim Ersetzen
+             *     eines Werts).
+             */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Anbieter und Feldnamen. */
+            spec: components["schemas"]["ProviderCredentialSummary"];
+            /** @description Vom Server verwaltete Angaben. */
+            status: components["schemas"]["ProviderCredentialStatus"];
+        };
+        /** @description Zugangsdaten (Eingabe für Anlegen und Ersetzen). */
+        ProviderCredentialInput: {
+            /** @description Metadaten (`name`, `labels`). */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Anbieter und Werte. */
+            spec: components["schemas"]["ProviderCredentialInputSpec"];
+        };
+        /** @description Spezifikation beim Anlegen/Ersetzen. */
+        ProviderCredentialInputSpec: {
+            /** @description Felder, z. B. `{"apiKey": {"value": "sk-…"}}`. */
+            data: {
+                [key: string]: components["schemas"]["CredentialValue"];
+            };
+            /** @description Anbieter. */
+            provider: components["schemas"]["ProviderKind"];
+        };
+        /** @description Seite einer Liste: Zugangsdaten. */
+        ProviderCredentialList: {
+            /** @description Einträge (nach Name sortiert). */
+            items: components["schemas"]["ProviderCredential"][];
+            /** @description Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite. */
+            nextCursor?: string | null;
+        };
+        /** @description Teiländerung (JSON Merge Patch). */
+        ProviderCredentialPatch: {
+            metadata?: components["schemas"]["CredentialPatchMeta"] | null;
+            spec?: components["schemas"]["CredentialPatchSpec"] | null;
+        };
+        /** @description Status der Zugangsdaten. */
+        ProviderCredentialStatus: {
+            /** @description Mindestens ein Geheimwert ist gespeichert. */
+            hasSecret: boolean;
+            /** @description ID des Master-Keys, mit dem verschlüsselt ist (Rotation). */
+            keyId: string;
+        };
+        /** @description Anbieter und Namen der gespeicherten Felder. */
+        ProviderCredentialSummary: {
+            /** @description Namen der gespeicherten Felder (sortiert), z. B. `["apiKey"]`. */
+            fields: string[];
+            /** @description Anbieter. */
+            provider: components["schemas"]["ProviderKind"];
+        };
+        /**
+         * @description Art eines Upstream-Anbieters (MVP-Umfang laut E5).
+         *
+         *     Serialisiert als `openai`, `anthropic`, `azure-openai`, `bedrock`, `vertex`, `mistral`,
+         *     `ollama`, `vllm`, `openai-compatible` und `mock` (eingebauter Echo-Anbieter für Tests,
+         *     Smoke-Tests und Demos; ohne Netzwerkzugriff).
+         * @enum {string}
+         */
+        ProviderKind: "openai" | "anthropic" | "azure-openai" | "bedrock" | "vertex" | "mistral" | "ollama" | "vllm" | "openai-compatible" | "mock";
         /**
          * @description Art einer Ressource (`kind` in YAML).
          * @enum {string}
@@ -621,6 +921,15 @@ export interface components {
          * @enum {string}
          */
         RoutingStrategy: "weighted" | "least-latency" | "least-busy" | "cost";
+        /**
+         * Format: password
+         * @description Geheimer Klartext (z. B. API-Key eines Anbieters).
+         *
+         *     `Debug`, `Display` und `Serialize` geben nur [`REDACTED`] aus; der Wert ist ausschließlich
+         *     über [`SecretString::expose`] erreichbar. Deserialisieren ist erlaubt (Eingabe über die
+         *     Admin-API).
+         */
+        SecretString: string;
         /** @description Anzahl je Aktion. */
         Summary: {
             /** @description Anzulegen. */
@@ -672,6 +981,17 @@ export interface components {
             metadata?: components["schemas"]["BTreeMap"];
             /** @description Organisation (Name). */
             organization: string;
+        };
+        /** @description Preise je 1 Mio. Tokens bzw. je Einheit; fehlende Werte gelten als 0. */
+        TokenPrices: {
+            audioInput?: components["schemas"]["Amount"] | null;
+            audioOutput?: components["schemas"]["Amount"] | null;
+            cacheWrite?: components["schemas"]["Amount"] | null;
+            cachedInput?: components["schemas"]["Amount"] | null;
+            imageInput?: components["schemas"]["Amount"] | null;
+            input?: components["schemas"]["Amount"] | null;
+            output?: components["schemas"]["Amount"] | null;
+            reasoning?: components["schemas"]["Amount"] | null;
         };
         User: {
             /**
@@ -1404,6 +1724,350 @@ export interface operations {
             };
         };
     };
+    list_deployments: {
+        parameters: {
+            query?: {
+                /** @description Seitengröße (1–500, Standard 50). */
+                limit?: number;
+                /** @description Fortsetzung (`nextCursor` der vorigen Seite). */
+                cursor?: string;
+                /** @description Teilstring im Namen oder in `providerModel`. */
+                q?: string;
+                /** @description Label-Selektor `k=v,k2`. */
+                label?: string;
+                /** @description Nur Deployments dieser Modellgruppe (Name). */
+                modelGroup?: string;
+                /** @description Nur dieser Anbieter. */
+                provider?: components["schemas"]["ProviderKind"];
+                /** @description Nur Deployments mit diesen Zugangsdaten (Name). */
+                credential?: string;
+                /** @description Nur aktive (`true`) bzw. deaktivierte (`false`). */
+                enabled?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Seite */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentList"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_deployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeploymentInput"];
+            };
+        };
+        responses: {
+            /** @description Angelegt */
+            201: {
+                headers: {
+                    /** @description Version */
+                    ETag?: string;
+                    /** @description Pfad */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Deployment"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Name bereits vergeben */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe oder Verweis */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_deployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gefunden */
+            200: {
+                headers: {
+                    /** @description Version für If-Match */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Deployment"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    put_deployment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeploymentInput"];
+            };
+        };
+        responses: {
+            /** @description Geändert */
+            200: {
+                headers: {
+                    /** @description Neue Version */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Deployment"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe oder Verweis */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_deployment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gelöscht */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Wird noch verwendet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     list_model_groups: {
         parameters: {
             query?: {
@@ -1460,6 +2124,79 @@ export interface operations {
             };
         };
     };
+    create_model_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelGroupInput"];
+            };
+        };
+        responses: {
+            /** @description Angelegt */
+            201: {
+                headers: {
+                    /** @description Version */
+                    ETag?: string;
+                    /** @description Pfad */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelGroup"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Name bereits vergeben */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe oder Verweis */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     get_model_group: {
         parameters: {
             query?: never;
@@ -1475,7 +2212,7 @@ export interface operations {
             /** @description Gefunden */
             200: {
                 headers: {
-                    /** @description Version */
+                    /** @description Version für If-Match */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -1503,6 +2240,161 @@ export interface operations {
             };
             /** @description Nicht gefunden */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    put_model_group: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelGroupInput"];
+            };
+        };
+        responses: {
+            /** @description Geändert */
+            200: {
+                headers: {
+                    /** @description Neue Version */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelGroup"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe oder Verweis */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_model_group: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gelöscht */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Wird noch verwendet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1839,6 +2731,790 @@ export interface operations {
             };
             /** @description ETag passt nicht */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_prices: {
+        parameters: {
+            query?: {
+                /** @description Seitengröße (1–500, Standard 50). */
+                limit?: number;
+                /** @description Fortsetzung (`nextCursor` der vorigen Seite). */
+                cursor?: string;
+                /** @description Teilstring im Namen oder Modell. */
+                q?: string;
+                /** @description Label-Selektor `k=v,k2`. */
+                label?: string;
+                /** @description Nur dieses Modell (exakt, wie `Deployment.providerModel`). */
+                model?: string;
+                /** @description Nur dieser Anbieter (`any` = Preise ohne Anbieter). */
+                provider?: string;
+                /** @description Nur die zum Zeitpunkt gültige Version je (Anbieter, Modell) (RFC 3339). */
+                effectiveAt?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Seite */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceList"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_price: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceInput"];
+            };
+        };
+        responses: {
+            /** @description Angelegt */
+            201: {
+                headers: {
+                    /** @description Version */
+                    ETag?: string;
+                    /** @description Pfad */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Price"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Name bereits vergeben */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe oder Verweis */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_price: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gefunden */
+            200: {
+                headers: {
+                    /** @description Version für If-Match */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Price"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    put_price: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceInput"];
+            };
+        };
+        responses: {
+            /** @description Geändert */
+            200: {
+                headers: {
+                    /** @description Neue Version */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Price"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe oder Verweis */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_price: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gelöscht */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Wird noch verwendet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_credentials: {
+        parameters: {
+            query?: {
+                /** @description Seitengröße (1–500, Standard 50). */
+                limit?: number;
+                /** @description Fortsetzung (`nextCursor` der vorigen Seite). */
+                cursor?: string;
+                /** @description Teilstring im Namen. */
+                q?: string;
+                /** @description Label-Selektor `k=v,k2`. */
+                label?: string;
+                /** @description Nur dieser Anbieter. */
+                provider?: components["schemas"]["ProviderKind"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Seite */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderCredentialList"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_credential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderCredentialInput"];
+            };
+        };
+        responses: {
+            /** @description Angelegt (ohne Werte) */
+            201: {
+                headers: {
+                    /** @description Version */
+                    ETag?: string;
+                    /** @description Pfad */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderCredential"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Name bereits vergeben */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe (Pflichtfelder des Anbieters, valueFrom) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_credential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gefunden */
+            200: {
+                headers: {
+                    /** @description Version für If-Match */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderCredential"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    put_credential: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderCredentialInput"];
+            };
+        };
+        responses: {
+            /** @description Ersetzt (ohne Werte) */
+            200: {
+                headers: {
+                    /** @description Neue Version */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderCredential"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Anbieterwechsel bei verwendeten Zugangsdaten */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_credential: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gelöscht */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Wird noch verwendet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    patch_credential: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/merge-patch+json": components["schemas"]["ProviderCredentialPatch"];
+            };
+        };
+        responses: {
+            /** @description Geändert (ohne Werte) */
+            200: {
+                headers: {
+                    /** @description Neue Version */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderCredential"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Anbieterwechsel bei verwendeten Zugangsdaten */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -10,6 +10,9 @@ use serde::Serialize;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi, ToSchema};
 
+use crate::credentials as c;
+use crate::deployments as d;
+use crate::prices as pr;
 use crate::problem::Problem;
 use crate::resources as r;
 
@@ -25,7 +28,13 @@ use crate::resources as r;
         r::list_users, r::create_user, r::get_user, r::put_user, r::delete_user,
         r::list_api_keys, r::create_api_key, r::get_api_key, r::put_api_key,
         r::delete_api_key, r::revoke_api_key, r::reactivate_api_key, r::rotate_api_key,
-        r::list_model_groups, r::get_model_group,
+        r::list_model_groups, r::create_model_group, r::get_model_group,
+        r::put_model_group, r::delete_model_group,
+        d::list_deployments, d::create_deployment, d::get_deployment, d::put_deployment,
+        d::delete_deployment,
+        c::list_credentials, c::create_credential, c::get_credential, c::put_credential,
+        c::patch_credential, c::delete_credential,
+        pr::list_prices, pr::create_price, pr::get_price, pr::put_price, pr::delete_price,
         crate::gitops::export_config, crate::gitops::apply_config,
     ),
     components(schemas(VersionInfo, Problem)),
@@ -36,7 +45,10 @@ use crate::resources as r;
         (name = "teams", description = "Teams mit Modellfreigaben, Limits und Budgets"),
         (name = "users", description = "Nutzer (Login per OIDC folgt mit AIGW-32)"),
         (name = "api-keys", description = "Virtuelle API-Keys der Datenebene"),
-        (name = "model-groups", description = "Modellgruppen (lesend, für Freigaben)"),
+        (name = "model-groups", description = "Modellgruppen (öffentliche Modellnamen, Aliasse, Routing, Fallbacks)"),
+        (name = "deployments", description = "Deployments: Anbieter-Modelle hinter Modellgruppen"),
+        (name = "provider-credentials", description = "Zugangsdaten der Anbieter (Werte nur schreibbar)"),
+        (name = "prices", description = "Preise je Anbieter-Modell, versioniert über validFrom"),
         (name = "gitops", description = "YAML-Export und -Apply aller Ressourcen (aigw/v1alpha1)"),
     )
 )]
@@ -123,6 +135,9 @@ mod tests {
             "/admin/api/v1/model-groups",
             "/admin/api/v1/config:export",
             "/admin/api/v1/config:apply",
+            "/admin/api/v1/deployments/{name}",
+            "/admin/api/v1/provider-credentials/{name}",
+            "/admin/api/v1/prices",
         ] {
             assert!(json["paths"][p].is_object(), "Pfad {p} fehlt");
         }
@@ -133,6 +148,11 @@ mod tests {
             "ApiKeyList",
             "CreatedApiKey",
             "RotatedApiKey",
+            "ModelGroupInput",
+            "DeploymentInput",
+            "ProviderCredential",
+            "ProviderCredentialPatch",
+            "PriceList",
         ] {
             assert!(
                 json["components"]["schemas"][s].is_object(),

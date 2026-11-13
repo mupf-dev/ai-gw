@@ -7,8 +7,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use aigw_core::resource::{
-    LimitSpec, Manifest, ResourceKind, ResourceSpec, Scope, ScopeLevel, SecretString,
+    LimitSpec, Manifest, ModelGroupSpec, ResourceKind, ResourceSpec, Scope, ScopeLevel,
+    SecretString,
 };
+use aigw_core::types::ProviderKind;
+use aigw_core::validate;
 use serde::Serialize;
 use serde_json::Value;
 use utoipa::ToSchema;
@@ -360,6 +363,7 @@ pub(crate) fn prepare(
             check_refs((*kind, name, *doc), m, &fin, state, &mut issues);
         }
     }
+    check_rules(&fin, state, opts, &resolved, &mut issues);
 
     if !issues.is_empty() {
         return Err(GitopsError::Invalid(issues));
@@ -730,6 +734,78 @@ fn collect_refs(
 }
 
 /// Prüft alle Verweise eines Objekts gegen den Endzustand.
+/// Inhaltliche Regeln wie in der Admin-API ([`aigw_core::validate`]) für alle Dokumente des
+/// Manifests: Aliasse, Fallbacks (Ziele, Zyklen im Endzustand), Deployments (SSRF,
+/// Pflichtfelder, Zugangsdaten desselben Anbieters), Feldnamen/Pflichtfelder der Zugangsdaten,
+/// Preise (Beträge; gültige Versionen unveränderlich).
+fn check_rules(
+    fin: &Final<'_>,
+    state: &State,
+    opts: &ApplyOptions,
+    resolved: &BTreeMap<(ResourceKind, String), Resolved>,
+    issues: &mut Vec<Issue>,
+) {
+    let now = time::OffsetDateTime::now_utc();
+    let of = |kind: ResourceKind| fin.objects.get(&kind).into_iter().flatten();
+    let groups: BTreeMap<&str, &ModelGroupSpec> = of(ResourceKind::ModelGroup)
+        .filter_map(|(n, (_, m))| match &m.spec {
+            ResourceSpec::ModelGroup(g) => Some((n.as_str(), g)),
+            _ => None,
+        })
+        .collect();
+    let creds: BTreeMap<&str, ProviderKind> = of(ResourceKind::ProviderCredential)
+        .filter_map(|(n, (_, m))| match &m.spec {
+            ResourceSpec::ProviderCredential(c) => Some((n.as_str(), c.provider)),
+            _ => None,
+        })
+        .collect();
+    for (kind, objs) in &fin.objects {
+        for (name, (doc, m)) in objs {
+            // Bestehende Objekte außerhalb des Manifests werden nicht nachträglich geprüft.
+            let Some(doc) = doc else { continue };
+            let res = match &m.spec {
+                ResourceSpec::ModelGroup(g) => validate::aliases(name, g)
+                    .and_then(|()| validate::fallbacks(&groups, name, g))
+                    .and_then(|()| opts.group_settings.map_or(Ok(()), |f| f(&g.settings))),
+                ResourceSpec::Deployment(d) => {
+                    validate::deployment(&opts.upstreams, d).and_then(|()| {
+                        match d
+                            .credential
+                            .as_deref()
+                            .and_then(|c| Some((c, creds.get(c)?)))
+                        {
+                            Some((c, p)) => validate::deployment_credential(d, c, *p),
+                            None => Ok(()),
+                        }
+                    })
+                }
+                ResourceSpec::ProviderCredential(c) => {
+                    validate::credential_fields(c.provider, c.data.keys().map(String::as_str))
+                        .and_then(|()| match resolved.get(&(*kind, name.clone())) {
+                            Some(Resolved::Credential(v)) => v
+                                .iter()
+                                .try_for_each(|(f, v)| validate::credential_value(f, v.expose())),
+                            _ => Ok(()),
+                        })
+                }
+                ResourceSpec::Price(pr) => validate::price(pr).and_then(|()| {
+                    match state
+                        .get(ResourceKind::Price, name)
+                        .map(|c| &c.manifest.spec)
+                    {
+                        Some(ResourceSpec::Price(cur)) => validate::price_change(cur, pr, now),
+                        _ => Ok(()),
+                    }
+                }),
+                _ => Ok(()),
+            };
+            if let Err(e) = res {
+                issues.push(Issue::at(Some(*doc), *kind, name, e));
+            }
+        }
+    }
+}
+
 fn check_refs(
     at: (ResourceKind, &str, Option<usize>),
     m: &Manifest,

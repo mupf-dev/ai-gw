@@ -148,15 +148,18 @@ fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         // /metrics (AIGW-43); Modus „nur YAML“ sperrt die Schreibrouten.
         let auth: std::sync::Arc<dyn aigw_admin::AdminAuthenticator> =
             std::sync::Arc::new(bootstrap_token()?);
-        let control = aigw_admin::router_with(aigw_admin::AdminState::new(
-            runtime_state.store.clone(),
-            std::sync::Arc::clone(&auth),
-        ))
+        let upstreams = aigw_admin::UpstreamPolicy::from_config(&config.admin)?;
+        let control = aigw_admin::router_with(
+            aigw_admin::AdminState::new(runtime_state.store.clone(), std::sync::Arc::clone(&auth))
+                .with_keyring(std::sync::Arc::clone(&runtime_state.keyring))
+                .with_upstream_policy(upstreams.clone()),
+        )
         .merge(aigw_admin::gitops::router(
             aigw_admin::gitops::GitopsState {
                 store: runtime_state.store.clone(),
                 keyring: std::sync::Arc::clone(&runtime_state.keyring),
                 auth,
+                upstreams,
             },
         ))
         .merge(observe::metrics_router(

@@ -5,7 +5,9 @@
 # Laufzeitprüfung: baut das Release-Binary (mit eingebetteter UI aus ui/dist, falls gebaut),
 # startet `aigw serve` (Daten- und Steuerebene getrennt) und prüft /healthz, die Admin-API
 # (Bootstrap-Token, Key anlegen), /v1/* mit und ohne Key, Routing über Snapshot-Routen
-# (Mock-Deployments, Retry auf anderes Deployment, Hot Reload), /metrics und /admin/.
+# (Mock-Deployments, Retry auf anderes Deployment, Hot Reload), Routing-Ressourcen per REST
+# (Zugangsdaten ohne Geheimwert in der Antwort, Modellgruppe/Deployment/Preis, Alias-Kollision,
+# SSRF-Ablehnung, Freigabe per Key), /metrics und /admin/.
 #
 # Modellgruppen und Mock-Deployments kommen per GitOps-Apply (`POST
 # /admin/api/v1/config:apply`) in die laufende Instanz.
@@ -20,7 +22,9 @@ cargo build --release "${LOCKED[@]}" -p aigw
 ls -l target/release/aigw
 
 TMP=$(mktemp -d)
-trap 'kill "${PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
+# Erst beenden und warten, dann löschen – sonst schreibt `aigw` beim Herunterfahren noch in die
+# bereits gelöschte SQLite-Datei („disk I/O error“).
+trap 'kill "${PID:-}" 2>/dev/null || true; wait "${PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "sqlite://%s/aigw.db?mode=rwc"\n' \
   "$PORT" "$CPORT" "$TMP" >"$TMP/aigw.yaml"
 # Modellgruppe „mock“: Priorität 0 = absichtlich fehlerhaftes Mock-Deployment, Priorität 1 =
@@ -46,7 +50,9 @@ spec: {modelGroup: mock, provider: mock, providerModel: mock, priority: 1}
 YAML
 # Wegwerf-Master-Key nur für diesen Lauf (ohne Key startet `aigw serve` nicht).
 TOKEN="aigw-admin-smoke-$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
+# Upstream-Ausnahmen per ENV (wie für einen lokalen Ollama): http + privat nur für localhost.
 AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') AIGW_BOOTSTRAP_TOKEN="$TOKEN" \
+  AIGW_ADMIN__ALLOW_INSECURE_UPSTREAMS=localhost AIGW_ADMIN__ALLOW_PRIVATE_UPSTREAMS=localhost \
   target/release/aigw serve --config "$TMP/aigw.yaml" &
 PID=$!
 
@@ -127,6 +133,59 @@ for _ in $(seq 1 50); do
   sleep 0.2
 done
 test "$CODE" = 200
+
+# Routing-Ressourcen per REST (AIGW-65), ergänzend zum GitOps-Apply oben.
+adm() { # adm <Methode> <Pfad> [JSON] → Status in $TMP/status, Körper auf stdout
+  curl -sS -o "$TMP/body" -w '%{http_code}' -X "$1" "$CBASE/admin/api/v1$2" \
+    -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' ${3:+-d "$3"} \
+    >"$TMP/status"
+  cat "$TMP/body"
+}
+expect() { test "$(cat "$TMP/status")" = "$1" || { echo "erwartet $1, erhalten $(cat "$TMP/status")" >&2; exit 1; }; }
+echo "--- POST /admin/api/v1/provider-credentials (Antwort ohne Geheimwert)"
+adm POST /provider-credentials \
+  '{"metadata":{"name":"smoke-cred"},"spec":{"provider":"openai-compatible","data":{"apiKey":{"value":"sk-smoke-nicht-echt"}}}}' |
+  tee "$TMP/cred.json"; echo
+expect 201
+if grep -q 'sk-smoke-nicht-echt' "$TMP/cred.json"; then echo 'Geheimnis in Antwort' >&2; exit 1; fi
+grep -q '"hasSecret":true' "$TMP/cred.json"
+echo "--- POST /admin/api/v1/model-groups"
+adm POST /model-groups '{"metadata":{"name":"rest-model"},"spec":{"aliases":["rest-alias"]}}'; echo
+expect 201
+echo "--- Alias-Kollision mit GitOps-Gruppe (mock-alias) → 409"
+adm POST /model-groups '{"metadata":{"name":"rest-other"},"spec":{"aliases":["mock-alias"]}}' >/dev/null
+expect 409
+echo "--- POST /admin/api/v1/deployments (Mock-Anbieter)"
+adm POST /deployments '{"metadata":{"name":"rest-echo"},"spec":{"modelGroup":"rest-model","provider":"mock","providerModel":"mock","capacity":{"rpm":600}}}'; echo
+expect 201
+echo "--- SSRF: Cloud-Metadaten-Adresse als Endpunkt → 422"
+adm POST /deployments '{"metadata":{"name":"rest-evil"},"spec":{"modelGroup":"rest-model","provider":"openai-compatible","endpoint":"http://169.254.169.254/latest","providerModel":"x"}}' >/dev/null
+expect 422
+echo "--- lokaler Endpunkt nach Freischaltung (AIGW_ADMIN__…) → 201 (deaktiviert)"
+adm POST /deployments '{"metadata":{"name":"rest-local"},"spec":{"modelGroup":"rest-model","provider":"ollama","endpoint":"http://localhost:11434/v1","providerModel":"llama3.1","enabled":false}}' >/dev/null
+expect 201
+echo "--- POST /admin/api/v1/prices (Name vom Server)"
+adm POST /prices '{"spec":{"provider":"openai","model":"gpt-4o-mini","validFrom":"2024-07-18T00:00:00Z","perMillionTokens":{"input":"0.15","output":"0.60"}}}'; echo
+expect 201
+echo "--- Key mit Freigabe nur für rest-model: Chat über Alias → 200, mock → 403"
+LIMITED=$(curl -fsS "$CBASE/admin/api/v1/api-keys" -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"metadata":{"name":"smoke-limited"},"spec":{"allowedModels":["rest-model"]}}' |
+  grep -o '"secret":"sk-aigw-[^"]*"' | cut -d'"' -f4)
+CODE=000
+for _ in $(seq 1 50); do
+  CODE=$(curl -s -D "$TMP/h2.txt" -o "$TMP/b2.json" -w '%{http_code}' "$BASE/v1/chat/completions" \
+    -H "authorization: Bearer $LIMITED" -H 'content-type: application/json' \
+    -d '{"model":"rest-alias","messages":[{"role":"user","content":"Hallo"}]}')
+  [[ "$CODE" == 200 ]] && break
+  sleep 0.1
+done
+test "$CODE" = 200
+grep -qi '^x-aigw-deployment: rest-echo' "$TMP/h2.txt"
+test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/chat/completions" \
+  -H "authorization: Bearer $LIMITED" -H 'content-type: application/json' \
+  -d '{"model":"mock","messages":[{"role":"user","content":"Hallo"}]}')" = 403
+curl -fsS "$BASE/v1/models" -H "authorization: Bearer $LIMITED" | grep -q '"rest-model"'
 echo "--- Admin nicht auf Datenebene"
 test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/api/v1/version")" = 404
 echo "--- GET /metrics (Steuerebene)"
@@ -134,7 +193,9 @@ curl -fsS "$CBASE/metrics" | tee "$TMP/metrics.txt" | grep '^aigw_log_'
 grep -q '^aigw_log_dropped_total 0$' "$TMP/metrics.txt"
 test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/metrics")" = 404
 echo "--- GET /admin/api/v1/version";   curl -fsS "$CBASE/admin/api/v1/version"; echo
-echo "--- GET /admin/api/openapi.json"; curl -fsS "$CBASE/admin/api/openapi.json" | head -c 200; echo
+echo "--- GET /admin/api/openapi.json"
+curl -fsS -o "$TMP/openapi.json" "$CBASE/admin/api/openapi.json"; head -c 200 "$TMP/openapi.json"; echo
+grep -q "/admin/api/v1/provider-credentials" "$TMP/openapi.json"
 echo "--- GET /admin/ (Kopfzeilen)";    curl -fsS -D - -o "$TMP/index.html" "$CBASE/admin/"
 grep -o '<title>[^<]*</title>' "$TMP/index.html"
 ASSET=$(grep -o '/admin/assets/[^"]*\.js' "$TMP/index.html" | head -1 || true)

@@ -58,15 +58,12 @@ pub(crate) fn seal_spec(
 }
 
 pub(crate) fn sealed_cols(
-    spec: &ProviderCredentialSpec,
+    provider: ProviderKind,
     fields: &[String],
     sealed: Sealed,
 ) -> Result<Vec<(&'static str, Val)>, StoreError> {
     Ok(vec![
-        (
-            "provider",
-            Val::Text(Some(spec.provider.as_str().to_owned())),
-        ),
+        ("provider", Val::Text(Some(provider.as_str().to_owned()))),
         ("fields", Val::Text(Some(serde_json::to_string(fields)?))),
         ("key_id", Val::Text(Some(sealed.key_id))),
         ("nonce", Val::Text(Some(sealed.nonce))),
@@ -91,7 +88,7 @@ impl Store {
             ResourceKind::ProviderCredential,
             id,
             &meta,
-            sealed_cols(&spec, &fields, sealed)?,
+            sealed_cols(spec.provider, &fields, sealed)?,
         )
         .await?;
         let after = ProviderCredential {
@@ -131,7 +128,7 @@ impl Store {
             ResourceKind::ProviderCredential,
             before.id,
             &meta,
-            sealed_cols(&spec, &fields, sealed)?,
+            sealed_cols(spec.provider, &fields, sealed)?,
         )
         .await?;
         let after = ProviderCredential {
@@ -139,6 +136,74 @@ impl Store {
             metadata: meta,
             spec: ProviderCredentialInfo {
                 provider: spec.provider,
+                fields,
+                key_id: keyring.primary_id().to_owned(),
+            },
+        };
+        tx.audit(
+            Action::Update,
+            ResourceKind::ProviderCredential,
+            Some(before.id),
+            &after.metadata.name,
+            Some(&before),
+            Some(&after),
+        )
+        .await?;
+        tx.commit().await?;
+        self.get_credential(&after.metadata.name).await
+    }
+
+    /// Ändert Zugangsdaten teilweise (Admin-API `PATCH`): `changes` setzt (`Some`) bzw.
+    /// entfernt (`None`) einzelne Felder, nicht genannte Felder behalten ihren Wert. Labels
+    /// und Anbieter werden nur ersetzt, wenn angegeben. Die Werte werden entschlüsselt,
+    /// zusammengeführt und mit dem aktuellen Master-Key neu verschlüsselt.
+    pub async fn patch_credential(
+        &self,
+        actor: &str,
+        keyring: &Keyring,
+        name: &str,
+        labels: Option<BTreeMap<String, String>>,
+        provider: Option<ProviderKind>,
+        changes: BTreeMap<String, Option<SecretString>>,
+    ) -> Result<ProviderCredential, StoreError> {
+        let row = self
+            .fetch_one_row(ResourceKind::ProviderCredential, NO_REFS, name)
+            .await?;
+        let (before, sealed) = info_from_row(&row)?;
+        let plain = keyring.open(before.id.as_bytes(), &sealed)?;
+        let mut values: BTreeMap<String, String> = serde_json::from_slice(&plain)?;
+        for (field, v) in changes {
+            match v {
+                Some(v) => values.insert(field, v.expose().to_owned()),
+                None => values.remove(&field),
+            };
+        }
+        if values.is_empty() {
+            return Err(StoreError::Invalid(
+                "Zugangsdaten brauchen mindestens ein Feld".into(),
+            ));
+        }
+        let provider = provider.unwrap_or(before.spec.provider);
+        let mut meta = before.metadata.clone();
+        if let Some(l) = labels {
+            meta.labels = l;
+        }
+        let json = serde_json::to_vec(&values)?;
+        let sealed = keyring.seal(before.id.as_bytes(), &json)?;
+        let fields: Vec<String> = values.into_keys().collect();
+        let mut tx = AdminTx::begin(self, actor).await?;
+        tx.update_row(
+            ResourceKind::ProviderCredential,
+            before.id,
+            &meta,
+            sealed_cols(provider, &fields, sealed)?,
+        )
+        .await?;
+        let after = ProviderCredential {
+            id: before.id,
+            metadata: meta,
+            spec: ProviderCredentialInfo {
+                provider,
                 fields,
                 key_id: keyring.primary_id().to_owned(),
             },

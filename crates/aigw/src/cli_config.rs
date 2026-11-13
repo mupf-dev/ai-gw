@@ -173,14 +173,22 @@ async fn open(config: &Path) -> Result<(Config, Store), BoxError> {
     Ok((cfg, store))
 }
 
-fn options(args: &PlanArgs, dry_run: bool, actor: &str) -> ApplyOptions {
-    ApplyOptions {
+fn options(
+    cfg: &Config,
+    args: &PlanArgs,
+    dry_run: bool,
+    actor: &str,
+) -> Result<ApplyOptions, BoxError> {
+    Ok(ApplyOptions {
         dry_run,
         prune: args.prune,
         api_keys: args.api_keys.into(),
         actor: actor.to_owned(),
+        // Gleiche Endpunktregeln wie die Admin-API (`admin.*` der Startkonfiguration).
+        upstreams: aigw_core::upstream::UpstreamPolicy::from_config(&cfg.admin)?,
+        group_settings: Some(aigw_admin::resources::group_settings),
         ..ApplyOptions::default()
-    }
+    })
 }
 
 fn print_plan(plan: &Plan, args: &PlanArgs) -> Result<(), BoxError> {
@@ -237,7 +245,7 @@ async fn exec(cmd: ConfigCommand) -> Result<ExitCode, BoxError> {
             };
             let (cfg, store) = open(&config).await?;
             let keyring = Keyring::from_config(&cfg.secrets)?;
-            let opts = options(&args, true, GITOPS_ACTOR);
+            let opts = options(&cfg, &args, true, GITOPS_ACTOR)?;
             let res = gitops::plan(&store, &keyring, &docs, &opts, &ProcessSecrets).await;
             store.close().await;
             let plan = match res {
@@ -263,7 +271,7 @@ async fn exec(cmd: ConfigCommand) -> Result<ExitCode, BoxError> {
             };
             let (cfg, store) = open(&config).await?;
             let keyring = Keyring::from_config(&cfg.secrets)?;
-            let opts = options(&args, dry_run, &actor);
+            let opts = options(&cfg, &args, dry_run, &actor)?;
             let res = gitops::apply(&store, &keyring, &docs, &opts, &ProcessSecrets).await;
             store.close().await;
             let rep = match res {
@@ -295,7 +303,7 @@ async fn exec(cmd: ConfigCommand) -> Result<ExitCode, BoxError> {
             if let Some(config) = config {
                 let (cfg, store) = open(&config).await?;
                 let keyring = Keyring::from_config(&cfg.secrets)?;
-                let opts = options(&args, true, GITOPS_ACTOR);
+                let opts = options(&cfg, &args, true, GITOPS_ACTOR)?;
                 let res = gitops::plan(&store, &keyring, &docs, &opts, &ProcessSecrets).await;
                 store.close().await;
                 if let Err(e) = res {

@@ -14,6 +14,8 @@ pub mod observe;
 pub mod resource;
 pub mod snapshot;
 pub mod types;
+pub mod upstream;
+pub mod validate;
 pub mod wire;
 
 pub use config::Config;

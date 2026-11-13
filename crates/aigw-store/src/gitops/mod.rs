@@ -25,6 +25,7 @@ mod state;
 use std::fmt;
 
 use aigw_core::resource::ResourceKind;
+use aigw_core::upstream::UpstreamPolicy;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -41,6 +42,9 @@ pub const GITOPS_ACTOR: &str = "gitops";
 
 /// Präfix der Platzhalter-Umgebungsvariablen im Export (und Erlaubnisliste der Admin-API).
 pub const SECRET_ENV_PREFIX: &str = "AIGW_SECRET_";
+
+/// Prüffunktion für `ModelGroup.spec.settings` (siehe [`ApplyOptions::group_settings`]).
+pub type SettingsCheck = fn(&aigw_core::resource::JsonObject) -> Result<(), String>;
 
 /// Umgang mit `ApiKey`-Manifesten.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
@@ -70,6 +74,12 @@ pub struct ApplyOptions {
     pub actor: String,
     /// Erlaubte Herkunft von Geheimnissen (`valueFrom`).
     pub secrets: SecretPolicy,
+    /// Regeln für Endpunkte von Deployments (wie in der Admin-API, `admin.*`).
+    pub upstreams: UpstreamPolicy,
+    /// Prüfung von `ModelGroup.spec.settings` (Routing-Parser der Datenebene; die
+    /// Persistenzschicht kennt ihn nicht, daher von außen gesetzt, z. B.
+    /// `aigw_admin::resources::group_settings`). `None` = keine Prüfung.
+    pub group_settings: Option<SettingsCheck>,
 }
 
 impl Default for ApplyOptions {
@@ -80,6 +90,8 @@ impl Default for ApplyOptions {
             api_keys: ApiKeyMode::Include,
             actor: GITOPS_ACTOR.to_owned(),
             secrets: SecretPolicy::default(),
+            upstreams: UpstreamPolicy::strict(),
+            group_settings: None,
         }
     }
 }

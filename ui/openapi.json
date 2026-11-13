@@ -1028,12 +1028,526 @@
         ]
       }
     },
+    "/admin/api/v1/deployments": {
+      "get": {
+        "tags": [
+          "deployments"
+        ],
+        "operationId": "list_deployments",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Seitengröße (1–500, Standard 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Fortsetzung (`nextCursor` der vorigen Seite).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Teilstring im Namen oder in `providerModel`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "description": "Label-Selektor `k=v,k2`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "modelGroup",
+            "in": "query",
+            "description": "Nur Deployments dieser Modellgruppe (Name).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "description": "Nur dieser Anbieter.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ProviderKind"
+            }
+          },
+          {
+            "name": "credential",
+            "in": "query",
+            "description": "Nur Deployments mit diesen Zugangsdaten (Name).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "enabled",
+            "in": "query",
+            "description": "Nur aktive (`true`) bzw. deaktivierte (`false`).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "deployments"
+        ],
+        "operationId": "create_deployment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeploymentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Angelegt",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version"
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Pfad"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Deployment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name bereits vergeben",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe oder Verweis",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/deployments/{name}": {
+      "get": {
+        "tags": [
+          "deployments"
+        ],
+        "operationId": "get_deployment",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gefunden",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version für If-Match"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Deployment"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "deployments"
+        ],
+        "operationId": "put_deployment",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeploymentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Geändert",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Neue Version"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Deployment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe oder Verweis",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "deployments"
+        ],
+        "operationId": "delete_deployment",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Gelöscht"
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Wird noch verwendet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/model-groups": {
       "get": {
         "tags": [
           "model-groups"
         ],
-        "summary": "Listet Modellgruppen (Namen und Aliasse für Modellfreigaben).",
         "operationId": "list_model_groups",
         "parameters": [
           {
@@ -1122,6 +1636,103 @@
             "bearer": []
           }
         ]
+      },
+      "post": {
+        "tags": [
+          "model-groups"
+        ],
+        "operationId": "create_model_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelGroupInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Angelegt",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version"
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Pfad"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name bereits vergeben",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe oder Verweis",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
       }
     },
     "/admin/api/v1/model-groups/{name}": {
@@ -1129,7 +1740,6 @@
         "tags": [
           "model-groups"
         ],
-        "summary": "Liest eine Modellgruppe.",
         "operationId": "get_model_group",
         "parameters": [
           {
@@ -1150,7 +1760,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "Version"
+                "description": "Version für If-Match"
               }
             },
             "content": {
@@ -1183,6 +1793,219 @@
           },
           "404": {
             "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "model-groups"
+        ],
+        "operationId": "put_model_group",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelGroupInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Geändert",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Neue Version"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe oder Verweis",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "model-groups"
+        ],
+        "operationId": "delete_model_group",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Gelöscht"
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Wird noch verwendet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1662,6 +2485,1151 @@
           },
           "412": {
             "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/prices": {
+      "get": {
+        "tags": [
+          "prices"
+        ],
+        "operationId": "list_prices",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Seitengröße (1–500, Standard 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Fortsetzung (`nextCursor` der vorigen Seite).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Teilstring im Namen oder Modell.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "description": "Label-Selektor `k=v,k2`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "description": "Nur dieses Modell (exakt, wie `Deployment.providerModel`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "description": "Nur dieser Anbieter (`any` = Preise ohne Anbieter).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "effectiveAt",
+            "in": "query",
+            "description": "Nur die zum Zeitpunkt gültige Version je (Anbieter, Modell) (RFC 3339).",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "prices"
+        ],
+        "operationId": "create_price",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Angelegt",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version"
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Pfad"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Price"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name bereits vergeben",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe oder Verweis",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/prices/{name}": {
+      "get": {
+        "tags": [
+          "prices"
+        ],
+        "operationId": "get_price",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gefunden",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version für If-Match"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Price"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "prices"
+        ],
+        "operationId": "put_price",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Geändert",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Neue Version"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Price"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe oder Verweis",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "prices"
+        ],
+        "operationId": "delete_price",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Gelöscht"
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Wird noch verwendet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/provider-credentials": {
+      "get": {
+        "tags": [
+          "provider-credentials"
+        ],
+        "summary": "Listet Zugangsdaten (ohne Werte).",
+        "operationId": "list_credentials",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Seitengröße (1–500, Standard 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Fortsetzung (`nextCursor` der vorigen Seite).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Teilstring im Namen.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "description": "Label-Selektor `k=v,k2`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "description": "Nur dieser Anbieter.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ProviderKind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCredentialList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "provider-credentials"
+        ],
+        "summary": "Legt Zugangsdaten an (Werte werden verschlüsselt, Antwort ohne Werte).",
+        "operationId": "create_credential",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderCredentialInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Angelegt (ohne Werte)",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version"
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Pfad"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCredential"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name bereits vergeben",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe (Pflichtfelder des Anbieters, valueFrom)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/provider-credentials/{name}": {
+      "get": {
+        "tags": [
+          "provider-credentials"
+        ],
+        "summary": "Liest Zugangsdaten (ohne Werte).",
+        "operationId": "get_credential",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gefunden",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version für If-Match"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCredential"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "provider-credentials"
+        ],
+        "summary": "Ersetzt Labels, Anbieter und **alle** Werte.",
+        "operationId": "put_credential",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderCredentialInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ersetzt (ohne Werte)",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Neue Version"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCredential"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Anbieterwechsel bei verwendeten Zugangsdaten",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "provider-credentials"
+        ],
+        "summary": "Löscht Zugangsdaten (`409`, solange Deployments oder MCP-Server sie nutzen).",
+        "operationId": "delete_credential",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Gelöscht"
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Wird noch verwendet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "provider-credentials"
+        ],
+        "summary": "Ändert einzelne Felder (JSON Merge Patch): angegebene Werte ersetzen, `null` entfernt,\nnicht genannte Felder behalten ihren gespeicherten Wert.",
+        "operationId": "patch_credential",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/merge-patch+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderCredentialPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Geändert (ohne Werte)",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Neue Version"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCredential"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Anbieterwechsel bei verwendeten Zugangsdaten",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2929,6 +4897,31 @@
           "total"
         ]
       },
+      "Capacity": {
+        "type": "object",
+        "description": "Kapazität eines Deployments (für das Routing).",
+        "properties": {
+          "rpm": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Anfragen je Minute.",
+            "minimum": 0
+          },
+          "tpm": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Tokens je Minute.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "Change": {
         "type": "object",
         "description": "Eine Ressource im Plan.",
@@ -2995,6 +4988,200 @@
             "description": "Klartext `sk-aigw-…` (nicht wiederherstellbar)."
           }
         }
+      },
+      "CredentialPatchMeta": {
+        "type": "object",
+        "description": "Metadaten im `PATCH`.",
+        "properties": {
+          "labels": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Ersetzt die Labels vollständig (weglassen = unverändert).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Muss, falls angegeben, zum Pfad passen."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CredentialPatchSpec": {
+        "type": "object",
+        "description": "Spezifikation im `PATCH`.",
+        "properties": {
+          "data": {
+            "type": "object",
+            "description": "Zu ändernde Felder: Wert setzt, `null` entfernt; nicht genannte Felder bleiben.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CredentialValue"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "provider": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProviderKind",
+                "description": "Neuer Anbieter (weglassen = unverändert)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "CredentialValue": {
+        "type": "object",
+        "description": "Ein Geheimwert in der Eingabe.",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "value": {
+            "$ref": "#/components/schemas/SecretString",
+            "description": "Klartext (wird sofort verschlüsselt, nie wieder ausgegeben)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "Deployment": {
+        "type": "object",
+        "required": [
+          "id",
+          "metadata",
+          "spec"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID (UUIDv7)."
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/DeploymentSpec",
+            "description": "Spezifikation."
+          }
+        }
+      },
+      "DeploymentInput": {
+        "type": "object",
+        "required": [
+          "metadata",
+          "spec"
+        ],
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert)."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/DeploymentSpec",
+            "description": "Spezifikation."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DeploymentList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Deployment"
+            },
+            "description": "Einträge (nach Name sortiert)."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite."
+          }
+        }
+      },
+      "DeploymentSpec": {
+        "type": "object",
+        "description": "Deployment: konkretes Anbieter-Modell hinter einer Modellgruppe.",
+        "required": [
+          "modelGroup",
+          "provider",
+          "providerModel"
+        ],
+        "properties": {
+          "capacity": {
+            "$ref": "#/components/schemas/Capacity",
+            "description": "Kapazitätsgrenzen."
+          },
+          "credential": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Zugangsdaten (Name einer `ProviderCredential`)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Deaktivierte Deployments werden nicht geroutet."
+          },
+          "endpoint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Basis-URL; ohne Angabe der Standard des Anbieters."
+          },
+          "modelGroup": {
+            "type": "string",
+            "description": "Modellgruppe (Name)."
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Prioritätsgruppe; 0 wird vor 1 genutzt (z. B. PTU vor PAYG).",
+            "minimum": 0
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ProviderKind",
+            "description": "Anbieter."
+          },
+          "providerModel": {
+            "type": "string",
+            "description": "Modellname beim Anbieter (bzw. Azure-Deployment-Name)."
+          },
+          "settings": {
+            "type": "object",
+            "description": "Anbieterspezifische Einstellungen (z. B. `apiVersion`, `region`)."
+          },
+          "weight": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Gewicht für `weighted` (Standard 1).",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "Fallback": {
         "type": "object",
@@ -3114,7 +5301,6 @@
       },
       "ModelGroup": {
         "type": "object",
-        "description": "Modellgruppe (gelesen).",
         "required": [
           "id",
           "metadata",
@@ -3136,9 +5322,26 @@
           }
         }
       },
+      "ModelGroupInput": {
+        "type": "object",
+        "required": [
+          "metadata",
+          "spec"
+        ],
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert)."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/ModelGroupSpec",
+            "description": "Spezifikation."
+          }
+        },
+        "additionalProperties": false
+      },
       "ModelGroupList": {
         "type": "object",
-        "description": "Seite einer Liste: Modellgruppen.",
         "required": [
           "items"
         ],
@@ -3379,6 +5582,125 @@
           }
         }
       },
+      "Price": {
+        "type": "object",
+        "required": [
+          "id",
+          "metadata",
+          "spec"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID (UUIDv7)."
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/PriceSpec",
+            "description": "Spezifikation."
+          }
+        }
+      },
+      "PriceInput": {
+        "type": "object",
+        "required": [
+          "spec"
+        ],
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert)."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/PriceSpec",
+            "description": "Spezifikation."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PriceList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Price"
+            },
+            "description": "Einträge (nach Name sortiert)."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite."
+          }
+        }
+      },
+      "PriceSpec": {
+        "type": "object",
+        "description": "Preis eines Anbieter-Modells ab einem Zeitpunkt (versioniert).",
+        "required": [
+          "model",
+          "validFrom"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "Modellname beim Anbieter (wie `Deployment.providerModel`)."
+          },
+          "perImage": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Preis je erzeugtem Bild."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "perMillionTokens": {
+            "$ref": "#/components/schemas/TokenPrices",
+            "description": "Preise je 1 Mio. Tokens."
+          },
+          "perRequest": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Fester Preis je Anfrage."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProviderKind",
+                "description": "Anbieter; ohne Angabe für alle Anbieter dieses Modells."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "validFrom": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Gültig ab (RFC 3339); es gilt der jüngste Preis mit `validFrom` ≤ Anfragezeitpunkt."
+          }
+        },
+        "additionalProperties": false
+      },
       "Problem": {
         "type": "object",
         "description": "Problem Details (RFC 9457).",
@@ -3422,6 +5744,186 @@
             "description": "Problemtyp (`urn:aigw:problem:<code>`)."
           }
         }
+      },
+      "ProviderCredential": {
+        "type": "object",
+        "description": "Zugangsdaten (gelesen) – **ohne** Werte.",
+        "required": [
+          "id",
+          "metadata",
+          "spec",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID (UUIDv7)."
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten (mit `createdAt`/`updatedAt`; `updatedAt` ändert sich auch beim Ersetzen\neines Werts)."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/ProviderCredentialSummary",
+            "description": "Anbieter und Feldnamen."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProviderCredentialStatus",
+            "description": "Vom Server verwaltete Angaben."
+          }
+        }
+      },
+      "ProviderCredentialInput": {
+        "type": "object",
+        "description": "Zugangsdaten (Eingabe für Anlegen und Ersetzen).",
+        "required": [
+          "metadata",
+          "spec"
+        ],
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten (`name`, `labels`)."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/ProviderCredentialInputSpec",
+            "description": "Anbieter und Werte."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProviderCredentialInputSpec": {
+        "type": "object",
+        "description": "Spezifikation beim Anlegen/Ersetzen.",
+        "required": [
+          "provider",
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "description": "Felder, z. B. `{\"apiKey\": {\"value\": \"sk-…\"}}`.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CredentialValue"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ProviderKind",
+            "description": "Anbieter."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProviderCredentialList": {
+        "type": "object",
+        "description": "Seite einer Liste: Zugangsdaten.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderCredential"
+            },
+            "description": "Einträge (nach Name sortiert)."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite."
+          }
+        }
+      },
+      "ProviderCredentialPatch": {
+        "type": "object",
+        "description": "Teiländerung (JSON Merge Patch).",
+        "properties": {
+          "metadata": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CredentialPatchMeta",
+                "description": "Metadaten."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spec": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CredentialPatchSpec",
+                "description": "Spezifikation."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProviderCredentialStatus": {
+        "type": "object",
+        "description": "Status der Zugangsdaten.",
+        "required": [
+          "hasSecret",
+          "keyId"
+        ],
+        "properties": {
+          "hasSecret": {
+            "type": "boolean",
+            "description": "Mindestens ein Geheimwert ist gespeichert."
+          },
+          "keyId": {
+            "type": "string",
+            "description": "ID des Master-Keys, mit dem verschlüsselt ist (Rotation)."
+          }
+        }
+      },
+      "ProviderCredentialSummary": {
+        "type": "object",
+        "description": "Anbieter und Namen der gespeicherten Felder.",
+        "required": [
+          "provider",
+          "fields"
+        ],
+        "properties": {
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Namen der gespeicherten Felder (sortiert), z. B. `[\"apiKey\"]`."
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ProviderKind",
+            "description": "Anbieter."
+          }
+        }
+      },
+      "ProviderKind": {
+        "type": "string",
+        "description": "Art eines Upstream-Anbieters (MVP-Umfang laut E5).\n\nSerialisiert als `openai`, `anthropic`, `azure-openai`, `bedrock`, `vertex`, `mistral`,\n`ollama`, `vllm`, `openai-compatible` und `mock` (eingebauter Echo-Anbieter für Tests,\nSmoke-Tests und Demos; ohne Netzwerkzugriff).",
+        "enum": [
+          "openai",
+          "anthropic",
+          "azure-openai",
+          "bedrock",
+          "vertex",
+          "mistral",
+          "ollama",
+          "vllm",
+          "openai-compatible",
+          "mock"
+        ]
       },
       "ResourceKind": {
         "type": "string",
@@ -3529,6 +6031,11 @@
           "least-busy",
           "cost"
         ]
+      },
+      "SecretString": {
+        "type": "string",
+        "format": "password",
+        "description": "Geheimer Klartext (z. B. API-Key eines Anbieters).\n\n`Debug`, `Display` und `Serialize` geben nur [`REDACTED`] aus; der Wert ist ausschließlich\nüber [`SecretString::expose`] erreichbar. Deserialisieren ist erlaubt (Eingabe über die\nAdmin-API)."
       },
       "Summary": {
         "type": "object",
@@ -3683,6 +6190,101 @@
           "organization": {
             "type": "string",
             "description": "Organisation (Name)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "TokenPrices": {
+        "type": "object",
+        "description": "Preise je 1 Mio. Tokens bzw. je Einheit; fehlende Werte gelten als 0.",
+        "properties": {
+          "audioInput": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Audio-Eingabe-Tokens."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "audioOutput": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Audio-Ausgabe-Tokens."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cacheWrite": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Schreiben in den Prompt-Cache."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cachedInput": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Gecachte Eingabe-Tokens (Lesen)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "imageInput": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Bild-Eingabe-Tokens."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "input": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Eingabe-Tokens."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "output": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Ausgabe-Tokens."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reasoning": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Reasoning-Tokens (falls abweichend von `output`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -3847,7 +6449,19 @@
     },
     {
       "name": "model-groups",
-      "description": "Modellgruppen (lesend, für Freigaben)"
+      "description": "Modellgruppen (öffentliche Modellnamen, Aliasse, Routing, Fallbacks)"
+    },
+    {
+      "name": "deployments",
+      "description": "Deployments: Anbieter-Modelle hinter Modellgruppen"
+    },
+    {
+      "name": "provider-credentials",
+      "description": "Zugangsdaten der Anbieter (Werte nur schreibbar)"
+    },
+    {
+      "name": "prices",
+      "description": "Preise je Anbieter-Modell, versioniert über validFrom"
     },
     {
       "name": "gitops",

@@ -14,6 +14,7 @@ publish.workspace = true
 [dependencies]
 arc-swap.workspace = true
 bytes.workspace = true
+http.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde-saphyr.workspace = true

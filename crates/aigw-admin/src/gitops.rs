@@ -37,6 +37,7 @@ use utoipa::IntoParams;
 
 use crate::auth::{AdminAuthenticator, Permission, Principal, require_principal};
 use crate::problem::Problem;
+use crate::upstream::UpstreamPolicy;
 
 /// Pfad des Exports.
 pub const EXPORT_PATH: &str = "/admin/api/v1/config:export";
@@ -54,6 +55,8 @@ pub struct GitopsState {
     pub keyring: Arc<Keyring>,
     /// Anmeldung (dieselbe wie für die übrige Admin-API).
     pub auth: Arc<dyn AdminAuthenticator>,
+    /// Regeln für Endpunkte von Deployments (wie bei den Ressourcen-Routen).
+    pub upstreams: UpstreamPolicy,
 }
 
 impl fmt::Debug for GitopsState {
@@ -168,6 +171,8 @@ pub(crate) async fn apply_config(
         api_keys: q.api_keys,
         actor: format!("{}:{}", gitops::GITOPS_ACTOR, p.actor()),
         secrets: SecretPolicy::restricted(SECRET_ENV_PREFIX),
+        upstreams: st.upstreams.clone(),
+        group_settings: Some(crate::resources::group_settings),
     };
     let report = gitops::apply(&st.store, &st.keyring, &docs, &opts, &ProcessSecrets)
         .await

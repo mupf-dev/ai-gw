@@ -45,6 +45,7 @@ async fn app(read_only_mode: bool) -> (Router, Store) {
             store: store.clone(),
             keyring: Arc::new(Keyring::new(master)),
             auth,
+            upstreams: aigw_admin::UpstreamPolicy::strict(),
         }),
     );
     (read_only::apply(router, read_only_mode), store)
