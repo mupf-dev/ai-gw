@@ -170,12 +170,19 @@ async fn random_change(store: &Store, keyring: &Keyring, rng: &mut Rng) {
             }
         }
         10 => {
-            let state = if rng.chance(50) {
+            // F37: vorübergehend sperren/fortsetzen, selten endgültig widerrufen.
+            let state = if rng.chance(10) {
                 ApiKeyState::Revoked
+            } else if rng.chance(50) {
+                ApiKeyState::Suspended
             } else {
                 ApiKeyState::Active
             };
-            drop(store.set_api_key_state(ACTOR, &key, state).await);
+            drop(
+                store
+                    .set_api_key_state(ACTOR, &key, state, aigw_store::Expect::Any)
+                    .await,
+            );
         }
         11 => drop(
             store
@@ -184,6 +191,7 @@ async fn random_change(store: &Store, keyring: &Keyring, rng: &mut Rng) {
                     &key,
                     ObjectMeta::named(rng.name("k", 16)),
                     OffsetDateTime::now_utc() + time::Duration::hours(1),
+                    aigw_store::Expect::Any,
                 )
                 .await,
         ),
@@ -199,7 +207,13 @@ async fn random_change(store: &Store, keyring: &Keyring, rng: &mut Rng) {
             if store.get_credential(&cred).await.is_ok() {
                 drop(
                     store
-                        .update_credential(ACTOR, keyring, ObjectMeta::named(&cred), spec)
+                        .update_credential(
+                            ACTOR,
+                            keyring,
+                            ObjectMeta::named(&cred),
+                            spec,
+                            aigw_store::Expect::Any,
+                        )
                         .await,
                 );
             } else {
