@@ -413,6 +413,8 @@ async fn run(store: Store) {
                     per_million_tokens: Default::default(),
                     per_request: None,
                     per_image: None,
+                    per_audio_minute: None,
+                    per_million_characters: None,
                 },
             )
             .await

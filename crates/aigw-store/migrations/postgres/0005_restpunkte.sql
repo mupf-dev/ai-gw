@@ -64,3 +64,8 @@ CREATE TABLE secret (
     updated_at  TIMESTAMPTZ NOT NULL
 );
 ALTER TABLE mcp_server ADD COLUMN secret_id UUID REFERENCES secret (id);
+
+-- AIGW-21-Folge: Preise für Audio (je Minute) und Sprachausgabe (je 1 Mio. Zeichen) in
+-- Nano-Einheiten wie per_request/per_image.
+ALTER TABLE price ADD COLUMN per_audio_minute BIGINT;
+ALTER TABLE price ADD COLUMN per_million_characters BIGINT;

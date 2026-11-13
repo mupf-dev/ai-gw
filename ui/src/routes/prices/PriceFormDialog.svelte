@@ -32,7 +32,7 @@
     { key: 'audioOutput', label: 'Audio-Ausgabe' },
   ];
   const ANY = '__any__';
-  const blank = () => ({ provider: ANY as string, model: '', validFrom: '', tokens: {} as Record<string, string>, perRequest: '', perImage: '' });
+  const blank = () => ({ provider: ANY as string, model: '', validFrom: '', tokens: {} as Record<string, string>, perRequest: '', perImage: '', perAudioMinute: '', perMillionCharacters: '' });
   let form = $state(blank());
   let loaded = $state<Price | null>(null);
   let etag = $state<string | null>(null);
@@ -48,6 +48,8 @@
       tokens: Object.fromEntries(Object.entries(p.spec.perMillionTokens ?? {}).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])),
       perRequest: p.spec.perRequest ?? '',
       perImage: p.spec.perImage ?? '',
+      perAudioMinute: p.spec.perAudioMinute ?? '',
+      perMillionCharacters: p.spec.perMillionCharacters ?? '',
     };
   }
 
@@ -94,7 +96,7 @@
       if (!AMOUNT.test(v)) e[t.key] = 'Dezimalzahl ≥ 0, z. B. 2.50';
       else perMillionTokens[t.key] = amount(v);
     }
-    for (const k of ['perRequest', 'perImage'] as const) if (form[k].trim() && !AMOUNT.test(form[k].trim())) e[k] = 'Dezimalzahl ≥ 0.';
+    for (const k of ['perRequest', 'perImage', 'perAudioMinute', 'perMillionCharacters'] as const) if (form[k].trim() && !AMOUNT.test(form[k].trim())) e[k] = 'Dezimalzahl ≥ 0.';
     errors = e;
     formError = null;
     if (Object.keys(e).length || !validFrom) return;
@@ -105,6 +107,8 @@
       perMillionTokens,
       perRequest: form.perRequest.trim() ? amount(form.perRequest) : null,
       perImage: form.perImage.trim() ? amount(form.perImage) : null,
+      perAudioMinute: form.perAudioMinute.trim() ? amount(form.perAudioMinute) : null,
+      perMillionCharacters: form.perMillionCharacters.trim() ? amount(form.perMillionCharacters) : null,
     };
     busy = true;
     try {
@@ -165,6 +169,16 @@
     <Field label="Je erzeugtem Bild" optional error={errors.perImage}>
       {#snippet children({ id, describedby, invalid })}
         <Input {id} bind:value={form.perImage} inputmode="decimal" placeholder="0" aria-describedby={describedby} aria-invalid={invalid || undefined} />
+      {/snippet}
+    </Field>
+    <Field label="Je Audio-Minute (Transkription)" optional error={errors.perAudioMinute}>
+      {#snippet children({ id, describedby, invalid })}
+        <Input {id} bind:value={form.perAudioMinute} inputmode="decimal" placeholder="0" aria-describedby={describedby} aria-invalid={invalid || undefined} />
+      {/snippet}
+    </Field>
+    <Field label="Je 1 Mio. Zeichen (Sprachausgabe)" optional error={errors.perMillionCharacters}>
+      {#snippet children({ id, describedby, invalid })}
+        <Input {id} bind:value={form.perMillionCharacters} inputmode="decimal" placeholder="0" aria-describedby={describedby} aria-invalid={invalid || undefined} />
       {/snippet}
     </Field>
     <div class="sm:col-span-2"><FormError message={formError} /></div>

@@ -804,6 +804,8 @@ fn price(valid_from: time::OffsetDateTime, per_million: &str) -> PriceSpec {
         },
         per_request: None,
         per_image: None,
+        per_audio_minute: None,
+        per_million_characters: None,
     }
 }
 

@@ -637,9 +637,16 @@ pub struct PriceSpec {
     /// Fester Preis je Anfrage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub per_request: Option<Amount>,
-    /// Preis je erzeugtem Bild.
+    /// Preis je erzeugtem Bild (`/v1/images/generations`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub per_image: Option<Amount>,
+    /// Preis je Minute Audio-Eingabe (Transkription/Übersetzung, z. B. Whisper); anteilig
+    /// je Millisekunde abgerechnet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_audio_minute: Option<Amount>,
+    /// Preis je 1 Mio. Zeichen Text-Eingabe einer Sprachausgabe (`/v1/audio/speech`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_million_characters: Option<Amount>,
 }
 
 // ---------------------------------------------------------------------------------------------

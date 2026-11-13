@@ -15,9 +15,10 @@
 //! | Ausgabe | `output − reasoning` | `output` (→ 0) |
 //! | Reasoning | `reasoning` | `reasoning` (→ `output`) |
 //!
-//! dazu `perRequest`. Gerechnet wird exakt in `i128` (Preis in Nano-Einheiten je 1 Mio.
-//! Tokens × Tokens) und erst die Summe auf ganze Nano-Einheiten abgerundet. Audio- und
-//! Bildpreise werden noch nicht angewendet (die IR-Usage führt diese Mengen nicht).
+//! dazu `perRequest` sowie für die weiteren Endpunkte (AIGW-21-Folge) `perImage` × erzeugte
+//! Bilder, `perAudioMinute` × Audio-Dauer (anteilig je Millisekunde) und
+//! `perMillionCharacters` × Zeichen einer Sprachausgabe. Gerechnet wird exakt in `i128`
+//! (Preis in Nano-Einheiten × Menge) und erst die Summe auf ganze Nano-Einheiten abgerundet.
 
 use aigw_core::ir::Usage;
 use aigw_core::resource::{Amount, PriceSpec};
@@ -51,7 +52,14 @@ pub fn cost(price: &PriceSpec, usage: &Usage) -> Amount {
         + output * t(plain_output)
         + reasoning * t(reasoning_tokens);
     let tokens = i64::try_from(sum / 1_000_000).unwrap_or(i64::MAX);
-    Amount::from_nanos(tokens).saturating_add(price.per_request.unwrap_or(Amount::ZERO))
+    // Bilder (ganzzahlig), Audio-Minuten (je ms) und Zeichen (je 1 Mio.).
+    let images = nanos(price.per_image) * t(usage.images.unwrap_or(0));
+    let audio = nanos(price.per_audio_minute) * t(usage.audio_ms.unwrap_or(0)) / 60_000;
+    let chars = nanos(price.per_million_characters) * t(usage.characters.unwrap_or(0)) / 1_000_000;
+    let media = i64::try_from(images + audio + chars).unwrap_or(i64::MAX);
+    Amount::from_nanos(tokens)
+        .saturating_add(Amount::from_nanos(media))
+        .saturating_add(price.per_request.unwrap_or(Amount::ZERO))
 }
 
 /// Kosten einer Anfrage an `provider`/`model` mit dem zum Zeitpunkt `at` gültigen Preis
@@ -95,6 +103,8 @@ mod tests {
             },
             per_request: None,
             per_image: None,
+            per_audio_minute: None,
+            per_million_characters: None,
         }
     }
 
@@ -135,6 +145,29 @@ mod tests {
         // 3000×3 + 6000×0,3 + 1000×3,75 + 1500×15 + 500×20 = 9000 + 1800 + 3750 + 22500 + 10000
         // = 47 050 / 1 Mio. = 0,04705 (+ 0,001 je Anfrage)
         assert_eq!(cost(&p, &u).to_string(), "0.04805");
+    }
+
+    #[test]
+    fn images_audio_and_characters() {
+        let mut p = price(datetime!(2026-01-01 0:00 UTC), "0", "0");
+        p.per_image = Some(amount("0.04"));
+        p.per_audio_minute = Some(amount("0.006"));
+        p.per_million_characters = Some(amount("15"));
+        let u = |images, audio_ms, characters| Usage {
+            images,
+            audio_ms,
+            characters,
+            ..Usage::default()
+        };
+        assert_eq!(cost(&p, &u(Some(3), None, None)).to_string(), "0.12");
+        // 90 s Audio = 1,5 min × 0,006 = 0,009; anteilig je Millisekunde.
+        assert_eq!(cost(&p, &u(None, Some(90_000), None)).to_string(), "0.009");
+        assert_eq!(cost(&p, &u(None, Some(1), None)).nanos(), 100);
+        // 2000 Zeichen × 15 / 1 Mio. = 0,03.
+        assert_eq!(cost(&p, &u(None, None, Some(2_000))).to_string(), "0.03");
+        // Ohne Preise: 0.
+        let free = price(datetime!(2026-01-01 0:00 UTC), "0", "0");
+        assert_eq!(cost(&free, &u(Some(3), Some(60_000), Some(10))), Amount::ZERO);
     }
 
     #[test]

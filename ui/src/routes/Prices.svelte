@@ -75,7 +75,7 @@
   const others = (p: Price) => {
     const t = p.spec.perMillionTokens ?? {};
     const n = Object.entries(t).filter(([k, v]) => v != null && !['input', 'cachedInput', 'output'].includes(k)).length;
-    return n + (p.spec.perRequest ? 1 : 0) + (p.spec.perImage ? 1 : 0);
+    return n + (p.spec.perRequest ? 1 : 0) + (p.spec.perImage ? 1 : 0) + (p.spec.perAudioMinute ? 1 : 0) + (p.spec.perMillionCharacters ? 1 : 0);
   };
 
   const columns: Column<Price>[] = [

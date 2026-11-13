@@ -194,6 +194,8 @@ mod tests {
             per_million_tokens: TokenPrices::default(),
             per_request: None,
             per_image: None,
+            per_audio_minute: None,
+            per_million_characters: None,
         }
     }
 

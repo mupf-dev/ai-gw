@@ -584,6 +584,8 @@ async fn least_latency_least_busy_and_cost() {
                     },
                     per_request: None,
                     per_image: None,
+                    per_audio_minute: None,
+                    per_million_characters: None,
                 },
             })],
         );

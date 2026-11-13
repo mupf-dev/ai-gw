@@ -340,6 +340,14 @@ impl Resource for PriceSpec {
                 Col::opt_int(self.per_request.map(Amount::nanos)),
             ),
             ("per_image", Col::opt_int(self.per_image.map(Amount::nanos))),
+            (
+                "per_audio_minute",
+                Col::opt_int(self.per_audio_minute.map(Amount::nanos)),
+            ),
+            (
+                "per_million_characters",
+                Col::opt_int(self.per_million_characters.map(Amount::nanos)),
+            ),
         ])
     }
 
@@ -356,6 +364,10 @@ impl Resource for PriceSpec {
             per_million_tokens: row.json("token_prices")?,
             per_request: row.opt_int("per_request")?.map(Amount::from_nanos),
             per_image: row.opt_int("per_image")?.map(Amount::from_nanos),
+            per_audio_minute: row.opt_int("per_audio_minute")?.map(Amount::from_nanos),
+            per_million_characters: row
+                .opt_int("per_million_characters")?
+                .map(Amount::from_nanos),
         })
     }
 

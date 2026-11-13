@@ -513,7 +513,7 @@ pub fn price(p: &PriceSpec) -> Res {
         ));
     }
     let t = &p.per_million_tokens;
-    let amounts: [(&str, Option<Amount>); 10] = [
+    let amounts: [(&str, Option<Amount>); 12] = [
         ("perMillionTokens.input", t.input),
         ("perMillionTokens.output", t.output),
         ("perMillionTokens.cachedInput", t.cached_input),
@@ -524,6 +524,8 @@ pub fn price(p: &PriceSpec) -> Res {
         ("perMillionTokens.imageInput", t.image_input),
         ("perRequest", p.per_request),
         ("perImage", p.per_image),
+        ("perAudioMinute", p.per_audio_minute),
+        ("perMillionCharacters", p.per_million_characters),
     ];
     for (field, a) in amounts {
         if a.is_some_and(|a| a.nanos() < 0) {
@@ -852,6 +854,8 @@ mod tests {
             per_million_tokens: TokenPrices::default(),
             per_request: None,
             per_image: None,
+            per_audio_minute: None,
+            per_million_characters: None,
         };
         let now = OffsetDateTime::from_unix_timestamp(1_000).unwrap_or(OffsetDateTime::UNIX_EPOCH);
         assert!(price_change(&at(10), &at(10), now).is_ok());
