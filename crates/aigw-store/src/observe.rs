@@ -8,6 +8,7 @@
 //! (`ON CONFLICT … DO UPDATE SET x = usage_rollup.x + excluded.x`) für die Rollups. Das läuft
 //! unverändert auf SQLite und Postgres und verträgt mehrere Instanzen ohne Read-Modify-Write.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
@@ -25,7 +26,7 @@ pub const LATENCY_BUCKETS_MS: [i64; 11] = [
 pub const LATENCY_BUCKET_COUNT: usize = LATENCY_BUCKETS_MS.len() + 1;
 
 /// Spalten der Latenz-Buckets (in der Reihenfolge von [`LATENCY_BUCKETS_MS`], dann `+Inf`).
-const LATENCY_COLUMNS: [&str; LATENCY_BUCKET_COUNT] = [
+pub(crate) const LATENCY_COLUMNS: [&str; LATENCY_BUCKET_COUNT] = [
     "lat_le_25",
     "lat_le_50",
     "lat_le_100",
@@ -39,6 +40,27 @@ const LATENCY_COLUMNS: [&str; LATENCY_BUCKET_COUNT] = [
     "lat_le_60000",
     "lat_inf",
 ];
+
+/// Spalten des TTFT-Histogramms (gleiche Grenzen wie [`LATENCY_BUCKETS_MS`], AIGW-46).
+pub(crate) const TTFT_COLUMNS: [&str; LATENCY_BUCKET_COUNT] = [
+    "ttft_le_25",
+    "ttft_le_50",
+    "ttft_le_100",
+    "ttft_le_250",
+    "ttft_le_500",
+    "ttft_le_1000",
+    "ttft_le_2500",
+    "ttft_le_5000",
+    "ttft_le_10000",
+    "ttft_le_30000",
+    "ttft_le_60000",
+    "ttft_inf",
+];
+
+/// Länge eines Minuten-Buckets (ms), Tabelle `usage_rollup`.
+pub const MINUTE_MS: i64 = 60_000;
+/// Länge eines Stunden-Buckets (ms), Tabelle `usage_rollup_hour` (AIGW-46).
+pub const HOUR_MS: i64 = 3_600_000;
 
 /// Index des Latenz-Buckets für `ms`.
 pub fn latency_bucket(ms: i64) -> usize {
@@ -110,6 +132,34 @@ pub struct RequestLogRow {
     pub client_aborted: bool,
     /// Client-Adresse.
     pub client_ip: Option<String>,
+    /// Request-ID des Clients (`x-request-id` / `x-client-request-id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_request_id: Option<String>,
+    /// Upstream-Versuche (Retries, Fallbacks) in Reihenfolge; leer = keine aufgezeichnet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attempts: Vec<AttemptRow>,
+}
+
+/// Ein Upstream-Versuch einer Anfrage (Spalte `request_log.attempts`, JSON-Array; AIGW-46).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AttemptRow {
+    /// Modellgruppe des Deployments (bei Fallbacks die Ziel-Gruppe).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_group: Option<String>,
+    /// Name des Deployments.
+    pub deployment: String,
+    /// ID des Deployments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployment_id: Option<String>,
+    /// Fehlerklasse (`snake_case` wie `ErrorClass`); fehlt = erfolgreich.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// HTTP-Status des Anbieters bei Fehlern.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_status: Option<u16>,
+    /// Dauer bis zur Antwort, zum ersten Stream-Ereignis bzw. zum Fehler (ms).
+    pub duration_ms: i64,
 }
 
 /// Eine Zeile in `request_payload`.
@@ -177,6 +227,9 @@ pub struct RollupCounts {
     pub ttft_count: i64,
     /// Anzahl je Latenz-Bucket (nicht kumulativ), siehe [`LATENCY_BUCKETS_MS`].
     pub latency_hist: [i64; LATENCY_BUCKET_COUNT],
+    /// Anzahl je TTFT-Bucket (nicht kumulativ, nur Anfragen mit TTFT), gleiche Grenzen.
+    #[serde(default)]
+    pub ttft_hist: [i64; LATENCY_BUCKET_COUNT],
 }
 
 impl RollupCounts {
@@ -220,10 +273,13 @@ impl RollupCounts {
         for (a, b) in self.latency_hist.iter_mut().zip(other.latency_hist) {
             add(a, b);
         }
+        for (a, b) in self.ttft_hist.iter_mut().zip(other.ttft_hist) {
+            add(a, b);
+        }
     }
 }
 
-const REQUEST_LOG_COLUMNS: [&str; 27] = [
+pub(crate) const REQUEST_LOG_COLUMNS: [&str; 29] = [
     "id",
     "at",
     "endpoint",
@@ -251,9 +307,11 @@ const REQUEST_LOG_COLUMNS: [&str; 27] = [
     "client_aborted",
     "client_ip",
     "metadata",
+    "attempts",
+    "client_request_id",
 ];
 
-const ROLLUP_KEY_COLUMNS: [&str; 6] = [
+pub(crate) const ROLLUP_KEY_COLUMNS: [&str; 6] = [
     "bucket_start",
     "api_key_id",
     "team_id",
@@ -262,7 +320,7 @@ const ROLLUP_KEY_COLUMNS: [&str; 6] = [
     "deployment_id",
 ];
 
-const ROLLUP_SCALAR_COLUMNS: [&str; 14] = [
+pub(crate) const ROLLUP_SCALAR_COLUMNS: [&str; 14] = [
     "requests",
     "errors",
     "cache_hits",
@@ -366,7 +424,9 @@ impl Store {
                     .bind(b(r.stream))
                     .bind(b(r.client_aborted))
                     .bind(r.client_ip.clone())
-                    .bind("{}");
+                    .bind("{}")
+                    .bind(attempts_json(&r.attempts)?)
+                    .bind(r.client_request_id.clone());
             }
             q.execute(&mut *tx).await?;
         }
@@ -390,46 +450,9 @@ impl Store {
         }
 
         if !rollups.is_empty() {
-            let cols: Vec<&str> = ROLLUP_KEY_COLUMNS
-                .iter()
-                .chain(&ROLLUP_SCALAR_COLUMNS)
-                .chain(&LATENCY_COLUMNS)
-                .copied()
-                .collect();
-            let mut suffix = format!(
-                " ON CONFLICT ({}) DO UPDATE SET ",
-                ROLLUP_KEY_COLUMNS.join(", ")
-            );
-            for (i, c) in ROLLUP_SCALAR_COLUMNS
-                .iter()
-                .chain(&LATENCY_COLUMNS)
-                .enumerate()
-            {
-                if i > 0 {
-                    suffix.push_str(", ");
-                }
-                let _ = write!(suffix, "{c} = usage_rollup.{c} + excluded.{c}");
-            }
-            for chunk in rollups.chunks(ROWS_PER_STATEMENT) {
-                let sql = insert_sql(self.backend(), "usage_rollup", &cols, chunk.len()) + &suffix;
-                let mut q = sqlx::query(AssertSqlSafe(sql));
-                for (k, c) in chunk {
-                    q = q
-                        .bind(k.bucket_start)
-                        .bind(k.api_key_id.clone())
-                        .bind(k.team_id.clone())
-                        .bind(k.organization_id.clone())
-                        .bind(k.model_group.clone())
-                        .bind(k.deployment_id.clone());
-                    for v in c.scalars() {
-                        q = q.bind(v);
-                    }
-                    for v in c.latency_hist {
-                        q = q.bind(v);
-                    }
-                }
-                q.execute(&mut *tx).await?;
-            }
+            upsert_rollups(&mut tx, self.backend(), "usage_rollup", rollups).await?;
+            let hourly = to_hourly(rollups);
+            upsert_rollups(&mut tx, self.backend(), "usage_rollup_hour", &hourly).await?;
         }
 
         tx.commit().await?;
@@ -465,15 +488,19 @@ impl Store {
         }
     }
 
-    /// Löscht Rollups mit `bucket_start < before_ms`.
+    /// Löscht Minuten-Rollups mit `bucket_start < before_ms` und Stunden-Rollups, deren
+    /// Stunde vollständig davor liegt. Liefert die Anzahl der Minuten-Rollups.
     pub async fn purge_rollups(&self, before_ms: i64) -> Result<u64, StoreError> {
-        Ok(
-            sqlx::query("DELETE FROM usage_rollup WHERE bucket_start < $1")
-                .bind(before_ms)
-                .execute(&self.pool)
-                .await?
-                .rows_affected(),
-        )
+        let n = sqlx::query("DELETE FROM usage_rollup WHERE bucket_start < $1")
+            .bind(before_ms)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        sqlx::query("DELETE FROM usage_rollup_hour WHERE bucket_start < $1")
+            .bind(before_ms.div_euclid(HOUR_MS) * HOUR_MS)
+            .execute(&self.pool)
+            .await?;
+        Ok(n)
     }
 
     /// Rollups mit `from_ms <= bucket_start < to_ms`, sortiert nach Schlüssel.
@@ -482,14 +509,32 @@ impl Store {
         from_ms: i64,
         to_ms: i64,
     ) -> Result<Vec<(RollupKey, RollupCounts)>, StoreError> {
+        self.list_rollups_in("usage_rollup", from_ms, to_ms).await
+    }
+
+    /// Stunden-Rollups mit `from_ms <= bucket_start < to_ms`, sortiert nach Schlüssel.
+    pub async fn list_hourly_rollups(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Result<Vec<(RollupKey, RollupCounts)>, StoreError> {
+        self.list_rollups_in("usage_rollup_hour", from_ms, to_ms)
+            .await
+    }
+
+    async fn list_rollups_in(
+        &self,
+        table: &str,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Result<Vec<(RollupKey, RollupCounts)>, StoreError> {
         let cols: Vec<&str> = ROLLUP_KEY_COLUMNS
             .iter()
-            .chain(&ROLLUP_SCALAR_COLUMNS)
-            .chain(&LATENCY_COLUMNS)
+            .chain(rollup_count_columns())
             .copied()
             .collect();
         let sql = format!(
-            "SELECT {} FROM usage_rollup WHERE bucket_start >= $1 AND bucket_start < $2 \
+            "SELECT {} FROM {table} WHERE bucket_start >= $1 AND bucket_start < $2 \
              ORDER BY {}",
             cols.join(", "),
             ROLLUP_KEY_COLUMNS.join(", ")
@@ -543,11 +588,86 @@ impl Store {
     }
 }
 
+/// Zählspalten eines Rollups in Bindungsreihenfolge: Skalare, Latenz-, TTFT-Histogramm.
+pub(crate) fn rollup_count_columns() -> impl Iterator<Item = &'static &'static str> {
+    ROLLUP_SCALAR_COLUMNS
+        .iter()
+        .chain(&LATENCY_COLUMNS)
+        .chain(&TTFT_COLUMNS)
+}
+
+/// Fasst Minuten-Rollups zu Stunden-Rollups zusammen (je Schlüssel ein Eintrag, sortiert).
+fn to_hourly(rollups: &[(RollupKey, RollupCounts)]) -> Vec<(RollupKey, RollupCounts)> {
+    let mut map: BTreeMap<RollupKey, RollupCounts> = BTreeMap::new();
+    for (k, c) in rollups {
+        let mut key = k.clone();
+        key.bucket_start = k.bucket_start.div_euclid(HOUR_MS) * HOUR_MS;
+        map.entry(key).or_default().merge(c);
+    }
+    map.into_iter().collect()
+}
+
+/// Additiver UPSERT von Rollup-Deltas in `table` (`usage_rollup` oder `usage_rollup_hour`).
+async fn upsert_rollups(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    backend: Backend,
+    table: &str,
+    rollups: &[(RollupKey, RollupCounts)],
+) -> Result<(), StoreError> {
+    let cols: Vec<&str> = ROLLUP_KEY_COLUMNS
+        .iter()
+        .chain(rollup_count_columns())
+        .copied()
+        .collect();
+    let mut suffix = format!(
+        " ON CONFLICT ({}) DO UPDATE SET ",
+        ROLLUP_KEY_COLUMNS.join(", ")
+    );
+    for (i, c) in rollup_count_columns().enumerate() {
+        if i > 0 {
+            suffix.push_str(", ");
+        }
+        let _ = write!(suffix, "{c} = {table}.{c} + excluded.{c}");
+    }
+    for chunk in rollups.chunks(ROWS_PER_STATEMENT) {
+        let sql = insert_sql(backend, table, &cols, chunk.len()) + &suffix;
+        let mut q = sqlx::query(AssertSqlSafe(sql));
+        for (k, c) in chunk {
+            q = q
+                .bind(k.bucket_start)
+                .bind(k.api_key_id.clone())
+                .bind(k.team_id.clone())
+                .bind(k.organization_id.clone())
+                .bind(k.model_group.clone())
+                .bind(k.deployment_id.clone());
+            for v in c.scalars() {
+                q = q.bind(v);
+            }
+            for v in c.latency_hist {
+                q = q.bind(v);
+            }
+            for v in c.ttft_hist {
+                q = q.bind(v);
+            }
+        }
+        q.execute(&mut **tx).await?;
+    }
+    Ok(())
+}
+
+fn attempts_json(a: &[AttemptRow]) -> Result<Option<String>, StoreError> {
+    if a.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(serde_json::to_string(a)?))
+    }
+}
+
 fn flag(row: &AnyRow, col: &str) -> Result<bool, StoreError> {
     Ok(row.try_get::<i64, _>(col)? != 0)
 }
 
-fn request_log_from_row(row: &AnyRow) -> Result<RequestLogRow, StoreError> {
+pub(crate) fn request_log_from_row(row: &AnyRow) -> Result<RequestLogRow, StoreError> {
     Ok(RequestLogRow {
         id: row.try_get("id")?,
         at: row.try_get("at")?,
@@ -575,6 +695,11 @@ fn request_log_from_row(row: &AnyRow) -> Result<RequestLogRow, StoreError> {
         stream: flag(row, "stream")?,
         client_aborted: flag(row, "client_aborted")?,
         client_ip: row.try_get("client_ip")?,
+        client_request_id: row.try_get("client_request_id")?,
+        attempts: match row.try_get::<Option<String>, _>("attempts")? {
+            Some(t) if !t.is_empty() => serde_json::from_str(&t)?,
+            _ => Vec::new(),
+        },
     })
 }
 
@@ -587,11 +712,20 @@ fn rollup_from_row(row: &AnyRow) -> Result<(RollupKey, RollupCounts), StoreError
         model_group: row.try_get("model_group")?,
         deployment_id: row.try_get("deployment_id")?,
     };
+    Ok((key, rollup_counts_from_row(row)?))
+}
+
+/// Zählspalten (Namen wie in der Tabelle) aus einer Ergebniszeile.
+pub(crate) fn rollup_counts_from_row(row: &AnyRow) -> Result<RollupCounts, StoreError> {
     let mut hist = [0; LATENCY_BUCKET_COUNT];
     for (slot, col) in hist.iter_mut().zip(LATENCY_COLUMNS) {
         *slot = row.try_get(col)?;
     }
-    let counts = RollupCounts {
+    let mut ttft_hist = [0; LATENCY_BUCKET_COUNT];
+    for (slot, col) in ttft_hist.iter_mut().zip(TTFT_COLUMNS) {
+        *slot = row.try_get(col)?;
+    }
+    Ok(RollupCounts {
         requests: row.try_get("requests")?,
         errors: row.try_get("errors")?,
         cache_hits: row.try_get("cache_hits")?,
@@ -607,8 +741,8 @@ fn rollup_from_row(row: &AnyRow) -> Result<(RollupKey, RollupCounts), StoreError
         ttft_ms_sum: row.try_get("ttft_ms_sum")?,
         ttft_count: row.try_get("ttft_count")?,
         latency_hist: hist,
-    };
-    Ok((key, counts))
+        ttft_hist,
+    })
 }
 
 #[cfg(test)]

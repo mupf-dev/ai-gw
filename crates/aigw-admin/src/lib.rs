@@ -16,11 +16,14 @@
 //! - `/admin/api/v1/audit-log` – Audit-Log lesen und exportieren ([`audit`])
 //! - `/admin/auth/{login,callback,logout}` – OIDC-Login und Abmeldung ([`session`], [`oidc`])
 //! - `GET /admin/api/v1/usage/budgets` – Budgetstände (siehe [`usage`])
+//! - `/admin/api/v1/analytics/{timeseries,summary,top}`, `/admin/api/v1/request-logs` –
+//!   Dashboards und Log-Explorer (siehe [`analytics`])
 //! - `GET /admin/…` – eingebettete Svelte-SPA (siehe [`ui`])
 //!
 //! Fehler kommen einheitlich als Problem Details (RFC 9457, [`problem::Problem`]).
 
 pub mod admin_keys;
+pub mod analytics;
 pub mod api;
 pub mod audit;
 pub mod auth;

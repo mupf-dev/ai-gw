@@ -11,6 +11,7 @@
 //! Details: `docs/konzept/02-datenmodell.md`.
 
 pub mod admin_auth;
+pub mod analytics;
 pub mod budget;
 pub mod crypto;
 pub mod gitops;
@@ -145,6 +146,13 @@ pub fn migrator() -> Migrator {
             "audit_scope".into(),
             MigrationType::Simple,
             include_str!("../migrations/0004_audit_scope.sql").into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            5,
+            "analytics".into(),
+            MigrationType::Simple,
+            include_str!("../migrations/0005_analytics.sql").into_sql_str(),
             false,
         ),
     ])

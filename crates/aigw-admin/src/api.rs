@@ -44,6 +44,9 @@ use crate::{admin_keys as ak, session as s};
         ak::put_admin_api_key, ak::delete_admin_api_key,
         crate::usage::list_budgets,
         crate::audit::audit_log,
+        crate::analytics::timeseries, crate::analytics::summary, crate::analytics::top,
+        crate::analytics::list_request_logs, crate::analytics::get_request_log,
+        crate::analytics::get_request_payload,
     ),
     components(schemas(VersionInfo, Problem, crate::bounds::Cascade)),
     modifiers(&SecuritySchemes),
@@ -62,6 +65,8 @@ use crate::{admin_keys as ak, session as s};
         (name = "admin-api-keys", description = "Admin-API-Keys für Automatisierung"),
         (name = "usage", description = "Verbrauch und Budgetstände"),
         (name = "audit-log", description = "Audit-Log: Änderungen und Anmeldeereignisse, Export als JSON Lines"),
+        (name = "analytics", description = "Dashboards: Zeitreihen, KPIs, Ranglisten aus den Rollups"),
+        (name = "request-logs", description = "Log-Explorer: einzelne Anfragen, Versuche, Payloads"),
     )
 )]
 pub struct ApiDoc;

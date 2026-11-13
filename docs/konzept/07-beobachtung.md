@@ -27,6 +27,7 @@ Aufbewahrungs-Task: stündlich Rohlogs / Payloads / Rollups nach Frist löschen
 | OTLP-Export: `tracing`-Layer für Traces, `OtlpLogExporter`, §12 | `aigw_observe::otel` |
 | Trace-Konventionen (`TRACE_TARGET`, `current_traceparent`, `gen_ai_system`) | `aigw_core::observe` |
 | Tabellen, Batch-Schreiben, Löschen, Lesen | `aigw_store::observe`, Migration `0002_observe.sql` |
+| Dashboards/Log-Explorer: Abfragen, Stunden-Rollups, §13 | `aigw_store::analytics`, `aigw_admin::analytics`, Migration `0005_analytics.sql` |
 
 **Eigene Crate statt Modul:** Der Proxy hängt nur vom Trait in `aigw-core` ab und bleibt frei von
 Datenbank-, Regex- und (ab AIGW-45) OpenTelemetry-Abhängigkeiten. Das Request-Log ist isoliert
@@ -396,3 +397,106 @@ Exportern in `aigw_log_export_errors_total` und zusätzlich in
 - `crates/aigw-observe/tests/otel_callsite.rs`: Callsites abgeschaltet, solange inaktiv.
 - `scripts/runtime-smoke.sh`: Binary mit lokalem Fake-Collector (python3) – Traces und Logs
   kommen als Protobuf an; `/metrics` mit Gateway-, Snapshot- und OTLP-Metriken.
+
+## 13. Dashboards und Log-Explorer (AIGW-46)
+
+Lese-API: [08-admin-api.md](08-admin-api.md) §5.11. Hier: Datenbasis, Aggregation, Messwerte.
+
+### 13.1 Datenbasis (Migration `0005_analytics.sql`)
+
+- **Stunden-Rollups** `usage_rollup_hour`: gleiche Spalten und gleicher Schlüssel wie
+  `usage_rollup`, Bucket = Stundenbeginn (UTC). Der Writer schreibt im **selben Batch** (eine
+  Transaktion) zusätzlich die je Stunde zusammengefassten Deltas als additiven UPSERT –
+  `aigw_store`-intern, der Writer in `aigw-observe` bleibt unverändert. Bestehende
+  Minuten-Rollups übernimmt die Migration. Aufbewahrung wie Minuten-Rollups (gelöscht wird
+  eine Stunde erst, wenn sie ganz vor der Frist liegt).
+- **TTFT-Histogramm** `ttft_le_25` … `ttft_inf` in beiden Rollup-Tabellen (Grenzen wie
+  Latenz, nur Anfragen mit TTFT, d. h. Streams). Ältere Zeilen haben 0 → `ttft_p95 = null`.
+- `request_log.attempts` (JSON-Array der Upstream-Versuche: Modellgruppe, Deployment,
+  Fehlerklasse, Upstream-Status, Dauer) und `request_log.client_request_id`
+  (`x-request-id`/`x-client-request-id` des Clients; nur sichtbares ASCII, höchstens 128
+  Zeichen). Ältere Einträge: leer.
+- Indizes: `usage_rollup (api_key_id|organization_id, bucket_start)`, je Dimension auf
+  `usage_rollup_hour`, `request_log (organization_id|model_group|deployment_id, at)` und
+  `request_log (client_request_id)`.
+
+### 13.2 Abfrage
+
+`Store::query_rollups` zerlegt `[from, to)` in Abschnitte: ganze Stunden aus
+`usage_rollup_hour`, angebrochene Stunden am Rand aus `usage_rollup`. Bei Schritten unter
+einer Stunde (`1m`, `5m`) nur Minuten. Jeder Abschnitt ist **eine** `GROUP BY`-Abfrage
+(`(bucket_start / step) * step`, Gruppenspalte, `SUM` je Zählspalte); die Teilergebnisse
+addiert der Store. Ein Dashboard über 7 Tage liest damit ≈ 168 statt ≈ 10 000 Minuten je
+Schlüssel.
+
+- **Zeitraum:** Standard die letzten 24 h; höchstens 400 Tage. Ränder werden auf Minuten,
+  bei Zeitreihen auf `step` ausgerichtet (an der Epoche, d. h. Tage in UTC).
+- **Schrittwahl:** ohne `step` der kleinste aus `1m`, `5m`, `1h`, `1d` mit höchstens 300
+  Punkten (1 h → `1m`, 24 h → `5m`, 7 Tage → `1h`, 30 Tage → `1d`); ein expliziter `step`
+  darf höchstens 1500 Punkte ergeben (sonst `400`). Punkte sind lückenlos (Zähler 0,
+  Quoten/Latenzen `null`).
+- **Top-N + „other“:** erst Gesamtsummen je Gruppe im Zeitraum (Rang), dann die Zeitreihe mit
+  `CASE WHEN spalte IN (…) THEN … ELSE '__other__' END` als Gruppe – die Datenbank liefert
+  höchstens N + 1 Gruppen je Bucket, auch bei Tausenden Keys. Rang: summierbare Kennzahlen
+  (Anfragen, Tokens, Kosten, Fehler) nach dem Wert, Quoten und Latenzen nach Anfragen.
+- **Anbieter** stehen nicht in den Rollups: Gruppierung und Filter bilden Deployments über die
+  **aktuelle** Konfiguration auf Anbieter ab (gelöschte Deployments → `unknown`). Im Rohlog
+  steht der Anbieter direkt.
+- **Kennzahlen:** `requests`, `tokens` (Eingabe + Ausgabe), `input_tokens`, `output_tokens`,
+  `cost`, `errors`, `error_rate`, `cache_hit_rate` (Treffer im Antwort-Cache / Anfragen),
+  `latency_avg`, `latency_p50|p95|p99`, `ttft_p95`.
+- **KPIs** (`summary`): Zeitraum und gleich lange Vorperiode direkt davor; `deltaPercent` =
+  (Wert − Vorwert) / Vorwert · 100, auch für Quoten (relativ, nicht Prozentpunkte); `null`
+  ohne Vorwert.
+
+### 13.3 Perzentile aus Histogrammen
+
+Wie Prometheus `histogram_quantile` (`aigw_store::analytics::histogram_quantile`): Rang
+`q · n`, erster Bucket mit kumulierter Anzahl ≥ Rang, darin **linear interpoliert** zwischen
+Unter- und Obergrenze (Annahme: gleichverteilt; der erste Bucket beginnt bei 0 ms). Fällt der
+Rang in den `+Inf`-Bucket, ist das Ergebnis 60 000 ms (Untergrenze). Die Genauigkeit ist durch
+die Bucket-Grenzen beschränkt (z. B. p95 irgendwo in 250–500 ms → Fehler bis ±125 ms). Über
+Gruppen und Zeit wird erst summiert, dann das Quantil gebildet (exakt bezüglich der Buckets,
+kein Mitteln von Perzentilen).
+
+### 13.4 Messwerte
+
+Buildbox (x86-64, 8 vCPU), Release, `AIGW_ANALYTICS_PERF=1 cargo test --release -p aigw-admin
+--test analytics_perf -- --nocapture --test-threads 1`: **1 Mio. Minuten-Rollups** über 7 Tage
+(100 Keys, 12 Teams, 6 Modellgruppen, 12 Deployments; ≈ 100 Zeilen je Minute) und **500 000
+Rohlogs**, Antwortzeit über HTTP inkl. Rechteprüfung und Namensauflösung, Median aus 5 Läufen.
+Postgres 17 im Docker-Container auf derselben Box.
+
+| Abfrage | SQLite (Datei) | Postgres 17 |
+|---|---|---|
+| `summary` 7 Tage (mit Vorperiode) | 42 ms | 31 ms |
+| `timeseries` 7 Tage `requests` (auto → 1h) | 12 ms | 12 ms |
+| `timeseries` 7 Tage `cost`, `groupBy=model_group` | 32 ms | 37 ms |
+| `timeseries` 7 Tage `latency_p95`, `groupBy=key` (Top 5 von 100) | 63 ms | 48 ms |
+| `timeseries` 7 Tage `ttft_p95`, `groupBy=provider` | 56 ms | 34 ms |
+| `top` 7 Tage Keys nach Kosten | 20 ms | 19 ms |
+| `summary` / `timeseries groupBy=team` 7 Tage, team-scoped viewer | 7 / 8 ms | 13 / 17 ms |
+| `timeseries` 24 h `requests` (auto → 5m, nur Minuten-Rollups, ≈ 144 000 Zeilen) | **380 ms** | 79 ms |
+| `request-logs` Seite 1 / Seite 2 (Cursor) | 1,8 / 1,6 ms | 7,0 / 3,6 ms |
+| `request-logs?status=error` / `modelGroup` + 24 h / `clientRequestId` | 6,7 / 1,7 / 0,8 ms | 5,2 / 3,6 / 2,8 ms |
+| `request-logs` team-scoped | 1,4 ms | 3,5 ms |
+
+Ziel < 200 ms für Dashboard-Abfragen über 7 Tage: eingehalten (Stunden-Rollups). Ohne
+Stunden-Rollups lagen dieselben 7-Tage-Abfragen bei rund 0,5–1 s. Summiert werden nur die
+Spalten, die die Kennzahl braucht (`RollupQuery::columns`; Zeitreihe 24 h vorher 650 ms
+SQLite / 520 ms Postgres). Offen: Schritte unter einer Stunde über 24 h auf SQLite (380 ms) –
+möglich wäre eine dritte Stufe mit 5-Minuten-Rollups. Schreiben (Seed): 1 Mio. Rollups in
+16 s (SQLite) bzw. 43 s (Postgres) inkl. Stunden-Rollups.
+
+### 13.5 Tests
+
+- `crates/aigw-admin/tests/analytics_api.rs` (SQLite Speicher/Datei, Postgres): Zeitreihen über
+  Stunden- und Minuten-Rollups inkl. angebrochener Stunden und doppelt geschriebener Minute,
+  Schrittwahl, Kosten exakt, KPIs mit Vorperiode, Top-N + `__other__`, Perzentile, TTFT,
+  Anbieter, Rangliste mit Anteil, Fehlerfälle; Geltungsbereiche (team-scoped viewer, org-admin,
+  globale Rollen; `403` bei fremdem Team/Key); Log-Explorer mit Cursor (inkl. gleicher
+  Zeitpunkte), allen Filtern, Namen, Versuchen; Payload nur `admin`/`auditor`
+  (`payloadStatus`, `403`/`404` der Payload-Route); Aufbewahrung der Stunden-Rollups.
+- Einheiten: Abschnittszerlegung, Interpolation, Schrittwahl, Status-/Cursor-Parser,
+  `ReadPayload` in `rbac.rs`.
+- Last: `crates/aigw-admin/tests/analytics_perf.rs` (nur mit `AIGW_ANALYTICS_PERF=1`).

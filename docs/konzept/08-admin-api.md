@@ -35,6 +35,9 @@ Instanz nach ca. 100 ms (Debounce), bei Postgres auf allen Instanzen per `NOTIFY
 | `/admin-api-keys`, `/admin-api-keys/{name}` | GET, POST · GET, PUT, DELETE | Admin-API-Keys (§5.5) |
 | `/session`, `/auth/info` | GET | angemeldeter Principal bzw. Anmeldeverfahren (§5) |
 | `/audit-log` | GET | Audit-Log lesen, filtern, als JSON Lines exportieren (§5.10) |
+| `/usage/budgets` | GET | Budgetstände ([11-limits-und-budgets.md](11-limits-und-budgets.md)) |
+| `/analytics/timeseries`, `/analytics/summary`, `/analytics/top` | GET | Dashboards: Zeitreihen, KPIs mit Vorperiode, Ranglisten (§5.11, [07-beobachtung.md](07-beobachtung.md) §13) |
+| `/request-logs`, `/request-logs/{id}`, `/request-logs/{id}/payload` | GET | Log-Explorer: Anfragen, Upstream-Versuche, Payload (§5.11) |
 | `/version` | GET | Version (ohne Anmeldung) |
 
 Körper wie in GitOps-YAML ([02-datenmodell.md](02-datenmodell.md) §3), als JSON:
@@ -400,7 +403,7 @@ eingeschränkt. Jede Operation fordert `Permission::Read`/`Write` auf einem `Tar
 | `org-admin` (Org O) | O, Teams und Keys in O, Katalog | Teams und Keys in O, nicht O selbst |
 | `team-admin` (Team T) | T, Keys in T, Katalog; O nur, wenn die Zuweisung `organization` nennt | Keys in T |
 | `viewer` | im Bereich (global: alles), Katalog | – |
-| `auditor` | wie `viewer`; dazu das Audit-Log (§5.10) | – |
+| `auditor` | wie `viewer`; dazu das Audit-Log (§5.10) und gespeicherte Payloads (§5.11) | – |
 
 - **Grenzen (AIGW-67):** Limits, Budgets und Modellfreigaben eines Keys dürfen die seines
   Teams und seiner Organisation nicht überschreiten, die eines Teams nicht die der
@@ -594,6 +597,49 @@ sichtbar.
 Feldnamen (`spec.fields`), Keys nur mit Präfix, Admin-Keys ohne Hash, `SecretString` als
 `<redacted>`. Session-IDs, CSRF-Tokens und ID-Tokens erscheinen nie. Antworten tragen
 `Cache-Control: no-store`.
+
+### 5.11 Dashboards und Log-Explorer (AIGW-46)
+
+Code `crates/aigw-admin/src/analytics.rs`, Lesefunktionen `aigw_store::analytics`; Kennzahlen,
+Aggregation und Messwerte in [07-beobachtung.md](07-beobachtung.md) §13.
+
+**Geltungsbereich** (gilt für alle Routen):
+
+| Principal | sieht |
+|---|---|
+| Leserecht `Global` (`admin`, `viewer`, `auditor` ohne Einschränkung) | alle Anfragen, auch ohne Team (Keys ohne Team, Fehler vor der Anmeldung) |
+| eingeschränkte Rollen | nur Anfragen von Keys in Teams mit Leserecht `InTeam(o, t)` (Org-Rollen: alle Teams der Organisation) |
+
+- Filter `team`/`key` außerhalb des Bereichs → `403`; `organization`, `modelGroup`,
+  `deployment`, `provider` schneiden nur. Unbekannte Namen → `422`.
+- Einzelanfrage außerhalb des Bereichs → `403`, unbekannt/abgelaufen → `404`.
+- **Payload:** eigene Berechtigung `Permission::ReadPayload` – nur `admin` und `auditor` im
+  jeweiligen Bereich (Ziel: das Team der Anfrage, ohne Team global). Andere Rollen erhalten die
+  Metadaten mit `payloadStatus: "forbidden"`; `GET /request-logs/{id}/payload` antwortet `403`.
+
+**Parameter (Auszug):**
+
+| Route | Parameter |
+|---|---|
+| `timeseries` | `metric` (Pflicht), `from`, `to`, `step` (`1m`/`5m`/`1h`/`1d`), `groupBy` (`model_group`, `deployment`, `provider`, `team`, `key`, `org`), `limit` (Top-N 1–20, Standard 5) |
+| `summary` | `from`, `to` |
+| `top` | `dimension` (Pflicht), `metric` (Standard `requests`), `from`, `to`, `limit` (1–100, Standard 10) |
+| alle drei | Filter `modelGroup`, `deployment`, `provider`, `team`, `key`, `organization` (kommagetrennt, Name oder ID) |
+| `request-logs` | `from`, `to`, `status` (`429`, `4xx`, `error`, `success`), `errorCode`, `modelGroup`, `deployment`, `provider`, `team`, `key`, `organization`, `requestId`, `clientRequestId`, `stream`, `cache` (`hit`, `miss`, `none`, `hit-exact`, `hit-semantic`), `limit` (1–500, Standard 50), `cursor` |
+
+Zeitpunkte RFC 3339; ohne `from`/`to` die letzten 24 h (Log-Explorer: ohne Zeitgrenze).
+Kosten erscheinen als Zahl (`v`, gerundet, für Diagramme) **und** exakt als Dezimaltext
+(`amount`). Der Cursor des Log-Explorers ist opak (Base64url von Zeitpunkt und Request-ID);
+sortiert wird absteigend nach (`at`, `id`), die Paginierung läuft in SQL.
+
+```json
+GET /admin/api/v1/analytics/timeseries?metric=cost&groupBy=model_group&from=2026-11-06T00:00:00Z&to=2026-11-13T00:00:00Z
+→ {"metric": "cost", "unit": "currency", "step": "1h", "stepSeconds": 3600, "groupBy": "model_group",
+   "from": "…", "to": "…",
+   "series": [{"key": "gpt-4o", "name": "gpt-4o", "other": false, "total": 812.4, "totalAmount": "812.412345678",
+               "points": [{"t": "2026-11-06T00:00:00Z", "v": 3.2, "amount": "3.2"}, …]},
+              …, {"key": "__other__", "other": true, …}]}
+```
 
 ## 6. Datenebene: Schlüsselprüfung und Modellfreigaben
 

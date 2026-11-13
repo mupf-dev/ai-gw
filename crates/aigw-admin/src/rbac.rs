@@ -29,6 +29,9 @@ pub enum Permission {
     Read,
     /// Ändern.
     Write,
+    /// Gespeicherte Request-/Response-Inhalte (Payload-Logging) lesen: nur `admin` und
+    /// `auditor` im jeweiligen Geltungsbereich (AIGW-46).
+    ReadPayload,
 }
 
 /// Ziel einer Operation (Geltungsbereich).
@@ -130,6 +133,7 @@ pub fn binding_allows(b: &RoleBinding, perm: Permission, target: &Target) -> boo
         return match perm {
             Permission::Read => true,
             Permission::Write => b.role == Role::Admin && matches!(scope(b), Scope::Global),
+            Permission::ReadPayload => false,
         };
     }
     let covers = match scope(b) {
@@ -140,7 +144,7 @@ pub fn binding_allows(b: &RoleBinding, perm: Permission, target: &Target) -> boo
                 target.team_name() == Some(t) && o.is_none_or(|o| target.organization() == Some(o))
             }
             // Die Organisation des eigenen Teams lesen (nur wenn die Zuweisung sie nennt).
-            Target::Organization(org) => perm == Permission::Read && o == Some(org.as_str()),
+            Target::Organization(org) => perm != Permission::Write && o == Some(org.as_str()),
             Target::Global | Target::Catalog => false,
         },
     };
@@ -148,7 +152,10 @@ pub fn binding_allows(b: &RoleBinding, perm: Permission, target: &Target) -> boo
         return false;
     }
     match (b.role, perm) {
-        (_, Permission::Read) | (Role::Admin, Permission::Write) => true,
+        (_, Permission::Read)
+        | (Role::Admin, Permission::Write)
+        | (Role::Admin | Role::Auditor, Permission::ReadPayload) => true,
+        (_, Permission::ReadPayload) => false,
         (Role::OrgAdmin, Permission::Write) => {
             matches!(target, Target::Team { .. } | Target::InTeam { .. })
         }
@@ -281,6 +288,30 @@ mod tests {
             assert!(allows(&t, R, &Target::in_team("a", "t")));
             assert!(!allows(&t, R, &Target::in_team("a", "u")));
         }
+    }
+
+    #[test]
+    fn payload_only_admin_and_auditor() {
+        const P: Permission = Permission::ReadPayload;
+        let t = Target::in_team("acme", "platform");
+        for (role, ok) in [
+            (Role::Admin, true),
+            (Role::Auditor, true),
+            (Role::Viewer, false),
+            (Role::OrgAdmin, false),
+            (Role::TeamAdmin, false),
+        ] {
+            let b = [rb(role, Some("acme"), Some("platform"))];
+            assert_eq!(allows(&b, P, &t), ok, "{role:?}");
+            assert!(allows(&b, R, &t), "{role:?}");
+        }
+        // Geltungsbereich gilt auch hier
+        let a = [rb(Role::Auditor, Some("acme"), None)];
+        assert!(allows(&a, P, &t));
+        assert!(!allows(&a, P, &Target::in_team("other", "x")));
+        assert!(!allows(&a, P, &Target::Global));
+        assert!(allows(&[rb(Role::Auditor, None, None)], P, &Target::Global));
+        assert!(!allows(&[rb(Role::Admin, None, None)], P, &Target::Catalog));
     }
 
     #[test]

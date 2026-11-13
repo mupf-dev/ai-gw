@@ -183,6 +183,10 @@ pub struct RequestRecord {
     pub organization_id: Option<Id>,
     /// Client-Adresse.
     pub client_ip: Option<IpAddr>,
+    /// Vom Client mitgegebene Request-ID (`x-request-id` bzw. `x-client-request-id`), zur
+    /// Korrelation im Log-Explorer (AIGW-46). Unverändert vom Client; der Writer kürzt und
+    /// filtert sie.
+    pub client_request_id: Option<String>,
     /// Roh-Payload; nur gesetzt, wenn [`RequestObserver::payload_mode`] es verlangt.
     pub payload: Option<Box<RawPayload>>,
     /// Alle Versuche in Reihenfolge (leer, wenn kein Deployment angefragt wurde). Der letzte
@@ -216,6 +220,7 @@ impl RequestRecord {
             team_id: None,
             organization_id: None,
             client_ip: None,
+            client_request_id: None,
             payload: None,
             attempts: Vec::new(),
         }

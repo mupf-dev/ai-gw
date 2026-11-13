@@ -210,6 +210,12 @@ fn serve(
             calendar: std::sync::Arc::clone(&runtime_state.calendar),
             auth: std::sync::Arc::clone(&auth),
         }))
+        .merge(aigw_admin::analytics::router(
+            aigw_admin::analytics::AnalyticsState {
+                store: runtime_state.store.clone(),
+                auth: std::sync::Arc::clone(&auth),
+            },
+        ))
         .merge(observe::metrics_router(runtime_state.metrics_sources()));
         let control = aigw_admin::read_only::apply(control, config.gitops.read_only_admin);
         server::run(listeners, state, control, shutdown_signal()).await?;

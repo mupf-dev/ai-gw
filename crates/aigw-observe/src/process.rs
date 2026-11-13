@@ -9,7 +9,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aigw_core::observe::{PayloadMode, RequestRecord};
 use aigw_core::wire::WireFormat;
-use aigw_store::observe::{PayloadRow, RequestLogRow, RollupCounts, RollupKey, latency_bucket};
+use aigw_store::observe::{
+    AttemptRow, PayloadRow, RequestLogRow, RollupCounts, RollupKey, latency_bucket,
+};
 
 use crate::mask::{PayloadMasker, build_payload};
 
@@ -75,6 +77,20 @@ fn error_code(r: &RequestRecord) -> Option<String> {
     })
 }
 
+/// Höchstlänge einer gespeicherten Client-Request-ID.
+const CLIENT_REQUEST_ID_MAX: usize = 128;
+
+/// Client-Request-ID für das Rohlog: nur sichtbares ASCII, gekürzt; leer → `None`.
+fn client_request_id(v: &str) -> Option<String> {
+    let s: String = v
+        .trim()
+        .chars()
+        .filter(char::is_ascii_graphic)
+        .take(CLIENT_REQUEST_ID_MAX)
+        .collect();
+    (!s.is_empty()).then_some(s)
+}
+
 impl Processor {
     /// Zeile für `request_log`.
     pub(crate) fn log_row(r: &RequestRecord) -> RequestLogRow {
@@ -106,6 +122,19 @@ impl Processor {
             stream: r.stream,
             client_aborted: r.client_aborted,
             client_ip: r.client_ip.map(|ip| ip.to_string()),
+            client_request_id: r.client_request_id.as_deref().and_then(client_request_id),
+            attempts: r
+                .attempts
+                .iter()
+                .map(|a| AttemptRow {
+                    model_group: a.model_group.clone(),
+                    deployment: a.deployment.clone(),
+                    deployment_id: a.deployment_id.map(|i| i.to_string()),
+                    error: a.error.map(|e| e.as_str().to_owned()),
+                    upstream_status: a.upstream_status,
+                    duration_ms: ms(a.duration),
+                })
+                .collect(),
         }
     }
 
@@ -137,6 +166,11 @@ impl Processor {
             ..RollupCounts::default()
         };
         if let Some(slot) = c.latency_hist.get_mut(latency_bucket(log.latency_ms)) {
+            *slot = 1;
+        }
+        if let Some(t) = log.ttft_ms
+            && let Some(slot) = c.ttft_hist.get_mut(latency_bucket(t))
+        {
             *slot = 1;
         }
         (key, c)
