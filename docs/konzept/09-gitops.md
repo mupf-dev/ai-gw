@@ -63,7 +63,7 @@ erscheinen nie, nur `secret: true`.
 ## 3. Export
 
 - Alle Arten in Abhängigkeitsreihenfolge (`ResourceKind::ALL`: Organization → Team → User →
-  ProviderCredential → ModelGroup → Deployment → Price → ApiKey → McpServer → McpGrant →
+  ProviderCredential → Secret → ModelGroup → Deployment → Price → ApiKey → McpServer → McpGrant →
   PluginBinding), je Art nach Name (Bytefolge, unabhängig von der DB-Kollation).
 - Feldreihenfolge: `apiVersion`, `kind`, `metadata`, `spec`; innerhalb von `spec` alphabetisch
   (feste Ordnung über die JSON-Zwischenform). Standardwerte werden weitgehend weggelassen.
@@ -77,7 +77,9 @@ erscheinen nie, nur `secret: true`.
   `valueFrom: {env: AIGW_SECRET_<ZUGANG>_<FELD>}` (Großbuchstaben, camelCase → `SNAKE_CASE`,
   nie `__`, damit die Variable nicht als Konfig-Override `AIGW_<ABSCHNITT>__<FELD>` gilt).
   Der Kopfkommentar listet alle Platzhalter. Vor `apply` diese Variablen setzen oder die
-  Verweise auf eigene Variablen/Dateien ändern.
+  Verweise auf eigene Variablen/Dateien ändern. Dasselbe gilt für **`Secret`** (F149,
+  allgemeine Geheimnisse für Webhooks, Guardrail-Dienste, MCP-Server): in YAML nur
+  `valueFrom`, Verweise originalgetreu (`secret.refs`), sonst Platzhalter.
 - **API-Keys** nur mit `--api-keys include` (bzw. `?apiKeys=include`), dann ohne Klartext (der
   ist nach der Erzeugung nicht mehr bekannt). Standard (`ignore`, F4): sie fehlen ganz.
 

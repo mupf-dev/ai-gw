@@ -177,8 +177,10 @@ OpenAI-Format inkl. Rate-Limit-Header, Request-Log, OpenTelemetry-Spans mit
 Embeddings Eingabetext / 4, Bilder Prompt / 4, Sprachausgabe Text / 4, Transkription 0
 (Anfrage-Limits greifen), Responses wie Chat (Eingabe / 4 + `max_output_tokens`). Die
 Plugin-Kette (AIGW-36) läuft für `/v1/responses` wie im Chat-Pfad (Pre-, Post-, Stream-Haken,
-gepufferter Modus); Embeddings, Bilder und Audio haben noch keine Plugin-Haken. Die Modellgruppe
-muss die Art der Anfrage in `settings.capabilities` freigeben (siehe
+gepufferter Modus); Embeddings, Bilder und Sprachausgabe durchlaufen die **Anfrage-Haken** auf
+einer Chat-Sicht ihrer Eingabetexte (Ablehnung und geänderte Texte gelten, `Respond` → `400`;
+Transkription hat keinen Eingabetext). Chat/Messages laufen seit AIGW-78 über dieselbe
+`Pipeline`. Die Modellgruppe muss die Art der Anfrage in `capabilities` freigeben (siehe
 [10-routing.md](10-routing.md) §2a), sonst `400 unsupported_capability`.
 
 | Endpunkt | IR | Wire (`aigw_core::wire::openai::…`) | `WireFormat` (Request-Log `endpoint`) |

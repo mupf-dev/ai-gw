@@ -105,6 +105,13 @@ Token-Reservierung der Limits wird vollständig freigegeben; die Anfrage zählt 
 Log (`request_log.cache`) und Rollup (`cache_hits`). Der Body enthält die **ursprüngliche**
 Usage der gecachten Antwort (siehe offene Fragen).
 
+**Embeddings (F174):** `/v1/embeddings` nutzt dieselbe Richtlinie (Scope, TTL,
+Client-Steuerung), aber nur **exakt**: Schlüssel aus Scope, kanonischer Modellgruppe,
+Eingaben, `dimensions` und unbekannten Feldern (nicht `user`, nicht `encoding_format` – die
+IR-Antwort wird je Anfrage als `float`/`base64` kodiert). Eigener RAM-LRU (Budget wie
+`memory_max_bytes`), Redis unter `<prefix>e:<hash>`. Treffer: Header `hit-exact`, Usage 0 im
+Request-Log, Body mit der ursprünglichen Usage. Anfrage-Plugins (Guardrails) laufen vorher.
+
 ## 4. Semantischer Cache (AIGW-40)
 
 1. Nur bei `mode: semantic`, wenn ein Vektor-Backend und ein Embedder verfügbar sind und die

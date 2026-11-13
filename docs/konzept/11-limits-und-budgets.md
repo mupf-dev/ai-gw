@@ -293,8 +293,18 @@ events:
 {"id": "<uuidv7>", "type": "budget.warning", "occurredAt": "2026-11-13T10:00:00Z",
  "data": {"level": "team", "targetId": "<id>", "period": "month",
           "periodStartMs": 1793491200000, "periodEndMs": 1796083200000,
-          "percent": 80, "amount": "100", "used": "80.5", "hardLimit": true}}
+          "percent": 80, "amount": "100", "used": "80.5", "hardLimit": true,
+          "targetName": "platform", "organization": "acme"}}
 ```
+
+**Namen (F154):** `targetName` (Organisation, Team bzw. Key) sowie bei Teams `organization` und
+bei Keys `team`/`organization` kommen aus dem aktuellen Snapshot; fehlt das Ziel dort (gerade
+gelöscht), fehlen die Felder.
+
+**Preise weiterer Endpunkte (AIGW-21-Folge):** `perImage` × erzeugte Bilder,
+`perAudioMinute` × Audio-Dauer der Transkription (anteilig je Millisekunde),
+`perMillionCharacters` × Zeichen einer Sprachausgabe – zusätzlich zu Token-Preisen und
+`perRequest`.
 
 Header: `x-aigw-event-type`, `x-aigw-delivery` (= Ereignis-ID, gleich über Wiederholungen →
 Idempotenz beim Empfänger), `x-aigw-attempt`, `x-aigw-signature` (HMAC-SHA256 wie beim Plugin,

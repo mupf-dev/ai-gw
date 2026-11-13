@@ -112,9 +112,12 @@ Ausgabe × `n` und rechnen die summierte Usage ab. Antworten mit `n > 1` werden 
 kind: ModelGroup
 metadata: {name: text-embedding}
 spec:
-  settings:
-    capabilities: [embeddings]   # chat, embeddings, images, audio-transcription, audio-speech
+  capabilities: [embeddings]   # chat, embeddings, images, audio-transcription, audio-speech
 ```
+
+`capabilities` ist seit F123 ein typisiertes Feld der Modellgruppe (Admin-API, GitOps,
+OpenAPI, UI-Formular). Ältere Gruppen mit `settings.capabilities` werden beim Lesen
+übernommen (Eingabe mit beidem und verschiedenen Werten → Fehler).
 
 Ohne Angabe nimmt eine Gruppe nur **Chat** an (Chat Completions, Messages, Responses). Eine
 Anfrage anderer Art an die Gruppe → `400 unsupported_capability` im Eingangsformat (auch für

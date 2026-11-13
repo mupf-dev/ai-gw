@@ -198,8 +198,11 @@ Blockiert ein Guardrail (`Flow::Block` / `ChunkFlow::Block`) **die Ausgabe**, en
 ## 4. Bindungen und Vererbung
 
 `PluginBinding` (Ressource, siehe [02-datenmodell.md](02-datenmodell.md)) bindet ein Plugin an
-eine Ebene. `config` enthält die Plugin-Konfiguration und fünf **reservierte** Schlüssel der
-Kettensteuerung (sie gehen nicht an das Plugin; als eigene Spec-Felder: F117, Folgeticket):
+eine Ebene. `config` enthält die Plugin-Konfiguration; die Kettensteuerung steht seit F117 in
+**eigenen Feldern** der Spezifikation (neben `config`). Abwärtskompatibilität: Stehen diese
+Schlüssel (wie früher) in `config`, werden sie beim Lesen übernommen (Admin-API, GitOps,
+Datenbank – gespeicherte Altbindungen werden beim nächsten Schreiben umgeschrieben); derselbe
+Schlüssel mit verschiedenen Werten in beiden ist ein Fehler (`422`/Plan-Fehler):
 
 | Schlüssel | Werte | Standard | Bedeutung |
 |---|---|---|---|

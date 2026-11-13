@@ -38,6 +38,9 @@ Instanz nach ca. 100 ms (Debounce), bei Postgres auf allen Instanzen per `NOTIFY
 | `/admin-api-keys`, `/admin-api-keys/{name}` | GET, POST · GET, PUT, DELETE | Admin-API-Keys (§5.5) |
 | `/session`, `/auth/info` | GET | angemeldeter Principal bzw. Anmeldeverfahren (§5) |
 | `/audit-log` | GET | Audit-Log lesen, filtern, als JSON Lines exportieren (§5.10) |
+| `/audit-log/verify` | GET | Hash-Kette des Audit-Logs prüfen (F116; nur globaler `admin`/`auditor`), auch `aigw audit verify` |
+| `/secrets`, `/secrets/{name}` | GET, POST · GET, PUT, PATCH, DELETE | Allgemeine Geheimnisse (F149): Werte nur schreibbar, nie in Antworten/Audit; Verweise aus Webhook (`secret: {secret: name}`), `content-safety` (`secret: name`) und MCP-Server (`spec.secret`) |
+| `/mcp-servers:status` | GET | Zustand der Upstream-MCP-Server (`up`/`down`/`idle`/`disabled`, letzter Fehler; AIGW-41-Folge) |
 | `/usage/budgets` | GET | Budgetstände ([11-limits-und-budgets.md](11-limits-und-budgets.md)) |
 | `/analytics/timeseries`, `/analytics/summary`, `/analytics/top` | GET | Dashboards: Zeitreihen, KPIs mit Vorperiode, Ranglisten (§5.11, [07-beobachtung.md](07-beobachtung.md) §13) |
 | `/request-logs`, `/request-logs/{id}`, `/request-logs/{id}/payload` | GET | Log-Explorer: Anfragen, Upstream-Versuche, Payload (§5.11) |
@@ -630,6 +633,28 @@ bei Rollenänderung/Löschen, Logout. `oidc_login.rs` prüft zusätzlich die Log
 (`login`, `login-failed` nur nach gültigem `state`, `logout`, Bootstrap-Abschaltung).
 
 ### 5.10 Audit-Log (AIGW-66)
+
+**Arten (F115):** einheitlich kebab-case – `organization`, `team`, `user`, `api-key`,
+`provider-credential`, `secret`, `model-group`, `deployment`, `price`, `plugin-binding`,
+`mcp-server`, `mcp-grant`, dazu `admin-api-key`, `admin-session`, `bootstrap-token`,
+`audit-log`. Migration 0003 schreibt ältere Einträge um; Filter akzeptieren weiter die
+YAML-Schreibweise (`kind=ApiKey`).
+
+**Manipulationsschutz (F116):** Jeder Eintrag trägt eine fortlaufende Nummer (`seq`), den Hash
+seines Vorgängers und seinen eigenen Hash (SHA-256 über Vorgänger-Hash und eine kanonische
+JSON-Form aller Felder); der Kettenkopf liegt in `audit_chain` und wird beim Schreiben gesperrt
+(eindeutige Reihenfolge auch im Cluster). `GET /admin/api/v1/audit-log/verify` bzw.
+`aigw audit verify -c <config> [--expect-head <hash>]` meldet veränderte, gelöschte,
+eingeschobene Einträge und ein abgeschnittenes Ende. Grenze: Wer Schreibrechte auf die
+Datenbank hat, kann die Kette komplett neu berechnen – dagegen den gemeldeten `headHash`
+regelmäßig extern sichern (SIEM/WORM) und mit `--expect-head` vergleichen. Einträge aus der
+Zeit vor der Kette zählen als „unverkettet“.
+
+**Aufbewahrung (F116):** `audit.retention_days` (Standard `0` = unbegrenzt) löscht im Abstand
+`audit.sweep_interval_secs` den Anfang der Kette; der letzte gelöschte Eintrag wird zum Anker,
+die Kette bleibt prüfbar, die Löschung selbst steht als `audit-log`/`prune` im Log. Hinweis:
+Der inkrementelle Snapshot-Neubau (AIGW-75) nutzt das Audit-Log als Journal – gelöschte
+Versionen führen dort nur zum vollständigen Neubau.
 
 `GET /admin/api/v1/audit-log` – Einträge **neueste zuerst** mit Vorher/Nachher-Zustand:
 
