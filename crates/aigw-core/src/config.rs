@@ -849,6 +849,30 @@ pub struct AdminConfig {
     pub allow_mock: bool,
     /// Anmeldung an Admin-API und Admin-UI (AIGW-32).
     pub auth: AdminAuthConfig,
+    /// Einstellungen der Admin-UI (AIGW-77).
+    pub ui: AdminUiConfig,
+}
+
+/// Einstellungen der Admin-UI (AIGW-77, `docs/konzept/04-ux-designsystem.md`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AdminUiConfig {
+    /// Mock-Modus (Beispieldaten im Browser) anbieten (Standard `true`, F135). `false` blendet
+    /// den Schalter aus und ignoriert `?mock=1` – für Produktivinstallationen.
+    pub mock: bool,
+    /// Link-Vorlage zum Tracing-System für den Log-Explorer, `{traceId}` wird ersetzt
+    /// (z. B. `https://grafana.example.org/explore?traceId={traceId}`); ohne = kein Link.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_url: Option<String>,
+}
+
+impl Default for AdminUiConfig {
+    fn default() -> Self {
+        Self {
+            mock: true,
+            trace_url: None,
+        }
+    }
 }
 
 impl Default for AdminConfig {
@@ -858,6 +882,7 @@ impl Default for AdminConfig {
             allow_private_upstreams: Vec::new(),
             allow_mock: true,
             auth: AdminAuthConfig::default(),
+            ui: AdminUiConfig::default(),
         }
     }
 }

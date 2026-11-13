@@ -1216,6 +1216,12 @@ export interface components {
             bootstrap: boolean;
             /** @description Start des Logins (falls OIDC konfiguriert). */
             loginUrl?: string | null;
+            /**
+             * Format: int64
+             * @description Höchstlaufzeit von Admin-API-Keys in Sekunden (`admin.auth.max_admin_key_lifetime`, F87),
+             *     nur für Angemeldete: die UI markiert ältere Keys, die länger gelten (F201).
+             */
+            maxAdminKeyLifetimeSecs?: number | null;
             /** @description OIDC-Login konfiguriert. */
             oidc: boolean;
             /**
@@ -1224,6 +1230,13 @@ export interface components {
              */
             readOnly: boolean;
             session?: components["schemas"]["SessionInfo"] | null;
+            /**
+             * @description Link-Vorlage zum Tracing-System (`admin.ui.trace_url`, `{traceId}` wird ersetzt), nur für
+             *     Angemeldete.
+             */
+            traceUrl?: string | null;
+            /** @description Mock-Modus der UI anbieten (`admin.ui.mock`, F135): `false` blendet den Schalter aus. */
+            uiMock: boolean;
         };
         BTreeMap: {
             [key: string]: string;

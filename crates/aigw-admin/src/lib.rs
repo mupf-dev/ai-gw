@@ -88,6 +88,10 @@ pub struct AdminState {
     pub(crate) read_only: bool,
     /// Bootstrap-Token (für `GET /auth/info`: aktiv?, F56).
     pub(crate) bootstrap: Option<Arc<BootstrapGate>>,
+    /// Mock-Modus der UI anbieten (`admin.ui.mock`, für `GET /auth/info`, F135).
+    pub(crate) ui_mock: bool,
+    /// Link-Vorlage zum Tracing-System (`admin.ui.trace_url`, für `GET /auth/info`).
+    pub(crate) trace_url: Option<String>,
 }
 
 /// Einstellungen der Anmeldung (aus `admin.auth`).
@@ -126,6 +130,8 @@ impl AdminState {
             auth_opts: AuthOptions::default(),
             read_only: false,
             bootstrap: None,
+            ui_mock: true,
+            trace_url: None,
         }
     }
 
@@ -134,6 +140,21 @@ impl AdminState {
     #[must_use]
     pub fn with_read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
+        self
+    }
+
+    /// Mock-Modus der Admin-UI anbieten (`admin.ui.mock`, F135) – nur für die Anzeige in
+    /// `GET /admin/api/v1/auth/info`.
+    #[must_use]
+    pub fn with_ui_mock(mut self, ui_mock: bool) -> Self {
+        self.ui_mock = ui_mock;
+        self
+    }
+
+    /// Link-Vorlage zum Tracing-System für den Log-Explorer (`admin.ui.trace_url`, `{traceId}`).
+    #[must_use]
+    pub fn with_trace_url(mut self, trace_url: Option<String>) -> Self {
+        self.trace_url = trace_url.filter(|u| !u.trim().is_empty());
         self
     }
 
@@ -201,6 +222,8 @@ impl AdminState {
             auth_opts,
             read_only: false,
             bootstrap: gate,
+            ui_mock: true,
+            trace_url: None,
         })
     }
 

@@ -5,7 +5,7 @@
   // Angemeldet (Session/OIDC): echter Nutzer; sonst im Mock-Modus der Beispielnutzer.
   import { DropdownMenu } from 'bits-ui';
   import { USER } from '../context.svelte';
-  import { isMock } from '../mode.svelte';
+  import { isMock, mockAvailable } from '../mode.svelte';
   import { auth, identity, logout, METHOD_LABEL, requestLogin, roleLabel } from '../session.svelte';
   import { prefs, setMockMode, setTheme, THEMES, type Theme } from '../prefs.svelte';
   import { navigate } from '../router.svelte';
@@ -58,6 +58,7 @@
           {/each}
         </DropdownMenu.RadioGroup>
       </DropdownMenu.Group>
+      {#if mockAvailable()}
       <DropdownMenu.Separator class={menuSeparator} />
       <DropdownMenu.CheckboxItem checked={isMock()} onCheckedChange={(c) => setMockMode(c ? 'on' : 'off')} class={menuItem} closeOnSelect={false}>
         {#snippet children({ checked })}
@@ -71,6 +72,7 @@
           </span>
         {/snippet}
       </DropdownMenu.CheckboxItem>
+      {/if}
       <DropdownMenu.Item class={menuItem} onSelect={() => navigate('/settings')}><Icon name="settings" size={14} /> Einstellungen</DropdownMenu.Item>
       <DropdownMenu.Item class={menuItem} onSelect={() => toast('info', 'API-Dokumentation', 'OpenAPI unter /admin/api/openapi.json')}>
         <Icon name="file-text" size={14} /> API-Dokumentation

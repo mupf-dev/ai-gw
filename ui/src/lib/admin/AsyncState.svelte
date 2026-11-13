@@ -6,10 +6,16 @@
   import { ApiError } from '../api/client';
   import Button from '../ui/Button.svelte';
   import EmptyState from '../ui/EmptyState.svelte';
-  import type { Loader } from './errors.svelte';
   import { problemText } from './errors.svelte';
 
-  let { loader, children, rows = 4 }: { loader: Loader<T>; children: Snippet<[T]>; rows?: number } = $props();
+  /** Loader oder Paged (gleiche Oberfläche). */
+  interface Source<T> {
+    data: T | null;
+    error: unknown;
+    loading: boolean;
+    reload(): unknown;
+  }
+  let { loader, children, rows = 4 }: { loader: Source<T>; children: Snippet<[T]>; rows?: number } = $props();
   const forbidden = $derived(loader.error instanceof ApiError && loader.error.status === 403);
 </script>
 

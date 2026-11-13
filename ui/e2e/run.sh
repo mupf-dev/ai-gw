@@ -25,13 +25,25 @@ rm -rf "$OUT" && mkdir -p "$OUT/screens"
 RUN=$(mktemp -d)
 printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "sqlite://%s/aigw.db?mode=rwc"\n' \
   "$PORT" "$PORT" "$RUN" > "$RUN/aigw.yaml"
+# AIGW-77: Link-Vorlage zum Tracing-System (Log-Explorer).
+printf 'admin:\n  ui:\n    trace_url: "https://tracing.example.org/trace/{traceId}"\n' >> "$RUN/aigw.yaml"
+# Zweiter Server mit OIDC (Einladungen, F90): Issuer wird erst beim Login abgefragt, der Test meldet sich per
+# Bootstrap-Token an (sessionStorage) und erzeugt nur Einladungslinks.
+OIDC_PORT=$((PORT + 1))
+mkdir -p "$RUN/oidc"
+printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "sqlite://%s/oidc/aigw.db?mode=rwc"\nadmin:\n  auth:\n    oidc:\n      issuer: "http://127.0.0.1:9/realms/e2e"\n      client_id: aigw-e2e\n      redirect_url: "http://127.0.0.1:%s/admin/auth/callback"\n' \
+  "$OIDC_PORT" "$OIDC_PORT" "$RUN" "$OIDC_PORT" > "$RUN/oidc/aigw.yaml"
 # Wegwerf-Master-Key, -Bootstrap-Token und -Datenbank nur für diesen Lauf (ohne Key startet `aigw serve` nicht).
 TOKEN="aigw-admin-e2e-$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
 (cd "$RUN" && AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') AIGW_BOOTSTRAP_TOKEN="$TOKEN" \
   exec "$BIN" serve --config "$RUN/aigw.yaml") > "$OUT/server.log" 2>&1 &
 PID=$!
-trap 'kill $PID 2>/dev/null || true; rm -rf "$RUN"' EXIT
+(cd "$RUN/oidc" && AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') AIGW_BOOTSTRAP_TOKEN="$TOKEN" \
+  exec "$BIN" serve --config "$RUN/oidc/aigw.yaml") > "$OUT/server-oidc.log" 2>&1 &
+PID2=$!
+trap 'kill $PID $PID2 2>/dev/null || true; rm -rf "$RUN"' EXIT
 for _ in $(seq 1 50); do curl -fsS -o /dev/null "http://127.0.0.1:$PORT/admin/" && break; sleep 0.2; done
+for _ in $(seq 1 50); do curl -fsS -o /dev/null "http://127.0.0.1:$OIDC_PORT/admin/api/v1/version" && break; sleep 0.2; done
 curl -fsS -D "$OUT/headers-admin.txt" -o /dev/null "http://127.0.0.1:$PORT/admin/"
 grep -qi '^content-security-policy:' "$OUT/headers-admin.txt"
 
@@ -40,4 +52,4 @@ if [[ -f pnpm-lock.yaml ]]; then pnpm install --frozen-lockfile; else pnpm insta
 if ! ls "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}" 2>/dev/null | grep -q chromium; then
   pnpm exec playwright install --with-deps chromium > "$OUT/playwright-install.log" 2>&1
 fi
-AIGW_URL="http://127.0.0.1:$PORT" AIGW_TOKEN="$TOKEN" E2E_OUT="$OUT" pnpm exec playwright test ${E2E_GREP:+--grep "$E2E_GREP"}
+AIGW_OIDC_URL="http://127.0.0.1:$OIDC_PORT" AIGW_URL="http://127.0.0.1:$PORT" AIGW_TOKEN="$TOKEN" E2E_OUT="$OUT" pnpm exec playwright test ${E2E_GREP:+--grep "$E2E_GREP"}

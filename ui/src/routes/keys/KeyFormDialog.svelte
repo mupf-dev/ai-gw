@@ -21,6 +21,9 @@
   import Input from '../../lib/ui/Input.svelte';
   import Select from '../../lib/ui/Select.svelte';
   import { checkbox } from '../../lib/ui/styles';
+  import InheritFields from '../../lib/admin/InheritFields.svelte';
+  import { fromRows, toRows, type LimitRow } from '../../lib/admin/limits';
+  import LimitsEditor from '../../lib/admin/LimitsEditor.svelte';
 
   let {
     open = $bindable(false),
@@ -47,6 +50,9 @@
     period: 'month' as S['BudgetPeriod'],
     rpm: '',
     tpm: '',
+    extraLimits: [] as LimitRow[],
+    payloadMode: '',
+    exposeReasoning: '',
     expires: '90',
     expiresAt: '',
   });
@@ -58,6 +64,16 @@
   let busy = $state(false);
   let groups = $state<string[]>([]);
   let loading = $state(false);
+  // Vererbung Key → Team → Organisation (F30/F185) für die Anzeige „erben – …“.
+  const inheritParents = $derived.by(() => {
+    const team = form.team === NO_TEAM ? null : catalog.teams.find((t) => t.metadata.name === form.team);
+    const orgName = team?.spec.organization ?? form.org;
+    const org = catalog.orgs.find((o) => o.metadata.name === orgName);
+    return [
+      ...(team ? [{ label: `Team ${team.metadata.name}`, spec: team.spec }] : []),
+      ...(org ? [{ label: `Organisation ${org.metadata.name}`, spec: org.spec }] : []),
+    ];
+  });
 
   function writableTeams() {
     return catalog.teams.filter((t) => canWriteKey(t.metadata.name, t.spec.organization));
@@ -84,6 +100,8 @@
     }
   }
 
+  /** RPM/TPM-Schnellfelder: requests/tokens je Minute ohne Modellgruppe; alles andere im Limit-Editor. */
+  const quick = (l: S['LimitSpec']) => (l.window ?? 'minute') === 'minute' && !l.modelGroup && (l.metric === 'requests' || l.metric === 'tokens');
   const limitOf = (k: ApiKey, metric: S['LimitMetric']) => k.spec.limits?.find((l) => l.metric === metric && l.window === 'minute' && !l.modelGroup)?.limit;
 
   async function load(name: string) {
@@ -104,6 +122,9 @@
         period: k.spec.budget?.period ?? 'month',
         rpm: String(limitOf(k, 'requests') ?? ''),
         tpm: String(limitOf(k, 'tokens') ?? ''),
+        extraLimits: toRows((k.spec.limits ?? []).filter((l) => !quick(l))),
+        payloadMode: k.spec.payloadMode ?? '',
+        exposeReasoning: k.spec.exposeReasoning == null ? '' : String(k.spec.exposeReasoning),
         expires: 'custom',
         expiresAt: toLocalInput(k.spec.expiresAt),
       };
@@ -134,13 +155,14 @@
       if (v !== null && (!Number.isFinite(v) || v <= 0 || (k !== 'budget' && !Number.isInteger(v)))) e[k] = `${l} muss eine positive ${k === 'budget' ? 'Zahl' : 'ganze Zahl'} sein.`;
     }
     if (form.expires === 'custom' && form.expiresAt && !fromLocalInput(form.expiresAt)) e.expiresAt = 'Ungültiges Datum.';
+    if (fromRows(form.extraLimits) === null) e.limits = 'Grenzen müssen ganze Zahlen ≥ 1 sein.';
     errors = e;
     return Object.keys(e).length === 0;
   }
 
   function spec(): S['ApiKeySpec'] {
     const base: Partial<S['ApiKeySpec']> = loaded?.spec ?? {};
-    const keep = (base.limits ?? []).filter((l) => !(l.window === 'minute' && !l.modelGroup && (l.metric === 'requests' || l.metric === 'tokens')));
+    const keep = fromRows(form.extraLimits) ?? [];
     const rpm = optNum(form.rpm);
     const tpm = optNum(form.tpm);
     const limits: S['LimitSpec'][] = [
@@ -160,6 +182,8 @@
       budget: amount ? { ...(base.budget ?? { hardLimit: true, warnAtPercent: [80] }), amount, period: form.period } : null,
       limits,
       expiresAt,
+      payloadMode: (form.payloadMode || null) as S['PayloadMode'] | null,
+      exposeReasoning: form.exposeReasoning === '' ? null : form.exposeReasoning === 'true',
     };
   }
 
@@ -340,6 +364,12 @@
           {/snippet}
         </Field>
       </div>
+      <fieldset class="flex flex-col gap-1.5 sm:col-span-2">
+        <legend class="mb-1 text-sm font-medium text-fg">Weitere Limits <span class="text-xs font-normal text-fg-subtle">(andere Fenster, z. B. Kalendermonat, oder je Modellgruppe)</span></legend>
+        <LimitsEditor bind:value={form.extraLimits} {groups} />
+        {#if errors.limits}<p class="flex items-center gap-1 text-xs text-danger-fg"><Icon name="alert" size={12} />{errors.limits}</p>{/if}
+      </fieldset>
+      <InheritFields bind:payloadMode={form.payloadMode} bind:exposeReasoning={form.exposeReasoning} parents={inheritParents} />
       <div class="sm:col-span-2"><FormError message={formError} /></div>
     </form>
   {/if}

@@ -5,6 +5,7 @@
   import type { Snippet } from 'svelte';
   import { isMock } from '../mode.svelte';
   import { setMockMode } from '../prefs.svelte';
+  import { mockAvailable } from '../mode.svelte';
   import { auth, requestLogin } from '../session.svelte';
   import Button from '../ui/Button.svelte';
   import Card from '../ui/Card.svelte';
@@ -23,7 +24,7 @@
       text={auth.oidc ? 'Melden Sie sich über den Identitätsanbieter an.' : 'Melden Sie sich mit dem Bootstrap-Token oder einem Admin-API-Key an.'}
     >
       <Button variant="primary" icon="lock" onclick={() => requestLogin()} data-testid="gate-login">Anmelden</Button>
-      <Button onclick={() => setMockMode('on')}>Mock-Daten ansehen</Button>
+      {#if mockAvailable()}<Button onclick={() => setMockMode('on')}>Mock-Daten ansehen</Button>{/if}
     </EmptyState>
   </Card>
 {/if}

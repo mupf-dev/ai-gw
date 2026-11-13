@@ -6,7 +6,9 @@
 // jedem Wechsel der Datenquelle neu geladen; eingeschränkte Rollen sehen nur ihren Bereich.
 import { organizations, teams, type Organization, type Team } from './api/resources';
 
-export const ctx = $state({ orgId: '', teamId: '' });
+// Vorbelegung per URL (`?org=…`, Deep-Links und Tests); der Umschalter ändert danach nur den Zustand.
+const initial = new URLSearchParams(location.search);
+export const ctx = $state({ orgId: initial.get('org') ?? '', teamId: '' });
 
 export const catalog = $state<{ orgs: Organization[]; teams: Team[]; loaded: boolean }>({ orgs: [], teams: [], loaded: false });
 

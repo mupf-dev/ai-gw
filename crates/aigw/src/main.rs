@@ -298,7 +298,9 @@ fn serve(
             admin
                 .with_keyring(std::sync::Arc::clone(&runtime_state.keyring))
                 .with_upstream_policy(upstreams.clone())
-                .with_read_only(config.gitops.read_only_admin),
+                .with_read_only(config.gitops.read_only_admin)
+                .with_ui_mock(config.admin.ui.mock)
+                .with_trace_url(config.admin.ui.trace_url.clone()),
         )
         .merge(aigw_admin::gitops::router(
             aigw_admin::gitops::GitopsState {

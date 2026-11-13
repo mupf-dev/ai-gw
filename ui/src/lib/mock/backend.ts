@@ -349,6 +349,7 @@ function create(kind: Kind, input: Obj): [number, Obj, string] {
   if (kind === 'model-groups' && groupOf(name)) throw conflictP(`„${name}“ ist bereits Alias einer Modellgruppe`);
   const obj = stored(kind, name, input);
   put(kind, obj);
+  audit('create', AUDIT_KIND[kind], obj, null, obj);
   const e = entry(kind, name);
   if (kind === 'api-keys') return [201, { key: obj, secret: `sk-aigw-${obj.status.prefix}-${rand(43)}` }, etag(kind, name, e)];
   return [201, obj, etag(kind, name, e)];
@@ -362,6 +363,7 @@ function update(kind: Kind, name: string, input: Obj, headers: Headers): [number
     throw conflictP('Preisversion ist bereits gültig – nur Labels änderbar, neue Version anlegen');
   }
   const obj = stored(kind, name, input, e.obj);
+  audit('update', AUDIT_KIND[kind], obj, e.obj, obj);
   put(kind, obj);
   return [200, obj, etag(kind, name, entry(kind, name))];
 }
@@ -392,9 +394,12 @@ function keyAction(name: string, verb: string, body: Obj, headers: Headers): [nu
   const e = entry('api-keys', name);
   checkIfMatch('api-keys', name, e, headers);
   const k = structuredClone(e.obj);
-  if (verb === 'revoke' || verb === 'reactivate') {
-    const state = verb === 'revoke' ? 'revoked' : 'active';
+  if (verb === 'suspend' || verb === 'resume' || verb === 'revoke') {
+    if (k.status.state === 'revoked') throw conflictP('Key ist endgültig widerrufen');
+    if (verb === 'resume' && k.status.state !== 'suspended') throw conflictP('Key ist nicht gesperrt');
+    const state = verb === 'revoke' ? 'revoked' : verb === 'suspend' ? 'suspended' : 'active';
     if (k.status.state !== state) {
+      audit(verb, 'api-key', k, structuredClone(e.obj), structuredClone({ ...k, status: { ...k.status, state } }));
       k.status.state = state;
       k.metadata.updatedAt = now();
       put('api-keys', k);
@@ -402,7 +407,7 @@ function keyAction(name: string, verb: string, body: Obj, headers: Headers): [nu
     return [200, k, etag('api-keys', name, entry('api-keys', name))];
   }
   if (verb === 'rotate') {
-    if (k.status.state === 'revoked') throw conflictP('gesperrte Keys lassen sich nicht rotieren');
+    if (k.status.state !== 'active') throw conflictP('gesperrte/widerrufene Keys lassen sich nicht rotieren');
     const stamp = now().replace(/[-:]/g, '').replace('Z', '');
     const newName = body.name || `${name.replace(/-\d{8}T\d{6}$/, '')}-${stamp}`.toLowerCase();
     const [, created] = create('api-keys', { metadata: { name: newName, labels: k.metadata.labels }, spec: k.spec });
@@ -482,6 +487,129 @@ function applyPlan(yaml: string, q: URLSearchParams): S['ApplyReport'] {
   };
 }
 
+// ------------------------------------------------------------------ Audit, Auswertungen, Einladungen (AIGW-77)
+
+const AUDIT_KIND: Record<Kind, string> = {
+  organizations: 'organization',
+  teams: 'team',
+  users: 'user',
+  'api-keys': 'api-key',
+  'model-groups': 'model-group',
+  deployments: 'deployment',
+  'provider-credentials': 'provider-credential',
+  prices: 'price',
+  'admin-api-keys': 'admin-api-key',
+};
+const auditLog: S['AuditEntry'][] = [];
+let configVersion = 42;
+function audit(action: string, kind: string, obj: Obj, before: Obj | null, after: Obj | null) {
+  configVersion += 1;
+  const spec = (after ?? before)?.spec ?? {};
+  auditLog.unshift({
+    id: uuid(),
+    at: new Date().toISOString(),
+    actor: 'user:anna',
+    action,
+    kind,
+    objectId: obj.id ?? null,
+    objectName: obj.metadata?.name ?? obj.name ?? null,
+    configVersion,
+    organization: kind === 'organization' ? obj.metadata.name : (spec.organization ?? null),
+    team: kind === 'team' ? obj.metadata.name : (spec.team ?? null),
+    before: before as never,
+    after: after as never,
+  });
+}
+function auditPage(q: URLSearchParams) {
+  const list = (p: string) => (q.get(p) ? q.get(p)!.split(',') : null);
+  const kinds = list('kind');
+  const actions = list('action');
+  const obj = q.get('object');
+  const items = auditLog.filter((e) => (!kinds || kinds.includes(e.kind)) && (!actions || actions.includes(e.action)) && (!obj || e.objectName === obj || e.objectId === obj));
+  const limit = Math.min(500, Number(q.get('limit') ?? 50));
+  const start = Number(q.get('cursor') ?? 0);
+  const page = items.slice(start, start + limit);
+  return { items: page, ...(start + limit < items.length ? { nextCursor: String(start + limit) } : {}) };
+}
+
+/** Deterministische Beispiel-Auswertung (Seed aus den Filtern), nur für Detailseiten im Mock-Modus. */
+function seeded(s: string) {
+  let h = 2166136261;
+  for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+  return () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0) % 1000) / 1000;
+}
+function analytics(kind: string, q: URLSearchParams): unknown {
+  const r = seeded(q.toString().replace(/(from|to)=[^&]*/g, ''));
+  const to = Date.parse(q.get('to') ?? new Date().toISOString());
+  const from = Date.parse(q.get('from') ?? new Date(to - 86_400_000).toISOString());
+  const kpi = (v: number, ratio = false) => ({ value: v, previous: v * (0.8 + r() * 0.4), deltaPercent: (r() - 0.4) * 30, ...(ratio ? { deltaPoints: (r() - 0.5) * 2 } : {}) });
+  if (kind === 'summary') {
+    const req = Math.round(500 + r() * 5000);
+    return { from: new Date(from).toISOString(), to: new Date(to).toISOString(), previousFrom: new Date(2 * from - to).toISOString(), previousTo: new Date(from).toISOString(), rollups: true, requests: kpi(req), tokens: kpi(req * 900), cost: { ...kpi(req * 0.004), amount: (req * 0.004).toFixed(4) }, latencyP95Ms: kpi(800 + r() * 900), errorRate: kpi(r() * 0.04, true), cacheHitRate: kpi(r() * 0.3, true) };
+  }
+  if (kind === 'timeseries') {
+    const n = 24;
+    const step = (to - from) / n;
+    const base = q.get('metric') === 'cost' ? 2 : q.get('metric')?.includes('tokens') ? 40_000 : 120;
+    const points = Array.from({ length: n }, (_, i) => ({ t: new Date(from + i * step).toISOString(), v: base * (0.5 + r()) * (1 + Math.sin(i / 3) / 2) }));
+    return { metric: q.get('metric'), unit: 'count', step: '1h', stepSeconds: 3600, from: new Date(from).toISOString(), to: new Date(to).toISOString(), rollups: true, series: [{ key: 'total', other: false, points }] };
+  }
+  return { dimension: q.get('dimension'), metric: q.get('metric') ?? 'requests', unit: 'count', from: new Date(from).toISOString(), to: new Date(to).toISOString(), rollups: true, items: [] };
+}
+
+function budgetList(level: string | null) {
+  const items: S['BudgetStatus'][] = [];
+  const add = (lvl: S['BudgetLevelName'], o: Obj) => {
+    const b = o.spec.budget;
+    if (!b || (level && level !== lvl)) return;
+    const r = seeded(o.metadata.name);
+    const pct = Math.round(r() * 100);
+    const amount = Number(b.amount);
+    items.push({ level: lvl, targetId: o.id, targetName: o.metadata.name, amount: b.amount, period: b.period, used: ((amount * pct) / 100).toFixed(2), remaining: ((amount * (100 - pct)) / 100).toFixed(2), percent: pct, exhausted: pct >= 100, hardLimit: b.hardLimit !== false, warnAtPercent: b.warnAtPercent ?? [80], periodStart: new Date(Date.now() - 86_400_000 * 5).toISOString(), periodEnd: new Date(Date.now() + 86_400_000 * 25).toISOString() });
+  };
+  for (const o of all('organizations')) add('organization', o);
+  for (const o of all('teams')) add('team', o);
+  for (const o of all('api-keys')) if (o.status.state === 'active') add('api-key', o);
+  return { at: new Date().toISOString(), timezone: 'Europe/Berlin', items };
+}
+
+const invites = new Map<string, S['Invitation']>();
+function invitation(method: string, user: string): [number, unknown] {
+  const u = entry('users', user).obj;
+  if (method === 'GET') {
+    const i = invites.get(user);
+    if (!i) throw notFound('Einladung', user);
+    return [200, i];
+  }
+  if (method === 'DELETE') {
+    invites.delete(user);
+    return [204, null];
+  }
+  if (u.spec.oidcSubject) throw conflictP('Nutzer ist bereits mit einer OIDC-Identität verknüpft');
+  const now = new Date();
+  const inv = { user, createdBy: 'user:anna', createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + 7 * 86_400_000).toISOString(), expired: false };
+  invites.set(user, inv);
+  return [201, { invitation: inv, url: `${location.origin}/admin/auth/login?invite=${rand(43)}` }];
+}
+
+/** Lesende Zusatzpfade im Mock-Modus; `null` = nicht zuständig. */
+function extra(method: string, parts: string[], q: URLSearchParams): Response | null {
+  const [a, b, c] = parts;
+  if (a === 'audit-log' && !b) return json(200, auditPage(q));
+  if (a === 'audit-log' && b === 'verify') return json(200, { ok: true, checked: auditLog.length, headSeq: auditLog.length, anchorSeq: 0, unchained: 0, headHash: 'mock', issues: [] });
+  if (a === 'analytics' && b) return json(200, analytics(b, q));
+  if (a === 'request-logs' && !b) return json(200, { items: [] });
+  if (a === 'usage' && b === 'budgets') return json(200, budgetList(q.get('level')));
+  if (a === 'usage' && b === 'limit-warnings') return json(200, { counterBackend: 'local', warnings: [] });
+  if (a === 'plugin-bindings' || a === 'secrets' || a === 'mcp-servers') return method === 'GET' && !b ? json(200, { items: [] }) : json(403, { type: 'urn:aigw:problem:forbidden', title: 'Im Mock-Modus nicht verfügbar', status: 403, code: 'forbidden', detail: null });
+  if (a === 'mcp-servers:status') return json(200, { gatewayEnabled: true, items: [] });
+  if (a === 'users' && b && c === 'invitation') {
+    const [s, body] = invitation(method, b);
+    return json(s, body);
+  }
+  return null;
+}
+
 // ------------------------------------------------------------------ Einstieg
 
 function json(status: number, body: unknown, extra: Record<string, string> = {}): Response {
@@ -499,6 +627,9 @@ export async function mockFetch(req: Request): Promise<Response> {
       return new Response(exportYaml(url.searchParams.get('apiKeys')), { status: 200, headers: { 'Content-Type': 'application/yaml' } });
     }
     if (parts[0] === 'config:apply') return json(200, applyPlan(text, url.searchParams));
+    store();
+    const x = extra(req.method, parts, url.searchParams);
+    if (x) return x;
     const body: Obj = text && parts[0] !== 'config:apply' ? JSON.parse(text) : {};
     const kind = parts[0] as Kind;
     if (!KINDS.includes(kind)) throw notFound('Pfad', url.pathname);
@@ -533,6 +664,7 @@ export async function mockFetch(req: Request): Promise<Response> {
         const e = entry(kind, name);
         checkIfMatch(kind, name, e, req.headers);
         blockDelete(kind, name);
+        audit('delete', AUDIT_KIND[kind], e.obj, e.obj, null);
         store()[kind].delete(name);
         return json(204, null);
       }

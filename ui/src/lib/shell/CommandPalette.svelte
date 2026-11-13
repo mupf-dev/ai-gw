@@ -6,7 +6,7 @@
   // Befund aus dem cloud-project-Spike, für bits-ui 2.20 erneut geprüft.
   import { Dialog } from 'bits-ui';
   import { tick } from 'svelte';
-  import { isMock } from '../mode.svelte';
+  import { isMock, mockAvailable } from '../mode.svelte';
   import { isGlobalAdmin } from '../rbac.svelte';
   import { prefs, setMockMode, setTheme } from '../prefs.svelte';
   import { MOCK, MODEL_GROUPS } from '../mock/data';
@@ -57,13 +57,13 @@
           keywords: 'theme darstellung hell dunkel dark light',
           run: () => setTheme(prefs.theme === 'dark' ? 'light' : 'dark'),
         },
-        {
+        ...(mockAvailable() ? [{
           id: 'act-mock',
           label: isMock() ? 'Mock-Daten ausschalten' : 'Mock-Daten einschalten',
           icon: 'sparkles' as IconName,
           keywords: 'mock demo beispieldaten',
           run: () => setMockMode(isMock() ? 'off' : 'on'),
-        },
+        }] : []),
       ],
     },
     {

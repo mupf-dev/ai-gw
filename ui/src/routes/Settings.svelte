@@ -4,7 +4,7 @@
   // Einstellungen: Anmeldung (Principal, Verfahren, Rollen, Abmelden), Nur-YAML-Modus, GitOps (Export, Apply mit
   // Trockenlauf), Datenquelle (Mock-Modus), Darstellung (Schema), Über.
   import { RadioGroup, Switch } from 'bits-ui';
-  import { isMock } from '../lib/mode.svelte';
+  import { isMock, mockAvailable } from '../lib/mode.svelte';
   import { prefs, setMockMode, setTheme, THEMES, type Theme } from '../lib/prefs.svelte';
   import { auth, bindingLabel, identity, logout, METHOD_LABEL, requestLogin } from '../lib/session.svelte';
   import { dateTime } from '../lib/format';
@@ -77,13 +77,15 @@
 
   <GitOpsCard />
 
+  {#if mockAvailable()}
   <Card title="Datenquelle">
     <div class="flex items-start gap-4">
       <div class="min-w-0 flex-1">
         <label for="mock-switch" class="text-base font-medium">Mock-Daten verwenden</label>
         <p class="mt-0.5 text-sm text-fg-muted">
           Standardmäßig aus. Eingeschaltet zeigen alle Seiten deterministische Beispieldaten (Demo, Entwicklung) und die UI ist deutlich als
-          Mock gekennzeichnet; Änderungen bleiben im Browser. Übersicht und Logs haben ohne Mock noch keine Daten (Endpunkte folgen mit AIGW-46/53).
+          Mock gekennzeichnet; Änderungen bleiben im Browser. Ohne Mock zeigen alle Seiten die echten Daten der Admin-API. In Produktion
+          lässt sich der Schalter mit <code class="font-mono text-xs">admin.ui.mock: false</code> ausblenden.
         </p>
       </div>
       <Switch.Root id="mock-switch" checked={prefs.mockMode === 'on'} onCheckedChange={(c) => setMockMode(c ? 'on' : 'off')} class={switchRoot} data-testid="mock-switch">
@@ -91,6 +93,7 @@
       </Switch.Root>
     </div>
   </Card>
+  {/if}
 
   <Card title="Farbschema" description="System folgt der Einstellung des Betriebssystems.">
     <RadioGroup.Root value={prefs.theme} onValueChange={(v) => setTheme(v as Theme)} class="grid gap-2 sm:grid-cols-3" aria-label="Farbschema">

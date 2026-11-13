@@ -121,3 +121,20 @@
     animation-duration: 0ms !important;
   }
 }
+
+/* LayerChart (F18): Achsen/Gitter mit den Design-Tokens (die Standardklassen von LayerChart stammen aus
+   @layerstack/tailwind und sind hier bewusst nicht eingebunden). */
+.lc-axis-tick-label,
+.lc-axis-label {
+  fill: var(--color-fg-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.lc-axis-rule,
+.lc-axis-tick {
+  stroke: var(--color-line-strong);
+}
+.lc-axis-grid {
+  stroke: var(--color-line);
+  stroke-dasharray: 2 3;
+}

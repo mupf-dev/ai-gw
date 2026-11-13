@@ -1,20 +1,23 @@
 <!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
-  // Keys (AIGW-49): Liste aus der Admin-API (Filter Status/Team serverseitig, Suche/Sortierung/Pagination in der
-  // Tabelle), Erstellen mit einmaliger Klartext-Anzeige, Bearbeiten, Rotieren, Sperren/Entsperren, Löschen.
+  // Keys (AIGW-49, AIGW-77): Liste mit serverseitiger Pagination, Suche und Filtern (Status, Team, Organisation –
+  // D11/F139), Erstellen mit einmaliger Klartext-Anzeige, Zeilenmenü (Bearbeiten, Rotieren, Sperren/Entsperren,
+  // endgültig Widerrufen, Löschen – F37) und Detailseite je Key (/keys/{name}, D8).
   // Schreibaktionen nur, wenn die Rolle sie erlaubt (rbac.svelte.ts); der Server prüft immer selbst.
   import { DropdownMenu } from 'bits-ui';
   import { untrack } from 'svelte';
+  import { listPage, type Query } from '../lib/api/client';
   import { apiKeys, type ApiKey, type S } from '../lib/api/resources';
   import AsyncState from '../lib/admin/AsyncState.svelte';
-  import ConfirmDialog from '../lib/admin/ConfirmDialog.svelte';
-  import { formErrorOf, Loader } from '../lib/admin/errors.svelte';
+  import { Loader } from '../lib/admin/errors.svelte';
+  import { Paged } from '../lib/admin/paged.svelte';
   import SecretDialog from '../lib/admin/SecretDialog.svelte';
-  import { catalog, ctx, currentOrg, orgOfTeam, teamLabel } from '../lib/context.svelte';
+  import { ctx, currentOrg, orgOfTeam, teamLabel } from '../lib/context.svelte';
   import { ago, dateTime, day, short } from '../lib/format';
+  import { detailPath } from '../lib/nav';
   import { canWriteKey, canWriteSomething } from '../lib/rbac.svelte';
-  import { route } from '../lib/router.svelte';
+  import { href, navigate, route } from '../lib/router.svelte';
   import { toast } from '../lib/toast.svelte';
   import Badge from '../lib/ui/Badge.svelte';
   import Button from '../lib/ui/Button.svelte';
@@ -25,62 +28,69 @@
   import PageHeader from '../lib/ui/PageHeader.svelte';
   import Select from '../lib/ui/Select.svelte';
   import { btn, cx, menuItem, menuSeparator, popover } from '../lib/ui/styles';
+  import KeyActionDialog from './keys/KeyActionDialog.svelte';
   import KeyFormDialog from './keys/KeyFormDialog.svelte';
+  import { keyStatus, STATE_FILTER, type KeyAction } from './keys/keyState';
   import RotateKeyDialog from './keys/RotateKeyDialog.svelte';
 
   const params = new URLSearchParams(route.search);
   let formOpen = $state(params.get('new') === '1');
   let editName = $state<string | null>(null);
-  let q = $state(params.get('q') ?? '');
   if (params.get('team')) ctx.teamId = params.get('team') ?? '';
-  let status = $state('all');
+  let status = $state(params.get('state') ?? '');
   let secret = $state<string | null>(null);
   let secretTitle = $state('');
   let snippetModel = $state('gpt-4o');
   let rotateOpen = $state(false);
   let rotating = $state<string | null>(null);
-  let confirm = $state<{ kind: 'revoke' | 'reactivate' | 'delete'; key: ApiKey } | null>(null);
-  let confirmOpen = $state(false);
+  let act = $state<{ action: KeyAction; name: string } | null>(null);
+  let actOpen = $state(false);
 
-  const DAY = 86_400_000;
-  const expired = (k: ApiKey) => !!k.spec.expiresAt && Date.parse(k.spec.expiresAt) <= Date.now();
-  const expiringSoon = (k: ApiKey) => k.status.state === 'active' && !!k.spec.expiresAt && !expired(k) && Date.parse(k.spec.expiresAt) - Date.now() < 14 * DAY;
-
-  const keys = new Loader<ApiKey[]>(() =>
-    apiKeys.list({ team: ctx.teamId || undefined, state: status === 'revoked' ? 'revoked' : status === 'all' ? undefined : 'active' }),
-  );
-  // Serverseitige Filter: bei Änderung neu laden.
+  // Serverseitige Filter (F42/F139): Status, Team, Organisation des Kontext-Umschalters.
+  const filters = (): Query => ({ state: status || undefined, team: ctx.teamId || undefined, organization: ctx.orgId || undefined });
+  const keys = new Paged<ApiKey>((q, limit, cursor) => listPage<ApiKey>(apiKeys.path, q, limit, cursor), filters, { q: params.get('q') ?? '' });
+  // Kennzahlen je Zustand (höchstens 500 gezählt, darüber „500+“).
+  const counts = new Loader(async () => {
+    const count = async (state: S['ApiKeyState']) => {
+      const p = await listPage<ApiKey>(apiKeys.path, { team: ctx.teamId || undefined, organization: ctx.orgId || undefined, state }, 500);
+      return p.nextCursor ? '500+' : String(p.items.length);
+    };
+    const [active, suspended, revoked] = await Promise.all([count('active'), count('suspended'), count('revoked')]);
+    return { active, suspended, revoked };
+  });
   let first = true;
   $effect(() => {
     void ctx.teamId;
+    void ctx.orgId;
     void status;
     if (first) {
       first = false;
       return;
     }
-    untrack(() => void keys.reload());
+    untrack(() => {
+      void keys.first();
+      void counts.reload();
+    });
   });
+  function reload() {
+    void keys.reload();
+    void counts.reload();
+  }
 
-  const inOrg = (k: ApiKey) => !ctx.orgId || !k.spec.team || orgOfTeam(k.spec.team) === ctx.orgId || !catalog.loaded;
-  const rows = $derived(
-    (keys.data ?? []).filter((k) => inOrg(k) && (status !== 'expired' || expired(k)) && (status !== 'active' || !expired(k))),
-  );
-  // Kennzahlen im aktuellen Organisationskontext (wie die Tabelle).
-  const all = $derived((keys.data ?? []).filter(inOrg));
-  const writable = (k: ApiKey) => canWriteKey(k.spec.team, orgOfTeam(k.spec.team));
+  const writable = (k: ApiKey) => canWriteKey(k.spec.team, k.spec.organization ?? orgOfTeam(k.spec.team));
 
   function created(r: S['CreatedApiKey']) {
     secretTitle = `Key „${r.key.metadata.name}“ erstellt`;
     snippetModel = r.key.spec.allowedModels?.[0] ?? 'gpt-4o';
     secret = r.secret;
-    void keys.reload();
+    reload();
   }
   function rotated(r: S['RotatedApiKey']) {
     secretTitle = `Key „${r.newKey.key.metadata.name}“ erstellt (Rotation)`;
     snippetModel = r.newKey.key.spec.allowedModels?.[0] ?? 'gpt-4o';
     secret = r.newKey.secret;
     toast('info', 'Alter Key läuft ab', r.previousKey.spec.expiresAt ? `„${r.previousKey.metadata.name}“ gilt bis ${dateTime(Date.parse(r.previousKey.spec.expiresAt))}.` : undefined);
-    void keys.reload();
+    reload();
   }
   function edit(k: ApiKey) {
     editName = k.metadata.name;
@@ -90,26 +100,9 @@
     editName = null;
     formOpen = true;
   }
-  function ask(kind: 'revoke' | 'reactivate' | 'delete', key: ApiKey) {
-    confirm = { kind, key };
-    confirmOpen = true;
-  }
-  async function runConfirm(): Promise<string | null> {
-    if (!confirm) return null;
-    const { kind, key } = confirm;
-    const name = key.metadata.name;
-    const action = { revoke: 'Key sperren', reactivate: 'Key entsperren', delete: 'Key löschen' }[kind];
-    try {
-      const { etag } = await apiKeys.get(name);
-      if (kind === 'revoke') await apiKeys.revoke(name, etag);
-      else if (kind === 'reactivate') await apiKeys.reactivate(name, etag);
-      else await apiKeys.remove(name, etag);
-      toast('success', { revoke: 'Key gesperrt', reactivate: 'Key entsperrt', delete: 'Key gelöscht' }[kind], `„${name}“`);
-      void keys.reload();
-      return null;
-    } catch (e) {
-      return formErrorOf(e, action, () => void keys.reload());
-    }
+  function ask(action: KeyAction, k: ApiKey) {
+    act = { action, name: k.metadata.name };
+    actOpen = true;
   }
 
   const limitText = (k: ApiKey) => {
@@ -121,24 +114,24 @@
   const PERIOD: Record<S['BudgetPeriod'], string> = { day: 'Tag', week: 'Woche', month: 'Monat', total: 'gesamt' };
 
   const columns: Column<ApiKey>[] = [
-    { id: 'name', label: 'Name', cell: nameCell, sort: (k) => k.metadata.name },
-    { id: 'team', label: 'Team', cell: teamCell, sort: (k) => teamLabel(k.spec.team), from: 'md' },
+    { id: 'name', label: 'Name', cell: nameCell },
+    { id: 'team', label: 'Team', cell: teamCell, from: 'md' },
     { id: 'models', label: 'Modelle', cell: modelsCell, from: 'xl' },
     { id: 'limits', label: 'Budget & Limits', cell: limitsCell, from: 'lg' },
-    { id: 'expires', label: 'Ablauf', cell: expiresCell, sort: (k) => (k.spec.expiresAt ? Date.parse(k.spec.expiresAt) : Infinity), from: 'lg' },
-    { id: 'used', label: 'Zuletzt genutzt', cell: usedCell, sort: (k) => (k.status.lastUsedAt ? Date.parse(k.status.lastUsedAt) : 0), from: 'sm' },
-    { id: 'status', label: 'Status', cell: statusCell, sort: (k) => (k.status.state === 'revoked' ? 2 : expired(k) ? 1 : 0) },
+    { id: 'expires', label: 'Ablauf', cell: expiresCell, from: 'lg' },
+    { id: 'used', label: 'Zuletzt genutzt', cell: usedCell, from: 'sm' },
+    { id: 'status', label: 'Status', cell: statusCell },
     { id: 'actions', label: 'Aktionen', cell: actionsCell, srOnlyLabel: true, align: 'right', class: 'w-10' },
   ];
 </script>
 
 {#snippet nameCell(k: ApiKey)}
   <div class="flex min-w-0 flex-col">
-    <span class="truncate font-medium text-fg">{k.metadata.name}</span>
+    <a class="truncate font-medium text-fg hover:text-accent-text" href={href(detailPath('key', k.metadata.name))}>{k.metadata.name}</a>
     <span class="font-mono text-xs text-fg-muted" data-testid="key-prefix">sk-aigw-{k.status.prefix}…</span>
   </div>
 {/snippet}
-{#snippet teamCell(k: ApiKey)}<span class="text-fg-muted">{k.spec.team ? teamLabel(k.spec.team) : 'kein Team'}</span>{/snippet}
+{#snippet teamCell(k: ApiKey)}<span class="text-fg-muted">{k.spec.team ? teamLabel(k.spec.team) : `kein Team · ${k.spec.organization}`}</span>{/snippet}
 {#snippet modelsCell(k: ApiKey)}
   {#if !k.spec.allowedModels?.length}
     <Badge tone="outline">Alle (Team)</Badge>
@@ -158,17 +151,16 @@
 {#snippet expiresCell(k: ApiKey)}<span class="text-sm text-fg-muted">{k.spec.expiresAt ? day(Date.parse(k.spec.expiresAt)) : 'nie'}</span>{/snippet}
 {#snippet usedCell(k: ApiKey)}<span class="text-sm text-fg-muted">{k.status.lastUsedAt ? ago(Date.parse(k.status.lastUsedAt)) : 'nie'}</span>{/snippet}
 {#snippet statusCell(k: ApiKey)}
-  {#if k.status.state === 'revoked'}<Badge tone="danger" dot>Gesperrt</Badge>
-  {:else if expired(k)}<Badge tone="neutral" dot>Abgelaufen</Badge>
-  {:else if expiringSoon(k)}<Badge tone="warning" dot>Läuft ab {day(Date.parse(k.spec.expiresAt ?? ''))}</Badge>
-  {:else}<Badge tone="success" dot>Aktiv</Badge>{/if}
+  {@const st = keyStatus(k)}
+  <Badge tone={st.tone} dot>{st.label}</Badge>
 {/snippet}
 {#snippet actionsCell(k: ApiKey)}
   <DropdownMenu.Root>
     <DropdownMenu.Trigger class={btn('ghost', 'icon-sm')} aria-label="Aktionen für {k.metadata.name}"><Icon name="more" /></DropdownMenu.Trigger>
     <DropdownMenu.Portal>
       <DropdownMenu.Content class={cx(popover, 'w-48')} align="end" sideOffset={4}>
-        {#if writable(k)}
+        <DropdownMenu.Item class={menuItem} onSelect={() => navigate(detailPath('key', k.metadata.name))}><Icon name="eye" size={14} /> Details</DropdownMenu.Item>
+        {#if writable(k) && k.status.state !== 'revoked'}
           <DropdownMenu.Item class={menuItem} onSelect={() => edit(k)}><Icon name="pencil" size={14} /> Bearbeiten</DropdownMenu.Item>
           <DropdownMenu.Item
             class={menuItem}
@@ -182,13 +174,16 @@
           </DropdownMenu.Item>
         {/if}
         <DropdownMenu.Item class={menuItem} onSelect={() => navigator.clipboard?.writeText(k.metadata.name)}><Icon name="copy" size={14} /> Name kopieren</DropdownMenu.Item>
-        {#if writable(k)}
+        {#if writable(k) && k.status.state !== 'revoked'}
           <DropdownMenu.Separator class={menuSeparator} />
           {#if k.status.state === 'active'}
-            <DropdownMenu.Item class={cx(menuItem, 'text-danger-fg [&_svg]:text-danger-fg')} onSelect={() => ask('revoke', k)}><Icon name="ban" size={14} /> Sperren …</DropdownMenu.Item>
+            <DropdownMenu.Item class={menuItem} onSelect={() => ask('suspend', k)}><Icon name="ban" size={14} /> Sperren …</DropdownMenu.Item>
           {:else}
-            <DropdownMenu.Item class={menuItem} onSelect={() => ask('reactivate', k)}><Icon name="check-circle" size={14} /> Entsperren …</DropdownMenu.Item>
+            <DropdownMenu.Item class={menuItem} onSelect={() => ask('resume', k)}><Icon name="check-circle" size={14} /> Entsperren …</DropdownMenu.Item>
           {/if}
+          <DropdownMenu.Item class={cx(menuItem, 'text-danger-fg [&_svg]:text-danger-fg')} onSelect={() => ask('revoke', k)}><Icon name="x-circle" size={14} /> Endgültig widerrufen …</DropdownMenu.Item>
+        {/if}
+        {#if writable(k)}
           <DropdownMenu.Item class={cx(menuItem, 'text-danger-fg [&_svg]:text-danger-fg')} onSelect={() => ask('delete', k)}><Icon name="trash" size={14} /> Löschen …</DropdownMenu.Item>
         {/if}
       </DropdownMenu.Content>
@@ -198,7 +193,7 @@
 
 <PageHeader title="Keys" description="Virtuelle API-Keys für Anwendungen. Budgets und Ratenlimits greifen je Key zusätzlich zu Team- und Organisationslimits.">
   {#snippet actions()}
-    <Button variant="secondary" icon="refresh" onclick={() => keys.reload()} loading={keys.loading} aria-label="Neu laden">Neu laden</Button>
+    <Button variant="secondary" icon="refresh" onclick={reload} loading={keys.loading} aria-label="Neu laden">Neu laden</Button>
     {#if canWriteSomething()}
       <Button variant="primary" icon="plus" onclick={create} data-testid="create-key">Key erstellen</Button>
     {/if}
@@ -206,45 +201,36 @@
 </PageHeader>
 
 
-  <div class="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-    {#each [{ l: 'Aktive Keys', v: all.filter((k) => k.status.state === 'active' && !expired(k)).length }, { l: 'Laufen in 14 Tagen ab', v: all.filter(expiringSoon).length }, { l: 'Gesperrt', v: all.filter((k) => k.status.state === 'revoked').length }, { l: 'Abgelaufen', v: all.filter((k) => k.status.state === 'active' && expired(k)).length }] as s (s.l)}
-      <div class="rounded-lg border border-line bg-surface px-4 py-3 shadow-card">
-        <div class="text-sm text-fg-muted">{s.l}</div>
-        <div class="num mt-1 text-xl font-semibold">{keys.data ? s.v : '–'}</div>
-      </div>
+  <div class="mb-4 grid grid-cols-3 gap-3" data-testid="key-counts">
+    {#each [{ l: 'Aktiv', k: 'active' }, { l: 'Gesperrt', k: 'suspended' }, { l: 'Widerrufen', k: 'revoked' }] as const as c (c.k)}
+      <button type="button" class={['rounded-lg border bg-surface px-4 py-3 text-left shadow-card hover:bg-surface-hover', status === c.k ? 'border-accent' : 'border-line']} onclick={() => (status = status === c.k ? '' : c.k)}>
+        <div class="text-sm text-fg-muted">{c.l}</div>
+        <div class="num mt-1 text-xl font-semibold">{counts.data ? counts.data[c.k] : '–'}</div>
+      </button>
     {/each}
   </div>
   <Card flush testid="keys-card">
     <AsyncState loader={keys}>
-      {#snippet children()}
+      {#snippet children(rows)}
         <DataTable
           {rows}
           {columns}
-          bind:q
+          server={keys}
+          filtered={!!status || !!ctx.teamId}
           key={(k) => k.metadata.name}
           caption="API-Keys"
-          search={(k) => `${k.metadata.name} ${k.status.prefix} ${teamLabel(k.spec.team)} ${k.spec.user ?? ''}`}
-          searchPlaceholder="Name, Präfix, Team oder Nutzer …"
-          sortId="name"
+          search={() => ''}
+          searchPlaceholder="Name oder Präfix …"
           testid="keys-table"
+          onrowclick={(k) => navigate(detailPath('key', k.metadata.name))}
           resetFilters={() => {
-            status = 'all';
+            status = '';
             ctx.teamId = '';
           }}
         >
           {#snippet toolbar()}
             <div class="w-40">
-              <Select
-                size="sm"
-                label="Status"
-                bind:value={status}
-                items={[
-                  { value: 'all', label: 'Alle Status' },
-                  { value: 'active', label: 'Aktiv' },
-                  { value: 'revoked', label: 'Gesperrt' },
-                  { value: 'expired', label: 'Abgelaufen' },
-                ]}
-              />
+              <Select size="sm" label="Status" bind:value={status} items={STATE_FILTER} />
             </div>
             <div class="w-44">
               <Select size="sm" label="Team" icon="users" bind:value={ctx.teamId} items={[{ value: '', label: 'Alle Teams' }, ...currentOrg().teams.map((t) => ({ value: t.id, label: t.name }))]} />
@@ -260,7 +246,7 @@
     </AsyncState>
   </Card>
 
-<KeyFormDialog bind:open={formOpen} {editName} oncreated={created} onsaved={() => (toast('success', 'Key gespeichert'), keys.reload())} />
+<KeyFormDialog bind:open={formOpen} {editName} oncreated={created} onsaved={() => (toast('success', 'Key gespeichert'), reload())} />
 <RotateKeyDialog bind:open={rotateOpen} name={rotating} onrotated={rotated} />
 <SecretDialog
   bind:secret
@@ -277,20 +263,4 @@ curl "$AIGW_URL/v1/chat/completions" \\
   }}
 />
 
-<ConfirmDialog
-  bind:open={confirmOpen}
-  title={confirm?.kind === 'revoke' ? 'Key sperren?' : confirm?.kind === 'reactivate' ? 'Key entsperren?' : 'Key löschen?'}
-  confirmLabel={confirm?.kind === 'revoke' ? 'Sperren' : confirm?.kind === 'reactivate' ? 'Entsperren' : 'Löschen'}
-  icon={confirm?.kind === 'reactivate' ? 'check-circle' : confirm?.kind === 'revoke' ? 'ban' : 'trash'}
-  danger={confirm?.kind !== 'reactivate'}
-  onconfirm={runConfirm}
-  testid="revoke-dialog"
->
-  {#if confirm?.kind === 'revoke'}
-    <p>„<span class="font-medium text-fg">{confirm.key.metadata.name}</span>“ wird nach dem Hot Reload sofort abgewiesen (HTTP 401). Entsperren ist möglich.</p>
-  {:else if confirm?.kind === 'reactivate'}
-    <p>„<span class="font-medium text-fg">{confirm.key.metadata.name}</span>“ wird wieder angenommen (sofern nicht abgelaufen).</p>
-  {:else if confirm}
-    <p>„<span class="font-medium text-fg">{confirm.key.metadata.name}</span>“ wird endgültig gelöscht und sofort abgewiesen. Das lässt sich nicht rückgängig machen.</p>
-  {/if}
-</ConfirmDialog>
+<KeyActionDialog bind:open={actOpen} action={act?.action ?? null} name={act?.name ?? null} ondone={reload} />

@@ -238,6 +238,9 @@ async fn scenario(store: Store) {
         .json();
     assert_eq!(info["readOnly"], false);
     assert_eq!(info["bootstrap"], true);
+    // F135/F201: Mock-Schalter (Standard an) und Höchstlaufzeit (nur angemeldet).
+    assert_eq!(info["uiMock"], true);
+    assert_eq!(info["maxAdminKeyLifetimeSecs"], 30 * 86_400);
 
     // --- F87: Höchstlaufzeit; F55: Rolle gitops nur global ------------------------------------
     let r = env

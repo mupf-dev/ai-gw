@@ -14,7 +14,7 @@
   import { catalog } from '../lib/context.svelte';
   import { ago, day } from '../lib/format';
   import { isGlobalAdmin } from '../lib/rbac.svelte';
-  import { bindingLabel } from '../lib/session.svelte';
+  import { auth, bindingLabel } from '../lib/session.svelte';
   import { toast } from '../lib/toast.svelte';
   import Badge from '../lib/ui/Badge.svelte';
   import Button from '../lib/ui/Button.svelte';
@@ -40,7 +40,15 @@
   let del = $state<string | null>(null);
   let delOpen = $state(false);
 
-  const writable = $derived(isGlobalAdmin());
+  const writable = $derived(isGlobalAdmin() && !auth.readOnly);
+  // F201: Höchstlaufzeit (admin.auth.max_admin_key_lifetime) gilt nur für neue/geänderte Keys – ältere, die länger
+  // (oder unbefristet) gelten, werden nur markiert.
+  const overLifetime = (k: AdminApiKey) => {
+    const max = auth.maxAdminKeyLifetimeSecs;
+    if (!max || expired(k)) return false;
+    return !k.expiresAt || Date.parse(k.expiresAt) - Date.now() > max * 1000 + 60_000;
+  };
+  const maxDays = $derived(auth.maxAdminKeyLifetimeSecs ? Math.round(auth.maxAdminKeyLifetimeSecs / 86_400) : null);
   const expired = (k: AdminApiKey) => !!k.expiresAt && Date.parse(k.expiresAt) <= Date.now();
 
   function openForm(k: AdminApiKey | null) {
@@ -113,6 +121,7 @@
 {/snippet}
 {#snippet expiresCell(k: AdminApiKey)}
   {#if expired(k)}<Badge tone="neutral" dot>abgelaufen</Badge>{:else}<span class="text-sm text-fg-muted">{k.expiresAt ? day(Date.parse(k.expiresAt)) : 'unbefristet'}</span>{/if}
+  {#if overLifetime(k)}<Badge tone="warning" icon="alert" class="ml-1">über Höchstlaufzeit</Badge>{/if}
 {/snippet}
 {#snippet usedCell(k: AdminApiKey)}<span class="text-sm text-fg-muted">{k.lastUsedAt ? ago(Date.parse(k.lastUsedAt)) : 'nie'}</span>{/snippet}
 {#snippet byCell(k: AdminApiKey)}<span class="font-mono text-xs text-fg-muted">{k.createdBy}</span>{/snippet}
@@ -144,6 +153,11 @@
 </PageHeader>
 
   <Card flush>
+    {#if maxDays && (data.data ?? []).some(overLifetime)}
+      <p class="border-b border-line bg-warning-bg px-4 py-2 text-sm text-warning-fg" role="status" data-testid="lifetime-hint">
+        {(data.data ?? []).filter(overLifetime).length} Key(s) gelten länger als die Höchstlaufzeit von {maxDays} Tagen (admin.auth.max_admin_key_lifetime). Sie bleiben gültig – bitte rotieren bzw. mit kürzerem Ablauf neu anlegen.
+      </p>
+    {/if}
     <AsyncState loader={data}>
       {#snippet children(rows)}
         <DataTable

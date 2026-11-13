@@ -79,12 +79,18 @@ test('Logs: Detail-Sheet mit Tabs und Code-Anzeige', async ({ page }) => {
 
 test('Modelle: Gruppenwechsel, Switch, Dialoge', async ({ page }) => {
   await goto(page, '/models');
-  await page.getByTestId('group-list').getByRole('button', { name: /^claude-sonnet/ }).click();
+  await page.getByTestId('group-list').getByRole('link', { name: 'claude-sonnet', exact: true }).click();
   await expect(page.getByTestId('group-detail')).toContainText('claude-sonnet');
+  // Strukturierte Einstellungen (D9) und JSON-Ansicht im Dialog, Nutzung mit LayerChart (F18, lazy) – ohne CSP-Verstöße.
+  await page.getByTestId('tab-usage').click();
+  await expect(page.getByTestId('stacked-area').locator('svg path').first()).toBeAttached();
+  await page.getByTestId('tab-overview').click();
   await page.getByRole('switch').first().click();
   await expect(page.getByRole('status').filter({ hasText: /Deployment (de)?aktiviert/ })).toBeVisible();
   await page.getByTestId('edit-group').click();
   await expect(page.getByTestId('group-form-dialog')).toBeVisible();
+  await page.getByTestId('settings-json-tab').click();
+  await expect(page.getByTestId('settings-json')).toBeVisible();
   await page.keyboard.press('Escape');
   await page.getByTestId('create-deployment').click();
   await expect(page.getByTestId('deployment-form-dialog')).toBeVisible();
@@ -151,7 +157,8 @@ test('Mock-Modus deutlich gekennzeichnet; ohne Mock und ohne Anmeldung: Token-Di
   await goto(page, '/', { mock: false });
   await expect(page.getByTestId('token-dialog')).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByTestId('version')).not.toHaveText('–');
+  // Seit AIGW-77 zeigt die Übersicht echte Daten – ohne Anmeldung der Anmelde-Hinweis.
+  await expect(page.getByText('Anmeldung erforderlich')).toBeVisible();
   await goto(page, '/keys', { mock: false });
   await page.keyboard.press('Escape');
   await expect(page.getByText('Anmeldung erforderlich')).toBeVisible();

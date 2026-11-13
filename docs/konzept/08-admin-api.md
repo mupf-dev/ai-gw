@@ -338,10 +338,13 @@ keinen `401` in der Konsole erzeugt), `GET /admin/api/openapi.json`, die UI und
 
 `auth/info` meldet zusätzlich (F56) `readOnly` (Modus „nur YAML“, `gitops.read_only_admin`: die UI
 blendet Schreibaktionen aus) und `bootstrap` (das Bootstrap-Token gilt derzeit: Modus `on` bzw.
-`auto` ohne Abschaltvermerk – die UI zeigt einen Warnhinweis).
+`auto` ohne Abschaltvermerk – die UI zeigt einen Warnhinweis). Für die UI (AIGW-77) außerdem `uiMock`
+(`admin.ui.mock`, Mock-Schalter anbieten) und – nur angemeldet – `maxAdminKeyLifetimeSecs`
+(`admin.auth.max_admin_key_lifetime`, F201: ältere Keys mit längerer Laufzeit markieren) sowie `traceUrl`
+(`admin.ui.trace_url`, Link-Vorlage zum Tracing-System mit `{traceId}`).
 
 ```json
-{"oidc": true, "loginUrl": "/admin/auth/login", "readOnly": false, "bootstrap": true,
+{"oidc": true, "loginUrl": "/admin/auth/login", "readOnly": false, "bootstrap": true, "uiMock": true,
  "session": {"subject": "user:anna", "method": "session", "roles": [{"role": "admin"}], "csrfToken": "…"}}
 ```
 

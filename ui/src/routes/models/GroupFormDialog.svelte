@@ -14,7 +14,9 @@
   import Icon from '../../lib/ui/Icon.svelte';
   import Input from '../../lib/ui/Input.svelte';
   import Select from '../../lib/ui/Select.svelte';
-  import { btn, checkbox, textarea } from '../../lib/ui/styles';
+  import { btn, checkbox } from '../../lib/ui/styles';
+  import SettingsEditor from './SettingsEditor.svelte';
+  import { GROUP_SECTIONS } from './settings';
 
   let {
     open = $bindable(false),
@@ -31,7 +33,8 @@
     { value: 'audio-transcription', label: 'Transkription' },
     { value: 'audio-speech', label: 'Sprachausgabe' },
   ];
-  const blank = () => ({ name: '', aliases: '', routing: 'weighted' as S['RoutingStrategy'], fallbacks: [] as S['Fallback'][], capabilities: ['chat'] as S['ModelCapability'][], settings: '' });
+  const blank = () => ({ name: '', aliases: '', routing: 'weighted' as S['RoutingStrategy'], fallbacks: [] as S['Fallback'][], capabilities: ['chat'] as S['ModelCapability'][], settings: {} as Record<string, unknown> });
+  let settingsInvalid = $state(false);
   let form = $state(blank());
   let loaded = $state<ModelGroup | null>(null);
   let etag = $state<string | null>(null);
@@ -68,7 +71,7 @@
         routing: s.routing ?? 'weighted',
         fallbacks: (s.fallbacks ?? []).map((f) => ({ modelGroup: f.modelGroup, on: [...(f.on ?? [])] })),
         capabilities: s.capabilities?.length ? [...s.capabilities] : ['chat'],
-        settings: s.settings && Object.keys(s.settings).length ? JSON.stringify(s.settings, null, 2) : '',
+        settings: { ...((s.settings ?? {}) as Record<string, unknown>) },
       };
     } catch (e) {
       handleError(e, { action: 'Modellgruppe laden' });
@@ -78,16 +81,6 @@
     }
   }
 
-  function parseSettings(): Record<string, unknown> | null {
-    if (!form.settings.trim()) return {};
-    try {
-      const v = JSON.parse(form.settings);
-      if (v && typeof v === 'object' && !Array.isArray(v)) return v;
-    } catch {
-      /* unten */
-    }
-    return null;
-  }
 
   async function submit(ev: SubmitEvent) {
     ev.preventDefault();
@@ -95,8 +88,8 @@
     if (!editName && !NAME_RE.test(form.name)) e.name = 'Ungültiger Name: a-z, 0-9, „-“, „.“, „_“, beginnt alphanumerisch.';
     const aliases = splitList(form.aliases);
     if (aliases.some((a) => /[\s\p{Cc}]/u.test(a) || a.length > 256)) e.aliases = 'Aliasse ohne Leer-/Steuerzeichen, max. 256 Zeichen.';
-    const settings = parseSettings();
-    if (settings === null) e.settings = 'Kein gültiges JSON-Objekt.';
+    const settings = $state.snapshot(form.settings);
+    if (settingsInvalid) e.settings = 'Einstellungen prüfen (ungültige Zahl bzw. kein gültiges JSON).';
     if (form.fallbacks.some((f) => !f.modelGroup)) e.fallbacks = 'Jeder Fallback braucht eine Ziel-Gruppe.';
     if (!form.capabilities.length) e.capabilities = 'Mindestens eine Fähigkeit wählen.';
     errors = e;
@@ -210,25 +203,11 @@
         </div>
       </fieldset>
 
-      <Field
-        label="Einstellungen (JSON)"
-        optional
-        hint={'retry {maxAttempts, initialBackoffMs, maxBackoffMs, budgetMs, maxRetryAfterMs} · circuitBreaker {enabled, failureRate, minRequests, windowSecs, openSecs} · healthCheck {enabled, intervalSecs, timeoutMs, unhealthyThreshold}. Unbekannte Felder lehnt der Server ab (422).'}
-        error={errors.settings}
-        class="sm:col-span-2"
-      >
-        {#snippet children({ id, describedby, invalid })}
-          <textarea
-            {id}
-            class={[textarea, 'min-h-28']}
-            bind:value={form.settings}
-            aria-describedby={describedby}
-            aria-invalid={invalid || undefined}
-            spellcheck="false"
-            placeholder={'{\n  "retry": {"maxAttempts": 2, "initialBackoffMs": 100}\n}'}
-          ></textarea>
-        {/snippet}
-      </Field>
+      <section class="flex flex-col gap-1.5 sm:col-span-2" aria-label="Einstellungen">
+        <h3 class="text-sm font-medium text-fg">Einstellungen <span class="text-xs font-normal text-fg-subtle">(leer = Standard; vom Server mit dem Parser der Datenebene geprüft)</span></h3>
+        <SettingsEditor bind:value={form.settings} bind:invalid={settingsInvalid} sections={GROUP_SECTIONS} />
+        {#if errors.settings}<p class="flex items-center gap-1 text-xs text-danger-fg"><Icon name="alert" size={12} />{errors.settings}</p>{/if}
+      </section>
       <div class="sm:col-span-2"><FormError message={formError} /></div>
     </form>
   {/if}

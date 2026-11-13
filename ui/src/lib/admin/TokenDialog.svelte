@@ -4,6 +4,7 @@
   // Anmeldung ohne OIDC: Bootstrap-Token (Server-Log beim Start bzw. AIGW_BOOTSTRAP_TOKEN) oder Admin-API-Key.
   // Gespeichert nur im sessionStorage dieses Tabs; geprüft über /admin/api/v1/auth/info.
   import { setMockMode } from '../prefs.svelte';
+  import { mockAvailable } from '../mode.svelte';
   import { auth, submitToken } from '../session.svelte';
   import Button from '../ui/Button.svelte';
   import Dialog from '../ui/Dialog.svelte';
@@ -52,7 +53,7 @@
     <FormError message={auth.tokenError} />
   </form>
   {#snippet footer()}
-    <Button variant="ghost" class="mr-auto" onclick={useMock}>Mock-Daten ansehen</Button>
+    {#if mockAvailable()}<Button variant="ghost" class="mr-auto" onclick={useMock}>Mock-Daten ansehen</Button>{/if}
     <Button variant="secondary" onclick={() => (auth.tokenDialog = false)}>Abbrechen</Button>
     <Button variant="primary" type="submit" form="token-form" icon="lock" loading={busy} disabled={busy} data-testid="token-submit">Anmelden</Button>
   {/snippet}

@@ -26,9 +26,29 @@ export const auth = $state<{
   tokenDialog: boolean;
   /** Fehlermeldung im Token-Dialog. */
   tokenError: string | null;
-  /** Modus „nur YAML“ erkannt (403 read-only bei einer Änderung). */
+  /** Modus „nur YAML“ (auth/info `readOnly`, F56; zusätzlich bei 403 read-only erkannt): Schreibaktionen ausblenden. */
   readOnly: boolean;
-}>({ loaded: false, oidc: false, loginUrl: null, session: null, tokenDialog: false, tokenError: null, readOnly: false });
+  /** Bootstrap-Token aktiv (auth/info `bootstrap`, F56) – Warnbanner. */
+  bootstrap: boolean;
+  /** Mock-Modus angeboten (`admin.ui.mock`, F135); `false` blendet alle Schalter aus. */
+  uiMock: boolean;
+  /** Höchstlaufzeit von Admin-API-Keys in Sekunden (F87/F201), nur angemeldet. */
+  maxAdminKeyLifetimeSecs: number | null;
+  /** Link-Vorlage zum Tracing-System (`admin.ui.trace_url`, `{traceId}`). */
+  traceUrl: string | null;
+}>({
+  loaded: false,
+  oidc: false,
+  loginUrl: null,
+  session: null,
+  tokenDialog: false,
+  tokenError: null,
+  readOnly: false,
+  bootstrap: false,
+  uiMock: true,
+  maxAdminKeyLifetimeSecs: null,
+  traceUrl: null,
+});
 
 const AUTH_ERRORS: Record<string, string> = {
   'no-access': 'Ihrem Konto ist keine Rolle in ai-gw zugeordnet.',
@@ -125,6 +145,11 @@ async function fetchInfo(): Promise<boolean> {
   auth.oidc = data.oidc;
   auth.loginUrl = data.loginUrl ?? null;
   auth.session = data.session ?? null;
+  auth.readOnly = data.readOnly;
+  auth.bootstrap = data.bootstrap;
+  auth.uiMock = data.uiMock ?? true;
+  auth.maxAdminKeyLifetimeSecs = data.maxAdminKeyLifetimeSecs ?? null;
+  auth.traceUrl = data.traceUrl ?? null;
   setCsrfToken(data.session?.csrfToken ?? null);
   return true;
 }

@@ -934,6 +934,16 @@ pub struct AuthInfo {
     /// Das Bootstrap-Token ist aktiv (F56) – die UI zeigt einen Warnhinweis (Notfallzugang
     /// abschalten: OIDC-Admin anmelden bzw. Admin-API-Key mit Rolle `admin` anlegen).
     pub bootstrap: bool,
+    /// Mock-Modus der UI anbieten (`admin.ui.mock`, F135): `false` blendet den Schalter aus.
+    pub ui_mock: bool,
+    /// Höchstlaufzeit von Admin-API-Keys in Sekunden (`admin.auth.max_admin_key_lifetime`, F87),
+    /// nur für Angemeldete: die UI markiert ältere Keys, die länger gelten (F201).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_admin_key_lifetime_secs: Option<u64>,
+    /// Link-Vorlage zum Tracing-System (`admin.ui.trace_url`, `{traceId}` wird ersetzt), nur für
+    /// Angemeldete.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_url: Option<String>,
 }
 
 /// Liefert die Anmeldeverfahren und den angemeldeten Principal (für die UI).
@@ -952,12 +962,17 @@ pub(crate) async fn auth_info(State(st): State<AdminState>, headers: HeaderMap) 
         Some(g) => g.active().await,
         None => false,
     };
+    let max_admin_key_lifetime_secs = session.as_ref().and(st.auth_opts.max_admin_key_lifetime);
+    let trace_url = session.as_ref().and(st.trace_url.clone());
     let mut res = Json(AuthInfo {
         oidc,
         login_url: oidc.then(|| "/admin/auth/login".to_owned()),
         session,
         read_only: st.read_only,
         bootstrap,
+        ui_mock: st.ui_mock,
+        max_admin_key_lifetime_secs,
+        trace_url,
     })
     .into_response();
     res.headers_mut()

@@ -11,11 +11,12 @@
     "check": "svelte-check --tsconfig ./tsconfig.json --threshold error",
     "sizes": "node scripts/sizes.mjs dist",
     "e2e": "e2e/run.sh",
-    "gen:api":"openapi-typescript openapi.json -o src/lib/api/schema.d.ts"
+    "gen:api": "openapi-typescript openapi.json -o src/lib/api/schema.d.ts"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@tailwindcss/vite": "^4.3.0",
+    "@types/d3-hierarchy": "3.1.7",
     "openapi-typescript": "^7.13.0",
     "svelte": "^5.57.0",
     "svelte-check": "^4.3.0",
@@ -26,6 +27,8 @@
   "dependencies": {
     "@internationalized/date": "^3.10.0",
     "bits-ui": "^2.20.0",
+    "d3-hierarchy": "3.1.2",
+    "layerchart": "2.9.2",
     "openapi-fetch": "^0.17.0",
     "uplot": "1.6.32"
   }

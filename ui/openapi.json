@@ -10399,7 +10399,8 @@
         "required": [
           "oidc",
           "readOnly",
-          "bootstrap"
+          "bootstrap",
+          "uiMock"
         ],
         "properties": {
           "bootstrap": {
@@ -10412,6 +10413,15 @@
               "null"
             ],
             "description": "Start des Logins (falls OIDC konfiguriert)."
+          },
+          "maxAdminKeyLifetimeSecs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Höchstlaufzeit von Admin-API-Keys in Sekunden (`admin.auth.max_admin_key_lifetime`, F87),\nnur für Angemeldete: die UI markiert ältere Keys, die länger gelten (F201).",
+            "minimum": 0
           },
           "oidc": {
             "type": "boolean",
@@ -10431,6 +10441,17 @@
                 "type": "null"
               }
             ]
+          },
+          "traceUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Link-Vorlage zum Tracing-System (`admin.ui.trace_url`, `{traceId}` wird ersetzt), nur für\nAngemeldete."
+          },
+          "uiMock": {
+            "type": "boolean",
+            "description": "Mock-Modus der UI anbieten (`admin.ui.mock`, F135): `false` blendet den Schalter aus."
           }
         }
       },

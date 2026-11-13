@@ -2,14 +2,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
   // Navigationsinhalt der Seitenleiste (Desktop fest, mobil im Sheet). Läuft in .scheme-dark.
-  import { NAV, NAV_FOOTER, type Page } from '../nav';
+  import { NAV, NAV_FOOTER, pageForPath, type Page } from '../nav';
   import { isGlobalAdmin } from '../rbac.svelte';
   import { href, route } from '../router.svelte';
   import Icon from '../ui/Icon.svelte';
   import Logo from './Logo.svelte';
 
   let { onnavigate }: { onnavigate?: () => void } = $props();
-  const active = (p: Page) => (p.path === '/' ? route.path === '/' : route.path === p.path || route.path.startsWith(`${p.path}/`));
+  const active = (p: Page) => pageForPath(route.path)?.id === p.id;
 </script>
 
 {#snippet link(p: Page)}

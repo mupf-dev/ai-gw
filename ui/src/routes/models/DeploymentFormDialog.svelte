@@ -13,7 +13,9 @@
   import Field from '../../lib/ui/Field.svelte';
   import Input from '../../lib/ui/Input.svelte';
   import Select from '../../lib/ui/Select.svelte';
-  import { switchRoot, switchThumb, textarea } from '../../lib/ui/styles';
+  import { switchRoot, switchThumb } from '../../lib/ui/styles';
+  import SettingsEditor from './SettingsEditor.svelte';
+  import { DEPLOYMENT_SECTIONS } from './settings';
 
   let {
     open = $bindable(false),
@@ -36,9 +38,10 @@
     rpm: '',
     tpm: '',
     enabled: true,
-    settings: '',
+    settings: {} as Record<string, unknown>,
   });
   let form = $state(blank());
+  let settingsInvalid = $state(false);
   let loaded = $state<Deployment | null>(null);
   let etag = $state<string | null>(null);
   let creds = $state<Credential[]>([]);
@@ -85,7 +88,7 @@
         rpm: s.capacity?.rpm ? String(s.capacity.rpm) : '',
         tpm: s.capacity?.tpm ? String(s.capacity.tpm) : '',
         enabled: s.enabled !== false,
-        settings: s.settings && Object.keys(s.settings).length ? JSON.stringify(s.settings, null, 2) : '',
+        settings: { ...((s.settings ?? {}) as Record<string, unknown>) },
       };
     } catch (e) {
       handleError(e, { action: 'Deployment laden' });
@@ -129,15 +132,9 @@
       const v = int(form[k]);
       if (v !== null && (!Number.isInteger(v) || v <= 0)) e[k] = 'Positive ganze Zahl.';
     }
-    let settings: Record<string, unknown> = {};
-    if (form.settings.trim()) {
-      try {
-        const v = JSON.parse(form.settings);
-        if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error();
-        settings = v;
-      } catch {
-        e.settings = 'Kein gültiges JSON-Objekt.';
-      }
+    const settings = $state.snapshot(form.settings);
+    if (settingsInvalid) {
+      e.settings = 'Einstellungen prüfen (ungültige Zahl bzw. kein gültiges JSON).';
     }
     errors = e;
     formError = null;
@@ -243,11 +240,12 @@
           {/snippet}
         </Field>
       </div>
-      <Field label="Einstellungen (JSON)" optional hint={SETTINGS_HINT[form.provider] ?? 'Anbieterspezifische Einstellungen, z. B. {"maxTokensField": "max_completion_tokens"}.'} error={errors.settings} class="sm:col-span-2">
-        {#snippet children({ id, describedby, invalid })}
-          <textarea {id} class={textarea} bind:value={form.settings} aria-describedby={describedby} aria-invalid={invalid || undefined} spellcheck="false"></textarea>
-        {/snippet}
-      </Field>
+      <section class="flex flex-col gap-1.5 sm:col-span-2" aria-label="Einstellungen">
+        <h3 class="text-sm font-medium text-fg">Einstellungen</h3>
+        <p class="text-xs text-fg-subtle">Anbieterspezifisches unter „Erweitert“: {SETTINGS_HINT[form.provider] ?? 'z. B. {"maxTokensField": "max_completion_tokens"}.'}</p>
+        <SettingsEditor bind:value={form.settings} bind:invalid={settingsInvalid} sections={DEPLOYMENT_SECTIONS} testid="deployment-settings" />
+        {#if errors.settings}<p class="text-xs text-danger-fg">{errors.settings}</p>{/if}
+      </section>
       <div class="flex items-center gap-3 sm:col-span-2">
         <Switch.Root id="dep-enabled" bind:checked={form.enabled} class={switchRoot}><Switch.Thumb class={switchThumb} /></Switch.Root>
         <label for="dep-enabled" class="text-base">Aktiv <span class="text-sm text-fg-muted">– deaktivierte Deployments bleiben gespeichert, werden aber nicht geroutet</span></label>

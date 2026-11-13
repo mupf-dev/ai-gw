@@ -129,6 +129,12 @@ admin:
   # Deployments mit `provider: mock` (eingebauter Echo-Anbieter für Demos/Smoke-Tests) erlauben.
   # false: Admin-API/GitOps lehnen sie ab, das Routing lässt vorhandene aus (F85).
   allow_mock: true
+  # Admin-UI: Mock-Modus (Beispieldaten im Browser) anbieten; false blendet den Schalter aus und
+  # ignoriert ?mock=1 (F135, empfohlen für Produktivinstallationen).
+  ui:
+    mock: true
+    # Link vom Log-Explorer zum Tracing-System; {traceId} wird ersetzt (ohne = kein Link)
+    # trace_url: "https://grafana.example.org/explore?traceId={traceId}"
   # Anmeldung an Admin-API und Admin-UI (§5).
   auth:
     # Bootstrap-Token für die Erstinstallation (AIGW_BOOTSTRAP_TOKEN oder Startausgabe):

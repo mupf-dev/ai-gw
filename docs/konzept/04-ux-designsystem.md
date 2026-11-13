@@ -1,10 +1,9 @@
 # 04 – UX-Konzept und Design-System der Admin-UI
 
-> Status: **Entwurf zur Abnahme** (AIGW-48, Verwaltungsseiten AIGW-49) · Stand: 2026-11-13 · Grundlage: cloud-project-Portal, Variante C
+> Status: **Entwurf zur Abnahme** (AIGW-48, Verwaltungsseiten AIGW-49, Nacharbeiten AIGW-77) · Stand: 2026-11-13 · Grundlage: cloud-project-Portal, Variante C
 > „Technisch“ (CLOU-106), Vorbild Cloudflare-Dashboard · Umsetzung: `ui/` (Svelte 5, Vite, Bits UI, Tailwind 4)
 >
-> Designfragen D1–D6 sind entschieden (§9: Violett, Monospace für alle Zahlen, dunkle Seitenleiste,
-> Systemschrift, Mock-Modus standardmäßig aus, uPlot + eigene SVG); offen sind D7–D12. Ältere Hinweise auf
+> Designfragen D1–D11 sind entschieden (§9); D7–D11 sind mit AIGW-77 umgesetzt (§5.6), D12 mit AIGW-74. Ältere Hinweise auf
 > „umschaltbare Alternativen“ betreffen nur noch das Farbschema; die Musterseiten zeigen jeweils den Vorschlag, Alternativen sind umschaltbar.
 
 ## 1. Ziel und Prinzipien
@@ -84,7 +83,7 @@ gespeichert in `localStorage`). Am `<html>` steht immer das wirksame Schema (`da
 | Gruppe | Einträge |
 |---|---|
 | – | Übersicht, Playground |
-| Gateway | Modelle & Routen, Anbieter, Preise, Guardrails & Plugins, Cache, MCP-Server |
+| Gateway | Modelle & Routen, Anbieter, Secrets, Preise, Guardrails & Plugins, Cache, MCP-Server |
 | Zugriff | Keys, Teams & Nutzer, Limits & Budgets, Admin-API-Keys (nur globale Admins) |
 | Beobachten | Logs, Audit |
 | (unten) | Einstellungen |
@@ -97,9 +96,9 @@ gespeichert in `localStorage`). Am `<html>` steht immer das wirksame Schema (`da
 - **Responsiv:** < 640 px eine Spalte, Tabellen blenden Nebenspalten aus (`from: 'md' | 'lg' | 'xl'`), Filter
   umbrechen; Dialoge maximal Bildschirmhöhe mit scrollendem Inhalt.
 
-| Befehlspalette | Übersicht (dunkel) | Befehlspalette (dunkel) |
-|---|---|---|
-| ![](ux/befehlspalette-hell-desktop.png) | ![](ux/uebersicht-dunkel-desktop.png) | ![](ux/befehlspalette-dunkel-desktop.png) |
+| Befehlspalette | Übersicht (dunkel, Mock) |
+|---|---|
+| ![](ux/befehlspalette-hell-desktop.png) | ![](ux/uebersicht-dunkel-desktop.png) |
 
 ## 4. Komponenten
 
@@ -135,11 +134,13 @@ für bits-ui 2.20.6 im Quelltext erneut bestätigt (einzige Bits-Komponente mit 
 
 ## 5. Musterseiten (klickbar, Mock-Daten)
 
-Mock-Modus (D6): **standardmäßig aus**; einschalten nur per Schalter (Einstellungen, Nutzer-Menü, Befehlspalette)
+Mock-Modus (D6): **standardmäßig aus**; mit `admin.ui.mock: false` (D7/F135, Feld `uiMock` in `GET /auth/info`)
+gibt es ihn gar nicht – Schalter in Einstellungen, Nutzer-Menü, Befehlspalette, Anmelde-Hinweis und Token-Dialog
+sind dann ausgeblendet, `?mock=1` wirkt nicht. Sonst einschalten nur per Schalter (Einstellungen, Nutzer-Menü, Befehlspalette)
 oder `?mock=1` (gilt nur für den Aufruf). Eingeschaltet ist er **deutlich gekennzeichnet**: gelbes Band unter der
 Topbar („Mock-Modus: Beispieldaten …“, mit „Mock ausschalten“) plus Badge in der Topbar. Übersicht und Logs zeigen
-Beispieldaten (`lib/data.svelte.ts`, fester Seed), bis Rollups/Logs mit AIGW-46/53 als Endpunkte kommen; ohne Mock
-einen Leerzustand. Die Verwaltungsseiten (§5.5) laufen im Mock-Modus über dasselbe API-Modul gegen ein
+im Mock-Modus die Musterseiten mit Beispieldaten (`routes/overview/OverviewMock.svelte`, `routes/logs/LogsMock.svelte`,
+fester Seed), sonst die echten Seiten gegen die Analytics- und Request-Log-API (§5.6). Die Verwaltungsseiten (§5.5) laufen im Mock-Modus über dasselbe API-Modul gegen ein
 In-Memory-Backend (`lib/mock/backend.ts`). Die Gateway-Version kommt immer von der echten API.
 
 ### 5.1 Übersicht
@@ -174,9 +175,9 @@ Kapazität, aktiv-Schalter). Die Musterseite aus AIGW-48 zeigte zusätzlich Zust
 und einen Tab „Routing-Regeln“ – Laufzeitwerte folgen mit AIGW-46, Routing-Regeln gibt es in der API nicht
 (Aliasse übernehmen die Aufgabe, siehe §9 D10).
 
-| Hell (Mock) | Dunkel (Mock) | Deployment bearbeiten (echt) |
+| Muster (Mock, AIGW-48) | Deployment bearbeiten (echt) | Deployment-Detail (echt, Mock-Anbieter) |
 |---|---|---|
-| ![](ux/modelle-hell-desktop.png) | ![](ux/modelle-dunkel-desktop.png) | ![](ux/echt-deployment-bearbeiten-hell-desktop.png) |
+| ![](ux/modelle-hell-desktop.png) | ![](ux/echt-deployment-bearbeiten-hell-desktop.png) | ![](ux/echt-deployment-detail-hell-desktop.png) |
 
 ### 5.4 Logs-Explorer
 
@@ -186,11 +187,11 @@ Live/Pause. **Detail-Sheet**: Übersicht (Endpunkt, Eingangsformat, Key, Team, D
 TTFB, Cache, Streaming, **Versuche** inkl. Fallback), Request- und Response-JSON, Zeitleiste der Gateway-Schritte
 (Auth, Limits, Guardrails, Übersetzung über die IR, Upstream …).
 
-| Liste | Detail (dunkel) | Detail (hell) |
-|---|---|---|
-| ![](ux/logs-hell-desktop.png) | ![](ux/log-detail-dunkel-desktop.png) | ![](ux/log-detail-hell-desktop.png) |
+| Liste (Mock) | Detail (dunkel, Mock) |
+|---|---|
+| ![](ux/logs-hell-desktop.png) | ![](ux/log-detail-dunkel-desktop.png) |
 
-Im Repo liegen nur Desktop-Screenshots hell/dunkel, auf 1200 px Breite und 64 Farben reduziert, nur die hier eingebundenen (≈ 1,2 MB)
+Im Repo liegen nur Desktop-Screenshots hell/dunkel, auf 1200 px Breite und 64 Farben reduziert, nur die hier eingebundenen
 (`docs/konzept/ux/`, `python3 ui/e2e/docs-screens.py ui/e2e/results/screens docs/konzept/ux`). Alle weiteren
 Varianten (schmal 390 px, Detailzustände) erzeugt `ui/e2e/run.sh` als nicht eingechecktes Artefakt
 (`ui/e2e/results/screens/`).
@@ -255,29 +256,114 @@ Klartext genau einmal, Liste und API zeigen nur das Präfix, Klartext nach Schli
 Modellgruppe + Mock-Deployment anlegen; ETag-Konflikt (paralleles PUT) → Dialog → Neu laden → Speichern;
 Viewer-Admin-API-Key sieht keine Schreibaktionen.
 
+
+### 5.6 Nacharbeiten AIGW-77
+
+**Detailseiten (D8/F136).** Keys, Teams, Organisationen, Modellgruppen und Deployments haben eine eigene Seite
+(`/keys/{name}`, `/teams/{name}`, `/organizations/{name}`, `/models/{name}`, `/deployments/{name}`; Zuordnung in
+`lib/nav.ts` `DETAIL_ROUTES`, Layout `lib/admin/DetailLayout.svelte`): Kopf mit Name, Status und Aktionen, Tabs
+**Übersicht** (Zuordnung, Modelle, Limits, Budgetverbrauch aus `GET /usage/budgets`, Plugin-Bindungen mit wirksamem
+`failMode`, Limit-Hinweise), **Nutzung** (`lib/admin/UsagePanel.svelte`: KPIs mit Vorperiode, Requests/Kosten mit uPlot,
+Tokens nach Art gestapelt mit LayerChart, Link in den Log-Explorer mit Filter) und **Audit** (`lib/admin/AuditTrail.svelte`:
+`GET /audit-log?kind=…&object=…`, serverseitig geblättert, je Eintrag aufklappbar mit Feld-Diff Vorher → Nachher).
+Der Tab steht in der URL (`?tab=audit`). Anlegen bleibt ein Dialog; Bearbeiten öffnet denselben Dialog auf der
+Detailseite. Nutzer bleiben im Seitenpanel (dort auch die Einladung). Alte Links `/models?group=x` leiten weiter.
+
+**Strukturierte Routing-Einstellungen (D9/F137).** `routes/models/SettingsEditor.svelte` mit Feldbeschreibung in
+`routes/models/settings.ts`: Modellgruppe – Wiederholungen (`retry`), Circuit Breaker, Health Checks, Zeitlimits
+(`timeouts`), Verhalten (`responseModel`, `exposeReasoning`, `clientBetas` + `betaAllowlist`, `fallbackIgnoresGrants`,
+`thinkingBudgetPolicy`, `propagateTraceContext`); Deployment – Zeitlimits, `thinkingBudgetPolicy`,
+`propagateTraceContext`. Leeres Feld = Standard (Schlüssel entfällt, Standardwert als Platzhalter), Zahlen werden mit
+Bereich geprüft, unbekannte Schlüssel bleiben erhalten. **„Erweitert (JSON)“** zeigt bzw. bearbeitet das ganze
+`settings`-Objekt (anbieterspezifische Felder wie `apiVersion`, `maxTokensField`); ungültiges JSON sperrt den Wechsel
+zurück. Die Detailseite zeigt gesetzte Werte je Abschnitt (`SettingsView.svelte`). `capabilities` ist seit AIGW-78 ein
+eigenes Feld (Formular: Fähigkeiten).
+
+**Limits, Payload-Modus, Reasoning.** Formulare für Organisation/Team (`routes/teams/EntityFormDialog.svelte`) und Key
+haben einen Limit-Editor (`lib/admin/LimitsEditor.svelte`: Kennzahl, Grenze, Fenster gleitend `second` … `30d` oder
+Kalender `calendar-day|week|month` (F25), optional Modellgruppe) sowie `payloadMode` und `exposeReasoning` mit
+„erben – <wirksamer Wert> (<Herkunft>)“ (Key → Team → Organisation → global; `InheritFields.svelte`,
+`InheritedSettings.svelte`). Beim Key bleiben RPM/TPM als Schnellfelder, weitere Limits im Editor. Hinweise aus
+`GET /usage/limit-warnings` (F29, Sekundenlimits mit `postgres-sync`) erscheinen auf „Limits & Budgets“ und den
+Detailseiten.
+
+**Serverseitige Pagination (D11/F139).** `lib/admin/paged.svelte.ts` (`Paged`: eine Seite je Abfrage, Cursor-Stapel
+für Zurück, Seitengröße 10/25/50/100, Suche `?q=` entprellt) und `DataTable` im Server-Modus (`server={paged}`:
+Filter/Suche auf dem Server, keine Sortierung im Browser, Vor/Zurück statt Seitenzahlen). Umgestellt: Keys (Status,
+Team, Organisation), Organisationen, Teams (Organisation), Nutzer, Modellgruppen, Secrets, Plugin-Bindungen,
+MCP-Server, Audit-Log, Log-Explorer. **Bewusst im Browser** bleiben die Kataloglisten Anbieter-Zugangsdaten, Preise
+und Admin-API-Keys: Sie brauchen Querbezüge über die ganze Menge (Verwendung durch Deployments, Zustand
+gültig/abgelöst/künftig je Modell) und bleiben klein; die Admin-API-Key-Liste hat serverseitig keine Seiten.
+Die Kennzahlen der Key-Liste zählen je Zustand höchstens 500 (darüber „500+“).
+
+**Übersicht, Log-Explorer, Audit, Budgets.** Echte Übersicht (`overview/OverviewReal.svelte`): KPIs (Quoten mit
+Änderung in Prozentpunkten, `deltaPoints`, F144), Zeitreihe je Kennzahl, Kosten-Treemap nach Team bzw. Modellgruppe
+(LayerChart), Anbieter-Anteile, Fehler nach Klasse (`groupBy`/`dimension=error_class`, F47), letzte Fehler,
+Gateway-/Snapshot-Info; Organisation/Team aus dem Kontext-Umschalter filtern. Mit `rollups: false` in der Antwort
+(F33) erscheint ein Hinweis, dass Dashboards leer bleiben. Log-Explorer (`logs/LogsReal.svelte`): Filter Status,
+Cache (inkl. `cache-embedding`, F191), Stream und ein Suchfeld (Request-, Client-Request-, Trace-, Eltern-ID,
+Modellgruppe, Deployment, Key, Fehlerklasse) – alles serverseitig und in der URL; Detail-Sheet mit Fehlerklasse,
+Trace-ID (Link über `admin.ui.trace_url`, `{traceId}` wird ersetzt), Guardrail-Treffern (F161), Eltern-Anfrage,
+Upstream-Versuchen und Payload. Audit (`/audit`): Filter Art (kebab-case, F115), Aktion, Akteursart, Akteur,
+Objekt, Zeitraum; **Export (JSON Lines)** mit denselben Filtern; **Kette prüfen** (`GET /audit-log/verify`, F116) für
+globale `admin`/`auditor`. Limits & Budgets (`/limits`): alle Budgets mit Meter je Ebene.
+
+**Hinweise und Banner** (`lib/admin/Banners.svelte`, unter der Topbar): Konfiguration veraltet bzw. nicht
+abgeglichen (`snapshot.stale`/`failing` aus `GET /version`, alle 30 s abgefragt, F15); Bootstrap-Token aktiv (F56);
+Nur-YAML-Modus (`readOnly`, F56) – Schreibaktionen sind dann über `rbac.svelte.ts` ausgeblendet (außer GitOps-Apply).
+Deployments mit `provider: mock` tragen „Mock-Anbieter“ (Liste, Detail mit Hinweis auf `admin.allow_mock`, F85).
+Plugin-Bindungen zeigen den wirksamen Fehlermodus samt Herkunft (F148). Admin-API-Keys, die länger als
+`admin.auth.max_admin_key_lifetime` gelten, sind markiert und oben zusammengefasst (F201; Wert aus `auth/info`
+`maxAdminKeyLifetimeSecs`, nur angemeldet).
+
+**Key-Zustände (F37).** Liste und Detail zeigen Aktiv / Gesperrt (suspended) / Widerrufen (revoked) / Abgelaufen /
+läuft ab; Filter und Kennzahl-Kacheln je Zustand (serverseitig `state`). Aktionen: **Sperren** (umkehrbar),
+**Entsperren**, **Endgültig widerrufen** (Bestätigung erst nach Eingabe des Key-Namens; danach keine Änderung,
+kein Rotieren) und Löschen (`routes/keys/KeyActionDialog.svelte`).
+
+**Einladungen (F90).** Im Nutzer-Panel: Stand der Einladung (offen/abgelaufen, gültig bis, von wem), Link erzeugen
+(einmalig angezeigt, kopierbar; ersetzt eine frühere Einladung), widerrufen; nur mit OIDC und für Nutzer ohne
+Identität. Das Nutzerformular nimmt OIDC-Issuer und -Kennung vorab auf (beide oder keines).
+
+**Secrets, MCP, Plugins (AIGW-78).** `/secrets`: Liste mit Feldnamen, Anlegen, „Werte ändern“ (PATCH: einzelne Felder
+setzen/entfernen, Werte nie lesbar), Löschen (409 nennt Verweise). `/mcp`: MCP-Server mit Verbindungszustand aus
+`GET /mcp-servers:status` (verbunden, gestört, unbenutzt, deaktiviert; letzter Fehler, Fehlversuche).
+`/guardrails`: Plugin-Bindungen aller Ebenen mit Formular für die Steuerfelder (`inherit`, `locked`, `failMode`,
+`timeoutMs`, `outputRejectMode`, F117) und die Plugin-Konfiguration als JSON.
+
+**Diagramme (F18).** LayerChart 2.9 nur per dynamic import auf Übersicht und Nutzung (`lib/charts/CostTreemap.svelte`
+mit `layerchart/hierarchy` + `d3-hierarchy`, `lib/charts/StackedArea.svelte`); Rechtecke/Flächen als SVG mit
+Token-Klassen, Achsen über die `lc-*`-Klassen in `app.css` (die Tailwind-Klassen von `@layerstack` sind bewusst nicht
+eingebunden). uPlot bleibt für einfache Zeitreihen.
+
+| Übersicht (echt) | Routing-Einstellungen | Audit mit Kettenprüfung |
+|---|---|---|
+| ![](ux/echt-uebersicht-hell-desktop.png) | ![](ux/echt-routing-einstellungen-hell-desktop.png) | ![](ux/echt-audit-hell-desktop.png) |
+
 ## 6. Seitenkatalog (alle geplanten Seiten)
 
 | Seite | Pfad | Inhalt | Stand |
 |---|---|---|---|
-| Übersicht | `/` | Kennzahlen, Zeitreihen, Top-Modelle, Anbieterzustand, letzte Fehler, Gateway-Info | Muster |
+| Übersicht | `/` | Kennzahlen, Zeitreihen, Kosten-Treemap, Top-Modelle, Anbieter, Fehler nach Klasse, letzte Fehler, Gateway-Info | **echt** (AIGW-77) |
 | Playground | `/playground` | Chat gegen Modellgruppen/Routen, Vergleich mehrerer Modelle nebeneinander, Parameter, Kosten/Latenz je Antwort, Code-Snippets (OpenAI/Anthropic-SDK, curl) | geplant |
-| Modelle & Routen | `/models` | Modellgruppen mit Deployments, Prioritäten, Gewichten, Fallbacks, Einstellungen; Laufzeitwerte folgen (AIGW-46) | **echt** (AIGW-49) |
+| Modelle & Routen | `/models`, `/models/{name}`, `/deployments/{name}` | Modellgruppen (Liste) → Detail mit Deployments, Fallbacks, strukturierten Einstellungen, Nutzung, Plugins, Audit | **echt** (AIGW-49/77) |
+| Secrets | `/secrets` | Geheimnisse für Webhooks/content-safety/MCP (Werte nur schreibbar) | **echt** (AIGW-77) |
 | Anbieter | `/providers` | Anbieter-Zugangsdaten (nie Klartext), Verwendung; später Health-Checks, Circuit-Breaker-Zustand | **echt** (Zugangsdaten) |
 | Preise | `/prices` | Preisversionen je Anbieter-Modell | **echt** |
-| Keys | `/keys` | Virtuelle Keys: erstellen (einmalige Anzeige), rotieren, sperren; Modelle, Budgets, Limits, Ablauf | **echt** |
-| Teams & Nutzer | `/teams` | Organisationen, Teams, Nutzer, Rollen; später Einladungen | **echt** |
+| Keys | `/keys`, `/keys/{name}` | Virtuelle Keys: erstellen (einmalige Anzeige), rotieren, sperren/entsperren/widerrufen; Detail mit Budget, Nutzung, Audit | **echt** |
+| Teams & Nutzer | `/teams`, `/teams/{name}`, `/organizations/{name}` | Organisationen, Teams (Detailseiten), Nutzer, Rollen, Einladungen | **echt** |
 | Admin-API-Keys | `/admin-keys` | Zugänge für Automatisierung mit Rollen und Ablauf | **echt** |
-| Limits & Budgets | `/limits` | RPM/TPM (gleitendes Fenster) und Budgets je Org/Team/Key/Modell; Verbrauch, Prognose, Schwellen-Alarme | geplant |
-| Guardrails & Plugins | `/guardrails` | Eingangs-/Ausgangsprüfungen (PII, Prompt-Injection, Moderation), Webhook-/WASM-Plugins, Reihenfolge, Testlauf | geplant |
+| Limits & Budgets | `/limits` | Budgetverbrauch je Org/Team/Key, Hinweise zu ungenauen Limits; Prognose folgt | **echt** (Budgets) |
+| Guardrails & Plugins | `/guardrails` | Plugin-Bindungen je Ebene mit Steuerfeldern und wirksamem Fehlermodus; Testlauf folgt | **echt** (Bindungen) |
 | Cache | `/cache` | Exakt/semantisch, Trefferquote, Ersparnis, TTL-Regeln, Vektorindex, gezieltes Leeren | geplant |
-| MCP-Server | `/mcp` | MCP-Server und Tools, Freigaben je Team/Key, Aufrufprotokoll, Gesundheit | geplant |
-| Logs | `/logs` | Request-Explorer mit Filtern, Detail-Sheet, Export | Muster |
-| Audit | `/audit` | Unveränderliches Änderungsprotokoll der Steuerungsebene mit Diff, Filter, Export | geplant |
+| MCP-Server | `/mcp` | MCP-Server mit Verbindungszustand; Tools/Freigaben folgen | **echt** (Status) |
+| Logs | `/logs` | Request-Explorer mit Filtern, Detail-Sheet (Versuche, Guardrails, Trace-Link, Payload) | **echt** (AIGW-77) |
+| Audit | `/audit` | Änderungsprotokoll mit Diff, Filter, NDJSON-Export, Kettenprüfung | **echt** (AIGW-77) |
 | Einstellungen | `/settings` | Anmeldung/Rollen, Nur-YAML-Hinweis, GitOps Export/Apply, Datenquelle, Darstellung, Über | **echt** |
 | Design-System | `/design` | Komponentenübersicht (Entwicklerseite, nicht in der Navigation, über Befehlspalette) | Muster |
 
-Detailseiten (z. B. `/keys/{id}`, `/models/{alias}`, `/logs/{requestId}`) folgen dem Muster Kopf mit Status +
-Aktionen, Tabs (Übersicht, Nutzung, Einstellungen, Audit).
+Detailseiten (`/keys/{name}` usw., §5.6) folgen dem Muster Kopf mit Status + Aktionen, Tabs (Übersicht, Nutzung,
+Audit, ggf. Plugins).
 
 ## 7. CSP-Prüfung (Bits UI, Diagramm)
 
@@ -291,6 +377,7 @@ aigw-admin liefert die UI mit `default-src 'self'; script-src 'self'; style-src 
 | uPlot-Diagramm inkl. Hover-Tooltip, Theme-Wechsel | funktioniert, **0 CSP-Verstöße** |
 | Befehlspalette, Toasts, mobile Navigation, Seitenwechsel | funktionieren, 0 Verstöße |
 | Verwaltungsseiten gegen echtes `aigw serve` (Token-Dialog, Formulare, Konflikt-Dialog, Sheets, Rollen-Ausblendung) | funktionieren, 0 CSP-Verstöße (`admin.spec.js`, `real-screens.spec.js`) |
+| LayerChart (Treemap, gestapelte Flächen; lazy) auf Übersicht und Nutzung, echte Detailseiten, Banner, Einladungen (`aigw77.spec.js`) | 0 CSP-Verstöße |
 | Konsole (`securitypolicyviolation` + Konsolenfehler) | leer in allen 66 Tests; einzige erlaubte Meldung: Chromiums „Failed to load resource … 412“ im absichtlich provozierten ETag-Konflikt |
 
 Warum es ohne Nonce/Hash geht: Bits UI (Floating-Positionierung, CSS-Variablen wie `--bits-select-anchor-width`)
@@ -302,11 +389,11 @@ CSSOM; Vite baut CSS als Datei (`assetsInlineLimit: 0`). Eine CSP-Anpassung war 
 
 ## 8. Bundle und Qualität
 
-| Messung (gzip -9, `pnpm sizes`) | AIGW-48 | AIGW-49 |
-|---|---|---|
-| initial JS (Shell, Svelte, Bits-Grundlagen; ab AIGW-49 + API-Client, Anmeldung, Token-/Konflikt-Dialog) | 80,3 KiB | 91,6 KiB (Brotli 81,3 KiB; Budget ≤ 120 KiB) |
-| initial CSS | ≈ 8,5 KiB | ≈ 8,7 KiB |
-| alle Chunks JS (alle Seiten inkl. uPlot und Mock-Backend) | ≈ 164 KiB | ≈ 215 KiB |
+| Messung (gzip -9, `pnpm sizes`) | AIGW-48 | AIGW-49 | AIGW-77 |
+|---|---|---|---|
+| initial JS (Shell, Svelte, Bits-Grundlagen; ab AIGW-49 + API-Client, Anmeldung, Token-/Konflikt-Dialog; ab AIGW-77 + Banner) | 80,3 KiB | 91,6 KiB (Brotli 81,3 KiB; Budget ≤ 120 KiB) | 96,7 KiB (Brotli 85,5 KiB) |
+| initial CSS | ≈ 8,5 KiB | ≈ 8,7 KiB | ≈ 8,9 KiB |
+| alle Chunks JS (alle Seiten inkl. uPlot, LayerChart und Mock-Backend) | ≈ 164 KiB | ≈ 215 KiB | ≈ 473 KiB (LayerChart-Chunks nur auf Übersicht/Nutzung) |
 
 Seiten werden per dynamic import geladen; uPlot (~20 KiB gzip) nur mit der Übersicht, das Mock-Backend nur im
 Mock-Modus. `svelte-check`, `vite build`
@@ -322,9 +409,9 @@ und `scripts/check.sh` sind grün; Browser-Tests: `ui/e2e/run.sh` (eigenes pnpm-
 | D4 | Zahlen in Monospace | alle · gemischt | **entschieden: alle Zahlen Monospace** (auch KPI-Kacheln) |
 | D5 | Seitenleiste im Hellmodus | dunkel · hell | **entschieden: immer dunkel** |
 | D6 | Mock-Modus Standard | an · automatisch · aus | **entschieden: aus**; nur per Schalter/`?mock=1`, dann deutlich gekennzeichnet (Band + Badge) |
-| D7 | Mock-Schalter in Produktion | immer sichtbar (heute) · per Konfiguration ausblendbar | per Konfiguration (`admin.ui.mock: false`) ausblendbar machen, Standard sichtbar |
-| D8 | Bearbeiten | Dialog (heute) · Detailseite je Objekt (`/keys/{name}`) mit Tabs Übersicht/Nutzung/Einstellungen/Audit | Dialoge fürs Anlegen behalten; Detailseiten, sobald Audit (AIGW-66) und Nutzung (AIGW-46) Daten liefern |
-| D9 | Einstellungen von Gruppen/Deployments | JSON-Feld mit Feldliste (heute) · strukturierte Formulare | strukturierte Felder für retry/circuitBreaker/healthCheck; JSON nur für Anbieter-Extras |
-| D10 | Routing-Regeln aus der Musterseite | entfallen (Aliasse decken Eingangsnamen ab) · eigene Ressource (Muster → Gruppe, je Team) | entfallen lassen, bis Bedarf über Aliasse hinaus besteht |
-| D11 | Große Listen | alle Seiten laden (`listAll`) + Filtern im Browser (heute) · serverseitige Pagination/Suche in der Tabelle | ab ca. 1 000 Einträgen je Art auf serverseitige Pagination umstellen (API kann es) |
+| D7 | Mock-Schalter in Produktion | immer sichtbar · per Konfiguration ausblendbar | **entschieden, umgesetzt (AIGW-77):** `admin.ui.mock: false` blendet aus, Standard sichtbar |
+| D8 | Bearbeiten | Dialog · Detailseite je Objekt | **entschieden, umgesetzt:** Detailseiten mit Übersicht/Nutzung/Audit; Anlegen/Bearbeiten weiter als Dialog |
+| D9 | Einstellungen von Gruppen/Deployments | JSON-Feld · strukturierte Formulare | **entschieden, umgesetzt:** strukturierte Felder, JSON als „Erweitert“ |
+| D10 | Routing-Regeln aus der Musterseite | entfallen · eigene Ressource | **entschieden:** entfallen (Aliasse) |
+| D11 | Große Listen | im Browser filtern · serverseitige Pagination | **entschieden, umgesetzt:** serverseitig (Ausnahmen: kleine Kataloglisten, §5.6) |
 | D12 | Bootstrap/Nur-YAML erkennen | Token-Dialog immer ohne OIDC, Nur-YAML erst beim ersten 403 (heute) · `auth/info` meldet `bootstrap` und `readOnly` | kleine API-Erweiterung von `auth/info` (zwei Felder), dann gezielte Hinweise vorab |

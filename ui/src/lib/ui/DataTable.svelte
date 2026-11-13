@@ -13,6 +13,21 @@
     from?: 'sm' | 'md' | 'lg' | 'xl';
     srOnlyLabel?: boolean;
   }
+
+  /** Serverseitige Pagination (D11): Seite, Blättern und Seitengröße kommen von außen (Paged). */
+  export interface ServerPaging {
+    index: number;
+    hasPrev: boolean;
+    hasNext: boolean;
+    pageSize: number;
+    loading: boolean;
+    prevPage(): void;
+    nextPage(): void;
+    setPageSize(n: number): void;
+    /** Suchtext an den Server (entprellt). */
+    search(q: string): void;
+    q: string;
+  }
 </script>
 
 <script lang="ts" generics="T">
@@ -42,7 +57,13 @@
     testid = 'table',
     resetFilters,
     q = $bindable(''),
+    server,
+    filtered = false,
   }: {
+    /** Serverseitige Pagination/Suche statt Filtern im Browser. */
+    server?: ServerPaging;
+    /** Server-Modus: Filter aktiv (leere Seite = „keine Treffer“ statt „noch keine Einträge“). */
+    filtered?: boolean;
     /** Suchtext (bindbar, z. B. aus ?q=). */
     q?: string;
     rows: T[];
@@ -68,6 +89,7 @@
   const FROM = { sm: 'hidden sm:table-cell', md: 'hidden md:table-cell', lg: 'hidden lg:table-cell', xl: 'hidden xl:table-cell' };
 
   const view = $derived.by(() => {
+    if (server) return rows;
     const needle = q.trim().toLowerCase();
     const r = needle && search ? rows.filter((x) => search(x).toLowerCase().includes(needle)) : [...rows];
     const col = columns.find((c) => c.id === sortId);
@@ -86,7 +108,8 @@
   $effect(() => {
     if (page > pages) page = pages;
   });
-  const visible = $derived(view.slice((page - 1) * perPage, page * perPage));
+  const visible = $derived(server ? rows : view.slice((page - 1) * perPage, page * perPage));
+  const PAGE_SIZES = [10, 25, 50, 100];
 
   function sortBy(id: string) {
     if (sortId === id) asc = !asc;
@@ -103,6 +126,7 @@
   }
   function reset() {
     q = '';
+    server?.search('');
     resetFilters?.();
   }
   const cellPad = $derived(dense ? 'px-3 py-1.5' : 'px-3 py-2.5');
@@ -116,15 +140,26 @@
         <span class="pointer-events-none absolute left-2.5 text-fg-subtle"><Icon name="search" size={14} /></span>
         <input
           type="search"
-          bind:value={q}
-          oninput={() => (page = 1)}
+          value={server ? server.q : q}
+          oninput={(e) => {
+            const v = e.currentTarget.value;
+            if (server) server.search(v);
+            else {
+              q = v;
+              page = 1;
+            }
+          }}
           placeholder={searchPlaceholder}
           class="h-8 w-full rounded-md border border-line bg-surface pr-2 pl-8 text-sm text-fg placeholder:text-fg-subtle hover:border-line-strong focus-visible:border-accent focus-visible:outline-0"
         />
       </label>
     {/if}
     {@render toolbar?.()}
-    <span class="ml-auto text-xs text-fg-muted num" aria-live="polite">{view.length === rows.length ? `${rows.length} Einträge` : `${view.length} von ${rows.length}`}</span>
+    {#if server}
+      <span class="ml-auto text-xs text-fg-muted num" aria-live="polite">{server.loading ? 'lädt …' : `Seite ${server.index + 1} · ${rows.length} Einträge${server.hasNext ? ' (weitere folgen)' : ''}`}</span>
+    {:else}
+      <span class="ml-auto text-xs text-fg-muted num" aria-live="polite">{view.length === rows.length ? `${rows.length} Einträge` : `${view.length} von ${rows.length}`}</span>
+    {/if}
   </div>
 
   <div class="scrollbar-thin overflow-x-auto">
@@ -138,7 +173,7 @@
               class={[cellPad, 'h-9 py-0 font-medium whitespace-nowrap text-fg-muted', c.align === 'right' && 'text-right', c.from && FROM[c.from], c.class]}
               aria-sort={c.sort && sortId === c.id ? (asc ? 'ascending' : 'descending') : undefined}
             >
-              {#if c.sort}
+              {#if c.sort && !server}
                 <button
                   type="button"
                   class={['inline-flex items-center gap-1 rounded-sm text-sm hover:text-fg', c.align === 'right' && 'flex-row-reverse', sortId === c.id && 'text-fg']}
@@ -160,7 +195,7 @@
         {#if visible.length === 0}
           <tr>
             <td colspan={columns.length}>
-              {#if rows.length > 0}
+              {#if server ? filtered || !!server.q || server.index > 0 : rows.length > 0}
                 <EmptyState compact icon="search" title="Keine Treffer" text="Kein Eintrag passt zu Suche und Filtern.">
                   <button type="button" class={btn('secondary', 'sm')} onclick={reset}>Filter zurücksetzen</button>
                 </EmptyState>
@@ -192,7 +227,21 @@
     </table>
   </div>
 
-  {#if view.length > 0}
+  {#if server && (rows.length > 0 || server.index > 0)}
+    <div class="flex flex-wrap items-center gap-3 border-t border-line px-3 py-2 text-sm text-fg-muted" data-testid="{testid}-pager">
+      <span class="num">Seite {server.index + 1}</span>
+      <div class="hidden items-center gap-2 sm:flex">
+        <span>Zeilen</span>
+        <div class="w-20">
+          <Select size="sm" label="Zeilen pro Seite" value={String(server.pageSize)} items={PAGE_SIZES.map((n) => ({ value: String(n), label: String(n) }))} onchange={(v) => server.setPageSize(Number(v))} />
+        </div>
+      </div>
+      <div class="ml-auto flex items-center gap-1">
+        <button type="button" class={btn('ghost', 'sm')} disabled={!server.hasPrev || server.loading} onclick={() => server.prevPage()} data-testid="page-prev"><Icon name="chevron-left" size={14} /> Zurück</button>
+        <button type="button" class={btn('ghost', 'sm')} disabled={!server.hasNext || server.loading} onclick={() => server.nextPage()} data-testid="page-next">Weiter <Icon name="chevron-right" size={14} /></button>
+      </div>
+    </div>
+  {:else if !server && view.length > 0}
     <div class="flex flex-wrap items-center gap-3 border-t border-line px-3 py-2 text-sm text-fg-muted">
       <span class="num">{(page - 1) * perPage + 1}–{Math.min(page * perPage, view.length)} von {view.length}</span>
       <div class="hidden items-center gap-2 sm:flex">

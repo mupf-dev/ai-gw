@@ -17,6 +17,7 @@
     trend,
     hint,
     testid,
+    deltaUnit = '%',
   }: {
     label: string;
     value: string;
@@ -28,13 +29,15 @@
     trend?: number[];
     hint?: string;
     testid?: string;
+    /** Einheit der Änderung: relativ (%) oder Prozentpunkte (Quoten, F144: delta = Punkte/100). */
+    deltaUnit?: '%' | 'pp';
   } = $props();
 
   const good = $derived(delta === undefined ? null : delta === 0 ? null : (delta > 0) === (better === 'up'));
   const deltaText = $derived(
     delta === undefined
       ? ''
-      : `${delta > 0 ? '+' : delta < 0 ? '−' : '±'}${Math.abs(delta * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} %`,
+      : `${delta > 0 ? '+' : delta < 0 ? '−' : '±'}${Math.abs(delta * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} ${deltaUnit === 'pp' ? 'Pp.' : '%'}`,
   );
 </script>
 

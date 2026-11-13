@@ -789,10 +789,12 @@ async fn scenario(store: Store, db_url: &str) {
         .await
         .expect(StatusCode::OK)
         .json();
-    // F56: readOnly + bootstrap (Bootstrap-Token aktiv, solange kein OIDC-Admin angemeldet war)
+    // F56: readOnly + bootstrap (Bootstrap-Token aktiv, solange kein OIDC-Admin angemeldet war);
+    // F135: uiMock; ohne Anmeldung weder Höchstlaufzeit noch Trace-Link (AIGW-77).
     assert_eq!(
         info,
-        json!({"oidc": true, "loginUrl": "/admin/auth/login", "readOnly": false, "bootstrap": true})
+        json!({"oidc": true, "loginUrl": "/admin/auth/login", "readOnly": false, "bootstrap": true,
+               "uiMock": true})
     );
     send(Method::GET, &gw.url("/admin/api/v1/session"), &[], None)
         .await

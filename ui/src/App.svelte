@@ -9,7 +9,8 @@
   import TokenDialog from './lib/admin/TokenDialog.svelte';
   import { loadCatalog } from './lib/context.svelte';
   import { dataKey, isMock } from './lib/mode.svelte';
-  import { pageForPath, PAGES } from './lib/nav';
+  import Banners from './lib/admin/Banners.svelte';
+  import { detailForPath, pageForPath, PAGES, type DetailKind } from './lib/nav';
   import { interceptLinks, route } from './lib/router.svelte';
   import { auth } from './lib/session.svelte';
   import CommandPalette from './lib/shell/CommandPalette.svelte';
@@ -20,27 +21,46 @@
   import Sheet from './lib/ui/Sheet.svelte';
   import Toaster from './lib/ui/Toaster.svelte';
 
-  type Loader = () => Promise<{ default: Component }>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  type Loader = () => Promise<{ default: Component<any> }>;
   const ROUTES: Partial<Record<keyof typeof PAGES, Loader>> = {
     overview: () => import('./routes/Overview.svelte'),
     keys: () => import('./routes/Keys.svelte'),
     models: () => import('./routes/Models.svelte'),
     providers: () => import('./routes/Providers.svelte'),
+    secrets: () => import('./routes/Secrets.svelte'),
+    guardrails: () => import('./routes/Guardrails.svelte'),
+    mcp: () => import('./routes/Mcp.svelte'),
     prices: () => import('./routes/Prices.svelte'),
     teams: () => import('./routes/Teams.svelte'),
     'admin-keys': () => import('./routes/AdminKeys.svelte'),
     logs: () => import('./routes/Logs.svelte'),
+    audit: () => import('./routes/Audit.svelte'),
+    limits: () => import('./routes/Limits.svelte'),
     settings: () => import('./routes/Settings.svelte'),
     design: () => import('./routes/DesignSystem.svelte'),
+  };
+  // Detailseiten (D8/F136) je Objektart.
+  const DETAILS: Record<DetailKind, Loader> = {
+    key: () => import('./routes/keys/KeyDetail.svelte'),
+    team: () => import('./routes/teams/TeamDetail.svelte'),
+    organization: () => import('./routes/teams/OrgDetail.svelte'),
+    'model-group': () => import('./routes/models/GroupDetail.svelte'),
+    deployment: () => import('./routes/models/DeploymentDetail.svelte'),
   };
   const placeholder: Loader = () => import('./routes/Placeholder.svelte');
   const notFound: Loader = () => import('./routes/NotFound.svelte');
   const gate: Loader = () => import('./routes/LoginRequired.svelte');
 
   const page = $derived(pageForPath(route.path));
+  const detail = $derived(detailForPath(route.path));
   // Verwaltungsseiten ohne Mock-Modus nur angemeldet – sonst würden ihre Abfragen 401 liefern.
   const gated = $derived(!!page?.needsAuth && !isMock() && !auth.session);
-  const loader = $derived(gated ? gate : page ? (ROUTES[page.id] ?? placeholder) : notFound);
+  const loader = $derived(gated ? gate : detail ? DETAILS[detail.kind] : page ? (ROUTES[page.id] ?? placeholder) : notFound);
+  // Modul samt Pfad und Name laden: so erhält eine Seite nie den Namen der nächsten Route, solange deren Modul lädt.
+  const pagePromise = $derived(
+    auth.loaded ? ((load: Loader, path: string, name?: string) => load().then((mod) => ({ mod, path, name })))(loader, route.path, detail?.name) : new Promise<never>(() => {}),
+  );
 
   // Organisationen/Teams für den Kontext-Umschalter bei jedem Wechsel der Datenquelle neu laden.
   $effect(() => {
@@ -52,7 +72,7 @@
   let paletteOpen = $state(false);
 
   $effect(() => {
-    document.title = `${page?.label ?? 'Nicht gefunden'} · ai-gw`;
+    document.title = `${detail ? `${detail.name} · ` : ''}${page?.label ?? 'Nicht gefunden'} · ai-gw`;
   });
 
   // Fokus nach Seitenwechsel auf die Überschrift (Screenreader, Tastatur)
@@ -103,13 +123,14 @@
           <button type="button" class="font-medium underline underline-offset-2 hover:no-underline" onclick={() => setMockMode('off')}>Mock ausschalten</button>
         </div>
       {/if}
+      <Banners />
       <main id="main" class="mx-auto w-full max-w-[90rem] flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        {#await auth.loaded ? loader() : new Promise<never>(() => {})}
+        {#await pagePromise}
           <div class="h-8 w-48 animate-pulse rounded-md bg-skeleton" aria-label="Lade Seite"></div>
-        {:then mod}
-          {@const Page = mod.default}
-          {#key `${route.path}|${dataKey()}`}
-            <Page />
+        {:then p}
+          {@const Page = p.mod.default}
+          {#key `${p.path}|${dataKey()}`}
+            <Page name={p.name} />
           {/key}
         {/await}
       </main>

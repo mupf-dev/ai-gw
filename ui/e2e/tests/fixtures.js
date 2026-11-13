@@ -20,6 +20,10 @@ export const test = base.extend({
       if (m.type() === 'error' || /Content Security Policy/i.test(m.text())) errors.push(m.text());
     });
     page.on('pageerror', (e) => errors.push(String(e)));
+    // Fehlgeschlagene Antworten (für die Diagnose von „Failed to load resource“).
+    const failed = [];
+    page.on('response', (r) => r.status() >= 400 && failed.push(`${r.status()} ${r.request().method()} ${r.url()}`));
+    page.failedResponses = failed;
     page.cspViolations = violations;
     page.consoleErrors = errors;
     await use(page);
@@ -44,7 +48,7 @@ export async function goto(page, path, { theme = 'light', mock = true } = {}) {
 export function clean(page, { allow = [] } = {}) {
   expect(page.cspViolations, `CSP-Verstöße: ${JSON.stringify(page.cspViolations)}`).toEqual([]);
   const errors = page.consoleErrors.filter((e) => !allow.some((re) => re.test(e)));
-  expect(errors, `Konsolenfehler: ${JSON.stringify(errors)}`).toEqual([]);
+  expect(errors, `Konsolenfehler: ${JSON.stringify(errors)} – Antworten: ${JSON.stringify(page.failedResponses)}`).toEqual([]);
 }
 
 /** Bootstrap-Token des Testservers (run.sh setzt AIGW_BOOTSTRAP_TOKEN). */

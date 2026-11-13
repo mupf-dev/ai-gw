@@ -40,12 +40,6 @@ export const apiKeys = {
   resume: (name: string, etag?: string | null) => action<ApiKey>('api-keys', name, 'resume', undefined, etag),
   /** Endgültig widerrufen (F37) – nicht umkehrbar. */
   revokePermanently: (name: string, etag?: string | null) => action<ApiKey>('api-keys', name, 'revoke', undefined, etag),
-  /**
-   * Bisherige Aufrufe der Seiten („Sperren“/„Entsperren“, umkehrbar gemeint) – bis zur Umstellung der Seiten
-   * (AIGW-77) auf die vorübergehende Sperre abgebildet, damit kein Key versehentlich endgültig widerrufen wird.
-   */
-  revoke: (name: string, etag?: string | null) => action<ApiKey>('api-keys', name, 'suspend', undefined, etag),
-  reactivate: (name: string, etag?: string | null) => action<ApiKey>('api-keys', name, 'resume', undefined, etag),
   rotate: (name: string, body: S['RotateApiKeyRequest'], etag?: string | null) => action<S['RotatedApiKey']>('api-keys', name, 'rotate', body, etag),
 };
 
@@ -151,3 +145,21 @@ export const FALLBACK_TRIGGERS: { value: S['FallbackTrigger']; label: string }[]
 /** Name laut ObjectMeta: `a-z0-9-._`, max. 128 Zeichen. */
 export const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 export const NAME_HINT = 'Kleinbuchstaben, Ziffern, „-“, „.“, „_“; nicht änderbar.';
+
+// ------------------------------------------------------------------ AIGW-78: Secrets, MCP, Plugin-Bindungen
+
+export type Secret = S['Secret'];
+const secretBase = resource<Secret, S['SecretInput'], { q?: string }>('secrets');
+/** Secrets (F149): Werte nur schreibbar (PUT ersetzt alle, PATCH setzt/entfernt einzelne Felder). */
+export const secrets = {
+  ...secretBase,
+  patch: (name: string, body: S['SecretPatch'], etag?: string | null) => patch<Secret>('secrets', name, body, etag),
+};
+export type McpServer = S['McpServer'];
+export const mcpServers = resource<McpServer, S['McpServerInput'], { q?: string; transport?: string; enabled?: boolean }>('mcp-servers');
+/** Verbindungszustand der MCP-Upstreams (GET /mcp-servers:status). */
+export const mcpStatus = () => unwrap<S['McpStatusList']>(api.GET('/admin/api/v1/mcp-servers:status'));
+export type PluginBinding = S['PluginBinding'];
+export const pluginBindingsRes = resource<PluginBinding, S['PluginBindingInput'], { q?: string; plugin?: string; level?: string; target?: string }>(
+  'plugin-bindings',
+);
