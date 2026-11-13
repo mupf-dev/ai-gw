@@ -309,3 +309,11 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 - F148: Standard-failMode je Plugin-Art (content-safety closed, webhook open), UI zeigt failMode, Metrik aigw_plugin_failmode_triggered_total{plugin,mode}
 - F160: Ausgabe-Guardrails beenden mit content_filter/refusal (200, auch Stream sauber), Header x-aigw-guardrail; Bindung outputRejectMode: finish|error
 - F167b: Plugin-Kette: on_response/on_chunk/on_stream_end in umgekehrter order (Zwiebel), Test pii→webhook sieht nur Pseudonyme
+
+## AIGW-72 Outbound – Empfehlungen übernommen (2026-11-13)
+176. [x] OIDC nutzt upstream.roots (Std. webpki) + oidc.ca_file – Release-Note → Empfehlung übernommen
+177. [x] settings.caFile nur aus upstream.ca_dir (wie gitops.secret_dir) → Empfehlung übernommen (Umsetzung nötig, Sicherheit)
+178. [x] gesperrtes Anbieter-Ziel = ErrorClass::Connect → Empfehlung übernommen
+179. [x] OTLP-Retry darf Writer verzögern, Entkopplung später → Empfehlung übernommen
+180. [x] Collector-Test UID 10001 erst bei CI angehen → Empfehlung übernommen
+- F177: upstream.ca_dir – settings.caFile nur innerhalb (Pfad-Normalisierung, keine Symlinks nach außen)
