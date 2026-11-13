@@ -23,11 +23,12 @@ use std::time::Instant;
 use aigw_core::ir::{
     ChatRequest, ChatResponse, Content, PartKind, StreamEvent, UpstreamError, Usage,
 };
-use aigw_core::observe::{RawPayload, RequestObserver, RequestRecord};
+use aigw_core::observe::{RawPayload, RequestObserver, RequestRecord, error_type, gen_ai_system};
 use aigw_core::wire::WireFormat;
 use axum::http::HeaderMap;
 use bytes::Bytes;
 use futures_util::Stream;
+use tracing::Span;
 
 use crate::auth::AuthContext;
 use crate::provider::{Describe, EventStream};
@@ -85,6 +86,8 @@ pub(crate) struct Recorder {
     payload: Option<Box<RawPayload>>,
     /// Gestreamter Antworttext (nur bei Payload-Mitschnitt).
     streamed_text: Option<String>,
+    /// Wurzel-Span der Anfrage (OpenTelemetry, AIGW-45; `Span::none()`, wenn Tracing aus ist).
+    span: Span,
 }
 
 impl Recorder {
@@ -97,6 +100,7 @@ impl Recorder {
         let mut record = RequestRecord::new(request_id, ingress, 200);
         record.started_at = start.at;
         let capture = observer.payload_mode().captures();
+        observer.request_started();
         Self {
             observer,
             record: Some(record),
@@ -108,7 +112,13 @@ impl Recorder {
             stopped: false,
             payload: capture.then(Box::default),
             streamed_text: None,
+            span: Span::none(),
         }
+    }
+
+    /// Wurzel-Span, an dem Ergebnis-Attribute und das TTFT-Ereignis landen.
+    pub(crate) fn set_span(&mut self, span: Span) {
+        self.span = span;
     }
 
     fn rec(&mut self) -> Option<&mut RequestRecord> {
@@ -161,6 +171,15 @@ impl Recorder {
             r.model_alias = Some(req.model.clone());
             r.stream = req.is_stream();
         }
+        if !self.span.is_disabled() {
+            self.span
+                .record("otel.name", format!("chat {}", req.model))
+                .record("gen_ai.request.model", req.model.as_str())
+                .record("aigw.stream", req.is_stream());
+            if let Some(m) = req.max_tokens {
+                self.span.record("gen_ai.request.max_tokens", m);
+            }
+        }
     }
 
     pub(crate) fn set_deployment(&mut self, d: Describe<'_>) {
@@ -170,10 +189,22 @@ impl Recorder {
             r.provider = d.provider;
             r.provider_model = Some(d.provider_model.to_owned());
         }
+        if !self.span.is_disabled() {
+            self.span.record("aigw.deployment", d.deployment);
+            if let Some(g) = d.model_group {
+                self.span.record("aigw.model_group", g);
+            }
+            if let Some(p) = d.provider {
+                self.span.record("gen_ai.system", gen_ai_system(p));
+            }
+        }
     }
 
     /// Versuche (Retries/Fallbacks) übernehmen.
     pub(crate) fn set_attempts(&mut self, attempts: Vec<aigw_core::observe::Attempt>) {
+        if !self.span.is_disabled() {
+            self.span.record("aigw.attempts", attempts.len());
+        }
         if let Some(r) = self.rec() {
             r.attempts = attempts;
         }
@@ -181,6 +212,8 @@ impl Recorder {
 
     /// Nicht gestreamte Antwort: Usage übernehmen bzw. aus dem Antworttext schätzen.
     pub(crate) fn set_response(&mut self, resp: &ChatResponse) {
+        self.span
+            .record("gen_ai.response.model", resp.model.as_str());
         match &resp.usage {
             Some(u) => {
                 self.usage = Some(u.clone());
@@ -235,7 +268,9 @@ impl Recorder {
                     r.error_kind = Some(e.kind);
                 }
             }
-            StreamEvent::Start { .. } => {}
+            StreamEvent::Start { model, .. } => {
+                self.span.record("gen_ai.response.model", model.as_str());
+            }
         }
     }
 
@@ -245,6 +280,15 @@ impl Recorder {
             && r.ttft.is_none()
         {
             r.ttft = Some(elapsed);
+            let ttft_ms = elapsed.as_secs_f64() * 1000.0;
+            self.span.record("aigw.ttft_ms", ttft_ms);
+            tracing::event!(
+                target: aigw_core::observe::TRACE_TARGET,
+                parent: &self.span,
+                tracing::Level::INFO,
+                aigw.ttft_ms = ttft_ms,
+                "first_token"
+            );
         }
     }
 
@@ -271,6 +315,20 @@ impl Recorder {
         };
         r.usage = usage;
         r.usage_estimated = estimated;
+        if !self.span.is_disabled() {
+            let s = &self.span;
+            s.record("http.response.status_code", r.status)
+                .record("gen_ai.usage.input_tokens", r.usage.input_tokens)
+                .record("gen_ai.usage.output_tokens", r.usage.output_tokens)
+                .record("aigw.usage_estimated", r.usage_estimated)
+                .record("aigw.client_aborted", r.client_aborted);
+            if let Some(k) = r.error_kind {
+                s.record("error.type", error_type(k));
+            }
+            if r.is_error() {
+                s.record("otel.status_code", "error");
+            }
+        }
         if let Some(mut p) = self.payload.take() {
             if let Some(t) = self.streamed_text.take() {
                 p.response_body = Bytes::from(t);

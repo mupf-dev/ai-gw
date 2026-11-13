@@ -33,6 +33,7 @@ mod request_id;
 pub mod routes;
 pub mod routing;
 mod stream;
+mod trace;
 
 use std::fmt;
 use std::sync::Arc;

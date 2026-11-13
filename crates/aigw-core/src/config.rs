@@ -11,6 +11,8 @@
 //! `AIGW_<ABSCHNITT>__<FELD>` (doppelter Unterstrich als Trenner, tiefere Ebenen ebenso),
 //! z. B. `AIGW_STORE__URL=postgres://…` oder `AIGW_STORE__MAX_CONNECTIONS=20`.
 
+use std::collections::BTreeMap;
+use std::fmt;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
@@ -391,6 +393,10 @@ pub struct ObserveConfig {
     pub retention: RetentionConfig,
     /// Export als JSON-Lines-Datei.
     pub jsonl: JsonlExportConfig,
+    /// Prometheus-Metriken (`/metrics`, AIGW-44).
+    pub metrics: MetricsConfig,
+    /// OpenTelemetry-Export (OTLP/HTTP): Traces und Request-Log als Logs (AIGW-45).
+    pub otlp: OtlpConfig,
 }
 
 impl Default for ObserveConfig {
@@ -405,6 +411,8 @@ impl Default for ObserveConfig {
             payload_max_bytes: 64 * 1024,
             retention: RetentionConfig::default(),
             jsonl: JsonlExportConfig::default(),
+            metrics: MetricsConfig::default(),
+            otlp: OtlpConfig::default(),
         }
     }
 }
@@ -603,6 +611,190 @@ pub struct GroupRoleMapping {
     pub team: Option<String>,
 }
 
+/// Prometheus-Metriken des Gateways (AIGW-44, `docs/konzept/07-beobachtung.md` §11).
+///
+/// Labels sind auf Modellgruppe, Deployment, Anbieter, Eingangsformat und Statusklasse
+/// begrenzt (keine Key-, Team- oder Nutzer-IDs). Werte jenseits der Obergrenzen landen im
+/// Sammelwert `other`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MetricsConfig {
+    /// Gateway-Metriken erfassen (die `aigw_log_*`-Zähler gibt es immer).
+    pub enabled: bool,
+    /// Höchstzahl unterschiedlicher Werte für das Label `model_group`.
+    pub max_model_groups: usize,
+    /// Höchstzahl unterschiedlicher Werte für das Label `deployment`.
+    pub max_deployments: usize,
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_model_groups: 200,
+            max_deployments: 500,
+        }
+    }
+}
+
+/// OpenTelemetry-Export über OTLP/HTTP mit Protobuf (AIGW-45).
+///
+/// `endpoint` ist die Basis-URL des Collectors (wie `OTEL_EXPORTER_OTLP_ENDPOINT`); die Pfade
+/// `/v1/traces` und `/v1/logs` werden angehängt. Leer = kein Export.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OtlpConfig {
+    /// Basis-URL, z. B. `http://otel-collector:4318`.
+    pub endpoint: String,
+    /// Zusätzliche HTTP-Header (z. B. `authorization`); Werte erscheinen nicht in `Debug`.
+    pub headers: BTreeMap<String, String>,
+    /// Zeitlimit je Export-Aufruf (Millisekunden).
+    pub timeout_ms: u64,
+    /// `service.name` der Ressource.
+    pub service_name: String,
+    /// Traces.
+    pub traces: OtlpTracesConfig,
+    /// Request-Log als OTLP-Logs.
+    pub logs: OtlpLogsConfig,
+}
+
+impl Default for OtlpConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            headers: BTreeMap::new(),
+            timeout_ms: 10_000,
+            service_name: "aigw".to_owned(),
+            traces: OtlpTracesConfig::default(),
+            logs: OtlpLogsConfig::default(),
+        }
+    }
+}
+
+impl fmt::Debug for OtlpConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let headers: Vec<&str> = self.headers.keys().map(String::as_str).collect();
+        f.debug_struct("OtlpConfig")
+            .field("endpoint", &self.endpoint)
+            .field("headers", &headers)
+            .field("timeout_ms", &self.timeout_ms)
+            .field("service_name", &self.service_name)
+            .field("traces", &self.traces)
+            .field("logs", &self.logs)
+            .finish()
+    }
+}
+
+impl OtlpConfig {
+    /// `true`, wenn ein Collector konfiguriert ist.
+    pub fn has_endpoint(&self) -> bool {
+        !self.endpoint.trim().is_empty()
+    }
+
+    /// Traces werden erzeugt und exportiert.
+    pub fn traces_active(&self) -> bool {
+        self.has_endpoint() && self.traces.enabled
+    }
+
+    /// Das Request-Log wird als OTLP-Logs exportiert.
+    pub fn logs_active(&self) -> bool {
+        self.has_endpoint() && self.logs.enabled
+    }
+}
+
+/// Traces (Spans je Anfrage mit GenAI-Semantic-Conventions).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OtlpTracesConfig {
+    /// Traces erzeugen und exportieren (Standard: aus).
+    pub enabled: bool,
+    /// Anteil der Anfragen ohne übernommene Sampling-Entscheidung, die aufgezeichnet werden
+    /// (0.0–1.0, deterministisch nach Trace-ID).
+    pub sampling_ratio: SamplingRatio,
+    /// Sampling-Entscheidung eines eingehenden `traceparent` (Flag `sampled`) übernehmen.
+    pub parent_based: bool,
+    /// Eingehenden W3C-`traceparent` übernehmen (sonst beginnt jede Anfrage einen neuen Trace).
+    pub accept_traceparent: bool,
+    /// `traceparent` an den Upstream weitergeben.
+    pub propagate: bool,
+    /// Puffer fertiger Spans (voll → verwerfen + zählen).
+    pub queue_capacity: usize,
+    /// Höchstzahl Spans je Export.
+    pub batch_size: usize,
+    /// Export spätestens nach dieser Zeit (Millisekunden).
+    pub flush_interval_ms: u64,
+}
+
+impl Default for OtlpTracesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            sampling_ratio: SamplingRatio::ALWAYS,
+            parent_based: true,
+            accept_traceparent: true,
+            propagate: true,
+            queue_capacity: 8192,
+            batch_size: 512,
+            flush_interval_ms: 1000,
+        }
+    }
+}
+
+/// Request-Log als OTLP-Logs.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OtlpLogsConfig {
+    /// Export aktiv (Standard: aus).
+    pub enabled: bool,
+    /// Payload (sofern geloggt, also bereits maskiert) als Body mitsenden.
+    pub include_payload: bool,
+}
+
+/// Sampling-Anteil 0.0–1.0.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(transparent)]
+pub struct SamplingRatio(f64);
+
+impl SamplingRatio {
+    /// Alles aufzeichnen.
+    pub const ALWAYS: Self = Self(1.0);
+    /// Nichts aufzeichnen.
+    pub const NEVER: Self = Self(0.0);
+
+    /// Anteil (nur 0.0–1.0).
+    pub fn new(ratio: f64) -> Option<Self> {
+        (0.0..=1.0).contains(&ratio).then_some(Self(ratio))
+    }
+
+    /// Wert.
+    pub fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl Default for SamplingRatio {
+    fn default() -> Self {
+        Self::ALWAYS
+    }
+}
+
+impl PartialEq for SamplingRatio {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
+    }
+}
+
+impl Eq for SamplingRatio {}
+
+impl<'de> Deserialize<'de> for SamplingRatio {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let v = f64::deserialize(d)?;
+        Self::new(v).ok_or_else(|| {
+            serde::de::Error::custom(format!("sampling_ratio muss zwischen 0 und 1 liegen: {v}"))
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -796,6 +988,33 @@ admin:
         assert!(a.oidc.client_secret_file.is_some());
         assert!(!Config::default().admin.auth.oidc.enabled());
         assert!(Config::from_yaml("admin:\n  auth:\n    bootstrap: maybe\n").is_err());
+    }
+
+    #[test]
+    fn observe_metrics_and_otlp() {
+        let cfg = Config::from_yaml_with_env(
+            "observe:\n  otlp:\n    endpoint: http://collector:4318\n    headers: {authorization: geheim}\n    traces: {enabled: true, sampling_ratio: 0.25}\n",
+            env(&[
+                ("AIGW_OBSERVE__METRICS__MAX_DEPLOYMENTS", "7"),
+                ("AIGW_OBSERVE__OTLP__TRACES__SAMPLING_RATIO", "0.5"),
+                ("AIGW_OBSERVE__OTLP__LOGS__ENABLED", "true"),
+            ]),
+        )
+        .unwrap();
+        let o = &cfg.observe;
+        assert!(o.metrics.enabled);
+        assert_eq!(o.metrics.max_deployments, 7);
+        assert!(o.otlp.traces_active());
+        assert!(o.otlp.logs_active());
+        assert_eq!(o.otlp.traces.sampling_ratio.get(), 0.5);
+        assert!(o.otlp.traces.propagate);
+        assert_eq!(o.otlp.headers["authorization"], "geheim");
+        assert!(!format!("{o:?}").contains("geheim"));
+        assert!(
+            Config::from_yaml("observe:\n  otlp:\n    traces: {sampling_ratio: 1.5}\n").is_err()
+        );
+        let off = ObserveConfig::default();
+        assert!(!off.otlp.traces_active() && !off.otlp.logs_active());
     }
 
     #[test]

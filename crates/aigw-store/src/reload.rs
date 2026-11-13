@@ -84,11 +84,41 @@ pub struct ReloadMetrics {
     pub listener_errors: AtomicU64,
     /// Dauer des letzten erfolgreichen Neubaus in Mikrosekunden.
     pub last_build_micros: AtomicU64,
+    /// Seit wann (Unix-ms) die Prüfung bzw. der Neubau fehlschlägt (`0` = aktuell; AIGW-44).
+    pub stale_since_unix_ms: AtomicU64,
 }
 
 impl ReloadMetrics {
     fn inc(counter: &AtomicU64) {
         counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn mark_stale(&self) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+            .unwrap_or(1)
+            .max(1);
+        // Nur der erste Fehler einer Serie setzt den Zeitpunkt.
+        let _ =
+            self.stale_since_unix_ms
+                .compare_exchange(0, now, Ordering::Relaxed, Ordering::Relaxed);
+    }
+
+    fn mark_fresh(&self) {
+        self.stale_since_unix_ms.store(0, Ordering::Relaxed);
+    }
+
+    /// Wie lange der aktive Snapshot schon nicht mehr mit der Datenbank abgeglichen werden
+    /// konnte (`None` = letzte Prüfung erfolgreich).
+    pub fn stale_for(&self) -> Option<Duration> {
+        let since = self.stale_since_unix_ms.load(Ordering::Relaxed);
+        (since != 0).then(|| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            now.saturating_sub(Duration::from_millis(since))
+        })
     }
 }
 
@@ -149,10 +179,12 @@ impl Reloader {
             Ok(v) => v,
             Err(e) => {
                 ReloadMetrics::inc(&self.metrics.checks_failed);
+                self.metrics.mark_stale();
                 return Err(e);
             }
         };
         if latest == current {
+            self.metrics.mark_fresh();
             return Ok(None);
         }
         let started = Instant::now();
@@ -162,6 +194,7 @@ impl Reloader {
                 let took = started.elapsed();
                 self.handle.store(snap);
                 ReloadMetrics::inc(&self.metrics.reloads_ok);
+                self.metrics.mark_fresh();
                 self.metrics.last_build_micros.store(
                     u64::try_from(took.as_micros()).unwrap_or(u64::MAX),
                     Ordering::Relaxed,
@@ -176,6 +209,7 @@ impl Reloader {
             }
             Err(e) => {
                 ReloadMetrics::inc(&self.metrics.reloads_failed);
+                self.metrics.mark_stale();
                 tracing::error!(
                     error = %e,
                     active = current,

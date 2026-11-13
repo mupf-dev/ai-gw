@@ -19,7 +19,9 @@ use aigw_core::observe::{PayloadMode, RequestObserver, RequestRecord};
 use aigw_core::resource::new_id;
 use aigw_core::types::ProviderKind;
 use aigw_core::wire::WireFormat;
-use aigw_observe::{ObserveBuilder, ObserveHandle, ObserveMetrics, RequestLogger};
+use aigw_observe::{
+    GatewayMetrics, MetricsObserver, ObserveBuilder, ObserveHandle, ObserveMetrics, RequestLogger,
+};
 use tokio::sync::mpsc;
 
 fn main() {
@@ -89,6 +91,42 @@ fn record_drop_when_full(b: divan::Bencher<'_, '_>) {
     log.record(record());
     b.with_inputs(record)
         .bench_local_values(|r| log.record(divan::black_box(r)));
+}
+
+/// Nur die Prometheus-Metriken (Serie existiert bereits): Hash, Nachschlagen, Inkremente.
+#[divan::bench]
+fn metrics_observe(b: divan::Bencher<'_, '_>) {
+    let m = GatewayMetrics::default();
+    let template = record();
+    m.observe(&template);
+    b.with_inputs(|| {
+        let mut r = record();
+        r.deployment_id = template.deployment_id;
+        r
+    })
+    .bench_local_refs(|r| m.observe(divan::black_box(r)));
+}
+
+/// Gesamtpfad im Betrieb: `request_started` + Metriken + Einreihen ins Request-Log
+/// (`MetricsObserver` vor dem `RequestLogger`, wie `ObserveHandle::observer()`).
+#[divan::bench]
+fn record_with_metrics(b: divan::Bencher<'_, '_>) {
+    let template = record();
+    let obs = MetricsObserver::new(
+        Arc::new(GatewayMetrics::default()),
+        Arc::new(running().handle.logger()),
+    );
+    obs.request_started();
+    obs.record(template.clone());
+    b.with_inputs(|| {
+        let mut r = record();
+        r.deployment_id = template.deployment_id;
+        r
+    })
+    .bench_local_values(|r| {
+        obs.request_started();
+        obs.record(divan::black_box(r));
+    });
 }
 
 /// Zum Vergleich: Erzeugen eines Eintrags (außerhalb von `record()`).

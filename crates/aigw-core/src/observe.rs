@@ -11,6 +11,7 @@
 
 use std::fmt;
 use std::net::IpAddr;
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
@@ -231,6 +232,10 @@ impl RequestRecord {
 /// `record` darf nicht blockieren und nicht warten (der Proxy wartet nie auf Logs); ist der
 /// Puffer voll, wird verworfen und gezählt.
 pub trait RequestObserver: Send + Sync + fmt::Debug + 'static {
+    /// Eine Anfrage beginnt (für `aigw_inflight_requests`). Zu jedem Aufruf folgt genau ein
+    /// [`record`](Self::record). Muss so billig sein wie ein atomares Inkrement.
+    fn request_started(&self) {}
+
     /// Übergibt die Kennzahlen einer abgeschlossenen Anfrage.
     fn record(&self, record: RequestRecord);
 
@@ -240,6 +245,66 @@ pub trait RequestObserver: Send + Sync + fmt::Debug + 'static {
     /// Später je Key/Team (Parameter folgen mit der Policy-Auflösung).
     fn payload_mode(&self) -> PayloadMode {
         PayloadMode::Off
+    }
+}
+
+/// `target` der `tracing`-Spans und -Events, die als OpenTelemetry-Traces exportiert werden
+/// (AIGW-45). Proxy und Anbieter-Adapter instrumentieren nur über `tracing`; welche Spans
+/// aufgezeichnet und exportiert werden, entscheidet die Crate `aigw-observe`.
+///
+/// Konventionen für Felder: `otel.name` (Span-Name), `otel.kind` (`server`/`client`/…),
+/// `otel.status_code` (`ok`/`error`), `otel.status_message`, am Wurzel-Span
+/// `otel.traceparent` (eingehender W3C-Header); alle anderen Felder werden Attribute
+/// (GenAI-Semantic-Conventions, z. B. `gen_ai.request.model`).
+pub const TRACE_TARGET: &str = "aigw::otel";
+
+/// Quelle des `traceparent` für ausgehende Anfragen (gesetzt von `aigw-observe`).
+static TRACEPARENT_SOURCE: OnceLock<fn() -> Option<String>> = OnceLock::new();
+
+/// Registriert die Quelle für [`current_traceparent`] (einmal je Prozess; `false`, wenn
+/// bereits gesetzt).
+pub fn set_traceparent_source(source: fn() -> Option<String>) -> bool {
+    TRACEPARENT_SOURCE.set(source).is_ok()
+}
+
+/// W3C-`traceparent` des aktuellen Spans für eine ausgehende Anfrage (`None`, wenn Tracing
+/// aus ist, kein Span aktiv ist oder die Weitergabe abgeschaltet ist).
+pub fn current_traceparent() -> Option<String> {
+    TRACEPARENT_SOURCE.get().and_then(|f| f())
+}
+
+/// Wert von `error.type` in Traces/Logs bzw. Label `class` (`snake_case` wie die
+/// Serialisierung von [`ErrorKind`]).
+pub fn error_type(kind: ErrorKind) -> &'static str {
+    match kind {
+        ErrorKind::InvalidRequest => "invalid_request",
+        ErrorKind::Authentication => "authentication",
+        ErrorKind::PermissionDenied => "permission_denied",
+        ErrorKind::NotFound => "not_found",
+        ErrorKind::MethodNotAllowed => "method_not_allowed",
+        ErrorKind::RequestTooLarge => "request_too_large",
+        ErrorKind::RateLimit => "rate_limit",
+        ErrorKind::Internal => "internal",
+        ErrorKind::NotImplemented => "not_implemented",
+        ErrorKind::BadGateway => "bad_gateway",
+        ErrorKind::Overloaded => "overloaded",
+        ErrorKind::Timeout => "timeout",
+        #[allow(unreachable_patterns)]
+        _ => "other",
+    }
+}
+
+/// Wert von `gen_ai.system` (OpenTelemetry GenAI-Semantic-Conventions) für einen Anbieter;
+/// Anbieter ohne festgelegten Wert behalten ihren Bezeichner.
+pub fn gen_ai_system(provider: ProviderKind) -> &'static str {
+    match provider {
+        ProviderKind::OpenAi => "openai",
+        ProviderKind::Anthropic => "anthropic",
+        ProviderKind::AzureOpenAi => "az.ai.openai",
+        ProviderKind::Bedrock => "aws.bedrock",
+        ProviderKind::Vertex => "gcp.vertex_ai",
+        ProviderKind::Mistral => "mistral_ai",
+        other => other.as_str(),
     }
 }
 

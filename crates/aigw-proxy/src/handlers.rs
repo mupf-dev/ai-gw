@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use aigw_core::ir::{ApiError, ChatRequest, ErrorKind, UpstreamError};
+use aigw_core::observe::error_type;
 use aigw_core::wire::{Losses, WireFormat, anthropic, openai};
 use axum::body::Body;
 use axum::extract::rejection::BytesRejection;
@@ -13,6 +14,7 @@ use axum::extract::{Extension, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::Response;
 use bytes::Bytes;
+use tracing::Instrument as _;
 
 use crate::ProxyState;
 use crate::auth::extract_api_key;
@@ -140,7 +142,12 @@ async fn chat(
 ) -> Response {
     let mut rec = Recorder::new(st.observer.clone(), rid.0.clone(), started, ingress(format));
     let mut info = RouteInfo::default();
-    let mut res = match chat_inner(st, headers, body, format, &mut rec, &mut info).await {
+    let span = crate::trace::request_span(&rid.0, ingress(format), headers);
+    rec.set_span(span.clone());
+    let mut res = match chat_inner(st, headers, body, format, &mut rec, &mut info)
+        .instrument(span)
+        .await
+    {
         Ok(Reply::Json(out)) => {
             let out = Bytes::from(out);
             if rec.captures() {
@@ -181,7 +188,13 @@ async fn chat_inner(
     rec: &mut Recorder,
     info: &mut RouteInfo,
 ) -> Result<Reply, UpstreamError> {
-    let auth = st.auth.authenticate(extract_api_key(headers).as_ref())?;
+    let auth = {
+        let span = crate::trace::auth_span();
+        let _g = span.enter();
+        st.auth
+            .authenticate(extract_api_key(headers).as_ref())
+            .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?
+    };
     rec.set_key(&auth);
     let body = body.map_err(|r| body_error(&r, st.config.max_body_bytes))?;
     rec.set_request_payload(headers, &body);
@@ -206,15 +219,23 @@ async fn chat_inner(
     // Modellfreigabe (Architektur §3, Schritt 3); die Gruppe nutzt später das Routing.
     let _group = auth.authorize_model(&req.model)?;
     rec.set_request(&req);
+    // Platzhalter-Span, bis die Plugin-Kette (Architektur §9) eingehängt wird.
+    drop(crate::trace::plugins_span());
 
-    let route = st.routes.route(&req.model).ok_or_else(|| {
-        ApiError::new(
-            ErrorKind::NotFound,
-            format!("Modell {:?} ist nicht konfiguriert", req.model),
-        )
-        .with_param("model")
-        .with_code("model_not_found")
-    })?;
+    let route_span = crate::trace::route_span(&req.model);
+    let route = route_span
+        .in_scope(|| st.routes.route(&req.model))
+        .ok_or_else(|| {
+            crate::trace::fail(&route_span, "not_found");
+            ApiError::new(
+                ErrorKind::NotFound,
+                format!("Modell {:?} ist nicht konfiguriert", req.model),
+            )
+            .with_param("model")
+            .with_code("model_not_found")
+        })?;
+    route_span.record("aigw.model_group", route.name());
+    drop(route_span);
     let include_usage = req
         .stream_options
         .as_ref()
@@ -230,6 +251,10 @@ async fn chat_inner(
     }
     info.attempts = routed.attempts.len();
     info.fallback.clone_from(&routed.fallback);
+    if let Some(f) = &routed.fallback {
+        // Wurzel-Span (OpenTelemetry): Ausweichgruppe.
+        tracing::Span::current().record("aigw.fallback", f.as_str());
+    }
     rec.set_attempts(routed.attempts);
 
     let resp = match routed.result? {

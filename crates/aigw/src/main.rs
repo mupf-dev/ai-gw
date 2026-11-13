@@ -19,7 +19,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::{Layer as _, SubscriberExt as _};
+use tracing_subscriber::util::SubscriberInitExt as _;
+use tracing_subscriber::{EnvFilter, Registry};
 
 /// AI-Gateway (Gateway und Admin-API in einem Binary).
 #[derive(Debug, Parser)]
@@ -53,17 +55,29 @@ enum LogFormat {
     Json,
 }
 
-fn init_tracing(format: LogFormat) {
-    // Filter über `AIGW_LOG` (Syntax wie `RUST_LOG`), Standard `info`.
+/// Richtet das Logging ein und hängt den (noch inaktiven) OpenTelemetry-Layer ein; Traces
+/// werden erst nach dem Laden der Konfiguration aktiviert (`observe.otlp`, AIGW-45).
+fn init_tracing(format: LogFormat) -> aigw_observe::otel::TraceActivator {
+    // Filter über `AIGW_LOG` (Syntax wie `RUST_LOG`), Standard `info`. Die Trace-Spans
+    // (`aigw::otel`) gehören nicht ins Log.
     let filter = EnvFilter::try_from_env("AIGW_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
-    let builder = tracing_subscriber::fmt()
-        .with_env_filter(filter)
+    let filter = match "aigw::otel=off".parse() {
+        Ok(d) => filter.add_directive(d),
+        Err(_) => filter,
+    };
+    let fmt = tracing_subscriber::fmt::layer()
         .with_ansi(std::io::stderr().is_terminal())
         .with_writer(std::io::stderr);
-    match format {
-        LogFormat::Text => builder.init(),
-        LogFormat::Json => builder.json().init(),
-    }
+    let fmt: Box<dyn tracing_subscriber::Layer<Registry> + Send + Sync> = match format {
+        LogFormat::Text => Box::new(fmt),
+        LogFormat::Json => Box::new(fmt.json()),
+    };
+    let (otel, activator) = aigw_observe::otel::layer();
+    tracing_subscriber::registry()
+        .with(fmt.with_filter(filter))
+        .with(otel)
+        .init();
+    activator
 }
 
 fn main() -> ExitCode {
@@ -90,8 +104,8 @@ fn main() -> ExitCode {
             cli_config::run(cmd)
         }
         Command::Serve { config } => {
-            init_tracing(cli.log_format);
-            match serve(config) {
+            let traces = init_tracing(cli.log_format);
+            match serve(config, &traces) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     tracing::error!(error = %e, "Abbruch");
@@ -102,7 +116,10 @@ fn main() -> ExitCode {
     }
 }
 
-fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn serve(
+    config_path: PathBuf,
+    traces: &aigw_observe::otel::TraceActivator,
+) -> Result<(), Box<dyn std::error::Error>> {
     // rustls: aws-lc-rs als einziger Krypto-Provider (kein ring, kein OpenSSL).
     if rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
@@ -118,7 +135,7 @@ fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         .enable_all()
         .build()?;
     runtime.block_on(async move {
-        let runtime_state = runtime::Runtime::start(&config).await?;
+        let runtime_state = runtime::Runtime::start(&config, traces).await?;
         let listeners = server::Listeners::bind(&config.server).await?;
         let (data, control) = listeners.local_addrs()?;
         tracing::info!(
@@ -178,9 +195,7 @@ fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
                 upstreams,
             },
         ))
-        .merge(observe::metrics_router(
-            runtime_state.observe_metrics.clone(),
-        ));
+        .merge(observe::metrics_router(runtime_state.metrics_sources()));
         let control = aigw_admin::read_only::apply(control, config.gitops.read_only_admin);
         server::run(listeners, state, control, shutdown_signal()).await?;
         drop(routes_task);

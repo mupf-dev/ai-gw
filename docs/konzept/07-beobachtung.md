@@ -1,4 +1,4 @@
-# ai-gw – Beobachtung: Request-Log, Rollups, Payload-Logging (AIGW-43)
+# ai-gw – Beobachtung: Request-Log, Rollups, Payload-Logging, Metriken, Traces (AIGW-43/44/45)
 
 Stand: 2026-11-13 · Status: umgesetzt (Entwurf zur Durchsicht)
 Grundlage: [01-architektur.md](01-architektur.md) §1 (Q7, Q8), §3 Schritt 12, §12;
@@ -23,6 +23,9 @@ Aufbewahrungs-Task: stündlich Rohlogs / Payloads / Rollups nach Frist löschen
 | Ereignis `RequestRecord`, Hook-Trait `RequestObserver`, `PayloadMode`, `RawPayload`, `CacheOutcome`, `SENSITIVE_HEADERS` | `aigw_core::observe` |
 | Konfiguration `observe` | `aigw_core::config::ObserveConfig` |
 | Logger, Writer, Aufbereitung, Maskierung, Exporter, Aufbewahrung, Zähler | Crate `aigw-observe` |
+| Prometheus-Metriken (`GatewayMetrics`, `MetricsObserver`), §11 | `aigw_observe::prom` |
+| OTLP-Export: `tracing`-Layer für Traces, `OtlpLogExporter`, §12 | `aigw_observe::otel` |
+| Trace-Konventionen (`TRACE_TARGET`, `current_traceparent`, `gen_ai_system`) | `aigw_core::observe` |
 | Tabellen, Batch-Schreiben, Löschen, Lesen | `aigw_store::observe`, Migration `0002_observe.sql` |
 
 **Eigene Crate statt Modul:** Der Proxy hängt nur vom Trait in `aigw-core` ab und bleibt frei von
@@ -155,14 +158,14 @@ Datenbanken), damit Sperren kurz bleiben.
 ## 7. Export und Metriken
 
 - `LogExporter` (dyn-kompatibel, `export(&[LogEntry]) -> ExportFuture`, `flush()`), Eintrag =
-  `RequestLogRow` + optional `PayloadRow`. OTLP-Logs (AIGW-45) und Webhook implementieren denselben
-  Trait.
+  `RequestLogRow` + optional `PayloadRow`. OTLP-Logs (§12.4) und künftig Webhook implementieren
+  denselben Trait.
 - `JsonLinesExporter`: eine JSON-Zeile je Anfrage (Felder wie `request_log` in camelCase,
   optional `payload`), angehängt an `observe.jsonl.path`, Flush je Batch, Schreiben per
   `spawn_blocking`.
 - Zähler (`ObserveMetrics::render_prometheus`, `GET /metrics` der Steuerebene): `aigw_log_dropped_total`,
   `aigw_log_written_total`, `aigw_log_write_failed_total`, `aigw_log_batches_total`,
-  `aigw_log_export_errors_total`, `aigw_log_purged_total`.
+  `aigw_log_export_errors_total`, `aigw_log_purged_total`. Gateway-Metriken: §11.
 
 ## 8. Konfiguration
 
@@ -177,16 +180,34 @@ observe:
   payload_max_bytes: 65536
   retention: {request_log_days: 30, payload_days: 7, rollup_days: 400, sweep_interval_secs: 3600}
   jsonl: {enabled: false, path: aigw-requests.jsonl, include_payload: false}
+  metrics: {enabled: true, max_model_groups: 200, max_deployments: 500}      # §11
+  otlp:                                                                       # §12
+    endpoint: ""               # z. B. http://otel-collector:4318 – leer = kein OTLP-Export
+    headers: {}                # z. B. {authorization: "Bearer …"} (Werte nicht in Debug-Ausgaben)
+    timeout_ms: 10000
+    service_name: aigw
+    traces:
+      enabled: false           # Standard: aus
+      sampling_ratio: 1.0      # 0.0–1.0, nach Trace-ID (wenn kein übernommenes Sampling-Flag)
+      parent_based: true       # Sampling-Flag eines eingehenden traceparent übernehmen
+      accept_traceparent: true # eingehenden W3C-traceparent übernehmen
+      propagate: true          # traceparent an den Upstream weitergeben
+      queue_capacity: 8192
+      batch_size: 512
+      flush_interval_ms: 1000
+    logs: {enabled: false, include_payload: false}
 ```
 
-ENV wie üblich, z. B. `AIGW_OBSERVE__PAYLOAD=masked`, `AIGW_OBSERVE__RETENTION__PAYLOAD_DAYS=3`.
+ENV wie üblich, z. B. `AIGW_OBSERVE__PAYLOAD=masked`, `AIGW_OBSERVE__RETENTION__PAYLOAD_DAYS=3`,
+`AIGW_OBSERVE__OTLP__ENDPOINT=http://collector:4318`, `AIGW_OBSERVE__OTLP__TRACES__ENABLED=true`,
+`AIGW_OBSERVE__OTLP__HEADERS__AUTHORIZATION=…`.
 
 Start im Binary (`crates/aigw/src/runtime.rs` → `observe::start`, Shutdown in
 `Runtime::shutdown` nach dem Schließen der Listener; `/metrics` auf der Steuerebene):
 
 ```rust
 let observe = ObserveBuilder::new(cfg.observe.clone()).store(store.clone()).start();
-let observer: Arc<dyn RequestObserver> = observe.observer();   // → ProxyState
+let observer: Arc<dyn RequestObserver> = observe.observer();   // → ProxyState (Metriken + Log)
 // … beim Herunterfahren, nach dem Schließen der Listener:
 observe.shutdown().await;
 ```
@@ -223,3 +244,152 @@ DB → Exporter), Pipelining wäre der nächste Schritt, falls nötig.
   Shutdown-Flush (1500 Einträge), JSON-Lines-Export ohne DB, Rollup-Szenario inkl. UPSERT über
   Batches, Payload-Ablage und Aufbewahrung gegen SQLite (Speicher, Datei) und Postgres
   (`AIGW_TEST_POSTGRES=docker`).
+
+## 11. Prometheus-Metriken (AIGW-44)
+
+`GET /metrics` der Steuerebene, Textformat 0.0.4 (`text/plain; version=0.0.4`). OpenMetrics
+ist (noch) nicht umgesetzt.
+
+### 11.1 Registry
+
+Eigene, schlanke Umsetzung aus Atomics (`aigw_observe::prom::GatewayMetrics`) statt
+`prometheus-client`: Die Metrikmenge ist fest, die Labels sind bekannt, und der Hot Path soll
+ohne Allokation und ohne Lock auskommen – das lässt sich mit einer zugeschnittenen Struktur
+einfacher garantieren als mit einer generischen Family-Map (die je Zugriff einen eigenen
+Label-Schlüssel braucht und ein `RwLock` nimmt).
+
+- **Befüllung nur über den `RequestObserver`-Pfad:** `MetricsObserver` sitzt vor dem
+  Request-Log (`ObserveHandle::observer()` = Metriken → `RequestLogger`), zählt den
+  `RequestRecord` per Referenz und reicht ihn weiter. Einziger neuer Aufruf im Proxy:
+  `RequestObserver::request_started()` (Default leer) in `Recorder::new` für
+  `aigw_inflight_requests`; zu jedem Aufruf folgt genau ein `record()` (auch bei Abbruch über
+  `Drop`).
+- **Hot Path:** Hash der Label-Werte (geliehen aus dem Datensatz) → `ArcSwap`-Map
+  (`u64` → Einträge mit Vergleich der Rohwerte) → `Relaxed`-Inkremente. Nur die erste Anfrage
+  einer neuen Kombination nimmt einen Mutex und veröffentlicht eine neue Map (Copy-on-Write).
+- **Kardinalität:** Labels nur `model_group`, `deployment` (ID), `provider`, `ingress`,
+  `status_class` (`1xx` … `5xx`) bzw. `type`/`class`/`result`. **Keine** Key-, Team-, Org- oder
+  Nutzer-IDs. `model_group` und `deployment` sind auf `max_model_groups` (200) bzw.
+  `max_deployments` (500) unterschiedliche Werte begrenzt; weitere Werte zählen unter `other`.
+  Die Map-Einträge (inkl. Aliasse auf `other`) sind zusätzlich gedeckelt; darüber nimmt eine
+  neue Kombination jedes Mal den langsamen Pfad (nur bei pathologischer Label-Vielfalt).
+
+### 11.2 Metriken
+
+| Metrik | Typ | Labels | Quelle |
+|---|---|---|---|
+| `aigw_requests_total` | counter | model_group, deployment, provider, ingress, status_class | `RequestRecord` |
+| `aigw_request_duration_seconds` | histogram | wie oben | `duration`; Buckets 0,05 … 300 s |
+| `aigw_ttft_seconds` | histogram | wie oben | `ttft` (nur Streams); Buckets 0,01 … 30 s |
+| `aigw_tokens_total` | counter | model_group, deployment, provider, ingress, type (`input`, `output`, `cache_read`, `cache_write`, `reasoning`) | `usage` (gemeldet oder geschätzt) |
+| `aigw_cost_total` | counter | model_group, deployment, provider, ingress | `cost` – Platzhalter bis AIGW-31 |
+| `aigw_stream_client_aborts_total` | counter | model_group, deployment, provider, ingress | `stream && client_aborted` |
+| `aigw_upstream_errors_total` | counter | class (`ErrorClass`: `rate_limit`, `timeout`, `connect`, `server_error` …) | jeder fehlgeschlagene Upstream-Versuch aus `RequestRecord::attempts` (Retries, Fallbacks) sowie ein Fehler im Stream nach erfolgreichem Versuch |
+| `aigw_inflight_requests` | gauge | – | `request_started` − `record` |
+| `aigw_snapshot_version` | gauge | – | aktive `config_version` |
+| `aigw_snapshot_reload_total` | counter | result (`ok`, `failed`, `check_failed`) | `ReloadMetrics` |
+| `aigw_snapshot_stale_seconds` | gauge | – | Zeit seit dem ersten fehlgeschlagenen Abgleich (0 = aktuell) |
+| `aigw_snapshot_build_seconds` | gauge | – | Dauer des letzten Neubaus |
+| `aigw_counter_backend_degraded` | gauge | – | `CounterBackend::health()` über `GatewayMetrics::set_counter_health`; erscheint erst, wenn das Zähler-Backend im Binary verdrahtet ist (Limits) |
+| `aigw_log_*` | counter | – | Request-Log (§7) |
+| `aigw_otlp_spans_exported_total`, `aigw_otlp_spans_dropped_total`, `aigw_otlp_logs_exported_total`, `aigw_otlp_export_errors_total{signal}` | counter | – | OTLP-Export (§12) |
+
+Tokens, Kosten und Abbrüche werden beim Ausgeben über die Statusklassen summiert.
+
+### 11.3 Kosten im Hot Path
+
+Buildbox (x86-64, 8 vCPU), Release, `cargo bench -p aigw-observe --bench record` (divan):
+
+| Fall | Median | Mittel |
+|---|---|---|
+| nur Metriken (`GatewayMetrics::observe`, Serie existiert) | 234 ns | 251 ns |
+| nur Einreihen ins Request-Log | 212 ns | 280 ns |
+| **gesamt** (`request_started` + Metriken + Einreihen) | **316 ns** | 370 ns |
+
+Ziel < 1 µs gesamt eingehalten.
+
+## 12. OpenTelemetry: Traces und Logs (AIGW-45)
+
+### 12.1 Umsetzung und Wire-Format
+
+- **OTLP/HTTP mit Protobuf** (`POST {endpoint}/v1/traces` bzw. `/v1/logs`,
+  `content-type: application/x-protobuf`) statt gRPC: wird von allen Collectoren angenommen
+  (Port 4318), braucht kein `tonic`/gRPC-Framing und nutzt denselben hyper-util-Client mit
+  rustls/aws-lc-rs wie die Upstreams. Klartext-HTTP ist für einen Collector im selben Netz
+  bzw. als Sidecar erlaubt.
+- **Eigene Umsetzung ohne OpenTelemetry-SDK:** ein kleiner Protobuf-Encoder für genau die
+  gesendeten Nachrichten (`otel/proto.rs`, Feldnummern nach `opentelemetry-proto` v1) und ein
+  `tracing`-Layer (`otel/trace.rs`). Keine neuen Crates im Abhängigkeitsbaum (hyper,
+  hyper-util, hyper-rustls, rustls, tracing-subscriber, arc-swap sind bereits
+  Workspace-Abhängigkeiten). Mit `opentelemetry` + `opentelemetry_sdk` + `opentelemetry-otlp`
+  + `tracing-opentelemetry` kämen u. a. `opentelemetry-proto`, `prost` und `reqwest` bzw.
+  `tonic` hinzu.
+- **Kein Export ohne Konfiguration:** `observe.otlp.endpoint` leer oder `traces.enabled: false`
+  → der Layer ist eingehängt, aber inaktiv; die Trace-Callsites haben dann das Interesse
+  `never` (zusammen mit dem Log-Filter `aigw::otel=off`), der Proxy erhält `Span::none()`.
+
+### 12.2 Spans
+
+Instrumentiert wird nur über `tracing` mit `target: "aigw::otel"`
+(`aigw_core::observe::TRACE_TARGET`); Proxy und Adapter kennen kein OpenTelemetry. Besondere
+Felder: `otel.name`, `otel.kind`, `otel.status_code`, `otel.status_message`, am Wurzel-Span
+`otel.traceparent` (eingehender Header, wird nicht als Attribut exportiert).
+
+```
+chat {model}               server   je Anfrage (aigw-proxy), bis zum letzten Byte bzw. Abbruch
+├── auth                   internal Schlüsselprüfung (Fehler → Status ERROR, error.type)
+├── plugins                internal Platzhalter bis zur Plugin-Kette (aigw.plugins.count = 0)
+├── route                  internal Modell → Route nachschlagen (aigw.model_group); die
+│                                   Deployment-Wahl je Versuch steckt im Routing (AIGW-24 ff.)
+├── chat {provider_model}  client   je Upstream-Versuch inkl. Retries/Fallbacks
+│                                   (aigw-providers; bei Streams bis zu
+│                                   den Antwort-Headern): server.address/port,
+│                                   http.response.status_code, error.type (ErrorClass)
+└── Ereignis first_token            bei Streams, Attribut aigw.ttft_ms
+```
+
+Attribute des Wurzel-Spans (GenAI-Semantic-Conventions): `gen_ai.operation.name` (`chat`),
+`gen_ai.system` (`openai`, `anthropic`, `az.ai.openai`, `aws.bedrock`, `gcp.vertex_ai`,
+`mistral_ai`, sonst der Anbieter-Bezeichner), `gen_ai.request.model`,
+`gen_ai.request.max_tokens`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`,
+`gen_ai.usage.output_tokens`, `http.response.status_code`, `error.type`, dazu
+`aigw.request_id`, `aigw.ingress`, `aigw.model_group`, `aigw.deployment` (zuletzt
+verwendetes), `aigw.attempts`, `aigw.fallback`, `aigw.stream`, `aigw.ttft_ms`,
+`aigw.usage_estimated`, `aigw.client_aborted`. Keine Prompt- oder
+Antwortinhalte in Spans.
+
+### 12.3 Kontext und Sampling
+
+- **Eingehend:** Ein gültiger W3C-`traceparent` (Version 00; `ff`, Null-IDs und Großbuchstaben
+  werden verworfen) liefert Trace-ID und Eltern-Span (`accept_traceparent`).
+- **Sampling** (Kopf-Sampling am Wurzel-Span, gilt für alle Kind-Spans): Mit übernommenem
+  Kontext und `parent_based: true` entscheidet dessen Flag `sampled`; sonst
+  `sampling_ratio`, deterministisch nach Trace-ID (untere 63 Bit, wie `TraceIdRatioBased`).
+  Nicht gesampelte Spans tragen nur ihren Kontext und werden nicht exportiert.
+- **Ausgehend** (`propagate: true`): Der Adapter setzt `traceparent` mit der Span-ID des
+  Upstream-Versuchs und dem Sampling-Flag (`aigw_core::observe::current_traceparent`).
+- **Export:** fertige Spans per `try_send` in einen begrenzten Kanal (`queue_capacity`); voll →
+  verwerfen + `aigw_otlp_spans_dropped_total`. Ein Task sendet Batches (`batch_size`,
+  spätestens nach `flush_interval_ms`); Fehler werden gezählt und geloggt, nicht wiederholt.
+  Beim Herunterfahren wird der Puffer noch exportiert (höchstens 5 s).
+
+### 12.4 Logs
+
+`OtlpLogExporter` (implementiert `LogExporter`, aktiv mit `observe.otlp.logs.enabled`): ein
+`LogRecord` je Anfrage aus dem aufbereiteten Request-Log-Batch, `event_name = aigw.request`,
+Schweregrad nach Status (`INFO` < 400, `WARN` 4xx, `ERROR` 5xx), Attribute wie §12.2 bzw.
+`aigw.*` (Latenz, TTFT, Cache, Key-/Team-/Org-ID, `client.address`). Body = maskierter
+Payload als JSON-Text nur mit `logs.include_payload: true`. Fehler zählen wie bei allen
+Exportern in `aigw_log_export_errors_total` und zusätzlich in
+`aigw_otlp_export_errors_total{signal="logs"}`.
+
+### 12.5 Tests
+
+- `crates/aigw-observe/tests/otlp.rs`: Fake-Collector (axum) mit unabhängigem
+  Protobuf-Decoder; Traces durch den echten Proxy mit `Upstream` gegen einen Fake-OpenAI-Server
+  (Wurzel- und Kind-Spans, GenAI-Attribute, TTFT-Ereignis, eingehender `traceparent` gesampelt
+  und nicht gesampelt, Weitergabe an den Upstream, Fehlerstatus, abgeschaltete Übernahme und
+  Weitergabe), Request-Log als OTLP-Logs, Fehlerzählung bei HTTP 500.
+- `crates/aigw-observe/tests/otel_callsite.rs`: Callsites abgeschaltet, solange inaktiv.
+- `scripts/runtime-smoke.sh`: Binary mit lokalem Fake-Collector (python3) – Traces und Logs
+  kommen als Protobuf an; `/metrics` mit Gateway-, Snapshot- und OTLP-Metriken.

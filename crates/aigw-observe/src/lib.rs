@@ -12,11 +12,14 @@
 //!                                                                     ▼
 //!                  Store: eine Transaktion (request_log, request_payload, usage_rollup UPSERT)
 //!                                                                     ▼
-//!                                        Exporter (JSON-Lines, später OTLP/Webhook)
+//!                                        Exporter (JSON-Lines, OTLP-Logs, später Webhook)
 //! ```
 //!
+//! Dazu (AIGW-44/45): [`prom`] – Prometheus-Metriken über einen Fan-out-Beobachter vor dem
+//! Request-Log; [`otel`] – OTLP/HTTP-Export von Traces (`tracing`-Layer) und Logs.
+//!
 //! Eigene Crate statt Modul in `aigw-proxy`: Der Proxy kennt nur den Trait
-//! [`aigw_core::observe::RequestObserver`] und bleibt frei von Datenbank-, Regex- und (später)
+//! [`aigw_core::observe::RequestObserver`] und bleibt frei von Datenbank-, Regex- und
 //! OTLP-Abhängigkeiten; das Request-Log ist eigenständig testbar und austauschbar.
 //! Details: `docs/konzept/07-beobachtung.md`.
 
@@ -24,7 +27,9 @@ pub mod export;
 pub mod logger;
 pub mod mask;
 pub mod metrics;
+pub mod otel;
 pub mod process;
+pub mod prom;
 pub mod retention;
 mod writer;
 
@@ -42,6 +47,7 @@ pub use logger::RequestLogger;
 pub use mask::{PayloadMasker, RegexMasker};
 pub use metrics::{MetricsSnapshot, ObserveMetrics};
 pub use process::LogEntry;
+pub use prom::{GatewayMetrics, MetricsObserver};
 
 use crate::process::Processor;
 use crate::writer::Writer;
@@ -120,8 +126,13 @@ impl ObserveBuilder {
                 shutdown_rx,
             ))
         });
+        let gateway = cfg
+            .metrics
+            .enabled
+            .then(|| Arc::new(GatewayMetrics::new(&cfg.metrics)));
         ObserveHandle {
             logger: RequestLogger::new(tx, Arc::clone(&metrics), cfg.payload),
+            gateway,
             metrics,
             shutdown: shutdown_tx,
             writer,
@@ -135,6 +146,7 @@ impl ObserveBuilder {
 #[derive(Debug)]
 pub struct ObserveHandle {
     logger: RequestLogger,
+    gateway: Option<Arc<GatewayMetrics>>,
     metrics: Arc<ObserveMetrics>,
     shutdown: watch::Sender<bool>,
     writer: JoinHandle<()>,
@@ -148,9 +160,19 @@ impl ObserveHandle {
         self.logger.clone()
     }
 
-    /// Logger als Trait-Objekt für den Proxy-Zustand.
+    /// Beobachter für den Proxy-Zustand: Gateway-Metriken (falls `observe.metrics.enabled`)
+    /// und danach das Request-Log.
     pub fn observer(&self) -> Arc<dyn RequestObserver> {
-        Arc::new(self.logger.clone())
+        let log: Arc<dyn RequestObserver> = Arc::new(self.logger.clone());
+        match &self.gateway {
+            Some(g) => Arc::new(MetricsObserver::new(Arc::clone(g), log)),
+            None => log,
+        }
+    }
+
+    /// Prometheus-Metriken des Gateways (`None`, wenn abgeschaltet).
+    pub fn gateway_metrics(&self) -> Option<&Arc<GatewayMetrics>> {
+        self.gateway.as_ref()
     }
 
     /// Zähler.

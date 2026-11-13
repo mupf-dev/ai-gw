@@ -7,7 +7,8 @@
 # (Bootstrap-Token, Key anlegen), /v1/* mit und ohne Key, Routing über Snapshot-Routen
 # (Mock-Deployments, Retry auf anderes Deployment, Hot Reload), Routing-Ressourcen per REST
 # (Zugangsdaten ohne Geheimwert in der Antwort, Modellgruppe/Deployment/Preis, Alias-Kollision,
-# SSRF-Ablehnung, Freigabe per Key), /metrics und /admin/.
+# SSRF-Ablehnung, Freigabe per Key), /metrics, OTLP-Export (gegen einen lokalen Fake-Collector,
+# falls python3 vorhanden) und /admin/.
 #
 # Modellgruppen und Mock-Deployments kommen per GitOps-Apply (`POST
 # /admin/api/v1/config:apply`) in die laufende Instanz.
@@ -24,9 +25,31 @@ ls -l target/release/aigw
 TMP=$(mktemp -d)
 # Erst beenden und warten, dann löschen – sonst schreibt `aigw` beim Herunterfahren noch in die
 # bereits gelöschte SQLite-Datei („disk I/O error“).
-trap 'kill "${PID:-}" 2>/dev/null || true; wait "${PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
+trap 'kill "${PID:-}" "${OTLP_PID:-}" 2>/dev/null || true; wait "${PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "sqlite://%s/aigw.db?mode=rwc"\n' \
   "$PORT" "$CPORT" "$TMP" >"$TMP/aigw.yaml"
+# Fake-OTLP-Collector (nur lokal): speichert jeden POST-Body als Datei je Pfad.
+OTLP_PORT=${AIGW_SMOKE_OTLP_PORT:-14318}
+if command -v python3 >/dev/null 2>&1; then
+  mkdir -p "$TMP/otlp"
+  python3 -I -c '
+import http.server, sys, os, itertools
+out = sys.argv[1]; n = itertools.count()
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers["content-length"]))
+        name = self.path.strip("/").replace("/", "_")
+        ok = self.headers.get("content-type") == "application/x-protobuf"
+        with open(os.path.join(out, "%s.%d%s" % (name, next(n), "" if ok else ".badtype")), "wb") as f:
+            f.write(body)
+        self.send_response(200); self.send_header("content-length", "0"); self.end_headers()
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[2])), H).serve_forever()
+' "$TMP/otlp" "$OTLP_PORT" &
+  OTLP_PID=$!
+  printf 'observe:\n  flush_interval_ms: 100\n  otlp:\n    endpoint: "http://127.0.0.1:%s"\n    traces: {enabled: true, flush_interval_ms: 100}\n    logs: {enabled: true}\n' \
+    "$OTLP_PORT" >>"$TMP/aigw.yaml"
+fi
 # Modellgruppe „mock“: Priorität 0 = absichtlich fehlerhaftes Mock-Deployment, Priorität 1 =
 # Echo → jede Anfrage braucht einen Retry auf das andere Deployment.
 cat >"$TMP/models.yaml" <<'YAML'
@@ -189,8 +212,31 @@ curl -fsS "$BASE/v1/models" -H "authorization: Bearer $LIMITED" | grep -q '"rest
 echo "--- Admin nicht auf Datenebene"
 test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/api/v1/version")" = 404
 echo "--- GET /metrics (Steuerebene)"
-curl -fsS "$CBASE/metrics" | tee "$TMP/metrics.txt" | grep '^aigw_log_'
+curl -fsS "$CBASE/metrics" | tee "$TMP/metrics.txt" | grep -E '^aigw_(log_|requests_total|upstream_errors|snapshot_|inflight)'
 grep -q '^aigw_log_dropped_total 0$' "$TMP/metrics.txt"
+grep -q '^aigw_requests_total{.*ingress="anthropic-messages",status_class="4xx"} 1$' "$TMP/metrics.txt"
+grep -q '^aigw_requests_total{model_group="mock",.*status_class="2xx"} [1-9]' "$TMP/metrics.txt"
+grep -q '^aigw_upstream_errors_total{class="[a-z_]*"} [1-9]' "$TMP/metrics.txt"
+grep -q '^aigw_inflight_requests 0$' "$TMP/metrics.txt"
+grep -q '^aigw_snapshot_version [1-9]' "$TMP/metrics.txt"
+grep -q '^aigw_snapshot_stale_seconds 0$' "$TMP/metrics.txt"
+if [[ -n "${OTLP_PID:-}" ]]; then
+  echo "--- OTLP-Export an den Fake-Collector (Traces + Logs)"
+  for _ in $(seq 1 50); do
+    compgen -G "$TMP/otlp/v1_traces.*" >/dev/null && compgen -G "$TMP/otlp/v1_logs.*" >/dev/null && break
+    sleep 0.1
+  done
+  ls -l "$TMP/otlp"
+  compgen -G "$TMP/otlp/v1_traces.*" >/dev/null
+  compgen -G "$TMP/otlp/v1_logs.*" >/dev/null
+  if compgen -G "$TMP/otlp/*.badtype" >/dev/null; then
+    echo "FEHLER: OTLP-Export ohne content-type application/x-protobuf" >&2
+    exit 1
+  fi
+  grep -q 'gen_ai.operation.name' "$TMP"/otlp/v1_traces.*
+  grep -q 'aigw.request' "$TMP"/otlp/v1_logs.*
+  curl -fsS "$CBASE/metrics" | grep '^aigw_otlp_'
+fi
 test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/metrics")" = 404
 echo "--- GET /admin/api/v1/version";   curl -fsS "$CBASE/admin/api/v1/version"; echo
 echo "--- GET /admin/api/openapi.json"

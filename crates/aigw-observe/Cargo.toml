@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 [package]
 name = "aigw-observe"
-description = "Request-Log von ai-gw: Puffer, Batch-Writer, Rollups, Payload-Maskierung, Export"
+description = "Beobachtung in ai-gw: Request-Log (Puffer, Batch-Writer, Rollups, Maskierung, Export), Prometheus-Metriken, OTLP-Traces und -Logs"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,16 +14,27 @@ publish.workspace = true
 [dependencies]
 aigw-core.workspace = true
 aigw-store.workspace = true
+arc-swap.workspace = true
+bytes.workspace = true
 futures-util.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-rustls.workspace = true
+hyper-util.workspace = true
 regex.workspace = true
+rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
-bytes.workspace = true
+aigw-providers.workspace = true
+aigw-proxy.workspace = true
+axum.workspace = true
 divan.workspace = true
 sqlx.workspace = true
 uuid.workspace = true

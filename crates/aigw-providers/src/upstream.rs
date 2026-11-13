@@ -30,6 +30,8 @@ use futures_util::Stream;
 use http_body_util::BodyExt as _;
 use hyper::body::{Body as _, Incoming};
 use tokio::time::{Instant, Sleep};
+use tracing::Instrument as _;
+use tracing::field::Empty;
 
 use crate::client::UpstreamClient;
 use crate::settings::Settings;
@@ -184,12 +186,65 @@ impl Upstream {
         Ok(http_req)
     }
 
+    /// Span eines Upstream-Versuchs (OpenTelemetry, AIGW-45; ohne aktives Tracing
+    /// `Span::none()`).
+    fn attempt_span(&self, stream: bool) -> tracing::Span {
+        let info = &self.info;
+        let span = tracing::info_span!(
+            target: aigw_core::observe::TRACE_TARGET,
+            "upstream",
+            otel.name = Empty,
+            otel.kind = "client",
+            otel.status_code = Empty,
+            gen_ai.operation.name = "chat",
+            gen_ai.system = aigw_core::observe::gen_ai_system(info.provider),
+            gen_ai.request.model = info.provider_model.as_str(),
+            server.address = Empty,
+            server.port = Empty,
+            http.response.status_code = Empty,
+            error.type = Empty,
+            aigw.deployment = info.deployment.as_str(),
+            aigw.stream = stream,
+        );
+        if !span.is_disabled() {
+            span.record("otel.name", format!("chat {}", info.provider_model));
+        }
+        span
+    }
+
+    /// Ergebnis eines Versuchs am Span vermerken.
+    fn record_attempt<T>(span: &tracing::Span, res: &Result<T, UpstreamError>) {
+        if let Err(e) = res {
+            span.record("otel.status_code", "error");
+            span.record("error.type", e.class.as_str());
+        }
+    }
+
     async fn send(
         &self,
-        req: crate::UpstreamRequest,
+        mut req: crate::UpstreamRequest,
         deadline: Instant,
     ) -> Result<http::Response<Incoming>, UpstreamError> {
-        match tokio::time::timeout_at(deadline, self.client.send(req)).await {
+        // W3C-Trace-Kontext weitergeben (nur bei aktivem Tracing und `propagate`).
+        if let Some(tp) = aigw_core::observe::current_traceparent()
+            && let Ok(v) = http::HeaderValue::from_str(&tp)
+        {
+            req.headers_mut().insert("traceparent", v);
+        }
+        let span = tracing::Span::current();
+        if !span.is_disabled() {
+            if let Some(host) = req.uri().host() {
+                span.record("server.address", host);
+            }
+            if let Some(port) = req.uri().port_u16() {
+                span.record("server.port", port);
+            }
+        }
+        let res = tokio::time::timeout_at(deadline, self.client.send(req)).await;
+        if let Ok(Ok(resp)) = &res {
+            span.record("http.response.status_code", resp.status().as_u16());
+        }
+        match res {
             Err(_) => Err(timeout_error("keine Antwort-Header")),
             Ok(Err(e)) => {
                 tracing::warn!(
@@ -235,6 +290,13 @@ impl Upstream {
 
     /// Nicht gestreamte Anfrage.
     pub async fn chat(&self, req: ChatRequest) -> Result<ChatResponse, UpstreamError> {
+        let span = self.attempt_span(false);
+        let res = self.chat_attempt(req).instrument(span.clone()).await;
+        Self::record_attempt(&span, &res);
+        res
+    }
+
+    async fn chat_attempt(&self, req: ChatRequest) -> Result<ChatResponse, UpstreamError> {
         let deadline = Instant::now() + self.timeouts.total;
         self.prepare(deadline).await?;
         let http_req = self.build(req)?;
@@ -274,6 +336,14 @@ impl Upstream {
     /// Gestreamte Anfrage. Fehler bis zu den Antwort-Headern kommen als `Err`; alles danach
     /// als [`StreamEvent::Error`] (danach endet der Strom).
     pub async fn chat_stream(&self, req: ChatRequest) -> Result<EventStream, UpstreamError> {
+        // Der Span endet mit den Antwort-Headern; den Stream deckt der Wurzel-Span ab.
+        let span = self.attempt_span(true);
+        let res = self.chat_stream_attempt(req).instrument(span.clone()).await;
+        Self::record_attempt(&span, &res);
+        res
+    }
+
+    async fn chat_stream_attempt(&self, req: ChatRequest) -> Result<EventStream, UpstreamError> {
         let start = Instant::now();
         let total = start + self.timeouts.total;
         let first_byte = total.min(start + self.timeouts.first_byte);
