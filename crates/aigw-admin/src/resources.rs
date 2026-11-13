@@ -408,10 +408,13 @@ pub(crate) async fn get_impl<R: AdminResource>(
     name: &str,
 ) -> ApiResult {
     let obj: Object<R> = st.store.get(name).await?;
-    p.require_on(
-        Permission::Read,
-        &R::target_for(st, &obj.metadata.name, &obj.spec).await?,
-    )?;
+    // Katalog-Arten (auch Plugin-Bindungen) liest jede wirksame Rolle – wie in der Liste.
+    let target = if is_catalog(R::KIND) {
+        Target::Catalog
+    } else {
+        R::target_for(st, &obj.metadata.name, &obj.spec).await?
+    };
+    p.require_on(Permission::Read, &target)?;
     let tag = etag_of(&obj);
     Ok(json_with(StatusCode::OK, Some(tag), &R::Res::from(obj)))
 }

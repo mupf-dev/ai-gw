@@ -508,6 +508,10 @@ async fn scenario(store: Store) {
     )
     .await
     .expect(StatusCode::FORBIDDEN);
+    // Lesen bleibt für jede wirksame Rolle möglich (wie die Liste).
+    env.call(&plat_admin, Method::GET, "/plugin-bindings/pii-acme", None)
+        .await
+        .expect(ok);
     env.call(
         &acme_admin,
         Method::DELETE,
