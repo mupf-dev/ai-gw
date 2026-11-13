@@ -363,3 +363,10 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 204. [x] error_class als Rollup-Dimension → Empfehlung übernommen
 205. [x] 15-min-Rollup-Stufe für SQLite-24h-Dashboards → Folgeticket bei Bedarf
 206. [x] UI-Folgen (limit-warnings, rollups:false, payloadMode/exposeReasoning-Formulare, neue Fensterwerte, errorClass/traceId/Guardrails) → an AIGW-77
+
+## AIGW-78 – Empfehlungen übernommen (2026-11-13)
+207. [x] Exakter Status auch für sonstige 4xx der Anbieter → Empfehlung übernommen
+208. [x] Hash-Kette: Kopf später regelmäßig signiert an SIEM/OTLP exportieren → Folgeticket
+209. [x] audit.retention_days Standard 0 (unbegrenzt) → Empfehlung übernommen
+210. [x] embeddings_max_bytes eigener Konfigwert → bei Bedarf (Folgeticket)
+- UI-Folgen aus 78: Seiten Secrets + MCP-Status (an AIGW-77 nach Merge)
