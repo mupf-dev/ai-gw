@@ -17,6 +17,8 @@ server:
     listen: "127.0.0.1:4000"
     # Maximale Request-Größe (32 MiB); größere Anfragen → 413
     max_body_bytes: 33554432
+    # Antwort-Header x-aigw-deployment / x-aigw-attempts / x-aigw-fallback (Routing, AIGW-24/25)
+    routing_headers: true
   control:
     listen: "127.0.0.1:4001"
 

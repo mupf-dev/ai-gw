@@ -20,7 +20,9 @@ use crate::error::ErrorFormat;
 use crate::observe::{ObservedStream, Recorder};
 use crate::provider::EventStream;
 use crate::request_id::{RequestId, RequestStart};
+use crate::routing::exec::{self, Outcome};
 use crate::stream::sse_response;
+use crate::{ATTEMPTS_HEADER, DEPLOYMENT_HEADER, FALLBACK_HEADER};
 
 type St = State<Arc<ProxyState>>;
 
@@ -97,6 +99,37 @@ enum Reply {
     Stream(EventStream, bool),
 }
 
+/// Routing-Informationen für die Antwort-Header.
+#[derive(Default)]
+struct RouteInfo {
+    deployment: Option<String>,
+    attempts: usize,
+    fallback: Option<String>,
+}
+
+impl RouteInfo {
+    fn apply(&self, res: &mut Response) {
+        let h = res.headers_mut();
+        if let Some(v) = self
+            .deployment
+            .as_deref()
+            .and_then(|d| HeaderValue::from_str(d).ok())
+        {
+            h.insert(DEPLOYMENT_HEADER, v);
+        }
+        if self.attempts > 0 {
+            h.insert(ATTEMPTS_HEADER, HeaderValue::from(self.attempts));
+        }
+        if let Some(v) = self
+            .fallback
+            .as_deref()
+            .and_then(|g| HeaderValue::from_str(g).ok())
+        {
+            h.insert(FALLBACK_HEADER, v);
+        }
+    }
+}
+
 async fn chat(
     st: &ProxyState,
     rid: &RequestId,
@@ -106,7 +139,8 @@ async fn chat(
     format: ErrorFormat,
 ) -> Response {
     let mut rec = Recorder::new(st.observer.clone(), rid.0.clone(), started, ingress(format));
-    match chat_inner(st, headers, body, format, &mut rec).await {
+    let mut info = RouteInfo::default();
+    let mut res = match chat_inner(st, headers, body, format, &mut rec, &mut info).await {
         Ok(Reply::Json(out)) => {
             let out = Bytes::from(out);
             if rec.captures() {
@@ -132,7 +166,11 @@ async fn chat(
             rec.finish(false);
             res
         }
+    };
+    if st.config.routing_headers {
+        info.apply(&mut res);
     }
+    res
 }
 
 async fn chat_inner(
@@ -141,6 +179,7 @@ async fn chat_inner(
     body: Result<Bytes, BytesRejection>,
     format: ErrorFormat,
     rec: &mut Recorder,
+    info: &mut RouteInfo,
 ) -> Result<Reply, UpstreamError> {
     let auth = st.auth.authenticate(extract_api_key(headers).as_ref())?;
     rec.set_key(&auth);
@@ -168,7 +207,7 @@ async fn chat_inner(
     let _group = auth.authorize_model(&req.model)?;
     rec.set_request(&req);
 
-    let provider = st.routes.resolve(&req.model).ok_or_else(|| {
+    let route = st.routes.route(&req.model).ok_or_else(|| {
         ApiError::new(
             ErrorKind::NotFound,
             format!("Modell {:?} ist nicht konfiguriert", req.model),
@@ -176,19 +215,27 @@ async fn chat_inner(
         .with_param("model")
         .with_code("model_not_found")
     })?;
-    rec.set_deployment(provider.describe());
+    let include_usage = req
+        .stream_options
+        .as_ref()
+        .and_then(|o| o.include_usage)
+        .unwrap_or(false);
 
-    if req.is_stream() {
-        let include_usage = req
-            .stream_options
-            .as_ref()
-            .and_then(|o| o.include_usage)
-            .unwrap_or(false);
-        let events = provider.chat_stream(req).await?;
-        return Ok(Reply::Stream(events, include_usage));
+    // Auswahl, Retries, Fallbacks (AIGW-24/25/26).
+    let routed = exec::execute(st.routes.as_ref(), route, req).await;
+    if let Some(m) = &routed.last {
+        let d = m.provider().describe();
+        rec.set_deployment(d);
+        info.deployment = Some(d.deployment.to_owned());
     }
+    info.attempts = routed.attempts.len();
+    info.fallback.clone_from(&routed.fallback);
+    rec.set_attempts(routed.attempts);
 
-    let resp = provider.chat(req).await?;
+    let resp = match routed.result? {
+        Outcome::Stream(events) => return Ok(Reply::Stream(events, include_usage)),
+        Outcome::Json(resp) => resp,
+    };
     rec.set_response(&resp);
     let mut losses = Losses::new();
     let out = match format {

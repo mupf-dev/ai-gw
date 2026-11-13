@@ -1,35 +1,35 @@
 // SPDX-FileCopyrightText: 2026 ai-gw contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Modellname (Alias) → Deployment.
+//! Modellname (Alias) → Route einer Modellgruppe.
 //!
-//! Vorläufig: [`StaticRoutes`] bildet jeden Modellnamen auf genau ein Deployment ab. Der
-//! Snapshot-Halter (AIGW-10) und das Routing mit Strategien, Retries und Fallbacks
-//! (AIGW-24/25) ersetzen das über eine eigene [`ModelRoutes`]-Implementierung;
-//! [`StaticRoutes::from_model_groups`] baut die Tabelle bereits aus den Snapshot-Typen.
+//! - [`SnapshotRoutes`](crate::routing::SnapshotRoutes) – der Normalfall: Routen aus dem
+//!   Konfigurations-Snapshot mit Strategien, Prioritätsgruppen, Retries, Fallbacks und Circuit
+//!   Breaker (AIGW-24/25/26), Neuaufbau bei jeder neuen `config_version`.
+//! - [`StaticRoutes`] – feste Tabelle Modellname → genau ein Deployment, ohne Retries
+//!   (Tests, Benchmarks, eingebauter Mock).
 
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
 use aigw_core::ir::ModelInfo;
-use aigw_core::snapshot::ModelGroupCtx;
-use aigw_providers::{ConfigError, Registry, Upstream, UpstreamClient};
 
 use crate::provider::ChatProvider;
+use crate::routing::GroupRoute;
 
 /// Auflösung von Modellnamen.
 pub trait ModelRoutes: Send + Sync + 'static {
-    /// Deployment für den angefragten Modellnamen (`None` = unbekannt).
-    fn resolve(&self, model: &str) -> Option<Arc<dyn ChatProvider>>;
-    /// Öffentliche Modellliste (`GET /v1/models`).
+    /// Route für den angefragten Modellnamen (Name oder Alias; `None` = unbekannt).
+    fn route(&self, model: &str) -> Option<Arc<GroupRoute>>;
+    /// Öffentliche Modellliste (`GET /v1/models`, wenn der Key keine eigene liefert).
     fn models(&self) -> Vec<ModelInfo>;
 }
 
-/// Feste Tabelle Modellname → Deployment.
+/// Feste Tabelle Modellname → Deployment (je Name genau eines, ohne Retries/Breaker).
 #[derive(Default)]
 pub struct StaticRoutes {
-    routes: HashMap<String, Arc<dyn ChatProvider>>,
+    routes: HashMap<String, Arc<GroupRoute>>,
     models: Vec<ModelInfo>,
     fallback: Option<Arc<dyn ChatProvider>>,
 }
@@ -53,6 +53,12 @@ impl StaticRoutes {
     /// Ordnet `model` ein Deployment zu (ein gleichnamiger Eintrag wird ersetzt).
     pub fn insert(&mut self, model: impl Into<String>, provider: Arc<dyn ChatProvider>) {
         let model = model.into();
+        self.insert_route(model.clone(), Arc::new(GroupRoute::single(model, provider)));
+    }
+
+    /// Ordnet `model` eine vollständige Route zu (mehrere Deployments, Retries, Fallbacks).
+    pub fn insert_route(&mut self, model: impl Into<String>, route: Arc<GroupRoute>) {
+        let model = model.into();
         if !self.models.iter().any(|m| m.id == model) {
             self.models.push(ModelInfo {
                 id: model.clone(),
@@ -61,11 +67,11 @@ impl StaticRoutes {
                 owned_by: aigw_core::NAME.to_owned(),
             });
         }
-        self.routes.insert(model, provider);
+        self.routes.insert(model, route);
     }
 
-    /// Deployment für alle nicht eingetragenen Modellnamen (z. B. der Mock-Anbieter, solange
-    /// das Snapshot-Routing fehlt). Ohne Fallback sind unbekannte Namen `404`.
+    /// Deployment für alle nicht eingetragenen Modellnamen (z. B. der Mock-Anbieter in
+    /// Tests). Ohne Fallback sind unbekannte Namen `404`.
     pub fn set_fallback(&mut self, provider: Arc<dyn ChatProvider>) {
         self.fallback = Some(provider);
     }
@@ -76,38 +82,6 @@ impl StaticRoutes {
             Some(m) => *m = info,
             None => self.models.push(info),
         }
-    }
-
-    /// Baut die Tabelle aus Modellgruppen des Snapshots: je Gruppe (Name und alle Aliasse)
-    /// das erste aktive Deployment (niedrigste Priorität) mit unterstütztem Anbieter.
-    /// Gruppen ohne nutzbares Deployment werden ausgelassen und gemeldet.
-    pub fn from_model_groups<'a>(
-        groups: impl IntoIterator<Item = &'a ModelGroupCtx>,
-        registry: &Registry,
-        client: &UpstreamClient,
-    ) -> Result<Self, ConfigError> {
-        let mut routes = Self::new();
-        for g in groups {
-            let Some(dep) = g
-                .deployments
-                .iter()
-                .filter(|d| d.deployment.spec.enabled)
-                .find(|d| registry.supports(d.deployment.spec.provider))
-            else {
-                tracing::warn!(
-                    model_group = %g.group.metadata.name,
-                    "Modellgruppe ohne unterstütztes Deployment – nicht erreichbar"
-                );
-                continue;
-            };
-            let upstream: Arc<dyn ChatProvider> =
-                Arc::new(Upstream::from_deployment(dep, registry, client)?);
-            routes.insert(g.group.metadata.name.clone(), upstream.clone());
-            for alias in &g.group.spec.aliases {
-                routes.insert(alias.clone(), upstream.clone());
-            }
-        }
-        Ok(routes)
     }
 
     /// Anzahl der Modellnamen.
@@ -122,8 +96,13 @@ impl StaticRoutes {
 }
 
 impl ModelRoutes for StaticRoutes {
-    fn resolve(&self, model: &str) -> Option<Arc<dyn ChatProvider>> {
-        self.routes.get(model).or(self.fallback.as_ref()).cloned()
+    fn route(&self, model: &str) -> Option<Arc<GroupRoute>> {
+        if let Some(r) = self.routes.get(model) {
+            return Some(Arc::clone(r));
+        }
+        self.fallback
+            .as_ref()
+            .map(|p| Arc::new(GroupRoute::single(model, Arc::clone(p))))
     }
 
     fn models(&self) -> Vec<ModelInfo> {

@@ -423,6 +423,7 @@ async fn body_limit_is_enforced_in_ingress_format() {
     let state = ProxyState {
         config: ProxyConfig {
             max_body_bytes: 1024,
+            ..ProxyConfig::default()
         },
         ..ProxyState::mock()
     };

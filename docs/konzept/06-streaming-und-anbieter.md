@@ -251,13 +251,11 @@ Tool-Aufrufe/-Ergebnisse, Reasoning; Ausgabe: gestreamte Text-/Reasoning-/Tool-F
 Bekannte Werte des Anbieters (z. B. Eingabe-Tokens aus Anthropic `message_start`) haben Vorrang;
 `usage_estimated = true`. Fehler vor dem ersten Byte erzeugen keine Usage.
 
-## 8. Routing bis AIGW-24
+## 8. Routing
 
-`ModelRoutes::resolve(alias) → Arc<dyn ChatProvider>`. `StaticRoutes` ist eine feste Tabelle;
-`StaticRoutes::from_model_groups(snapshot.model_groups.values(), &registry, &client)` baut sie aus
-dem Snapshot (je Gruppe Name + Aliasse → erstes aktives Deployment mit unterstütztem Anbieter).
-Das Binary nutzt noch die Mock-Routen; die Verdrahtung mit dem Snapshot-Halter (Neuaufbau bei
-neuer `config_version`) gehört zu AIGW-24.
+Seit AIGW-24/25/26 liefert `ModelRoutes::route(alias)` eine `GroupRoute` (Deployments nach
+Priorität, Strategie, Retries, Fallbacks, Circuit Breaker); das Binary baut sie aus dem
+Snapshot und bei jeder neuen `config_version` neu. Details: [10-routing.md](10-routing.md).
 
 ## 9. Messwerte
 
@@ -291,9 +289,7 @@ HTTP plus Übersetzung). Optimierungen (Profiling, Allokationen im Encoder, `Byt
 
 - Die Fehlerklasse (`ErrorClass`) steht nicht im `RequestRecord` (dort `ErrorKind`).
 - `client_ip` füllt der Proxy noch nicht (braucht `ConnectInfo` im Listener).
-- Entra-ID-`TokenSource`, Retries/Fallbacks (AIGW-25), Routing über den Snapshot (AIGW-24).
-- Routing (AIGW-24) muss Deployments vor dem Bau mit `with_group_defaults(&group.spec.settings,
-  dep)` versehen, damit `defaultMaxTokens` der Modellgruppe greift (heute nur in Tests).
+- Entra-ID-`TokenSource`.
 - OpenAI-Clients bekommen gestreamtes Reasoning (vLLM/Ollama/Anthropic) nicht zu sehen
   (`ReasoningDelta` wird im OpenAI-Encoder verworfen, siehe 03); nicht gestreamt bleibt
   `reasoning_content` kompatibler Anbieter erhalten.

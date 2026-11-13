@@ -18,8 +18,10 @@
 //! [`RequestObserver`](aigw_core::observe::RequestObserver).
 //!
 //! Die Schlüsselprüfung übernimmt [`SnapshotAuthenticator`] (Keys, Ablauf, Modellfreigaben
-//! aus dem Snapshot); [`auth::AllowAll`] lässt alles zu (Tests, Entwicklung). Bis zum
-//! Snapshot-Routing (AIGW-24) stehen [`StaticRoutes`] und [`mock::MockProvider`] bereit.
+//! aus dem Snapshot); [`auth::AllowAll`] lässt alles zu (Tests, Entwicklung). Das Routing
+//! ([`routing`]: Strategien, Prioritätsgruppen, Retries, Fallbacks, Circuit Breaker) kommt im
+//! Betrieb aus dem Snapshot ([`SnapshotRoutes`]); [`StaticRoutes`] und
+//! [`mock::MockProvider`] dienen Tests und Benchmarks.
 
 pub mod auth;
 mod error;
@@ -29,6 +31,7 @@ mod observe;
 pub mod provider;
 mod request_id;
 pub mod routes;
+pub mod routing;
 mod stream;
 
 use std::fmt;
@@ -46,20 +49,32 @@ pub use error::ErrorFormat;
 pub use provider::{BoxFuture, ChatProvider, Describe, EventStream};
 pub use request_id::{REQUEST_ID_HEADER, RequestId, RequestStart};
 pub use routes::{ModelRoutes, StaticRoutes};
+pub use routing::{GroupRoute, RoutesTask, SnapshotRoutes};
 
 pub use aigw_core::config::DEFAULT_MAX_BODY_BYTES;
+
+/// Antwort-Header: gewähltes Deployment (Name).
+pub const DEPLOYMENT_HEADER: &str = "x-aigw-deployment";
+/// Antwort-Header: Anzahl der Versuche (inkl. Retries und Fallbacks).
+pub const ATTEMPTS_HEADER: &str = "x-aigw-attempts";
+/// Antwort-Header: Modellgruppe, falls die Antwort über eine Fallback-Kette kam.
+pub const FALLBACK_HEADER: &str = "x-aigw-fallback";
 
 /// Einstellungen der Datenebene.
 #[derive(Debug, Clone)]
 pub struct ProxyConfig {
     /// Maximale Größe eines Request-Bodys in Bytes (`server.data.max_body_bytes`).
     pub max_body_bytes: usize,
+    /// Antwort-Header `x-aigw-deployment`, `x-aigw-attempts`, `x-aigw-fallback`
+    /// (`server.data.routing_headers`).
+    pub routing_headers: bool,
 }
 
 impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            routing_headers: true,
         }
     }
 }
@@ -68,6 +83,7 @@ impl From<&aigw_core::config::DataListenerConfig> for ProxyConfig {
     fn from(c: &aigw_core::config::DataListenerConfig) -> Self {
         Self {
             max_body_bytes: c.max_body_bytes,
+            routing_headers: c.routing_headers,
         }
     }
 }
@@ -75,7 +91,7 @@ impl From<&aigw_core::config::DataListenerConfig> for ProxyConfig {
 /// Gemeinsamer Zustand der Datenebene.
 #[derive(Clone)]
 pub struct ProxyState {
-    /// Modellname → Deployment.
+    /// Modellname → Route der Modellgruppe.
     pub routes: Arc<dyn ModelRoutes>,
     /// Schlüsselprüfung.
     pub auth: Arc<dyn Authenticator>,

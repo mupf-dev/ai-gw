@@ -21,7 +21,8 @@ impl fmt::Display for ModelName {
 /// Art eines Upstream-Anbieters (MVP-Umfang laut E5).
 ///
 /// Serialisiert als `openai`, `anthropic`, `azure-openai`, `bedrock`, `vertex`, `mistral`,
-/// `ollama`, `vllm`, `openai-compatible`.
+/// `ollama`, `vllm`, `openai-compatible` und `mock` (eingebauter Echo-Anbieter für Tests,
+/// Smoke-Tests und Demos; ohne Netzwerkzugriff).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
@@ -47,11 +48,13 @@ pub enum ProviderKind {
     /// Generischer OpenAI-kompatibler Endpunkt.
     #[serde(rename = "openai-compatible")]
     OpenAiCompatible,
+    /// Eingebauter Mock-Anbieter (Echo, kein Netzwerk).
+    Mock,
 }
 
 impl ProviderKind {
     /// Alle Anbieter.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::OpenAi,
         Self::Anthropic,
         Self::AzureOpenAi,
@@ -61,6 +64,7 @@ impl ProviderKind {
         Self::Ollama,
         Self::Vllm,
         Self::OpenAiCompatible,
+        Self::Mock,
     ];
 
     /// Bezeichner wie in YAML und Datenbank.
@@ -75,6 +79,7 @@ impl ProviderKind {
             Self::Ollama => "ollama",
             Self::Vllm => "vllm",
             Self::OpenAiCompatible => "openai-compatible",
+            Self::Mock => "mock",
         }
     }
 

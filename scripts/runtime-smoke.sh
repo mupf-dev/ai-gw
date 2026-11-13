@@ -4,7 +4,11 @@
 #
 # Laufzeitprüfung: baut das Release-Binary (mit eingebetteter UI aus ui/dist, falls gebaut),
 # startet `aigw serve` (Daten- und Steuerebene getrennt) und prüft /healthz, die Admin-API
-# (Bootstrap-Token, Key anlegen), /v1/* mit und ohne Key, /metrics und /admin/.
+# (Bootstrap-Token, Key anlegen), /v1/* mit und ohne Key, Routing über Snapshot-Routen
+# (Mock-Deployments, Retry auf anderes Deployment, Hot Reload), /metrics und /admin/.
+#
+# Modellgruppen/Deployments legt – bis die Admin-API sie anlegen kann (AIGW-65) – der
+# Seed-Helfer `crates/aigw/examples/seed.rs` direkt in der Wegwerf-Datenbank an.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -12,13 +16,37 @@ PORT=${AIGW_SMOKE_PORT:-14000}
 CPORT=${AIGW_SMOKE_CONTROL_PORT:-14001}
 LOCKED=()
 [[ -f Cargo.lock ]] && LOCKED=(--locked)
-cargo build --release "${LOCKED[@]}" -p aigw
+cargo build --release "${LOCKED[@]}" -p aigw --bin aigw --example seed
 ls -l target/release/aigw
+SEED=target/release/examples/seed
 
 TMP=$(mktemp -d)
 trap 'kill "${PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
-printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "sqlite://%s/aigw.db?mode=rwc"\n' \
-  "$PORT" "$CPORT" "$TMP" >"$TMP/aigw.yaml"
+DB="sqlite://$TMP/aigw.db?mode=rwc"
+printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "%s"\n  reload_poll_secs: 1\n' \
+  "$PORT" "$CPORT" "$DB" >"$TMP/aigw.yaml"
+# Modellgruppe „mock“: Priorität 0 = absichtlich fehlerhaftes Mock-Deployment, Priorität 1 =
+# Echo → jede Anfrage braucht einen Retry auf das andere Deployment.
+cat >"$TMP/models.yaml" <<'YAML'
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: mock}
+spec:
+  aliases: [mock-alias]
+  settings:
+    retry: {maxAttempts: 2, initialBackoffMs: 10}
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: mock-flaky}
+spec: {modelGroup: mock, provider: mock, providerModel: mock-error, priority: 0}
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: mock-echo}
+spec: {modelGroup: mock, provider: mock, providerModel: mock, priority: 1}
+YAML
+"$SEED" "$DB" "$TMP/models.yaml"
 # Wegwerf-Master-Key nur für diesen Lauf (ohne Key startet `aigw serve` nicht).
 TOKEN="aigw-admin-smoke-$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
 AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') AIGW_BOOTSTRAP_TOKEN="$TOKEN" \
@@ -49,12 +77,46 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 curl -fsS "$BASE/v1/models" -H "authorization: Bearer $KEY"; echo
-# Modellgruppen lassen sich noch nicht über die Admin-API anlegen (folgt mit dem Routing):
-# ein unbekanntes Modell ergibt für einen unbeschränkten Key 404 model_not_found.
 echo "--- POST /v1/messages (x-api-key), unbekanntes Modell → 404"
 test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/messages" -H "x-api-key: $KEY" \
   -H 'content-type: application/json' \
-  -d '{"model":"mock","max_tokens":64,"messages":[{"role":"user","content":"Hallo"}]}')" = 404
+  -d '{"model":"unbekannt","max_tokens":64,"messages":[{"role":"user","content":"Hallo"}]}')" = 404
+echo "--- POST /v1/chat/completions über Alias: Retry auf anderes Deployment"
+curl -fsS -D "$TMP/h1.txt" -o "$TMP/b1.json" "$BASE/v1/chat/completions" \
+  -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"model":"mock-alias","messages":[{"role":"user","content":"Hallo"}]}'
+cat "$TMP/b1.json"; echo
+grep -i '^x-aigw-' "$TMP/h1.txt"
+grep -qi '^x-aigw-deployment: mock-echo' "$TMP/h1.txt"
+grep -qi '^x-aigw-attempts: 2' "$TMP/h1.txt"
+grep -q 'Echo: Hallo' "$TMP/b1.json"
+echo "--- POST /v1/messages (Stream) über Modellgruppe mock"
+curl -fsS -N "$BASE/v1/messages" -H "x-api-key: $KEY" -H 'content-type: application/json' \
+  -d '{"model":"mock","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"Hallo"}]}' \
+  >"$TMP/s1.txt"
+grep -q 'message_stop' "$TMP/s1.txt"
+echo "--- Hot Reload: neue Modellgruppe mock-2 per Seed, danach erreichbar"
+cat >"$TMP/models2.yaml" <<'YAML'
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: mock-2}
+spec: {routing: least-busy}
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: mock-2-echo}
+spec: {modelGroup: mock-2, provider: mock, providerModel: mock}
+YAML
+"$SEED" "$DB" "$TMP/models2.yaml"
+CODE=000
+for _ in $(seq 1 50); do
+  CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/chat/completions" \
+    -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+    -d '{"model":"mock-2","messages":[{"role":"user","content":"Hallo"}]}')
+  [[ "$CODE" == 200 ]] && break
+  sleep 0.2
+done
+test "$CODE" = 200
 echo "--- Admin nicht auf Datenebene"
 test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/api/v1/version")" = 404
 echo "--- GET /metrics (Steuerebene)"

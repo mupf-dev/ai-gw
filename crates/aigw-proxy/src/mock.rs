@@ -10,7 +10,8 @@
 //!   das Wort `tool`, ruft das Modell das erste Funktions-Tool mit `{"echo": "<Text>"}` auf.
 //! - Ist Reasoning angefordert, kommt vorab ein Reasoning-Block mit Signatur.
 //! - Modell `mock-error` liefert einen Überlastungsfehler, `mock-stream-error` bricht einen
-//!   Stream nach dem ersten Textstück mit Fehler ab.
+//!   Stream nach dem ersten Textstück mit Fehler ab. Als Deployment (Anbieterart `mock`)
+//!   entscheidet `providerModel` statt des angefragten Modellnamens.
 //! - Usage: Eingabe ≈ Zeichen / 4 aller Nachrichten, Ausgabe = Anzahl Wörter.
 
 use std::sync::Arc;
@@ -20,6 +21,9 @@ use aigw_core::ir::{
     PartKind, Role, StopReason, StreamEvent, ToolCallStart, ToolChoice, ToolKind, UpstreamError,
     Usage,
 };
+use aigw_core::resource::Id;
+use aigw_core::snapshot::DeploymentCtx;
+use aigw_core::types::ProviderKind;
 use futures_util::stream;
 
 use crate::provider::{BoxFuture, ChatProvider, Describe, EventStream};
@@ -28,13 +32,40 @@ use crate::routes::StaticRoutes;
 /// Mock-Anbieter.
 #[derive(Debug, Clone, Default)]
 pub struct MockProvider {
-    _private: (),
+    deployment: Option<MockDeployment>,
+}
+
+#[derive(Debug, Clone)]
+struct MockDeployment {
+    name: String,
+    id: Id,
+    model_group: String,
+    provider_model: String,
 }
 
 impl MockProvider {
-    /// Neuer Mock-Anbieter.
+    /// Neuer Mock-Anbieter (ohne Deployment; Verhalten nach angefragtem Modellnamen).
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Mock-Anbieter für ein Deployment mit Anbieterart `mock`: Verhalten nach
+    /// `providerModel` (`mock`, `mock-error`, `mock-stream-error`).
+    pub fn for_deployment(dep: &DeploymentCtx) -> Self {
+        Self {
+            deployment: Some(MockDeployment {
+                name: dep.deployment.metadata.name.clone(),
+                id: dep.deployment.id,
+                model_group: dep.deployment.spec.model_group.clone(),
+                provider_model: dep.deployment.spec.provider_model.clone(),
+            }),
+        }
+    }
+
+    fn behaviour<'a>(&'a self, req: &'a ChatRequest) -> &'a str {
+        self.deployment
+            .as_ref()
+            .map_or(req.model.as_str(), |d| d.provider_model.as_str())
     }
 }
 
@@ -47,8 +78,8 @@ struct Plan {
     usage: Usage,
 }
 
-fn plan(req: &ChatRequest) -> Result<Plan, ApiError> {
-    if req.model == "mock-error" {
+fn plan(req: &ChatRequest, behaviour: &str) -> Result<Plan, ApiError> {
+    if behaviour == "mock-error" {
         return Err(ApiError::new(
             ErrorKind::Overloaded,
             "Mock-Anbieter ist (absichtlich) überlastet",
@@ -109,17 +140,26 @@ pub fn mock_routes() -> StaticRoutes {
 
 impl ChatProvider for MockProvider {
     fn describe(&self) -> Describe<'_> {
-        Describe {
-            deployment: "mock",
-            deployment_id: None,
-            model_group: None,
-            provider: None,
-            provider_model: "mock",
+        match &self.deployment {
+            Some(d) => Describe {
+                deployment: &d.name,
+                deployment_id: Some(d.id),
+                model_group: Some(&d.model_group),
+                provider: Some(ProviderKind::Mock),
+                provider_model: &d.provider_model,
+            },
+            None => Describe {
+                deployment: "mock",
+                deployment_id: None,
+                model_group: None,
+                provider: None,
+                provider_model: "mock",
+            },
         }
     }
 
     fn chat(self: Arc<Self>, req: ChatRequest) -> BoxFuture<Result<ChatResponse, UpstreamError>> {
-        let result = plan(&req).map(|p| {
+        let result = plan(&req, self.behaviour(&req)).map(|p| {
             let mut parts = Vec::new();
             if p.reasoning {
                 parts.push(Part::new(PartKind::Reasoning {
@@ -166,8 +206,9 @@ impl ChatProvider for MockProvider {
         self: Arc<Self>,
         req: ChatRequest,
     ) -> BoxFuture<Result<EventStream, UpstreamError>> {
-        let fail_mid_stream = req.model == "mock-stream-error";
-        let result = plan(&req).map(|p| {
+        let behaviour = self.behaviour(&req);
+        let fail_mid_stream = behaviour == "mock-stream-error";
+        let result = plan(&req, behaviour).map(|p| {
             let mut events = vec![
                 StreamEvent::Start {
                     id: p.id,

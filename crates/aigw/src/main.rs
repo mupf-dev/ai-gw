@@ -129,16 +129,20 @@ fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
             ui = aigw_admin::ui::KIND,
             "ai-gw gestartet"
         );
-        // Bis die Anbieter-Adapter (AIGW-15) da sind, bedient der eingebaute Mock-Anbieter
-        // die Datenebene; Keys und Modellfreigaben prüft der Snapshot (AIGW-28).
-        tracing::warn!("Datenebene nutzt den Mock-Anbieter (echo)");
+        // Routing aus dem Snapshot (AIGW-24): Neuaufbau bei jeder neuen config_version,
+        // Health Checks im Hintergrund; Keys und Modellfreigaben prüft der Snapshot (AIGW-28).
+        let routes = std::sync::Arc::new(
+            aigw_proxy::SnapshotRoutes::with_defaults()
+                .map_err(|e| format!("Upstream-Client: {e}"))?,
+        );
+        let routes_task = routes.spawn(runtime_state.snapshot.clone());
         let state = aigw_proxy::ProxyState {
-            config: aigw_proxy::ProxyConfig::from(&config.server.data),
+            routes,
             auth: std::sync::Arc::new(aigw_proxy::SnapshotAuthenticator::new(
                 runtime_state.snapshot.clone(),
             )),
             observer: runtime_state.observer.clone(),
-            ..aigw_proxy::ProxyState::mock()
+            config: aigw_proxy::ProxyConfig::from(&config.server.data),
         };
         // Steuerebene: Admin-API/-UI (mit Anmeldung, AIGW-28), GitOps (AIGW-33) und
         // /metrics (AIGW-43); Modus „nur YAML“ sperrt die Schreibrouten.
@@ -160,6 +164,7 @@ fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         ));
         let control = aigw_admin::read_only::apply(control, config.gitops.read_only_admin);
         server::run(listeners, state, control, shutdown_signal()).await?;
+        drop(routes_task);
         runtime_state.shutdown().await;
         tracing::info!("ai-gw beendet");
         Ok(())

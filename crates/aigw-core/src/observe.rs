@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::ir::{ErrorKind, Usage};
+use crate::ir::{ErrorClass, ErrorKind, Usage};
 use crate::resource::{Amount, Id};
 use crate::types::ProviderKind;
 use crate::wire::WireFormat;
@@ -115,6 +115,23 @@ pub struct RawPayload {
     pub response_body: Bytes,
 }
 
+/// Ein Versuch gegen ein Deployment (Retries und Fallbacks, AIGW-25).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Attempt {
+    /// Modellgruppe des Deployments (bei Fallbacks die Ziel-Gruppe).
+    pub model_group: Option<String>,
+    /// Name des Deployments.
+    pub deployment: String,
+    /// ID des Deployments (`None` bei programmatisch gebauten Routen).
+    pub deployment_id: Option<Id>,
+    /// Fehlerklasse; `None` = erfolgreich (bis zum ersten Ereignis bzw. zur Antwort).
+    pub error: Option<ErrorClass>,
+    /// HTTP-Status des Anbieters bei Fehlern (falls vorhanden).
+    pub upstream_status: Option<u16>,
+    /// Dauer bis zur Antwort, zum ersten Stream-Ereignis bzw. zum Fehler.
+    pub duration: Duration,
+}
+
 /// Kennzahlen einer abgeschlossenen Anfrage (ein Eintrag im Request-Log).
 ///
 /// Feldnamen abgestimmt mit dem Proxy-Hook (AIGW-14/15). Optionale Felder sind `None`, wenn
@@ -167,6 +184,9 @@ pub struct RequestRecord {
     pub client_ip: Option<IpAddr>,
     /// Roh-Payload; nur gesetzt, wenn [`RequestObserver::payload_mode`] es verlangt.
     pub payload: Option<Box<RawPayload>>,
+    /// Alle Versuche in Reihenfolge (leer, wenn kein Deployment angefragt wurde). Der letzte
+    /// Versuch ist der, dessen Ergebnis der Client erhielt.
+    pub attempts: Vec<Attempt>,
 }
 
 impl RequestRecord {
@@ -196,6 +216,7 @@ impl RequestRecord {
             organization_id: None,
             client_ip: None,
             payload: None,
+            attempts: Vec::new(),
         }
     }
 

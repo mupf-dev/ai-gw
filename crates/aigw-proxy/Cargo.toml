@@ -14,12 +14,15 @@ publish.workspace = true
 [dependencies]
 aigw-core.workspace = true
 aigw-providers.workspace = true
+arc-swap.workspace = true
 aws-lc-rs.workspace = true
 axum.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 time.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 
@@ -27,7 +30,6 @@ uuid.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
-tokio.workspace = true
 tower.workspace = true
 
 [lints]

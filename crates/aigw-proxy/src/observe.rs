@@ -172,6 +172,13 @@ impl Recorder {
         }
     }
 
+    /// Versuche (Retries/Fallbacks) übernehmen.
+    pub(crate) fn set_attempts(&mut self, attempts: Vec<aigw_core::observe::Attempt>) {
+        if let Some(r) = self.rec() {
+            r.attempts = attempts;
+        }
+    }
+
     /// Nicht gestreamte Antwort: Usage übernehmen bzw. aus dem Antworttext schätzen.
     pub(crate) fn set_response(&mut self, resp: &ChatResponse) {
         match &resp.usage {

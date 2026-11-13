@@ -204,6 +204,9 @@ pub struct DataListenerConfig {
     pub listen: SocketAddr,
     /// Maximale Größe eines Request-Bodys in Bytes (Standard 32 MiB); größere → `413`.
     pub max_body_bytes: usize,
+    /// Antwort-Header `x-aigw-deployment`, `x-aigw-attempts`, `x-aigw-fallback` setzen
+    /// (Standard `true`; abschalten, wenn Clients die Topologie nicht sehen sollen).
+    pub routing_headers: bool,
 }
 
 impl Default for DataListenerConfig {
@@ -211,6 +214,7 @@ impl Default for DataListenerConfig {
         Self {
             listen: SocketAddr::from(([127, 0, 0, 1], 4000)),
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            routing_headers: true,
         }
     }
 }
