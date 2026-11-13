@@ -412,6 +412,9 @@ pub(crate) async fn delete_impl<R: AdminResource>(
 }
 
 /// Erzeugt Darstellung, Eingabe- und Listentyp sowie die fünf CRUD-Handler einer Art.
+///
+/// `res_extra = [#[doc = "…"] feld: Typ = funktion]` ergänzt die gelesene Darstellung um
+/// abgeleitete Felder (`funktion(&Object<Spec>) -> Typ`, z. B. wirksame Standardwerte).
 macro_rules! plain_resource {
     (
         spec = $spec:ident, res = $res:ident, input = $input:ident, list = $list:ident,
@@ -420,6 +423,7 @@ macro_rules! plain_resource {
         handlers = [$list_fn:ident, $create_fn:ident, $get_fn:ident, $put_fn:ident, $delete_fn:ident]
         $(, input_meta = [$($iattr:meta),*])?
         $(, bounds = $bq:ty)?
+        $(, res_extra = [$($(#[$fattr:meta])* $fname:ident : $fty:ty = $fexpr:path),* $(,)?])?
     ) => {
         #[doc = concat!($what, " (gelesen).")]
         #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -432,14 +436,20 @@ macro_rules! plain_resource {
             pub metadata: ObjectMeta,
             /// Spezifikation.
             pub spec: $spec,
+            $($(
+                $(#[$fattr])*
+                pub $fname: $fty,
+            )*)?
         }
 
         impl From<Object<$spec>> for $res {
             fn from(o: Object<$spec>) -> Self {
+                $($(let $fname = $fexpr(&o);)*)?
                 Self {
                     id: o.id,
                     metadata: o.metadata,
                     spec: o.spec,
+                    $($($fname,)*)?
                 }
             }
         }

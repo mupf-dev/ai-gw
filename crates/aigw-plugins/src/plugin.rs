@@ -87,6 +87,13 @@ pub enum Flow {
     Respond(Box<ChatResponse>),
     /// Mit diesem Fehler ablehnen (Status aus [`ApiError::kind`], Format des Eingangs).
     Reject(ApiError),
+    /// **Guardrail-Ablehnung des Inhalts** (PII, Inhaltsprüfung …, F160). Die Kette setzt
+    /// den Header `x-aigw-guardrail: <plugin>` ([`crate::GUARDRAIL_HEADER`]) und stoppt.
+    /// Anfrage-Phase: wie [`Flow::Reject`] (Fehler, i. d. R. `400`). Antwort-Phase: je
+    /// `outputRejectMode` der Bindung `200` mit entferntem Inhalt und
+    /// `finish_reason: content_filter` / `stop_reason: refusal` (Standard `finish`) oder
+    /// dieser Fehler (`error`).
+    Block(ApiError),
 }
 
 /// Ergebnis von [`Plugin::on_chunk`].
@@ -98,6 +105,11 @@ pub enum ChunkFlow {
     Drop,
     /// Stream mit diesem Fehler beenden ([`StreamEvent::Error`], Upstream wird abgebrochen).
     Reject(ApiError),
+    /// Guardrail-Ablehnung der Ausgabe (F160): Stream je `outputRejectMode` der Bindung
+    /// sauber beenden (`finish`: [`StreamEvent::Stop`] mit
+    /// [`aigw_core::ir::StopReason::ContentFilter`]) oder mit diesem Fehler (`error`);
+    /// der Upstream wird in beiden Fällen abgebrochen.
+    Block(ApiError),
 }
 
 /// Ergebnis eines Hakens: sofort fertig (synchron, ohne Allokation) oder eine Future.
@@ -323,6 +335,8 @@ fn unreachable_state() -> ! {
 /// Ausgabe-Plugins, die Inhalte prüfen oder verändern, implementieren **beide**
 /// Ausgabehaken: [`Plugin::on_response`] (JSON und gepufferter Modus) und
 /// [`Plugin::on_chunk`] (Live-Stream). Je Antwort wird genau einer davon aufgerufen.
+/// Antwort- und Stream-Haken laufen in **umgekehrter** Kettenreihenfolge (Zwiebelprinzip,
+/// F167b); Guardrails melden Inhaltsablehnungen als [`Flow::Block`] / [`ChunkFlow::Block`].
 ///
 /// `Any` als Obertrait erlaubt der Pipeline, Richtlinien-Plugins ohne Haken (z. B.
 /// [`crate::builtin::cache`]) aus der Kette zu lesen.

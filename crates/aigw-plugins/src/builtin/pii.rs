@@ -15,12 +15,14 @@
 //!     creditCard: reject
 //!     ipAddress: {action: log-only, direction: input}
 //!   allow: ["support@acme.example", "*@example.com"]
-//!   entropy: {enabled: true, minLength: 32, minBits: 4.0}   # API-Key-Heuristik
+//!   entropy: {enabled: true, minLength: 32, minBits: 4.0}   # API-Key-Heuristik (abschaltbar, F164)
 //!   streamWindowBytes: 128       # Zurückhalten im Stream (nur bei Ausgabe-Erkennung)
 //! ```
 //!
 //! - `mask`: `[EMAIL_1]` (je Anfrage und Wert stabil nummeriert, nicht rückübersetzt),
-//!   `redact`: `[REDACTED]`, `reject`: `400 pii_detected` mit Kategorie (ohne Fundstelle),
+//!   `redact`: `[REDACTED]`, `reject`: [`crate::Flow::Block`] mit `pii_detected` und Kategorie
+//!   (ohne Fundstelle) – Eingabe `400`, Ausgabe je `outputRejectMode` `200` mit
+//!   `content_filter` (Standard) oder `400` (F160),
 //!   `pseudonymize`: wie `mask`, aber die Antwort (JSON, Stream) bekommt die Originalwerte
 //!   zurück, `log-only`: nur zählen.
 //! - Zuordnung Platzhalter → Original liegt nur im Speicher der Anfrage (`Meta`, Schlüssel
@@ -593,7 +595,7 @@ impl Plugin for Pii {
             }
         }
         if let Some(c) = rejected {
-            return Hook::ok(Flow::Reject(Self::reject_error(c, false)));
+            return Hook::ok(Flow::Block(Self::reject_error(c, false)));
         }
         st.save(&mut ctx.meta);
         Hook::ok(Flow::Continue)
@@ -610,7 +612,7 @@ impl Plugin for Pii {
                 Ok::<(), Category>(())
             });
             if let Err(c) = r {
-                return Hook::ok(Flow::Reject(Self::reject_error(c, true)));
+                return Hook::ok(Flow::Block(Self::reject_error(c, true)));
             }
         }
         st.save(ctx.meta);
@@ -654,7 +656,7 @@ impl Plugin for Pii {
         }
         Ok(match res {
             Ok(flow) => flow,
-            Err(c) => ChunkFlow::Reject(Self::reject_error(c, true)),
+            Err(c) => ChunkFlow::Block(Self::reject_error(c, true)),
         })
     }
 
@@ -667,7 +669,7 @@ impl Plugin for Pii {
                 Ok(ChunkFlow::Continue)
             }
             Ok(None) => Ok(ChunkFlow::Continue),
-            Err(c) => Ok(ChunkFlow::Reject(Self::reject_error(c, true))),
+            Err(c) => Ok(ChunkFlow::Block(Self::reject_error(c, true))),
         }
     }
 }

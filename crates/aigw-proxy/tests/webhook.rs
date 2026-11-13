@@ -609,12 +609,62 @@ async fn internal_meta_never_leaves_the_gateway() {
         assert!(!text.contains("aigw."), "{text}");
         assert!(!text.contains("nicht-raus"), "{text}");
     }
-    // Anfrage-Phase: der Webhook sieht nur den Platzhalter, nie den Originalwert. (In der
-    // Antwort-Phase laufen die Plugins in derselben Reihenfolge – `pii` hat dort schon
-    // zurückübersetzt; siehe offene Frage zur Reihenfolge der Antwort-Haken.)
-    let req = s.calls[0].1.to_string();
-    assert!(
-        req.contains("[EMAIL_1]") && !req.contains("bob@example.com"),
-        "{req}"
-    );
+    // Beide Phasen: der Webhook sieht nur den Platzhalter, nie den Originalwert – in der
+    // Antwort-Phase laufen die Haken in umgekehrter Reihenfolge (Zwiebelprinzip, F167b),
+    // `pii` übersetzt erst nach dem Webhook zurück.
+    for (_, p) in &s.calls {
+        let text = p.to_string();
+        assert!(
+            text.contains("[EMAIL_1]") && !text.contains("bob@example.com"),
+            "{text}"
+        );
+    }
+}
+
+/// F167b (Sicherheit): `pii` (pseudonymize, order 10) → Webhook mit Antwort-Phase (order 20).
+/// Der Webhook darf in keiner Phase, keinem Format und auch nicht im gepufferten Stream den
+/// Originalwert sehen; der Client bekommt ihn zurück.
+#[tokio::test]
+async fn response_webhook_sees_only_pseudonyms() {
+    let (wh, seen) = fake_webhook().await;
+    let pii = builtin::pii::Factory
+        .build(&json!({"categories": {"email": "pseudonymize", "phone": "pseudonymize"}}))
+        .unwrap();
+    let plugin = factory()
+        .build(&json!({
+            "url": format!("http://{wh}/hook/continue"),
+            "phases": ["response"],
+            "secret": {"file": secret_file()},
+        }))
+        .unwrap();
+    let gw = gateway(vec![
+        Arc::new(Entry::new("pii", pii).with_order(10)),
+        Arc::new(Entry::new("audit", plugin).with_order(20)),
+    ])
+    .await;
+    let secret = "Mail an bob@example.com oder +49 30 1234567";
+    for stream in [false, true] {
+        for (path, body) in [
+            (OAI, openai(secret, stream)),
+            (ANT, anthropic(secret, stream)),
+        ] {
+            let r = post(gw, path, body).await;
+            assert_eq!(r.status, StatusCode::OK, "{path} {stream}");
+            let text = if stream { r.sse_text() } else { r.text() };
+            assert_eq!(text, format!("Echo: {secret}"), "{path} {stream}");
+        }
+    }
+    let s = seen.lock().unwrap();
+    assert_eq!(s.calls.len(), 4);
+    for (_, p) in &s.calls {
+        assert_eq!(p["phase"], "response");
+        let text = p["response"].to_string();
+        assert!(
+            text.contains("[EMAIL_1]") && text.contains("[PHONE_1]"),
+            "{text}"
+        );
+        let all = p.to_string();
+        assert!(!all.contains("bob@example.com"), "{all}");
+        assert!(!all.contains("1234567"), "{all}");
+    }
 }

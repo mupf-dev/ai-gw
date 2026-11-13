@@ -3,29 +3,36 @@
 
 //! Kettensteuerung einer Plugin-Bindung.
 //!
-//! `PluginBindingSpec.config` enthält neben der Plugin-Konfiguration vier reservierte
+//! `PluginBindingSpec.config` enthält neben der Plugin-Konfiguration fünf reservierte
 //! Schlüssel, die die Kette auswertet und die nicht an das Plugin gehen:
 //!
 //! | Schlüssel | Werte | Standard | Bedeutung |
 //! |---|---|---|---|
 //! | `inherit` | `append` / `override` / `disable` | `append` | Verhältnis zu Bindungen desselben Plugins auf äußeren Ebenen |
 //! | `locked` | bool | `false` | innere Ebenen dürfen diese Bindung weder ersetzen noch abschalten |
-//! | `failMode` | `open` / `closed` | Plugin-Standard | Verhalten bei Laufzeitfehler, Zeitüberschreitung und ungültiger Konfiguration |
+//! | `failMode` | `open` / `closed` | Plugin-Standard (F148) | Verhalten bei Laufzeitfehler, Zeitüberschreitung und ungültiger Konfiguration |
 //! | `timeoutMs` | 1–60000 | Plugin-Standard | Zeitlimit asynchroner Haken |
+//! | `outputRejectMode` | `finish` / `error` | `finish` | Ausgabe-Guardrail blockiert: `200` mit `finish_reason: content_filter` bzw. `stop_reason: refusal` oder Fehler (F160) |
 
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 /// Reservierte Schlüssel in `config`.
-pub const CONTROL_KEYS: [&str; 4] = ["inherit", "locked", "failMode", "timeoutMs"];
+pub const CONTROL_KEYS: [&str; 5] = [
+    "inherit",
+    "locked",
+    "failMode",
+    "timeoutMs",
+    "outputRejectMode",
+];
 
 /// Größtes zulässiges Zeitlimit eines asynchronen Hakens.
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Verhalten bei Fehlern eines Plugins.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FailMode {
     /// Fehler protokollieren, Plugin überspringen (Anfrage läuft weiter).
@@ -40,6 +47,29 @@ impl FailMode {
         match self {
             Self::Open => "open",
             Self::Closed => "closed",
+        }
+    }
+}
+
+/// Wirkung einer Guardrail-Ablehnung **der Ausgabe** ([`crate::Flow::Block`] in der
+/// Antwort- bzw. Stream-Phase, F160). Eingabe-Ablehnungen sind immer Fehler (`400`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OutputRejectMode {
+    /// Wie Azure OpenAI: `200`, Inhalt entfernt, `finish_reason: content_filter` (OpenAI) bzw.
+    /// `stop_reason: refusal` (Anthropic); im Stream sauberer Abschluss statt Fehlerereignis.
+    #[default]
+    Finish,
+    /// Fehlerantwort (`400`) bzw. Fehlerereignis im Stream.
+    Error,
+}
+
+impl OutputRejectMode {
+    /// Bezeichner.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Finish => "finish",
+            Self::Error => "error",
         }
     }
 }
@@ -68,6 +98,8 @@ pub struct Control {
     pub fail_mode: Option<FailMode>,
     /// Zeitlimit (`None` = Standard des Plugins).
     pub timeout: Option<Duration>,
+    /// Wirkung einer Ausgabe-Ablehnung.
+    pub output_reject: OutputRejectMode,
 }
 
 #[derive(Deserialize)]
@@ -81,6 +113,8 @@ struct RawControl {
     fail_mode: Option<FailMode>,
     #[serde(default)]
     timeout_ms: Option<u64>,
+    #[serde(default)]
+    output_reject_mode: OutputRejectMode,
 }
 
 /// Ergebnis von [`split`].
@@ -128,6 +162,7 @@ pub fn split(config: &Map<String, Value>) -> Split {
                 locked: raw.locked,
                 fail_mode: raw.fail_mode,
                 timeout,
+                output_reject: raw.output_reject_mode,
             })
         });
     Split {
@@ -153,13 +188,14 @@ mod tests {
     fn splits_control_and_plugin_config() {
         let sp = split(&obj(json!({
             "inherit": "override", "locked": true, "failMode": "open", "timeoutMs": 150,
-            "set": {"a": "b"}
+            "outputRejectMode": "error", "set": {"a": "b"}
         })));
         let c = sp.control.unwrap_or_default();
         assert_eq!(c.inherit, Inherit::Override);
         assert!(c.locked);
         assert_eq!(c.fail_mode, Some(FailMode::Open));
         assert_eq!(c.timeout, Some(Duration::from_millis(150)));
+        assert_eq!(c.output_reject, OutputRejectMode::Error);
         assert_eq!(sp.plugin_config, json!({"set": {"a": "b"}}));
     }
 
@@ -170,5 +206,12 @@ mod tests {
         assert_eq!(sp.fail_mode, Some(FailMode::Closed));
         assert!(split(&obj(json!({"timeoutMs": 0}))).control.is_err());
         assert!(split(&obj(json!({"timeoutMs": 600_000}))).control.is_err());
+        assert!(
+            split(&obj(json!({"outputRejectMode": "drop"})))
+                .control
+                .is_err()
+        );
+        let c = split(&obj(json!({}))).control.unwrap_or_default();
+        assert_eq!(c.output_reject, OutputRejectMode::Finish);
     }
 }

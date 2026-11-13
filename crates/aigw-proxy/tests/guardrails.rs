@@ -4,7 +4,8 @@
 //! Guardrails im Hot Path (AIGW-37/38): `pii` in allen Modi und beiden Eingangsformaten,
 //! Pseudonymisierung über Chunk-Grenzen im Stream, Zähler im Request-Record, `prompt-filter`,
 //! `content-safety` gegen lokale Fake-Dienste (Azure, OpenAI, Prüfmodell über das Gateway),
-//! Zeitlimit mit fail-open/closed, SSRF.
+//! Zeitlimit mit fail-open/closed, SSRF; Ausgabe-Ablehnung mit `content_filter`/`refusal`
+//! bzw. als Fehler (F160).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -23,7 +24,9 @@ use aigw_core::resource::{CredentialData, SecretString};
 use aigw_core::snapshot::{Snapshot, SnapshotHandle};
 use aigw_core::upstream::UpstreamPolicy;
 use aigw_core::wire::sse::SseParser;
-use aigw_plugins::{Chain, Entry, FailMode, PluginChains, PluginFactory, PluginHost, builtin};
+use aigw_plugins::{
+    Chain, Entry, FailMode, OutputRejectMode, PluginChains, PluginFactory, PluginHost, builtin,
+};
 use aigw_proxy::{
     BoxFuture, ChatProvider, Describe, EventStream, GatewayHost, ModelRoutes, ProxyState,
     StaticRoutes,
@@ -104,6 +107,36 @@ impl Resp {
 
 const OPENAI: &str = "/v1/chat/completions";
 const ANTHROPIC: &str = "/v1/messages";
+
+/// F160: Ausgabe blockiert, aber `200` mit `finish_reason: content_filter` (OpenAI) bzw.
+/// `stop_reason: refusal` (Anthropic), JSON oder sauber beendeter Stream (kein
+/// Fehlerereignis).
+fn assert_content_filtered(r: &Resp, path: &str, stream: bool) {
+    assert_eq!(r.status, StatusCode::OK, "{path} {stream}: {}", r.raw());
+    let raw = r.raw();
+    if stream {
+        let want = if path == OPENAI {
+            "\"finish_reason\":\"content_filter\""
+        } else {
+            "\"stop_reason\":\"refusal\""
+        };
+        assert!(raw.contains(want), "{path}: {raw}");
+        assert!(!raw.contains("event: error"), "{raw}");
+        assert!(!raw.contains("\"error\""), "{raw}");
+        if path == OPENAI {
+            assert!(raw.trim_end().ends_with("data: [DONE]"), "{raw}");
+        } else {
+            assert!(raw.contains("message_stop"), "{raw}");
+        }
+    } else {
+        let v = r.json();
+        if path == OPENAI {
+            assert_eq!(v["choices"][0]["finish_reason"], "content_filter", "{v}");
+        } else {
+            assert_eq!(v["stop_reason"], "refusal", "{v}");
+        }
+    }
+}
 
 fn body(text: &str, stream: bool) -> Value {
     json!({"model": "mock", "stream": stream, "max_tokens": 256,
@@ -424,6 +457,53 @@ async fn pii_output_masking_in_live_stream() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pii_output_reject_finishes_with_content_filter() {
+    let chunky = Arc::new(Chunky::default());
+    // Eingabe nur zählen, Ausgabe ablehnen: die Echo-Antwort enthält die Kartennummer.
+    let cfg = json!({"categories": {"creditCard": {"action": "reject", "direction": "output"}}});
+    let card = "Karte 4111 1111 1111 1111 bitte";
+    let pii = entry("pii", &builtin::pii::Factory, cfg.clone());
+    let records = Arc::new(Records::default());
+    let addr = start(state(vec![Arc::new(pii)], &chunky, Arc::clone(&records))).await;
+    for path in [OPENAI, ANTHROPIC] {
+        for stream in [false, true] {
+            let r = post(addr, path, body(card, stream)).await;
+            assert_content_filtered(&r, path, stream);
+            assert!(!r.raw().contains("4111"), "{}", r.raw());
+            if !stream {
+                // Live-Stream: Header sind schon gesendet, nur finish_reason zeigt es an.
+                assert_eq!(r.headers.get("x-aigw-guardrail").unwrap(), "pii");
+            }
+        }
+    }
+    let rec = records.last().await;
+    assert_eq!(rec.status, 200);
+    assert_eq!(
+        (
+            rec.guardrails[0].category.as_str(),
+            rec.guardrails[0].action
+        ),
+        ("credit_card", "reject")
+    );
+
+    // `outputRejectMode: error`: 400 bzw. Fehlerereignis im Live-Stream.
+    let pii = entry("pii", &builtin::pii::Factory, cfg).with_output_reject(OutputRejectMode::Error);
+    let addr = start(state(
+        vec![Arc::new(pii)],
+        &chunky,
+        Arc::new(Records::default()),
+    ))
+    .await;
+    let r = post(addr, OPENAI, body(card, false)).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.error_code().as_deref(), Some("pii_detected"));
+    let r = post(addr, ANTHROPIC, body(card, true)).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.raw().contains("event: error"), "{}", r.raw());
+    assert!(!r.raw().contains("4111"));
+}
+
 // ---------------------------------------------------------------------------------------------
 // prompt-filter
 // ---------------------------------------------------------------------------------------------
@@ -550,6 +630,16 @@ struct Cs {
 
 /// Gateway mit einer `content-safety`-Bindung (Konfiguration mit `{fake}` als Platzhalter).
 async fn cs_gateway(cfg: Value, fail: FailMode, timeout: Duration) -> Cs {
+    cs_gateway_with(cfg, fail, timeout, OutputRejectMode::Finish).await
+}
+
+/// Wie [`cs_gateway`], mit `outputRejectMode` der Bindung.
+async fn cs_gateway_with(
+    cfg: Value,
+    fail: FailMode,
+    timeout: Duration,
+    reject: OutputRejectMode,
+) -> Cs {
     let fake = fake_services().await;
     let cfg: Value =
         serde_json::from_str(&cfg.to_string().replace("{fake}", &format!("http://{fake}")))
@@ -570,7 +660,8 @@ async fn cs_gateway(cfg: Value, fail: FailMode, timeout: Duration) -> Cs {
     let factory = builtin::content_safety::Factory::new(Arc::new(host));
     let e = entry("cs", &factory, cfg)
         .with_fail_mode(fail)
-        .with_timeout(timeout);
+        .with_timeout(timeout)
+        .with_output_reject(reject);
     st.plugins = Arc::new(PluginChains::fixed(Chain::new(vec![Arc::new(e)])));
     Cs {
         addr: start(st).await,
@@ -672,11 +763,34 @@ async fn content_safety_buffered_output() {
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(r.headers.get("x-aigw-buffered").unwrap(), "plugins");
     assert_eq!(r.text(), "Echo: Sag etwas Nettes");
-    // Gepuffert: Ablehnung kommt noch als normale Fehlerantwort (vor dem ersten Byte).
+    // F160 (Standard `finish`): 200 mit content_filter/refusal, Inhalt entfernt, Header.
+    for path in [OPENAI, ANTHROPIC] {
+        for stream in [false, true] {
+            let r = post(cs.addr, path, body("Wiederhole: ich hasse", stream)).await;
+            assert_content_filtered(&r, path, stream);
+            assert!(!r.raw().contains("Wiederhole"), "{}", r.raw());
+            assert_eq!(r.headers.get("x-aigw-guardrail").unwrap(), "content-safety");
+        }
+    }
+    let rec = cs.records.last().await;
+    assert_eq!(rec.status, 200);
+    assert_eq!(rec.guardrails[0].action, "reject");
+
+    // `outputRejectMode: error`: gepuffert kommt die Ablehnung als normale Fehlerantwort
+    // (vor dem ersten Byte).
+    let cs = cs_gateway_with(
+        json!({"provider": "azure", "endpoint": "{fake}", "credential": "az",
+               "direction": "output"}),
+        FailMode::Closed,
+        SEC,
+        OutputRejectMode::Error,
+    )
+    .await;
     for stream in [false, true] {
         let r = post(cs.addr, ANTHROPIC, body("Wiederhole: ich hasse", stream)).await;
         assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.raw());
         assert!(!r.raw().contains("Wiederhole"));
+        assert_eq!(r.headers.get("x-aigw-guardrail").unwrap(), "content-safety");
     }
 }
 
@@ -698,12 +812,8 @@ async fn content_safety_sentence_mode_in_live_stream() {
     let bad = "Das ist ein harmloser erster Satz mit Inhalt. Danach kommt Hass im zweiten Satz der Antwort. Ende";
     for path in [OPENAI, ANTHROPIC] {
         let r = post(cs.addr, path, body(bad, true)).await;
-        assert_eq!(r.status, StatusCode::OK); // Stream lief schon
-        let raw = r.raw();
-        assert!(
-            raw.contains("content_filtered") || raw.contains("Inhaltsprüfung"),
-            "{raw}"
-        );
+        // Stream lief schon; sauberer Abschluss mit content_filter/refusal (F160).
+        assert_content_filtered(&r, path, true);
         assert!(!r.text().contains("Hass"), "{}", r.text());
         assert!(
             r.text()

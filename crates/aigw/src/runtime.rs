@@ -131,6 +131,7 @@ impl Runtime {
             reload: Arc::clone(&self.reload_metrics),
             events: self.events.as_ref().map(|(d, _)| Arc::clone(d.metrics())),
             cache: None,
+            plugins: None,
         }
     }
 

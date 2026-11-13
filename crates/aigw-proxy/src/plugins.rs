@@ -13,6 +13,10 @@
 //! 5. Nicht gestreamt bzw. gepuffert: [`PluginRun::run_post_plugins`] vor dem Encoder;
 //!    gestreamt: [`PluginRun::wrap_stream`] (Stream-Haken je Ereignis vor dem Encoder)
 //!
+//! Antwort- und Stream-Haken laufen in umgekehrter Kettenreihenfolge (Zwiebelprinzip,
+//! F167b); Ausgabe-Guardrails beenden je `outputRejectMode` mit `200` +
+//! `content_filter`/`refusal` (F160) – beides regelt [`aigw_plugins::Chain`].
+//!
 //! Ohne Bindungen kostet das einen Index-Lookup; Kontext, Meta und Stream-Hülle werden
 //! dann gar nicht erst angelegt.
 
@@ -125,7 +129,8 @@ impl PluginRun {
         match flow {
             Flow::Continue => Ok(Pre::Continue(request)),
             Flow::Respond(resp) => Ok(Pre::Respond(*resp)),
-            Flow::Reject(e) => Err(e),
+            // `Block` setzt die Kette in `Reject` um (Header schon gesetzt).
+            Flow::Reject(e) | Flow::Block(e) => Err(e),
         }
     }
 
@@ -172,7 +177,9 @@ impl PluginRun {
             meta: &mut self.meta,
         };
         match self.chain.run_response(&mut ctx).await {
-            Flow::Reject(e) => Err(e),
+            // Ausgabe-Guardrail mit `outputRejectMode: finish` kommt als `Continue` mit
+            // gefilterter Antwort (200, content_filter/refusal, F160).
+            Flow::Reject(e) | Flow::Block(e) => Err(e),
             Flow::Continue | Flow::Respond(_) => Ok(ctx.response),
         }
     }

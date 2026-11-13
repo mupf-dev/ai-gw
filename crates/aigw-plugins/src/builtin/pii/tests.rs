@@ -191,7 +191,7 @@ fn reject_names_category_but_not_value() {
     let p = plugin(json!({"categories": {"creditCard": "reject", "email": "mask"}}));
     let info = info();
     let (flow, _, _) = run_request(&p, &info, vec![user("Karte 4111 1111 1111 1111 bitte")]);
-    let Flow::Reject(err) = flow else {
+    let Flow::Block(err) = flow else {
         panic!("{flow:?}")
     };
     assert_eq!(err.status(), 400);
@@ -330,18 +330,58 @@ fn stream_output_detection_spans_chunks() {
 #[test]
 fn stream_output_reject_ends_stream() {
     let p = plugin(json!({"categories": {"creditCard": "reject"}, "direction": "output"}));
-    let out = stream(
-        p,
-        info(),
-        Meta::new(),
-        deltas(&["Die Nummer ist 4111 ", "1111 1111 1111", " ok"]),
+    let evs = || deltas(&["Die Nummer ist 4111 ", "1111 1111 1111", " ok"]);
+    // F160 Standard (`outputRejectMode: finish`): sauberer Abschluss mit content_filter.
+    let out = stream(Arc::clone(&p), info(), Meta::new(), evs());
+    assert_eq!(
+        out.last(),
+        Some(&StreamEvent::Stop {
+            reason: StopReason::ContentFilter,
+            stop_sequence: None
+        }),
+        "{out:?}"
     );
+    assert!(!out.iter().any(|e| matches!(e, StreamEvent::Error(_))));
+    assert!(!joined(&out).contains("4111"));
+    // `outputRejectMode: error`: Fehlerereignis wie bisher.
+    let chain = Arc::new(Chain::new(vec![Arc::new(
+        Entry::new("pii", p).with_output_reject(crate::OutputRejectMode::Error),
+    )]));
+    let mut r = ChunkRunner::new(chain, Arc::new(info()), Meta::new(), ChunkMode::Live);
+    let mut out = Vec::new();
+    for ev in evs() {
+        r.push(ev, &mut out);
+    }
+    r.finish(&mut out);
     let last = out.last().unwrap();
     let StreamEvent::Error(e) = last else {
         panic!("{out:?}")
     };
     assert_eq!(e.code.as_deref(), Some("pii_detected"));
     assert!(!joined(&out).contains("4111"));
+}
+
+#[test]
+fn entropy_heuristic_can_be_disabled_per_binding() {
+    // F164: Entropie-Heuristik standardmäßig an, je Bindung abschaltbar.
+    let token = "token: Zx8Qm2Lp9RtV4Kw7Hy3Nc6Bd1Fg5Js0A ok";
+    let on = plugin(json!({"categories": {"apiKey": "mask"}}));
+    let (_, req, _) = run_request(&on, &info(), vec![user(token)]);
+    assert!(
+        req.messages[0].content.text().contains("[API_KEY_1]"),
+        "{:?}",
+        req.messages[0].content
+    );
+    let off = plugin(json!({"categories": {"apiKey": "mask"}, "entropy": {"enabled": false}}));
+    let (_, req, _) = run_request(&off, &info(), vec![user(token)]);
+    assert_eq!(req.messages[0].content.text(), token);
+    // Bekannte Präfixe bleiben auch ohne Heuristik erkannt.
+    let (_, req, _) = run_request(
+        &off,
+        &info(),
+        vec![user("key=sk-proj-AbCdEf0123456789GhIjKl0123456789 ok")],
+    );
+    assert!(req.messages[0].content.text().contains("[API_KEY_1]"));
 }
 
 #[test]

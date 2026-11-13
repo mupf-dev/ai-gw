@@ -88,6 +88,8 @@ pub(crate) struct MetricsSources {
     pub(crate) events: Option<Arc<aigw_webhook::EventMetrics>>,
     /// Antwort-Cache (AIGW-39/40).
     pub(crate) cache: Option<Arc<aigw_cache::ResponseCache>>,
+    /// Plugin-Kette: `aigw_plugin_failmode_triggered_total` (F148).
+    pub(crate) plugins: Option<Arc<aigw_plugins::PluginMetrics>>,
 }
 
 impl MetricsSources {
@@ -104,6 +106,9 @@ impl MetricsSources {
         }
         if let Some(c) = &self.cache {
             c.render_prometheus(&mut out);
+        }
+        if let Some(p) = &self.plugins {
+            p.render_prometheus(&mut out);
         }
         out
     }

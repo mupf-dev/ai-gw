@@ -185,6 +185,7 @@ fn serve(
             aigw_plugins::IndexOptions::default(),
         ));
         let plugins_task = plugins.spawn(runtime_state.snapshot.clone());
+        let plugin_metrics = plugins.metrics();
         // Antwort-Cache (AIGW-39/40): RAM-LRU, optional Redis, Vektor-Backend; Warmstart des
         // eigenen HNSW aus der Datenbank (verschlüsselt mit dem Master-Key).
         let cache_rt = aigw_cache::start(
@@ -263,6 +264,7 @@ fn serve(
         ))
         .merge(observe::metrics_router(observe::MetricsSources {
             cache: Some(std::sync::Arc::clone(&cache_rt.cache)),
+            plugins: Some(plugin_metrics),
             ..runtime_state.metrics_sources()
         }));
         let control = aigw_admin::read_only::apply(control, config.gitops.read_only_admin);

@@ -419,6 +419,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/plugin-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_plugin_bindings"];
+        put?: never;
+        post: operations["create_plugin_binding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/plugin-bindings/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_plugin_binding"];
+        put: operations["put_plugin_binding"];
+        post?: never;
+        delete: operations["delete_plugin_binding"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/prices": {
         parameters: {
             query?: never;
@@ -1179,6 +1211,29 @@ export interface components {
          * @enum {string}
          */
         Dimension: "model_group" | "deployment" | "provider" | "team" | "key" | "org";
+        /** @description Wirksame Kettensteuerung einer Bindung (F148), für die Anzeige in der UI. */
+        EffectivePluginControl: {
+            /**
+             * @description Fehlermodus bei Laufzeitfehlern und Zeitüberschreitung: `open` (überspringen) oder
+             *     `closed` (ablehnen). Standard je Plugin-Art: `content-safety` closed, `webhook` open,
+             *     sonst closed.
+             * @example closed
+             */
+            failMode: string;
+            /** @description Woher der Fehlermodus kommt. */
+            failModeSource: components["schemas"]["ValueSource"];
+            /**
+             * @description Ausgabe-Ablehnung eines Guardrails: `finish` (200 mit `content_filter`/`refusal`) oder
+             *     `error` (400 bzw. Fehlerereignis im Stream).
+             * @example finish
+             */
+            outputRejectMode: string;
+            /**
+             * Format: int64
+             * @description Zeitlimit asynchroner Haken (Millisekunden).
+             */
+            timeoutMs: number;
+        };
         /** @description Fallback auf eine andere Modellgruppe. */
         Fallback: {
             /** @description Ziel-Modellgruppe (Name). */
@@ -1447,6 +1502,46 @@ export interface components {
             summary: components["schemas"]["Summary"];
             /** @description Warnungen (z. B. übersprungene Keys). */
             warnings: string[];
+        };
+        PluginBinding: {
+            effective?: components["schemas"]["EffectivePluginControl"] | null;
+            /**
+             * Format: uuid
+             * @description ID (UUIDv7).
+             */
+            id: string;
+            /** @description Metadaten. */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Spezifikation. */
+            spec: components["schemas"]["PluginBindingSpec"];
+        };
+        PluginBindingInput: {
+            /** @description Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert). */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Spezifikation. */
+            spec: components["schemas"]["PluginBindingSpec"];
+        };
+        PluginBindingList: {
+            /** @description Einträge (nach Name sortiert). */
+            items: components["schemas"]["PluginBinding"][];
+            /** @description Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite. */
+            nextCursor?: string | null;
+        };
+        /** @description Plugin-Bindung: ein Plugin mit Konfiguration auf einer Ebene. */
+        PluginBindingSpec: {
+            /** @description Plugin-Konfiguration (Schema je Plugin). */
+            config?: Record<string, never>;
+            /** @description Aktiv? */
+            enabled?: boolean;
+            /**
+             * Format: int32
+             * @description Reihenfolge innerhalb der Ebene (aufsteigend).
+             */
+            order?: number;
+            /** @description Plugin-Name (z. B. `pii`, `webhook`). */
+            plugin: string;
+            /** @description Geltungsbereich. */
+            scope: components["schemas"]["Scope"];
         };
         /** @description Ein Punkt einer Zeitreihe. */
         Point: {
@@ -1975,6 +2070,11 @@ export interface components {
             /** @description Rollen. */
             roles?: components["schemas"]["RoleBinding"][];
         };
+        /**
+         * @description Herkunft eines wirksamen Werts.
+         * @enum {string}
+         */
+        ValueSource: "binding" | "plugin-default";
         /** @description Versionsinformationen des laufenden Gateways. */
         VersionInfo: {
             /** @description Produktname. */
@@ -4966,6 +5066,357 @@ export interface operations {
         };
     };
     delete_organization: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gelöscht */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Wird noch verwendet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_plugin_bindings: {
+        parameters: {
+            query?: {
+                /** @description Seitengröße (1–500, Standard 50). */
+                limit?: number;
+                /** @description Fortsetzung (`nextCursor` der vorigen Seite). */
+                cursor?: string;
+                /** @description Teilstring im Namen. */
+                q?: string;
+                /** @description Label-Selektor `k=v,k2`. */
+                label?: string;
+                /** @description Nur dieses Plugin (z. B. `pii`). */
+                plugin?: string;
+                /** @description Nur diese Ebene (`global`, `organization`, `team`, `api-key`, `model-group`). */
+                level?: string;
+                /** @description Nur dieses Ziel der Ebene (Name). */
+                target?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Seite */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginBindingList"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_plugin_binding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginBindingInput"];
+            };
+        };
+        responses: {
+            /** @description Angelegt */
+            201: {
+                headers: {
+                    /** @description Version */
+                    ETag?: string;
+                    /** @description Pfad */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginBinding"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Name bereits vergeben */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe oder Verweis */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_plugin_binding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gefunden */
+            200: {
+                headers: {
+                    /** @description Version für If-Match */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginBinding"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    put_plugin_binding: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginBindingInput"];
+            };
+        };
+        responses: {
+            /** @description Geändert */
+            200: {
+                headers: {
+                    /** @description Neue Version */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginBinding"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Konflikt (z. B. bestehende Objekte über neuen Grenzen) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe oder Verweis */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_plugin_binding: {
         parameters: {
             query?: never;
             header?: {

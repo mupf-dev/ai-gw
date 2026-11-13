@@ -288,6 +288,32 @@ for _ in $(seq 1 50); do
   sleep 0.2
 done
 test "$FOUND" = 1
+echo "--- Plugin-Bindungen per REST (AIGW-69): Prüfung (422), wirksamer failMode, Ausgabe-Guardrail"
+CODE=$(curl -s -o "$TMP/pb1.json" -w '%{http_code}' "$CBASE/admin/api/v1/plugin-bindings" \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"metadata":{"name":"smoke-bad"},"spec":{"scope":{"level":"global"},"plugin":"pii","config":{"acton":"mask"}}}')
+cat "$TMP/pb1.json"; echo
+test "$CODE" = 422
+grep -q 'Plugin-Bindung (pii)' "$TMP/pb1.json"
+curl -fsS "$CBASE/admin/api/v1/plugin-bindings" -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"metadata":{"name":"smoke-pii"},"spec":{"scope":{"level":"model-group","target":"mock-2"},"plugin":"pii","order":5,"config":{"categories":{"creditCard":{"action":"reject","direction":"output"}}}}}' |
+  tee "$TMP/pb2.json" | grep -q '"failMode":"closed","failModeSource":"plugin-default"'
+echo
+# Ausgabe enthält eine Kartennummer (Echo) → 200 mit finish_reason content_filter (F160).
+FOUND=0
+for _ in $(seq 1 50); do
+  curl -fsS -D "$TMP/pb3.txt" -o "$TMP/pb3.json" "$BASE/v1/chat/completions" \
+    -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+    -d '{"model":"mock-2","messages":[{"role":"user","content":"Karte 4111 1111 1111 1111"}]}'
+  if grep -qi '^x-aigw-guardrail: pii' "$TMP/pb3.txt"; then FOUND=1; break; fi
+  sleep 0.2
+done
+test "$FOUND" = 1
+cat "$TMP/pb3.json"; echo
+grep -q '"finish_reason":"content_filter"' "$TMP/pb3.json"
+if grep -q '4111' "$TMP/pb3.json"; then exit 1; fi
+curl -fsS -X DELETE "$CBASE/admin/api/v1/plugin-bindings/smoke-pii" -H "authorization: Bearer $TOKEN"
 echo "--- Antwort-Cache (AIGW-39): zweite gleiche Anfrage mit temperature 0 = hit-exact"
 for i in 1 2; do
   curl -fsS -D "$TMP/c$i.txt" -o "$TMP/c$i.json" "$BASE/v1/chat/completions" \
@@ -322,6 +348,7 @@ grep -q '^aigw_inflight_requests 0$' "$TMP/metrics.txt"
 grep -q '^aigw_snapshot_version [1-9]' "$TMP/metrics.txt"
 grep -q '^aigw_cache_lookups_total{result="hit-exact"} [1-9]' "$TMP/metrics.txt"
 grep -q '^aigw_snapshot_stale_seconds 0$' "$TMP/metrics.txt"
+grep -q '^# TYPE aigw_plugin_failmode_triggered_total counter' "$TMP/metrics.txt"
 # Limits nach der Metrik-Prüfung (erzeugt weitere 4xx).
 echo "--- Limits (AIGW-30): Key mit 1 Anfrage/Minute → zweite Anfrage 429 mit Rate-Limit-Headern"
 RL=$(curl -fsS "$CBASE/admin/api/v1/api-keys" -H "authorization: Bearer $TOKEN" \

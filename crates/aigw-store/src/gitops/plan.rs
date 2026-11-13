@@ -803,6 +803,10 @@ fn check_rules(
                     aigw_core::mcp::validate_server(&opts.upstreams, name, s)
                 }
                 ResourceSpec::McpGrant(g) => aigw_core::mcp::validate_grant(g),
+                // Plugin-Kette (F118/F165): wie in der Admin-API.
+                ResourceSpec::PluginBinding(b) => opts
+                    .plugin_bindings
+                    .map_or(Ok(()), |f| f(&opts.upstreams, &b.plugin, &b.config)),
                 _ => Ok(()),
             };
             if let Err(e) = res {

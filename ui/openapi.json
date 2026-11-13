@@ -4759,6 +4759,537 @@
         ]
       }
     },
+    "/admin/api/v1/plugin-bindings": {
+      "get": {
+        "tags": [
+          "plugin-bindings"
+        ],
+        "operationId": "list_plugin_bindings",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Seitengröße (1–500, Standard 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Fortsetzung (`nextCursor` der vorigen Seite).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Teilstring im Namen.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "description": "Label-Selektor `k=v,k2`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "plugin",
+            "in": "query",
+            "description": "Nur dieses Plugin (z. B. `pii`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "description": "Nur diese Ebene (`global`, `organization`, `team`, `api-key`, `model-group`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "description": "Nur dieses Ziel der Ebene (Name).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginBindingList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "plugin-bindings"
+        ],
+        "operationId": "create_plugin_binding",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginBindingInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Angelegt",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version"
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Pfad"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name bereits vergeben",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe oder Verweis",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/plugin-bindings/{name}": {
+      "get": {
+        "tags": [
+          "plugin-bindings"
+        ],
+        "operationId": "get_plugin_binding",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gefunden",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version für If-Match"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginBinding"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "plugin-bindings"
+        ],
+        "operationId": "put_plugin_binding",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginBindingInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Geändert",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Neue Version"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt (z. B. bestehende Objekte über neuen Grenzen)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe oder Verweis",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "plugin-bindings"
+        ],
+        "operationId": "delete_plugin_binding",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Gelöscht"
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Wird noch verwendet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/prices": {
       "get": {
         "tags": [
@@ -8757,6 +9288,38 @@
           "org"
         ]
       },
+      "EffectivePluginControl": {
+        "type": "object",
+        "description": "Wirksame Kettensteuerung einer Bindung (F148), für die Anzeige in der UI.",
+        "required": [
+          "failMode",
+          "failModeSource",
+          "timeoutMs",
+          "outputRejectMode"
+        ],
+        "properties": {
+          "failMode": {
+            "type": "string",
+            "description": "Fehlermodus bei Laufzeitfehlern und Zeitüberschreitung: `open` (überspringen) oder\n`closed` (ablehnen). Standard je Plugin-Art: `content-safety` closed, `webhook` open,\nsonst closed.",
+            "example": "closed"
+          },
+          "failModeSource": {
+            "$ref": "#/components/schemas/ValueSource",
+            "description": "Woher der Fehlermodus kommt."
+          },
+          "outputRejectMode": {
+            "type": "string",
+            "description": "Ausgabe-Ablehnung eines Guardrails: `finish` (200 mit `content_filter`/`refusal`) oder\n`error` (400 bzw. Fehlerereignis im Stream).",
+            "example": "finish"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Zeitlimit asynchroner Haken (Millisekunden).",
+            "minimum": 0
+          }
+        }
+      },
       "Fallback": {
         "type": "object",
         "description": "Fallback auf eine andere Modellgruppe.",
@@ -9454,6 +10017,112 @@
             "description": "Warnungen (z. B. übersprungene Keys)."
           }
         }
+      },
+      "PluginBinding": {
+        "type": "object",
+        "required": [
+          "id",
+          "metadata",
+          "spec"
+        ],
+        "properties": {
+          "effective": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EffectivePluginControl",
+                "description": "Wirksame Kettensteuerung (F148; fehlt bei ungültiger Bindung)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID (UUIDv7)."
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/PluginBindingSpec",
+            "description": "Spezifikation."
+          }
+        }
+      },
+      "PluginBindingInput": {
+        "type": "object",
+        "required": [
+          "metadata",
+          "spec"
+        ],
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert)."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/PluginBindingSpec",
+            "description": "Spezifikation."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PluginBindingList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginBinding"
+            },
+            "description": "Einträge (nach Name sortiert)."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite."
+          }
+        }
+      },
+      "PluginBindingSpec": {
+        "type": "object",
+        "description": "Plugin-Bindung: ein Plugin mit Konfiguration auf einer Ebene.",
+        "required": [
+          "scope",
+          "plugin"
+        ],
+        "properties": {
+          "config": {
+            "type": "object",
+            "description": "Plugin-Konfiguration (Schema je Plugin)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Aktiv?"
+          },
+          "order": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Reihenfolge innerhalb der Ebene (aufsteigend)."
+          },
+          "plugin": {
+            "type": "string",
+            "description": "Plugin-Name (z. B. `pii`, `webhook`)."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/Scope",
+            "description": "Geltungsbereich."
+          }
+        },
+        "additionalProperties": false
       },
       "Point": {
         "type": "object",
@@ -10923,6 +11592,14 @@
         },
         "additionalProperties": false
       },
+      "ValueSource": {
+        "type": "string",
+        "description": "Herkunft eines wirksamen Werts.",
+        "enum": [
+          "binding",
+          "plugin-default"
+        ]
+      },
       "VersionInfo": {
         "type": "object",
         "description": "Versionsinformationen des laufenden Gateways.",
@@ -11033,6 +11710,10 @@
     {
       "name": "mcp-grants",
       "description": "Freigaben von MCP-Servern und -Tools für Teams und API-Keys"
+    },
+    {
+      "name": "plugin-bindings",
+      "description": "Plugin-Kette: Bindungen je Ebene (Guardrails, Webhooks, Header …) mit wirksamem Fehlermodus"
     },
     {
       "name": "gitops",

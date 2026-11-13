@@ -11,9 +11,12 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::binding::FailMode;
+use aigw_core::upstream::UpstreamPolicy;
+
+use crate::binding::{FailMode, OutputRejectMode};
 use crate::builtin;
 use crate::host::{NoHost, PluginHost};
+use crate::metrics::PluginMetrics;
 use crate::plugin::Plugin;
 
 /// Standard-Zeitlimit asynchroner Haken, wenn weder Bindung noch Fabrik eines vorgeben.
@@ -29,7 +32,8 @@ pub trait PluginFactory: Send + Sync + 'static {
     /// (`deny_unknown_fields`).
     fn build(&self, config: &Value) -> Result<Arc<dyn Plugin>, String>;
 
-    /// Standard-Fehlermodus (Sicherheits-Plugins: `closed`).
+    /// Standard-Fehlermodus (F148: `closed`; Ausnahme `webhook`: `open`). Je Bindung über
+    /// `failMode` überschreibbar.
     fn default_fail_mode(&self) -> FailMode {
         FailMode::Closed
     }
@@ -40,10 +44,24 @@ pub trait PluginFactory: Send + Sync + 'static {
     }
 }
 
+/// Wirksame Kettensteuerung einer Bindung (für Admin-API/UI, F148).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectiveControl {
+    /// Fehlermodus.
+    pub fail_mode: FailMode,
+    /// `true` = Standard der Plugin-Art (kein `failMode` in der Bindung).
+    pub fail_mode_default: bool,
+    /// Zeitlimit asynchroner Haken.
+    pub timeout: Duration,
+    /// Wirkung einer Ausgabe-Ablehnung.
+    pub output_reject: OutputRejectMode,
+}
+
 /// Bekannte Plugins.
 #[derive(Clone, Default)]
 pub struct Registry {
     factories: BTreeMap<&'static str, Arc<dyn PluginFactory>>,
+    metrics: Arc<PluginMetrics>,
 }
 
 impl fmt::Debug for Registry {
@@ -80,6 +98,24 @@ impl Registry {
         r
     }
 
+    /// Registry nur zum **Prüfen** von Bindungen (Admin-API, GitOps-Plan, F118/F165): die
+    /// eingebauten Plugins mit den SSRF-Regeln `policy` (aus `admin.allow_*_upstreams`), ohne
+    /// Gateway-Dienste (Aufrufe schlagen fehl; Credential-Referenzen werden erst zur Laufzeit
+    /// aufgelöst).
+    pub fn for_validation(policy: &UpstreamPolicy) -> Self {
+        let mut r = Self::with_builtin_host(Arc::new(NoHost::with_policy(policy.clone())));
+        r.register(Arc::new(builtin::webhook::Factory::with_policy(
+            policy.clone(),
+        )));
+        r
+    }
+
+    /// Fehlermodus-Zähler aller mit dieser Registry gebauten Ketten
+    /// (`aigw_plugin_failmode_triggered_total`).
+    pub fn metrics(&self) -> &Arc<PluginMetrics> {
+        &self.metrics
+    }
+
     /// Registriert (oder ersetzt) eine Fabrik.
     pub fn register(&mut self, factory: Arc<dyn PluginFactory>) {
         self.factories.insert(factory.name(), factory);
@@ -108,5 +144,27 @@ impl Registry {
         let split = crate::binding::split(config);
         split.control?;
         factory.build(&split.plugin_config).map(drop)
+    }
+
+    /// Wirksame Kettensteuerung einer Bindung (Standardwerte der Plugin-Art eingesetzt).
+    /// Fehler bei unbekanntem Plugin oder ungültigen reservierten Schlüsseln.
+    pub fn effective(
+        &self,
+        plugin: &str,
+        config: &serde_json::Map<String, Value>,
+    ) -> Result<EffectiveControl, String> {
+        let factory = self
+            .get(plugin)
+            .ok_or_else(|| format!("unbekanntes Plugin {plugin:?}"))?;
+        let c = crate::binding::split(config).control?;
+        Ok(EffectiveControl {
+            fail_mode: c.fail_mode.unwrap_or_else(|| factory.default_fail_mode()),
+            fail_mode_default: c.fail_mode.is_none(),
+            timeout: c
+                .timeout
+                .unwrap_or_else(|| factory.default_timeout())
+                .min(crate::binding::MAX_TIMEOUT),
+            output_reject: c.output_reject,
+        })
     }
 }

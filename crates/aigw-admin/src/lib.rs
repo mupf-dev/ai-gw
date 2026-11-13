@@ -12,6 +12,8 @@
 //! - `/admin/api/v1/{deployments,provider-credentials,prices}` – Routing-Ressourcen
 //!   (siehe [`deployments`], [`credentials`], [`prices`]; Endpunktprüfung in [`upstream`])
 //! - `/admin/api/v1/{mcp-servers,mcp-grants}` – MCP-Gateway ([`mcp`], AIGW-41)
+//! - `/admin/api/v1/plugin-bindings` – Plugin-Kette, geprüft mit der Plugin-Registry
+//!   ([`plugin_bindings`], AIGW-69)
 //! - `/admin/api/v1/admin-api-keys` – Admin-API-Keys ([`admin_keys`]),
 //!   `/admin/api/v1/session` – angemeldeter Principal
 //! - `/admin/api/v1/audit-log` – Audit-Log lesen und exportieren ([`audit`])
@@ -34,6 +36,7 @@ pub mod deployments;
 pub mod gitops;
 pub mod mcp;
 pub mod oidc;
+pub mod plugin_bindings;
 pub mod prices;
 pub mod problem;
 pub mod rbac;
@@ -181,6 +184,7 @@ pub fn router_with(state: AdminState) -> Router {
         .merge(credentials::router())
         .merge(prices::router())
         .merge(mcp::router())
+        .merge(plugin_bindings::router())
         .merge(admin_keys::router())
         .merge(audit::router())
         .merge(session::protected_router())

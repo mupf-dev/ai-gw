@@ -1,0 +1,258 @@
+// SPDX-FileCopyrightText: 2026 ai-gw contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Plugin-Bindungen über die Admin-API (AIGW-69): Prüfung mit der Plugin-Registry beim
+//! Schreiben (F118/F165, 422 mit verständlicher Meldung, SSRF-Regeln aus `admin.*`),
+//! wirksamer Fehlermodus je Bindung (F148) und dieselbe Prüfung im GitOps-Plan.
+
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr
+)]
+
+use std::sync::Arc;
+
+use aigw_admin::gitops::{GitopsState, router as gitops_router};
+use aigw_admin::{AdminAuthenticator, AdminState, BootstrapToken, UpstreamPolicy, router_with};
+use aigw_core::config::AdminConfig;
+use aigw_store::{Keyring, MasterKey, Store};
+use axum::Router;
+use axum::body::Body;
+use http_body_util::BodyExt as _;
+use hyper::{Method, Request, StatusCode};
+use serde_json::{Value, json};
+use tower::ServiceExt as _;
+
+const TOKEN: &str = "test-token-0123456789-0123456789-abcdef";
+
+/// `http` und private Ziele nur für `hooks.lan` (wie `admin.allow_*_upstreams`).
+fn policy() -> UpstreamPolicy {
+    UpstreamPolicy::from_config(&AdminConfig {
+        allow_insecure_upstreams: vec!["hooks.lan".into()],
+        allow_private_upstreams: vec!["hooks.lan".into()],
+        ..AdminConfig::default()
+    })
+    .unwrap()
+}
+
+async fn app() -> (Router, Store) {
+    let store = Store::connect("sqlite::memory:").await.unwrap();
+    store.migrate().await.unwrap();
+    let (master, _) = MasterKey::generate().unwrap();
+    let auth: Arc<dyn AdminAuthenticator> = Arc::new(BootstrapToken::new(TOKEN).unwrap());
+    let router = router_with(
+        AdminState::new(store.clone(), Arc::clone(&auth)).with_upstream_policy(policy()),
+    )
+    .merge(gitops_router(GitopsState {
+        store: store.clone(),
+        keyring: Arc::new(Keyring::new(master)),
+        auth,
+        upstreams: policy(),
+    }));
+    (router, store)
+}
+
+async fn call(
+    app: &Router,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    call_raw(
+        app,
+        method,
+        path,
+        body.map(|b| ("application/json", b.to_string())),
+    )
+    .await
+}
+
+async fn call_raw(
+    app: &Router,
+    method: Method,
+    path: &str,
+    body: Option<(&str, String)>,
+) -> (StatusCode, Value) {
+    let mut req = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("authorization", format!("Bearer {TOKEN}"));
+    let body = match body {
+        Some((ct, b)) => {
+            req = req.header("content-type", ct);
+            Body::from(b)
+        }
+        None => Body::empty(),
+    };
+    let res = app.clone().oneshot(req.body(body).unwrap()).await.unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|e| panic!("kein JSON ({e}): {}", String::from_utf8_lossy(&bytes)))
+    };
+    (status, v)
+}
+
+const BASE: &str = "/admin/api/v1/plugin-bindings";
+
+fn binding(name: &str, plugin: &str, config: Value) -> Value {
+    json!({"metadata": {"name": name},
+           "spec": {"scope": {"level": "global"}, "plugin": plugin, "order": 10,
+                    "config": config}})
+}
+
+#[tokio::test]
+async fn bindings_are_validated_and_show_effective_fail_mode() {
+    let (app, _) = app().await;
+
+    // Gültig: Standardwerte der Plugin-Art (pii closed, webhook open).
+    let (s, v) = call(
+        &app,
+        Method::POST,
+        BASE,
+        Some(binding(
+            "pii-default",
+            "pii",
+            json!({"action": "pseudonymize", "entropy": {"enabled": false}}),
+        )),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(
+        v["effective"],
+        json!({"failMode": "closed", "failModeSource": "plugin-default", "timeoutMs": 1000,
+               "outputRejectMode": "finish"})
+    );
+    let (s, v) = call(
+        &app,
+        Method::POST,
+        BASE,
+        Some(binding(
+            "audit",
+            "webhook",
+            json!({"url": "http://hooks.lan:8080/aigw", "phases": ["response"]}),
+        )),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["effective"]["failMode"], "open");
+    assert_eq!(v["effective"]["failModeSource"], "plugin-default");
+    assert_eq!(v["effective"]["timeoutMs"], 200);
+
+    // Ungültig → 422 mit der Meldung des Plugins.
+    let cases = [
+        ("pii", json!({"acton": "mask"}), "acton"),
+        ("pii", json!({"failMode": "sometimes"}), "Kettensteuerung"),
+        (
+            "pii",
+            json!({"outputRejectMode": "drop"}),
+            "Kettensteuerung",
+        ),
+        (
+            "pii",
+            json!({"entropy": {"minLength": 4}}),
+            "entropy.minLength",
+        ),
+        ("gibt-es-nicht", json!({}), "unbekanntes Plugin"),
+        (
+            "webhook",
+            json!({"url": "https://169.254.169.254/latest"}),
+            "url",
+        ),
+        (
+            "webhook",
+            json!({"url": "http://hooks.example.org/x"}),
+            "url",
+        ),
+        (
+            "content-safety",
+            json!({"provider": "azure", "credential": "c", "endpoint": "https://10.0.0.1"}),
+            "endpoint",
+        ),
+    ];
+    for (plugin, cfg, want) in cases {
+        let (s, v) = call(&app, Method::POST, BASE, Some(binding("x", plugin, cfg))).await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{plugin}: {v}");
+        let detail = v["detail"].as_str().unwrap_or_default();
+        assert!(
+            detail.starts_with(&format!("Plugin-Bindung ({plugin}): ")) && detail.contains(want),
+            "{plugin}: {detail}"
+        );
+    }
+
+    // Ersetzen: Fehlermodus der Bindung überschreibt den Standard; ungültig → 422.
+    let (s, v) = call(
+        &app,
+        Method::PUT,
+        &format!("{BASE}/audit"),
+        Some(binding(
+            "audit",
+            "webhook",
+            json!({"url": "http://hooks.lan:8080/aigw", "failMode": "closed", "timeoutMs": 500}),
+        )),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["effective"]["failMode"], "closed");
+    assert_eq!(v["effective"]["failModeSource"], "binding");
+    assert_eq!(v["effective"]["timeoutMs"], 500);
+    let (s, _) = call(
+        &app,
+        Method::PUT,
+        &format!("{BASE}/audit"),
+        Some(binding("audit", "webhook", json!({"url": "ftp://x"}))),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Liste mit Filter.
+    let (s, v) = call(&app, Method::GET, &format!("{BASE}?plugin=webhook"), None).await;
+    assert_eq!(s, StatusCode::OK);
+    let items = v["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["metadata"]["name"], "audit");
+    assert!(items[0]["effective"].is_object());
+    let (_, v) = call(&app, Method::GET, &format!("{BASE}/pii-default"), None).await;
+    assert_eq!(v["spec"]["plugin"], "pii");
+
+    let (s, _) = call(&app, Method::DELETE, &format!("{BASE}/audit"), None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn gitops_plan_validates_plugin_bindings() {
+    let (app, store) = app().await;
+    let doc = |config: &str| {
+        format!(
+            "apiVersion: aigw/v1alpha1\nkind: PluginBinding\nmetadata: {{name: pf}}\nspec:\n  scope: {{level: global}}\n  plugin: prompt-filter\n  config: {config}\n"
+        )
+    };
+    let (s, v) = call_raw(
+        &app,
+        Method::POST,
+        "/admin/api/v1/config:apply?dryRun=true",
+        Some(("application/yaml", doc("{words: {terms: [x]}, bogus: 1}"))),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
+    let detail = v["detail"].as_str().unwrap_or_default();
+    assert!(detail.contains("Plugin-Bindung (prompt-filter)"), "{v}");
+    assert!(detail.contains("bogus"), "{v}");
+    assert_eq!(store.config_version().await.unwrap(), 0);
+
+    let (s, v) = call_raw(
+        &app,
+        Method::POST,
+        "/admin/api/v1/config:apply",
+        Some(("application/yaml", doc("{words: {terms: [x]}}"))),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, v) = call(&app, Method::GET, &format!("{BASE}/pf"), None).await;
+    assert_eq!(v["effective"]["failMode"], "closed");
+}

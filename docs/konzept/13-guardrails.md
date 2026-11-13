@@ -104,7 +104,14 @@ spec:
     allow: ["support@acme.example", "*@example.com"]
     entropy: {enabled: true, minLength: 32, minBits: 4.0}
     streamWindowBytes: 128       # 16–4096
+    outputRejectMode: finish     # Kettensteuerung: finish (Standard) | error, siehe 12-plugins.md §3a
 ```
+
+- **Entropie-Heuristik (F164):** standardmäßig an (Kategorie `apiKey`, Token ohne bekanntes
+  Präfix). Je Bindung abschaltbar mit `entropy: {enabled: false}` – bekannte Präfixe
+  (`sk-…`, `ghp_…`, `AKIA…`, JWT …) werden weiter erkannt. Sinnvoll z. B. für Teams, deren
+  Prompts viele zufällige IDs oder Hashes enthalten. Test
+  `pii::tests::entropy_heuristic_can_be_disabled_per_binding`.
 
 Kategorienamen: `email`, `phone`, `iban`, `creditCard`, `taxIdDe`, `socialSecurityDe`,
 `idCardDe`, `passportDe`, `ipAddress`, `urlCredentials`, `apiKey` (auch `snake_case`).
@@ -113,7 +120,7 @@ Kategorienamen: `email`, `phone`, `iban`, `creditCard`, `taxIdDe`, `socialSecuri
 |---|---|---|
 | `mask` | `[EMAIL_1]`, je Anfrage und Wert stabil nummeriert | ebenso (Nummerierung fortgesetzt) |
 | `redact` | `[REDACTED]` | ebenso |
-| `reject` | `400 invalid_request_error`, Code `pii_detected`, Meldung nennt die Kategorie, **nie** den Wert | JSON/gepuffert: `400 pii_detected`; Live-Stream: Fehlerereignis, nichts von der Fundstelle wurde gesendet |
+| `reject` | `400 invalid_request_error`, Code `pii_detected`, Meldung nennt die Kategorie, **nie** den Wert | Standard (`outputRejectMode: finish`, F160): `200` mit entferntem Inhalt und `finish_reason: content_filter` bzw. `stop_reason: refusal`, Header `x-aigw-guardrail: pii`; Live-Stream: sauberes Ende mit `content_filter`/`refusal`. Mit `outputRejectMode: error`: `400 pii_detected` bzw. Fehlerereignis. Nichts von der Fundstelle wurde gesendet |
 | `pseudonymize` | `[EMAIL_1]`, Zuordnung für die Antwort gemerkt | Platzhalter werden durch die Originale ersetzt (JSON, gepuffert, Live-Stream); neue Werte des Modells bleiben unverändert |
 | `log-only` | unverändert, nur gezählt | ebenso |
 
@@ -124,8 +131,13 @@ Kategorienamen: `email`, `phone`, `iban`, `creditCard`, `taxIdDe`, `socialSecuri
 - **Zuordnung** Platzhalter → Original liegt nur im Speicher der Anfrage (`Meta`, Schlüssel
   `aigw.pii`) und wird nie geloggt. Schlüssel mit Präfix `aigw.` filtert
   `MetaExt::external_view` zentral heraus – sie gehen nie an externe Plugins (Webhook-Payload
-  enthält nur die externe Sicht, Test `webhook::internal_meta_never_leaves_the_gateway`). Mehrere `pii`-Bindungen teilen sich Nummerierung und
-  Zuordnung (keine doppelten Platzhalter).
+  enthält nur die externe Sicht, Test `webhook::internal_meta_never_leaves_the_gateway`).
+  Mehrere `pii`-Bindungen teilen sich Nummerierung und Zuordnung (keine doppelten Platzhalter).
+- **Reihenfolge (Zwiebelprinzip, F167b):** Antwort- und Stream-Haken laufen in umgekehrter
+  Kettenreihenfolge. `pii` mit niedriger `order` pseudonymisiert die Anfrage als erstes und
+  übersetzt die Antwort als letztes zurück – Webhooks und Prüfdienste mit höherer `order` sehen
+  in beiden Richtungen nur Platzhalter (Test `webhook::response_webhook_sees_only_pseudonyms`).
+  Daher `pii` vor (niedrigere `order` als) externe Plugins legen.
 - **Live-Stream:** Ein `[` am Ende des Puffers, dem bis zu 31 Zeichen `A–Z0–9_` folgen, wird
   zurückgehalten, bis klar ist, ob ein Platzhalter daraus wird – sonst keine Verzögerung.
   Mit Ausgabe-Erkennung bleiben zusätzlich die letzten `streamWindowBytes` zurück
@@ -181,7 +193,8 @@ config:
   Prüfmodell (z. B. Prompt Guard) kombinieren.
 - **Grenzen:** Nachrichtenanzahl (alle Rollen), Zeichen gesamt und je Nachricht (geprüfte
   Rollen, Unicode-Zeichen).
-- **Antwort:** `reject` → `400`, Code `prompt_rejected`, Meldung nennt die Regel
+- **Antwort:** `reject` → `400` (Eingabe-Ablehnung, Header `x-aigw-guardrail: prompt-filter`),
+  Code `prompt_rejected`, Meldung nennt die Regel
   (`words`, `regex:<name>`, `injection`, `limits:<feld>`), nie die Fundstelle. `flag` → nur
   Zähler und Log-Zeile (Info, mit Request-ID und Regel).
 
@@ -229,22 +242,27 @@ config:
   verbunden wird – auch bei DNS-Rebinding). Keine Weiterleitungen, Antwort höchstens 256 KiB.
 - **Ausgabe:**
   - `buffered` (Standard): `needs_buffered_output` – gestreamte Anfragen werden gepuffert
-    (`x-aigw-buffered: plugins`), Prüfung auf der ganzen Antwort, Ablehnung als normale
-    Fehlerantwort vor dem ersten Byte.
+    (`x-aigw-buffered: plugins`), Prüfung auf der ganzen Antwort; Ablehnung je
+    `outputRejectMode` als `200` mit `content_filter`/`refusal` (Standard) oder als normale
+    Fehlerantwort vor dem ersten Byte (`error`).
   - `sentence`: Live-Stream; Text wird bis zum Satzende (`.`, `!`, `?`, Zeilenumbruch +
     Leerraum, mindestens 40 Zeichen) zurückgehalten, dann im Hintergrund geprüft (Kontext:
     bisherige Ausgabe, höchstens `maxChars`). Freigegeben wird, sobald die Prüfung des
-    Satzes bestanden ist; bei `unsafe` endet der Stream mit Fehlerereignis
-    (`content_filtered`), nichts Ungeprüftes wurde gesendet. Am Stream-Ende wird synchron
+    Satzes bestanden ist; bei `unsafe` endet der Stream sauber mit `content_filter`/`refusal`
+    (bzw. mit Fehlerereignis `content_filtered` bei `outputRejectMode: error`), nichts
+    Ungeprüftes wurde gesendet. Am Stream-Ende wird synchron
     auf offene Prüfungen gewartet (`block_in_place`, nur auf der Mehrthread-Laufzeit).
     Fehler/Zeitlimit einer Satzprüfung: `sentenceOnError` (`block` = Stream endet mit
     `plugin_error`, `allow` = Satz wird freigegeben) – der `failMode` der Bindung lässt sich
     im synchronen Chunk-Pfad nicht sauber anwenden (zurückgehaltene Ereignisse).
-- **Antwort:** `reject` → `400`, Code `content_filtered`, Meldung mit Kategorien
-  (`hate, violence`); `flag` → nur Zähler und Log-Zeile.
+- **Antwort:** `reject` auf der Eingabe → `400`, Code `content_filtered`, Meldung mit
+  Kategorien (`hate, violence`); auf der Ausgabe je `outputRejectMode` `200` mit
+  `content_filter`/`refusal` (Standard) oder `400` (F160, [12-plugins.md](12-plugins.md) §3a);
+  Header `x-aigw-guardrail: content-safety`. `flag` → nur Zähler und Log-Zeile.
 - **Fehler** (Dienst nicht erreichbar, HTTP ≠ 2xx, Antwort nicht auswertbar, Zugangsdaten
   fehlen, Zeitlimit): Plugin-Fehler → `failMode` der Bindung (`closed`: `500 plugin_error`,
-  `open`: Warnung, Anfrage läuft weiter). Standard ist `closed`.
+  `open`: Warnung, Anfrage läuft weiter). Standard ist `closed` (F148); jedes Greifen zählt
+  `aigw_plugin_failmode_triggered_total{plugin="content-safety",mode}`.
 
 ### 5.1 Gateway-Host (`PluginHost`)
 
@@ -323,7 +341,8 @@ betroffenen Texte.
   Kategorienamen, Antworten des Prüfmodells, Satzgrenzen, Konfiguration inkl. SSRF.
 - `aigw-proxy/tests/guardrails.rs` (Hot Path): `pii` in allen Modi in beiden
   Eingangsformaten, JSON und Stream (Anbieter streamt in 3-Byte-Stücken), Zähler im
-  `RequestRecord`, Ausgabe-Maskierung im Live-Stream; `prompt-filter` beide Formate + flag;
+  `RequestRecord`, Ausgabe-Maskierung im Live-Stream, Ausgabe-Ablehnung mit
+  `content_filter`/`refusal` (JSON, gepuffert, Live-Stream) und mit `outputRejectMode: error`; `prompt-filter` beide Formate + flag;
   `content-safety` gegen lokale Fake-Dienste (Azure mit Schwellen, OpenAI mit/ohne
   Score-Schwelle, Prüfmodell über eine Modellgruppe, gepufferte Ausgabe, Satzmodus im
   Live-Stream, Zeitlimit mit fail-open/closed, fehlende Zugangsdaten, SSRF auch nach
@@ -332,6 +351,8 @@ betroffenen Texte.
 
 ## 9. Offene Fragen
 
-Siehe Abschlussbericht AIGW-37/38 (Ausgabe-Ablehnung als 400, Persistenz der Zähler im
-Request-Log, Satzmodus und Fehlermodus,
-Entropie-Heuristik standardmäßig an, Admin-Validierung mit Host).
+Entschieden und umgesetzt (AIGW-69): Ausgabe-Ablehnung mit `content_filter`/`refusal` statt
+400 (F160), Entropie-Heuristik an und je Bindung abschaltbar (F164), Prüfung der Bindungen in
+Admin-API und GitOps (F165), Zwiebelprinzip (F167b), Fehlermodus je Plugin-Art (F148).
+Offen: Persistenz der Zähler im Request-Log (F161, Folgeticket); Satzmodus mit
+`sentenceOnError` statt `failMode` (F163, vorerst so).

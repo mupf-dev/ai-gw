@@ -290,6 +290,7 @@ fn build_binding(
                 level: b.spec.scope.level,
                 order: b.spec.order,
                 ..Entry::new(name.as_str(), Broken::plugin(name))
+                    .with_metrics(Arc::clone(registry.metrics()))
             })),
         })
     };
@@ -335,6 +336,8 @@ fn build_binding(
             .timeout
             .unwrap_or_else(|| factory.default_timeout())
             .min(Duration::from_secs(60)),
+        output_reject: control.output_reject,
+        metrics: Arc::clone(registry.metrics()),
     }));
     Some(built)
 }
@@ -442,6 +445,11 @@ impl PluginChains {
     /// Registry.
     pub fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    /// Fehlermodus-Zähler (`aigw_plugin_failmode_triggered_total`, F148) für `/metrics`.
+    pub fn metrics(&self) -> Arc<crate::PluginMetrics> {
+        Arc::clone(self.registry.metrics())
     }
 
     /// Aktueller Index.

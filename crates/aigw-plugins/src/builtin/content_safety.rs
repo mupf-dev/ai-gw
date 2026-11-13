@@ -580,7 +580,9 @@ impl ContentSafety {
     }
 
     /// Wertet fertige Prüfungen aus (`wait` = auf alle offenen warten, Stream-Ende) und
-    /// hängt freigegebene Ereignisse an `out` an. `Some(err)` = blockiert (Rest verworfen).
+    /// hängt freigegebene Ereignisse an `out` an. `Some(flow)` = Stream endet (Rest
+    /// verworfen): [`ChunkFlow::Block`] bei `unsafe`, [`ChunkFlow::Reject`] bei
+    /// fehlgeschlagener Prüfung mit `sentenceOnError: block`.
     ///
     /// Fehler einer Satzprüfung (Dienst, Zeitlimit) behandelt `sentenceOnError`: `block`
     /// beendet den Stream, `allow` gibt den Satz frei. Der Fehlermodus der Bindung greift im
@@ -591,7 +593,7 @@ impl ContentSafety {
         info: &CallInfo,
         wait: bool,
         out: &mut Vec<StreamEvent>,
-    ) -> Option<ApiError> {
+    ) -> Option<ChunkFlow> {
         loop {
             while st.held.front().is_some_and(|(_, need)| *need < st.passed) {
                 if let Some((e, _)) = st.held.pop_front() {
@@ -610,7 +612,7 @@ impl ContentSafety {
             };
             st.checks.pop_front();
             let blocked = match r {
-                Ok(verdict) => self.judge(info, &verdict, true),
+                Ok(verdict) => self.judge(info, &verdict, true).map(ChunkFlow::Block),
                 Err(e) => {
                     tracing::warn!(
                         request_id = %info.request_id,
@@ -619,15 +621,17 @@ impl ContentSafety {
                         "content-safety: Satzprüfung fehlgeschlagen"
                     );
                     (self.sentence_on_error == OnError::Block).then(|| {
-                        ApiError::new(ErrorKind::Internal, "Inhaltsprüfung fehlgeschlagen")
-                            .with_code("plugin_error")
+                        ChunkFlow::Reject(
+                            ApiError::new(ErrorKind::Internal, "Inhaltsprüfung fehlgeschlagen")
+                                .with_code("plugin_error"),
+                        )
                     })
                 }
             };
-            if let Some(err) = blocked {
+            if let Some(flow) = blocked {
                 st.held.clear();
                 st.checks.clear();
-                return Some(err);
+                return Some(flow);
             }
             st.passed = seq + 1;
         }
@@ -676,7 +680,7 @@ impl Plugin for ContentSafety {
         Hook::future(async move {
             let v = self.inner.analyze(text, false).await?;
             Ok(match self.judge(info, &v, false) {
-                Some(e) => Flow::Reject(e),
+                Some(e) => Flow::Block(e),
                 None => Flow::Continue,
             })
         })
@@ -692,7 +696,7 @@ impl Plugin for ContentSafety {
         Hook::future(async move {
             let v = self.inner.analyze(text, true).await?;
             Ok(match self.judge(info, &v, true) {
-                Some(e) => Flow::Reject(e),
+                Some(e) => Flow::Block(e),
                 None => Flow::Continue,
             })
         })
@@ -739,10 +743,7 @@ impl Plugin for ContentSafety {
         for e in out {
             ctx.emit(e);
         }
-        Ok(match res {
-            Some(err) => ChunkFlow::Reject(err),
-            None => ChunkFlow::Drop,
-        })
+        Ok(res.unwrap_or(ChunkFlow::Drop))
     }
 
     fn on_stream_end(&self, ctx: &mut ChunkCtx<'_>) -> Result<ChunkFlow, PluginError> {
@@ -760,10 +761,7 @@ impl Plugin for ContentSafety {
         for e in out {
             ctx.emit(e);
         }
-        Ok(match res {
-            Some(err) => ChunkFlow::Reject(err),
-            None => ChunkFlow::Continue,
-        })
+        Ok(res.unwrap_or(ChunkFlow::Continue))
     }
 }
 

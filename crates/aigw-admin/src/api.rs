@@ -15,6 +15,7 @@ use utoipa::{Modify, OpenApi, ToSchema};
 use crate::credentials as c;
 use crate::deployments as d;
 use crate::mcp as m;
+use crate::plugin_bindings as pb;
 use crate::prices as pr;
 use crate::problem::Problem;
 use crate::resources as r;
@@ -43,6 +44,8 @@ use crate::{admin_keys as ak, session as s};
         m::delete_mcp_server,
         m::list_mcp_grants, m::create_mcp_grant, m::get_mcp_grant, m::put_mcp_grant,
         m::delete_mcp_grant,
+        pb::list_plugin_bindings, pb::create_plugin_binding, pb::get_plugin_binding,
+        pb::put_plugin_binding, pb::delete_plugin_binding,
         crate::gitops::export_config, crate::gitops::apply_config,
         s::login, s::callback, s::logout, s::session_info, s::auth_info,
         ak::list_admin_api_keys, ak::create_admin_api_key, ak::get_admin_api_key,
@@ -67,6 +70,7 @@ use crate::{admin_keys as ak, session as s};
         (name = "prices", description = "Preise je Anbieter-Modell, versioniert über validFrom"),
         (name = "mcp-servers", description = "Upstream-MCP-Server des MCP-Gateways"),
         (name = "mcp-grants", description = "Freigaben von MCP-Servern und -Tools für Teams und API-Keys"),
+        (name = "plugin-bindings", description = "Plugin-Kette: Bindungen je Ebene (Guardrails, Webhooks, Header …) mit wirksamem Fehlermodus"),
         (name = "gitops", description = "YAML-Export und -Apply aller Ressourcen (aigw/v1alpha1)"),
         (name = "auth", description = "Anmeldung: OIDC-Login, Session, Abmeldung"),
         (name = "admin-api-keys", description = "Admin-API-Keys für Automatisierung"),
@@ -201,6 +205,7 @@ mod tests {
             "/admin/api/v1/prices",
             "/admin/api/v1/mcp-servers/{name}",
             "/admin/api/v1/mcp-grants",
+            "/admin/api/v1/plugin-bindings/{name}",
         ] {
             assert!(json["paths"][p].is_object(), "Pfad {p} fehlt");
         }
@@ -218,6 +223,8 @@ mod tests {
             "PriceList",
             "McpServerInput",
             "McpGrantList",
+            "PluginBindingList",
+            "EffectivePluginControl",
         ] {
             assert!(
                 json["components"]["schemas"][s].is_object(),

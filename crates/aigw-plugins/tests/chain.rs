@@ -9,7 +9,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use aigw_core::ir::{ApiError, ChatRequest, ErrorKind, StreamEvent};
+use aigw_core::ir::{
+    ApiError, ChatRequest, ChatResponse, Choice, Content, ErrorKind, Message, Role, StopReason,
+    StreamEvent,
+};
 use aigw_core::resource::{
     ApiKey, ApiKeySpec, ApiKeyState, ApiKeyStatus, JsonObject, Object, ObjectMeta,
     OrganizationSpec, PluginBinding, PluginBindingSpec, Scope, ScopeLevel, TeamSpec,
@@ -17,9 +20,10 @@ use aigw_core::resource::{
 use aigw_core::snapshot::{KeyCtx, KeyHash, Snapshot, SnapshotHandle};
 use aigw_core::wire::WireFormat;
 use aigw_plugins::{
-    CallInfo, Chain, ChunkCtx, ChunkFlow, ChunkMode, ChunkRunner, Entry, FailMode, Flow, Hook,
-    IndexOptions, Meta, Phases, Plugin, PluginChains, PluginError, PluginFactory, PluginIndex,
-    PluginStream, Registry, ReqCtx, ResponseHeaders, TextWindow,
+    CallInfo, Chain, ChunkCtx, ChunkFlow, ChunkMode, ChunkRunner, Entry, FailMode, Flow,
+    GUARDRAIL_HEADER, Hook, IndexOptions, Meta, OutputRejectMode, Phases, Plugin, PluginChains,
+    PluginError, PluginFactory, PluginIndex, PluginStream, Registry, ReqCtx, RespCtx,
+    ResponseHeaders, TextWindow,
 };
 use futures_util::StreamExt as _;
 use http::HeaderMap;
@@ -767,7 +771,7 @@ async fn chunk_plugin_rewrites_across_chunk_boundaries() {
             text("he"),
             text("im und bleibt geheim!"),
             StreamEvent::Stop {
-                reason: aigw_core::ir::StopReason::EndTurn,
+                reason: StopReason::EndTurn,
                 stop_sequence: None,
             },
         ],
@@ -785,11 +789,12 @@ async fn chunk_plugin_rewrites_across_chunk_boundaries() {
 
 #[tokio::test]
 async fn chunk_reject_ends_stream_and_later_plugins_still_see_events() {
-    // guard (order 0) vor redact (order 1): Fehlerereignis beendet den Stream; was bis dahin
-    // zurückgehalten war, kommt nicht mehr ungefiltert heraus.
+    // Stream-Haken laufen von innen nach außen (Zwiebel): guard (order 1) vor redact
+    // (order 0). Das Fehlerereignis beendet den Stream; was bis dahin zurückgehalten war,
+    // kommt nicht mehr ungefiltert heraus.
     let chain = Chain::new(vec![
-        Arc::new(Entry::new("guard", Arc::new(Guard))),
-        Arc::new(Entry::new("redact", Arc::new(Redact)).with_order(1)),
+        Arc::new(Entry::new("redact", Arc::new(Redact))),
+        Arc::new(Entry::new("guard", Arc::new(Guard)).with_order(1)),
     ]);
     let out = run_stream(
         chain,
@@ -907,4 +912,355 @@ async fn hot_reload_changes_chains() {
     let snap3 = snapshot(3, &[&k], vec![]);
     assert!(chains.chain_for(Some(&snap3), Some(&k), None).is_empty());
     assert_eq!(chains.index().version(), 3);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Zwiebelprinzip (F167b), Guardrail-Ablehnung der Ausgabe (F160), Fehlermodus-Metrik (F148)
+// ---------------------------------------------------------------------------------------------
+
+/// Protokolliert in allen Phasen seinen Namen (Anfrage: `meta.trace`, Antwort: Text der
+/// Antwort, Stream: an jedes Textstück angehängt).
+struct Onion(&'static str);
+
+impl Plugin for Onion {
+    fn name(&self) -> &'static str {
+        self.0
+    }
+    fn phases(&self) -> Phases {
+        Phases::ALL
+    }
+    fn on_request<'a>(&'a self, ctx: &'a mut ReqCtx<'_>) -> Hook<'a, Flow> {
+        let trace = ctx
+            .meta
+            .entry("trace")
+            .or_insert_with(|| Value::Array(vec![]));
+        if let Value::Array(a) = trace {
+            a.push(Value::String(self.0.into()));
+        }
+        Hook::ok(Flow::Continue)
+    }
+    fn on_response<'a>(&'a self, ctx: &'a mut RespCtx<'_>) -> Hook<'a, Flow> {
+        let c = &mut ctx.response.choices[0].message.content;
+        *c = Content::Text(format!("{}{}", c.text(), self.0));
+        Hook::ok(Flow::Continue)
+    }
+    fn on_chunk(
+        &self,
+        _ctx: &mut ChunkCtx<'_>,
+        ev: &mut StreamEvent,
+    ) -> Result<ChunkFlow, PluginError> {
+        if let StreamEvent::TextDelta { text, .. } = ev {
+            text.push_str(self.0);
+        }
+        Ok(ChunkFlow::Continue)
+    }
+}
+
+fn answer(text: &str) -> ChatResponse {
+    ChatResponse {
+        id: "r".into(),
+        model: "m".into(),
+        created: None,
+        choices: vec![Choice {
+            index: 0,
+            message: Message::text(Role::Assistant, text),
+            stop_reason: Some(StopReason::EndTurn),
+            stop_sequence: None,
+            extra: Default::default(),
+        }],
+        usage: Some(aigw_core::ir::Usage {
+            input_tokens: 3,
+            output_tokens: 5,
+            ..Default::default()
+        }),
+        extra: Default::default(),
+        source: None,
+    }
+}
+
+async fn respond(chain: &Chain, resp: ChatResponse) -> (Flow, ChatResponse, ResponseHeaders) {
+    let info = CallInfo::new("rid", WireFormat::OpenAiChat);
+    let mut headers = ResponseHeaders::default();
+    let mut meta = Meta::new();
+    let mut ctx = RespCtx {
+        info: &info,
+        response: resp,
+        response_headers: &mut headers,
+        meta: &mut meta,
+    };
+    let flow = chain.run_response(&mut ctx).await;
+    let resp = ctx.response;
+    (flow, resp, headers)
+}
+
+#[tokio::test]
+async fn response_and_stream_hooks_run_in_reverse_order() {
+    let chain = || {
+        Chain::new(vec![
+            Arc::new(Entry::new("a", Arc::new(Onion("a")))),
+            Arc::new(Entry::new("b", Arc::new(Onion("b"))).with_order(1)),
+            Arc::new(Entry::new("c", Arc::new(Onion("c"))).with_order(2)),
+        ])
+    };
+    let (_, t) = trace(&chain()).await;
+    assert_eq!(t, ["a", "b", "c"]);
+    let (flow, resp, _) = respond(&chain(), answer(">")).await;
+    assert_eq!(flow, Flow::Continue);
+    assert_eq!(resp.choices[0].message.content.text(), ">cba");
+    let out = run_stream(chain(), vec![text(">")]).await;
+    assert_eq!(joined(&out), ">cba");
+}
+
+/// Blockiert jede Ein- oder Ausgabe mit „STOP“ (Guardrail, F160).
+struct Blocker;
+
+fn blocked() -> ApiError {
+    ApiError::invalid_request("Antwort blockiert").with_code("content_filtered")
+}
+
+impl Plugin for Blocker {
+    fn name(&self) -> &'static str {
+        "blocker"
+    }
+    fn phases(&self) -> Phases {
+        Phases::ALL
+    }
+    fn on_request<'a>(&'a self, ctx: &'a mut ReqCtx<'_>) -> Hook<'a, Flow> {
+        let hit = ctx
+            .request
+            .messages
+            .iter()
+            .any(|m| m.content.text().contains("STOP"));
+        Hook::ok(if hit {
+            Flow::Block(blocked())
+        } else {
+            Flow::Continue
+        })
+    }
+    fn on_response<'a>(&'a self, ctx: &'a mut RespCtx<'_>) -> Hook<'a, Flow> {
+        let hit = ctx.response.choices[0]
+            .message
+            .content
+            .text()
+            .contains("STOP");
+        Hook::ok(if hit {
+            Flow::Block(blocked())
+        } else {
+            Flow::Continue
+        })
+    }
+    fn on_chunk(
+        &self,
+        _ctx: &mut ChunkCtx<'_>,
+        ev: &mut StreamEvent,
+    ) -> Result<ChunkFlow, PluginError> {
+        Ok(match ev {
+            StreamEvent::TextDelta { text, .. } if text.contains("STOP") => {
+                ChunkFlow::Block(blocked())
+            }
+            _ => ChunkFlow::Continue,
+        })
+    }
+}
+
+/// Hält Stop-Ereignisse zurück (äußeres Plugin, das sie nie mehr ausgibt).
+struct SwallowStop;
+
+impl Plugin for SwallowStop {
+    fn name(&self) -> &'static str {
+        "swallow"
+    }
+    fn phases(&self) -> Phases {
+        Phases {
+            request: false,
+            response: false,
+            chunk: true,
+        }
+    }
+    fn on_chunk(
+        &self,
+        _ctx: &mut ChunkCtx<'_>,
+        ev: &mut StreamEvent,
+    ) -> Result<ChunkFlow, PluginError> {
+        Ok(if matches!(ev, StreamEvent::Stop { .. }) {
+            ChunkFlow::Drop
+        } else {
+            ChunkFlow::Continue
+        })
+    }
+}
+
+#[tokio::test]
+async fn output_block_finishes_with_content_filter_by_default() {
+    // Äußeres Plugin „outer“ (order 0) läuft nach dem Blocker nicht mehr.
+    let chain = |mode| {
+        Chain::new(vec![
+            Arc::new(Entry::new("outer", Arc::new(Onion("outer")))),
+            Arc::new(
+                Entry::new("guard", Arc::new(Blocker))
+                    .with_order(1)
+                    .with_output_reject(mode),
+            ),
+        ])
+    };
+    let (flow, resp, headers) =
+        respond(&chain(OutputRejectMode::Finish), answer("geheim STOP")).await;
+    assert_eq!(flow, Flow::Continue);
+    let c = &resp.choices[0];
+    assert_eq!(c.stop_reason, Some(StopReason::ContentFilter));
+    assert_eq!(c.message.content.text(), "");
+    assert_eq!(resp.usage.as_ref().map(|u| u.output_tokens), Some(5));
+    assert_eq!(
+        headers
+            .set
+            .get(GUARDRAIL_HEADER)
+            .map(|v| v.to_str().unwrap()),
+        Some("blocker")
+    );
+
+    let (flow, _, headers) = respond(&chain(OutputRejectMode::Error), answer("STOP")).await;
+    let Flow::Reject(e) = flow else {
+        panic!("{flow:?}")
+    };
+    assert_eq!(e.code.as_deref(), Some("content_filtered"));
+    assert!(headers.set.contains_key(GUARDRAIL_HEADER));
+
+    // Eingabe-Ablehnung bleibt ein Fehler – auch mit `finish`.
+    let info = CallInfo::new("rid", WireFormat::OpenAiChat);
+    let h = HeaderMap::new();
+    let mut ctx = ReqCtx {
+        info: &info,
+        request: ChatRequest {
+            model: "m".into(),
+            messages: vec![Message::text(Role::User, "bitte STOP")],
+            ..ChatRequest::default()
+        },
+        client_headers: &h,
+        upstream_headers: HeaderMap::new(),
+        response_headers: ResponseHeaders::default(),
+        meta: Meta::new(),
+    };
+    let flow = chain(OutputRejectMode::Finish).run_request(&mut ctx).await;
+    assert!(
+        matches!(flow, Flow::Reject(ref e) if e.status() == 400),
+        "{flow:?}"
+    );
+    assert!(ctx.response_headers.set.contains_key(GUARDRAIL_HEADER));
+}
+
+#[tokio::test]
+async fn stream_block_ends_cleanly_even_if_outer_plugin_holds_events() {
+    let stop = StreamEvent::Stop {
+        reason: StopReason::ContentFilter,
+        stop_sequence: None,
+    };
+    let chain = |mode| {
+        Chain::new(vec![
+            Arc::new(Entry::new("swallow", Arc::new(SwallowStop))),
+            Arc::new(
+                Entry::new("guard", Arc::new(Blocker))
+                    .with_order(1)
+                    .with_output_reject(mode),
+            ),
+        ])
+    };
+    let events = || vec![text("harmlos "), text("dann STOP"), text("nie gesehen")];
+    let out = run_stream(chain(OutputRejectMode::Finish), events()).await;
+    assert_eq!(out.last(), Some(&stop), "{out:?}");
+    assert_eq!(joined(&out), "harmlos ");
+    let out = run_stream(chain(OutputRejectMode::Error), events()).await;
+    assert!(
+        matches!(out.last(), Some(StreamEvent::Error(e)) if e.code.as_deref() == Some("content_filtered")),
+        "{out:?}"
+    );
+    assert_eq!(joined(&out), "harmlos ");
+}
+
+#[tokio::test]
+async fn failmode_metric_counts_open_and_closed() {
+    let reg = registry();
+    let snap = snapshot(
+        1,
+        &[],
+        vec![
+            binding(
+                "f-open",
+                ScopeLevel::Global,
+                None,
+                "fail",
+                0,
+                json!({"failMode": "open"}),
+            ),
+            binding("f-closed", ScopeLevel::Global, None, "fail", 1, json!({})),
+        ],
+    );
+    let idx = PluginIndex::build(&snap, &reg, IndexOptions::default());
+    let (flow, _) = trace(&idx.chain(None, None)).await;
+    assert!(matches!(flow, Flow::Reject(_)));
+    let m = reg.metrics();
+    assert_eq!(m.failmode_count("fail", FailMode::Open), 1);
+    assert_eq!(m.failmode_count("fail", FailMode::Closed), 1);
+    let mut out = String::new();
+    m.render_prometheus(&mut out);
+    assert!(
+        out.contains("aigw_plugin_failmode_triggered_total{plugin=\"fail\",mode=\"open\"} 1"),
+        "{out}"
+    );
+}
+
+#[test]
+fn default_fail_modes_and_effective_control() {
+    // F148: content-safety closed, webhook open, sonst closed; je Bindung überschreibbar.
+    let r = Registry::with_builtin();
+    let eff = |plugin: &str, cfg: Value| r.effective(plugin, &obj(cfg)).unwrap();
+    let cs = eff("content-safety", json!({}));
+    assert_eq!(cs.fail_mode, FailMode::Closed);
+    assert!(cs.fail_mode_default);
+    assert_eq!(cs.timeout, Duration::from_secs(3));
+    let wh = eff("webhook", json!({}));
+    assert_eq!(wh.fail_mode, FailMode::Open);
+    assert_eq!(wh.timeout, Duration::from_millis(200));
+    for p in [
+        "pii",
+        "prompt-filter",
+        "header",
+        "request-transform",
+        "cache",
+    ] {
+        assert_eq!(eff(p, json!({})).fail_mode, FailMode::Closed, "{p}");
+    }
+    let wh = eff(
+        "webhook",
+        json!({"failMode": "closed", "outputRejectMode": "error"}),
+    );
+    assert_eq!(wh.fail_mode, FailMode::Closed);
+    assert!(!wh.fail_mode_default);
+    assert_eq!(wh.output_reject, OutputRejectMode::Error);
+    assert!(r.effective("nope", &obj(json!({}))).is_err());
+    assert!(
+        r.effective("pii", &obj(json!({"outputRejectMode": "x"})))
+            .is_err()
+    );
+}
+
+#[test]
+fn validation_registry_uses_upstream_policy() {
+    use aigw_core::upstream::UpstreamPolicy;
+    let cfg = obj(json!({"url": "http://hooks.internal:8080/x"}));
+    let strict = Registry::for_validation(&UpstreamPolicy::strict());
+    let err = strict.validate("webhook", &cfg).unwrap_err();
+    assert!(err.contains("url"), "{err}");
+    let cs = obj(
+        json!({"provider": "azure", "endpoint": "http://cs.internal:8080",
+                        "credential": "c"}),
+    );
+    assert!(strict.validate("content-safety", &cs).is_err());
+    let admin = aigw_core::config::AdminConfig {
+        allow_insecure_upstreams: vec!["hooks.internal".into(), "cs.internal".into()],
+        allow_private_upstreams: vec!["hooks.internal".into(), "cs.internal".into()],
+        ..Default::default()
+    };
+    let lax = Registry::for_validation(&UpstreamPolicy::from_config(&admin).unwrap());
+    lax.validate("webhook", &cfg).unwrap();
+    lax.validate("content-safety", &cs).unwrap();
 }

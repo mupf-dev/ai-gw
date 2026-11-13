@@ -46,6 +46,11 @@ pub const SECRET_ENV_PREFIX: &str = "AIGW_SECRET_";
 /// Prüffunktion für `ModelGroup.spec.settings` (siehe [`ApplyOptions::group_settings`]).
 pub type SettingsCheck = fn(&aigw_core::resource::JsonObject) -> Result<(), String>;
 
+/// Prüffunktion für Plugin-Bindungen (Plugin-Name, `config`; SSRF-Regeln aus
+/// [`ApplyOptions::upstreams`]), siehe [`ApplyOptions::plugin_bindings`].
+pub type PluginBindingCheck =
+    fn(&UpstreamPolicy, &str, &aigw_core::resource::JsonObject) -> Result<(), String>;
+
 /// Umgang mit `ApiKey`-Manifesten.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -80,6 +85,10 @@ pub struct ApplyOptions {
     /// Persistenzschicht kennt ihn nicht, daher von außen gesetzt, z. B.
     /// `aigw_admin::resources::group_settings`). `None` = keine Prüfung.
     pub group_settings: Option<SettingsCheck>,
+    /// Prüfung von `PluginBinding` (Registry der Plugin-Kette, F118/F165; die
+    /// Persistenzschicht kennt sie nicht, z. B. `aigw_admin::plugin_bindings::check`).
+    /// `None` = keine Prüfung.
+    pub plugin_bindings: Option<PluginBindingCheck>,
 }
 
 impl Default for ApplyOptions {
@@ -92,6 +101,7 @@ impl Default for ApplyOptions {
             secrets: SecretPolicy::default(),
             upstreams: UpstreamPolicy::strict(),
             group_settings: None,
+            plugin_bindings: None,
         }
     }
 }

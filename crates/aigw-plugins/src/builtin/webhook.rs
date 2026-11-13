@@ -14,7 +14,7 @@
 //!   maxPayloadBytes: 1048576                   # Größe des Aufrufs (Standard 1 MiB)
 //!   maxResponseBytes: 1048576                  # Größe der Antwort (Standard 1 MiB)
 //!   timeoutMs: 200                             # Kettensteuerung (Standard 200 ms)
-//!   failMode: closed                           # Kettensteuerung (open | closed)
+//!   failMode: closed                           # Kettensteuerung (Standard open, F148)
 //! ```
 //!
 //! **Aufruf:** `POST` mit JSON `{version, phase, requestId, ingress, modelGroup, stream,
@@ -52,6 +52,7 @@ use http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
+use crate::binding::FailMode;
 use crate::plugin::{
     CallInfo, Flow, Hook, Meta, MetaExt as _, Phases, Plugin, PluginError, ReqCtx, RespCtx,
 };
@@ -137,17 +138,16 @@ enum Reply {
 struct Env {
     client: OnceLock<Result<WebhookClient, String>>,
     credentials: Option<Arc<dyn CredentialSource>>,
+    /// SSRF-Regeln für einen erst bei Bedarf gebauten Client.
+    policy: aigw_core::upstream::UpstreamPolicy,
 }
 
 impl Env {
     fn client(&self) -> Result<WebhookClient, String> {
         self.client
             .get_or_init(|| {
-                WebhookClient::new(
-                    aigw_core::upstream::UpstreamPolicy::strict(),
-                    ClientOptions::default(),
-                )
-                .map_err(|e| format!("Webhook-Client: {e}"))
+                WebhookClient::new(self.policy.clone(), ClientOptions::default())
+                    .map_err(|e| format!("Webhook-Client: {e}"))
             })
             .clone()
     }
@@ -171,16 +171,24 @@ impl std::fmt::Debug for Factory {
 
 impl Default for Factory {
     fn default() -> Self {
-        Self {
-            env: Arc::new(Env {
-                client: OnceLock::new(),
-                credentials: None,
-            }),
-        }
+        Self::with_policy(aigw_core::upstream::UpstreamPolicy::strict())
     }
 }
 
 impl Factory {
+    /// Fabrik mit eigenen SSRF-Regeln, ohne Credential-Quelle (Prüfen von Bindungen in
+    /// Admin-API/GitOps, [`crate::Registry::for_validation`]); der Client entsteht erst beim
+    /// ersten Bau einer Bindung.
+    pub fn with_policy(policy: aigw_core::upstream::UpstreamPolicy) -> Self {
+        Self {
+            env: Arc::new(Env {
+                client: OnceLock::new(),
+                credentials: None,
+                policy,
+            }),
+        }
+    }
+
     /// Fabrik mit eigenem Client (SSRF-Regeln, Pool) und Credential-Quelle.
     pub fn new(client: WebhookClient, credentials: Option<Arc<dyn CredentialSource>>) -> Self {
         let cell = OnceLock::new();
@@ -189,6 +197,7 @@ impl Factory {
             env: Arc::new(Env {
                 client: cell,
                 credentials,
+                policy: aigw_core::upstream::UpstreamPolicy::strict(),
             }),
         }
     }
@@ -243,6 +252,12 @@ impl PluginFactory for Factory {
 
     fn default_timeout(&self) -> Duration {
         DEFAULT_TIMEOUT
+    }
+
+    /// F148: ein nicht erreichbarer Webhook (meist Zusatzlogik, Audit) soll den Verkehr nicht
+    /// stoppen – Standard `open`; Policy-Webhooks setzen `failMode: closed`.
+    fn default_fail_mode(&self) -> FailMode {
+        FailMode::Open
     }
 }
 

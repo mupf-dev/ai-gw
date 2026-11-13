@@ -187,6 +187,8 @@ fn options(
         // Gleiche Endpunktregeln wie die Admin-API (`admin.*` der Startkonfiguration).
         upstreams: aigw_core::upstream::UpstreamPolicy::from_config(&cfg.admin)?,
         group_settings: Some(aigw_admin::resources::group_settings),
+        // Plugin-Bindungen mit der Registry der Plugin-Kette (F118/F165).
+        plugin_bindings: Some(aigw_admin::plugin_bindings::check),
         ..ApplyOptions::default()
     })
 }

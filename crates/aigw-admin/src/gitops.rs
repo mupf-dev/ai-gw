@@ -173,6 +173,7 @@ pub(crate) async fn apply_config(
         secrets: SecretPolicy::restricted(SECRET_ENV_PREFIX),
         upstreams: st.upstreams.clone(),
         group_settings: Some(crate::resources::group_settings),
+        plugin_bindings: Some(crate::plugin_bindings::check),
     };
     let report = gitops::apply(&st.store, &st.keyring, &docs, &opts, &ProcessSecrets)
         .await

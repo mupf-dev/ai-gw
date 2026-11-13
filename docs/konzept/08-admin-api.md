@@ -32,6 +32,7 @@ Instanz nach ca. 100 ms (Debounce), bei Postgres auf allen Instanzen per `NOTIFY
 | `/deployments`, `/deployments/{name}` | GET, POST · GET, PUT, DELETE | Deployments (Anbieter, Endpunkt, Anbieter-Modell, Zugangsdaten, Gewicht, Priorität, Kapazität, aktiv) |
 | `/provider-credentials`, `/provider-credentials/{name}` | GET, POST · GET, PUT, PATCH, DELETE | Anbieter-Zugangsdaten (Werte nur schreibbar) |
 | `/prices`, `/prices/{name}` | GET, POST · GET, PUT, DELETE | Preisversionen je Anbieter-Modell |
+| `/plugin-bindings`, `/plugin-bindings/{name}` | GET, POST · GET, PUT, DELETE | Plugin-Bindungen; Prüfung mit der Plugin-Registry (422), gelesen mit wirksamem `failMode` (`effective`), siehe [12-plugins.md](12-plugins.md) §3–4 |
 | `/admin-api-keys`, `/admin-api-keys/{name}` | GET, POST · GET, PUT, DELETE | Admin-API-Keys (§5.5) |
 | `/session`, `/auth/info` | GET | angemeldeter Principal bzw. Anmeldeverfahren (§5) |
 | `/audit-log` | GET | Audit-Log lesen, filtern, als JSON Lines exportieren (§5.10) |

@@ -1,7 +1,8 @@
 # ai-gw – Plugin-Kette (AIGW-36)
 
 Stand: 2026-11-13 · Status: umgesetzt (Kette, Vererbung, `header`, `request-transform`,
-`webhook` – AIGW-61),
+`webhook` – AIGW-61; Zwiebelprinzip, Fehlermodus je Plugin-Art, Ausgabe-Ablehnung mit
+`content_filter`, Prüfung beim Schreiben, Admin-API – AIGW-69),
 Grundlage: [01-architektur.md](01-architektur.md) §3, §7, §9 · Code: `crates/aigw-plugins`,
 Einhängepunkte `crates/aigw-proxy/src/plugins.rs`
 
@@ -27,6 +28,34 @@ Die Stellen sind in `aigw-proxy` als benannte Schritte markiert (`handlers::chat
 Ohne Bindungen kostet die Kette einen Index-Lookup (§7); Kontext, Meta und Stream-Hülle werden
 dann nicht angelegt.
 
+### Zwiebelprinzip (F167b, Sicherheit)
+
+Anfrage-Haken laufen in Kettenreihenfolge (`order` aufsteigend, §4), **Antwort- und
+Stream-Haken in umgekehrter Reihenfolge** – wie Middleware-Schichten:
+
+```
+Anfrage:  pii (10) ─► webhook (20) ─► content-safety (30) ─► Upstream
+Antwort:  pii (10) ◄─ webhook (20) ◄─ content-safety (30) ◄─ Upstream
+```
+
+Ein Plugin, das die Anfrage früh verändert, sieht die Antwort als letztes. Wichtigster Fall:
+`pii` mit `pseudonymize` ersetzt E-Mail-Adressen in der Anfrage durch `[EMAIL_1]` und übersetzt
+sie in der Antwort zurück – alle Plugins mit höherer `order` (Webhooks, externe Prüfdienste)
+sehen in **beiden** Richtungen nur die Platzhalter (Test
+`webhook::response_webhook_sees_only_pseudonyms`). Vor AIGW-69 liefen die Antwort-Haken in
+derselben Reihenfolge wie die Anfrage-Haken; ein Antwort-Webhook hinter `pii` sah dadurch die
+zurückübersetzten Originalwerte.
+
+Faustregel für `order`: Plugins, die Daten **schützen** (Pseudonymisierung, Maskierung),
+bekommen eine **niedrige** `order` (außen); Plugins, die die rohe Modellausgabe zuerst prüfen
+sollen (z. B. `content-safety` auf der Ausgabe), eine **hohe** (innen). Im Stream gibt
+`ctx.emit` Ereignisse an die nachfolgenden, also **äußeren** Plugins weiter.
+
+Grenze: Im gepufferten Modus (§2) laufen reine Stream-Plugins (ohne Antwort-Phase) erst auf
+den Ereignissen der fertig verarbeiteten Antwort, also nach allen Antwort-Haken – unabhängig von
+ihrer `order`. Eingebaute Plugins haben immer beide Ausgabehaken, betroffen wären nur eigene
+reine Stream-Plugins.
+
 **Abrechnung bei Plugin-Ergebnissen:** Die Admission (Reservierung) wird immer im Recorder
 abgeschlossen. `Reject` (auch Post-Plugins und `failMode: closed`) gleicht die
 Token-Reservierung mit Verbrauch 0 ab; `Respond` mit der Usage, die das Plugin in seiner Antwort
@@ -41,14 +70,19 @@ pub trait Plugin: Send + Sync + 'static {
     fn name(&self) -> &'static str;
     fn phases(&self) -> Phases;                                   // request / response / chunk
     fn needs_buffered_output(&self) -> bool { false }             // ganze Antwort nötig?
-    fn on_request<'a>(&'a self, ctx: &'a mut ReqCtx<'_>) -> Hook<'a, Flow>;   // Continue | Respond | Reject
-    fn on_response<'a>(&'a self, ctx: &'a mut RespCtx<'_>) -> Hook<'a, Flow>; // Continue | Respond (ersetzen) | Reject
+    fn on_request<'a>(&'a self, ctx: &'a mut ReqCtx<'_>) -> Hook<'a, Flow>;   // Continue | Respond | Reject | Block
+    fn on_response<'a>(&'a self, ctx: &'a mut RespCtx<'_>) -> Hook<'a, Flow>; // Continue | Respond (ersetzen) | Reject | Block
     fn on_chunk(&self, ctx: &mut ChunkCtx<'_>, ev: &mut StreamEvent) -> Result<ChunkFlow, PluginError>; // synchron
     fn on_stream_end(&self, ctx: &mut ChunkCtx<'_>) -> Result<ChunkFlow, PluginError>;              // Ausleeren
 }
 enum Hook<'a, T> { Ready(Result<T, PluginError>), Pending(BoxFuture<'a, Result<T, PluginError>>) }
-enum ChunkFlow { Continue, Drop, Reject(ApiError) }
+enum ChunkFlow { Continue, Drop, Reject(ApiError), Block(ApiError) }
 ```
+
+`Reject` ist eine Ablehnung aus Richtlinie oder Protokoll (z. B. Webhook `reject`,
+`request-transform` über dem Deckel); `Block` ist eine **Guardrail-Ablehnung des Inhalts**
+(`pii` mit `reject`, `prompt-filter`, `content-safety`), die die Kette nach F160 behandelt
+(§3a).
 
 - **Asynchron ohne Zwangs-Allokation:** Synchrone Plugins geben `Hook::Ready` zurück (keine
   Box, kein `async_trait`); asynchrone (Webhook, AIGW-61; externe Guardrails, AIGW-37) geben
@@ -106,24 +140,86 @@ soll die Route entsprechend kennzeichnen (Latenzkosten).
 | `model`/`stream` verändert | zurückgesetzt, weiter | zurückgesetzt, `500 plugin_error` |
 | Bindung ungültig (Snapshot-Aufbau) | geloggt, Bindung übersprungen | betroffene Ketten antworten `500 plugin_config_invalid` |
 
-Standard: `failMode` je Plugin-Fabrik (eingebaute: `closed`; sie können zur Laufzeit nicht
-fehlschlagen), `timeoutMs` 1000 (Fabrik kann abweichen, Webhook: 200). Für **ungültige**
-Bindungen ohne eigenes `failMode` gilt `IndexOptions::invalid_binding` (Standard `open` =
-überspringen). Die Fehlermeldung an den Client nennt nur den Bindungsnamen; Details stehen im
+**Standard je Plugin-Art (F148)**, je Bindung über `failMode` überschreibbar:
+
+| Plugin | `failMode` | `timeoutMs` | Begründung |
+|---|---|---|---|
+| `content-safety` | `closed` | 3000 | Sicherheitsprüfung: ohne Ergebnis keine Freigabe |
+| `webhook` | `open` | 200 | meist Zusatzlogik/Audit; ein ausgefallener Dienst soll den Verkehr nicht stoppen. Policy-Webhooks setzen `failMode: closed` |
+| alle anderen (`pii`, `prompt-filter`, `header`, `request-transform`, `cache`) | `closed` | 1000 | lokal, können zur Laufzeit praktisch nicht fehlschlagen |
+
+Für **ungültige** Bindungen ohne eigenes `failMode` gilt `IndexOptions::invalid_binding`
+(Standard `open` = überspringen); seit AIGW-69 werden Bindungen aber schon beim Schreiben
+geprüft (§4). Die Fehlermeldung an den Client nennt nur den Bindungsnamen; Details stehen im
 Log (mit Request-ID).
+
+**Sichtbarkeit:**
+
+- Metrik `aigw_plugin_failmode_triggered_total{plugin,mode}` (`/metrics` der Steuerebene):
+  zählt jeden Plugin-Fehler, bei dem der Fehlermodus gegriffen hat – `mode="open"` =
+  übersprungen (die Anfrage lief **ohne** das Plugin weiter), `mode="closed"` = abgelehnt.
+  `plugin` ist der Plugin-Name (begrenzt); ungültige Bindungen zählen hier nicht (Log beim
+  Snapshot-Aufbau, seit AIGW-69 ohnehin beim Schreiben abgewiesen). Alarmvorschlag:
+
+  ```yaml
+  - alert: AigwPluginFailOpen
+    expr: sum by (plugin) (increase(aigw_plugin_failmode_triggered_total{mode="open"}[5m])) > 0
+    annotations: {summary: "Plugin {{ $labels.plugin }} übersprungen (failMode open)"}
+  ```
+- Admin-API: `GET /admin/api/v1/plugin-bindings[/{name}]` liefert je Bindung `effective`
+  mit `failMode`, `failModeSource` (`binding` | `plugin-default`), `timeoutMs` und
+  `outputRejectMode` – die UI zeigt den wirksamen Fehlermodus an.
+
+Nicht gezählt wird `content-safety` mit `sentenceOnError` im Satzmodus (eigene Regel, siehe
+[13-guardrails.md](13-guardrails.md) §5).
+
+### 3a. Guardrail-Ablehnung der Ausgabe (F160)
+
+Blockiert ein Guardrail (`Flow::Block` / `ChunkFlow::Block`) **die Ausgabe**, entscheidet
+`outputRejectMode` der Bindung:
+
+| | `finish` (Standard, wie Azure OpenAI) | `error` |
+|---|---|---|
+| JSON | `200`, Inhalt aller Varianten entfernt, OpenAI `finish_reason: "content_filter"`, Anthropic `stop_reason: "refusal"`; Usage, ID und Modell bleiben (Upstream-Verbrauch wird abgerechnet) | `400` mit dem Fehler des Plugins (z. B. `pii_detected`, `content_filtered`) |
+| gepufferter Stream | `200`, SSE mit leerem Inhalt und `content_filter` / `refusal`, sauberes Ende (`[DONE]` bzw. `message_stop`) | `400` vor dem ersten Byte |
+| Live-Stream | bereits Gesendetes bleibt, dann Stop-Ereignis mit `content_filter` / `refusal` und sauberes Ende; der Upstream wird abgebrochen | Fehlerereignis im Format des Eingangs |
+
+- Header `x-aigw-guardrail: <plugin>` (z. B. `pii`, `content-safety`) bei JSON und gepufferten
+  Antworten, bei beiden Modi und auch bei **Eingabe**-Ablehnungen. Im Live-Stream sind die
+  Header schon gesendet – dort zeigt nur `finish_reason`/`stop_reason` die Ablehnung an.
+- **Eingabe-Ablehnungen bleiben `400`** (der Client muss seine Anfrage ändern).
+- Nach einem `Block` laufen keine weiteren (äußeren) Antwort-Haken mehr – ein Plugin kann eine
+  Ablehnung nicht rückgängig machen. Im Stream durchläuft das Endereignis noch die äußeren
+  Plugins (sie geben Zurückgehaltenes aus); hält eines es zurück, gibt die Kette es trotzdem
+  aus.
+- Im Request-Record: Status `200`, Guardrail-Zähler mit Aktion `reject`. Fehlt im Live-Stream
+  nach dem Abbruch die Usage des Upstreams, gilt dasselbe wie bei Client-Abbrüchen.
 
 ## 4. Bindungen und Vererbung
 
 `PluginBinding` (Ressource, siehe [02-datenmodell.md](02-datenmodell.md)) bindet ein Plugin an
-eine Ebene. `config` enthält die Plugin-Konfiguration und vier **reservierte** Schlüssel der
-Kettensteuerung (sie gehen nicht an das Plugin):
+eine Ebene. `config` enthält die Plugin-Konfiguration und fünf **reservierte** Schlüssel der
+Kettensteuerung (sie gehen nicht an das Plugin; als eigene Spec-Felder: F117, Folgeticket):
 
 | Schlüssel | Werte | Standard | Bedeutung |
 |---|---|---|---|
 | `inherit` | `append` / `override` / `disable` | `append` | Verhältnis zu Bindungen **desselben Plugins** auf äußeren Ebenen |
 | `locked` | bool | `false` | innere Ebenen können die Bindung weder ersetzen noch abschalten |
-| `failMode` | `open` / `closed` | Plugin | siehe §3 |
-| `timeoutMs` | 1–60000 | Plugin | Zeitlimit asynchroner Haken |
+| `failMode` | `open` / `closed` | je Plugin-Art | siehe §3 |
+| `timeoutMs` | 1–60000 | je Plugin-Art | Zeitlimit asynchroner Haken |
+| `outputRejectMode` | `finish` / `error` | `finish` | Ausgabe-Ablehnung eines Guardrails, siehe §3a |
+
+**Prüfung beim Schreiben (F118/F165):** Admin-API (`/admin/api/v1/plugin-bindings`, Anlegen
+und Ersetzen) und GitOps-Plan (`aigw config validate|diff|apply`, `config:apply`) prüfen jede
+Bindung mit der Registry der Plugin-Kette (`Registry::for_validation`): Kettensteuerung,
+Plugin-Konfiguration (`deny_unknown_fields`, Wertebereiche) und die SSRF-Regeln von
+`webhook`/`content-safety` mit `admin.allow_insecure_upstreams` / `allow_private_upstreams`.
+Fehler → `422` mit der Meldung des Plugins, z. B. ``Plugin-Bindung (pii): unknown field
+`acton`, expected one of …`` bzw. `Plugin-Bindung (webhook): url: …`. Credential-Referenzen
+(`webhook.secret.credential`, `content-safety.credential`) werden erst zur Laufzeit aufgelöst;
+`secret.env`/`secret.file` liest schon die Prüfung. Schreiben dürfen nur globale `admin`s
+(Plugin-Bindungen sind sicherheitsrelevant, RBAC-Ziel wie der Modellkatalog); lesen jede
+wirksame Rolle.
 
 Zusammensetzung je (Org, Team, Key, Modellgruppe):
 
@@ -216,7 +312,7 @@ spec:
     maxPayloadBytes: 1048576             # Standard 1 MiB, höchstens 16 MiB
     maxResponseBytes: 1048576
     timeoutMs: 200                       # Kettensteuerung, Standard 200 ms
-    failMode: closed                     # Kettensteuerung, Standard closed
+    failMode: closed                     # Kettensteuerung, Standard open (F148)
 ```
 
 | Feld | Bedeutung |
@@ -242,7 +338,8 @@ spec:
 `meta` (nur wenn nicht leer) ist die **externe Sicht** auf `Meta` früherer Plugins
 (`MetaExt::external_view`): Schlüssel mit Präfix `aigw.` (interne Daten eingebauter Plugins,
 z. B. `aigw.pii` mit der Pseudonym-Zuordnung samt Originalwerten, AIGW-37) werden zentral
-entfernt und verlassen das Gateway nie.
+entfernt und verlassen das Gateway nie. Dank Zwiebelprinzip (§1) sieht ein Webhook hinter
+`pii` auch in der Antwort-Phase nur die Platzhalter.
 
 In der Antwort-Phase steht statt `request` die IR-Antwort unter `response`. Nie enthalten:
 Gateway-Keys und andere Zugangsdaten-Header, Upstream-Header früherer Plugins
@@ -271,8 +368,9 @@ Empfänger prüft (Referenz: `aigw_webhook::sign::verify`):
 | `reject` | `status` (400–499, Standard 400), `message` (≤ 1024 Byte), `code` (Standard `webhook_rejected`) | Ablehnung im Format des Eingangs; der Status wird auf die Fehlerklasse abgebildet (401, 403, 404, 413, 429 bleiben, andere 4xx → 400). |
 | `respond` | `response` (IR) | Anfrage-Phase: feste Antwort ohne Upstream (Usage wie bei anderen Plugins nur, wenn angegeben); fehlende `id`/`model` ergänzt das Gateway. Antwort-Phase: wie `modify`. |
 
-Alles andere ist ein **Plugin-Fehler** und folgt `failMode` (§3): Zeitüberschreitung
-(`timeoutMs`, Standard 200 ms – die Kette bricht den Aufruf ab), Verbindungs-/SSRF-Fehler,
+Alles andere ist ein **Plugin-Fehler** und folgt `failMode` (§3, Standard für `webhook`:
+`open`): Zeitüberschreitung (`timeoutMs`, Standard 200 ms – die Kette bricht den Aufruf ab),
+Verbindungs-/SSRF-Fehler,
 Status ≠ 2xx, ungültiges JSON bzw. unbekannte `action`, verbotene Änderung, Größenlimit, nicht
 auflösbares Geheimnis. Fehlerdetails stehen nur im Log (mit Request-ID).
 
@@ -342,5 +440,7 @@ Plugins im Sub-µs-Bereich.
 - **WASM (nach MVP):** Die Schnittstelle ist auf WIT abbildbar: `Meta` und IR sind JSON-fähig,
   `on_chunk` ist synchron, Zustand je Stream liegt beim Host (`ChunkCtx::state`).
 - Neue Plugins registrieren eine `PluginFactory` in der `Registry`
-  (`PluginChains::new(registry, opts)`); `Registry::validate` prüft Bindungen ohne sie zu
-  verwenden (für Admin-API/`aigw config validate`).
+  (`PluginChains::new(registry, opts)`) und legen mit `default_fail_mode`/`default_timeout`
+  ihre Standardwerte fest (§3). `Registry::validate` prüft Bindungen ohne sie zu verwenden;
+  Admin-API und GitOps nutzen dafür `Registry::for_validation(&policy)` (§4). Guardrails
+  melden Inhaltsablehnungen als `Flow::Block`/`ChunkFlow::Block`, nicht als `Reject` (§3a).
