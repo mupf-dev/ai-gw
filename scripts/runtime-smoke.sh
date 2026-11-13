@@ -4,7 +4,7 @@
 #
 # Laufzeitprüfung: baut das Release-Binary (mit eingebetteter UI aus ui/dist, falls gebaut),
 # startet `aigw serve` (Daten- und Steuerebene getrennt) und prüft /healthz, /v1/* (Mock-Anbieter),
-# die Admin-API und /admin/.
+# die Admin-API, /metrics und /admin/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -41,6 +41,10 @@ echo "--- POST /v1/messages (Stream)";   curl -fsSN "$BASE/v1/messages" \
   -d '{"model":"mock","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"Hallo"}]}'
 echo "--- Admin nicht auf Datenebene"
 test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/api/v1/version")" = 404
+echo "--- GET /metrics (Steuerebene)"
+curl -fsS "$CBASE/metrics" | tee "$TMP/metrics.txt" | grep '^aigw_log_'
+grep -q '^aigw_log_dropped_total 0$' "$TMP/metrics.txt"
+test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/metrics")" = 404
 echo "--- GET /admin/api/v1/version";   curl -fsS "$CBASE/admin/api/v1/version"; echo
 echo "--- GET /admin/api/openapi.json"; curl -fsS "$CBASE/admin/api/openapi.json" | head -c 200; echo
 echo "--- GET /admin/ (Kopfzeilen)";    curl -fsS -D - -o "$TMP/index.html" "$CBASE/admin/"

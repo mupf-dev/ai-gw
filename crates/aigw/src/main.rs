@@ -8,6 +8,7 @@
 //!   Adresse auf einem gemeinsamen Port.
 //! - `aigw openapi` gibt die OpenAPI-Spezifikation der Admin-API aus (für `ui/` → TS-Typen).
 
+mod observe;
 mod runtime;
 mod server;
 
@@ -126,7 +127,8 @@ fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
             config: aigw_proxy::ProxyConfig::from(&config.server.data),
             ..aigw_proxy::ProxyState::mock()
         };
-        server::run(listeners, state, shutdown_signal()).await?;
+        let control_extra = observe::metrics_router(runtime_state.observe_metrics.clone());
+        server::run(listeners, state, control_extra, shutdown_signal()).await?;
         runtime_state.shutdown().await;
         tracing::info!("ai-gw beendet");
         Ok(())

@@ -50,9 +50,10 @@ impl Listeners {
     }
 }
 
-/// Router der Steuerebene: Admin-API, Admin-UI und optional `/healthz`.
-fn control_router(with_healthz: bool) -> Router {
-    let r = aigw_admin::router();
+/// Router der Steuerebene: Admin-API, Admin-UI, `extra` (z. B. `/metrics`) und optional
+/// `/healthz`.
+fn control_router(with_healthz: bool, extra: Router) -> Router {
+    let r = aigw_admin::router().merge(extra);
     if with_healthz {
         r.route("/healthz", get(aigw_proxy::healthz))
     } else {
@@ -61,16 +62,19 @@ fn control_router(with_healthz: bool) -> Router {
 }
 
 /// Betreibt die Listener, bis `shutdown` fertig ist; wartet dann auf laufende Anfragen.
+///
+/// `control_extra` wird in den Router der Steuerebene eingehängt (z. B. `/metrics`).
 pub(crate) async fn run(
     listeners: Listeners,
     state: ProxyState,
+    control_extra: Router,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
     let data_router = aigw_proxy::router(state);
     match listeners.control {
         None => {
             // `/healthz` liefert bereits der Daten-Router.
-            let app = data_router.merge(control_router(false));
+            let app = data_router.merge(control_router(false, control_extra));
             axum::serve(listeners.data, app)
                 .with_graceful_shutdown(shutdown)
                 .await
@@ -87,7 +91,7 @@ pub(crate) async fn run(
             let data = axum::serve(listeners.data, data_router)
                 .with_graceful_shutdown(wait(rx.clone()))
                 .into_future();
-            let ctrl = axum::serve(control, control_router(true))
+            let ctrl = axum::serve(control, control_router(true, control_extra))
                 .with_graceful_shutdown(wait(rx))
                 .into_future();
             tokio::try_join!(data, ctrl).map(|_| ())
@@ -137,9 +141,14 @@ mod tests {
         assert!(listeners.control.is_some());
         let (data, control) = listeners.local_addrs().unwrap();
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-        let task = tokio::spawn(run(listeners, ProxyState::mock(), async move {
-            let _ = rx.await;
-        }));
+        let task = tokio::spawn(run(
+            listeners,
+            ProxyState::mock(),
+            Router::new(),
+            async move {
+                let _ = rx.await;
+            },
+        ));
 
         assert_eq!(get_status(data, "/healthz").await, StatusCode::OK);
         assert_eq!(get_status(data, "/v1/models").await, StatusCode::OK);
@@ -174,9 +183,14 @@ mod tests {
         let (data, control) = listeners.local_addrs().unwrap();
         assert_eq!(data, control);
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-        let task = tokio::spawn(run(listeners, ProxyState::mock(), async move {
-            let _ = rx.await;
-        }));
+        let task = tokio::spawn(run(
+            listeners,
+            ProxyState::mock(),
+            Router::new(),
+            async move {
+                let _ = rx.await;
+            },
+        ));
         assert_eq!(get_status(data, "/healthz").await, StatusCode::OK);
         assert_eq!(get_status(data, "/v1/models").await, StatusCode::OK);
         assert_eq!(
