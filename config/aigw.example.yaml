@@ -33,6 +33,21 @@ store:
   # sonst sofort per Benachrichtigung (SQLite im Prozess, Postgres LISTEN/NOTIFY).
   reload_poll_secs: 30
 
+snapshot:
+  # Inkrementeller Neubau des Konfigurations-Snapshots (nur geänderte Objekte, F16); bei
+  # Lücken, unbekannten oder mehr als max_incremental_changes Änderungen vollständig
+  incremental: true
+  max_incremental_changes: 1000
+  # Konsistenzprüfung: vollständiger Neubau im Hintergrund + Vergleich (Sekunden, 0 = aus)
+  verify_interval_secs: 600
+  # /readyz meldet "degraded" (HTTP 200), wenn der Snapshot so lange nicht mit der
+  # Datenbank abgeglichen werden konnte oder aus dem Platten-Cache stammt (F15)
+  stale_after_secs: 300
+  # Verschlüsselter Snapshot-Cache (AES-256-GCM, Master-Key) für den Kaltstart bei
+  # Datenbankausfall (F14); ohne Angabe aus
+  # cache_file: "/var/lib/aigw/snapshot.cache"
+  cache_write_interval_secs: 10
+
 counters:
   # local | postgres-sync | redis
   backend: local

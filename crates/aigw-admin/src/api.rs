@@ -56,7 +56,7 @@ use crate::{admin_keys as ak, session as s};
         crate::analytics::list_request_logs, crate::analytics::get_request_log,
         crate::analytics::get_request_payload,
     ),
-    components(schemas(VersionInfo, Problem, crate::bounds::Cascade)),
+    components(schemas(VersionInfo, SnapshotInfo, Problem, crate::bounds::Cascade)),
     modifiers(&SecuritySchemes),
     tags(
         (name = "system", description = "Systeminformationen"),
@@ -149,6 +149,43 @@ pub struct VersionInfo {
     pub version: String,
     /// Art der eingebetteten UI: `ui` (gebaut) oder `fallback` (Platzhalter).
     pub ui: String,
+    /// Zustand des Konfigurations-Snapshots (F15, für das UI-Banner); fehlt ohne laufenden
+    /// Gateway-Zustand (z. B. `aigw openapi`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<SnapshotInfo>,
+}
+
+/// Zustand des aktiven Konfigurations-Snapshots (F15).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotInfo {
+    /// `config_version` des aktiven Snapshots.
+    pub version: i64,
+    /// Sekunden seit dem letzten erfolgreichen Abgleich mit der Datenbank (bei `source =
+    /// cache`: seit dem Schreiben des Caches).
+    pub age_seconds: u64,
+    /// Herkunft: `database` oder `cache` (Kaltstart ohne Datenbank, F14).
+    #[schema(example = "database")]
+    pub source: String,
+    /// Veraltet (Readiness `degraded`): aus dem Cache oder länger als
+    /// `snapshot.stale_after_secs` nicht mit der Datenbank abgleichbar.
+    pub stale: bool,
+    /// Schlägt der Abgleich mit der Datenbank gerade fehl?
+    pub failing: bool,
+}
+
+impl SnapshotInfo {
+    /// Aus dem Halter des Snapshots.
+    pub fn of(handle: &aigw_core::snapshot::SnapshotHandle) -> Self {
+        let st = handle.status();
+        Self {
+            version: st.version,
+            age_seconds: st.age.as_secs(),
+            source: st.source.as_str().to_owned(),
+            stale: st.stale,
+            failing: st.failing,
+        }
+    }
 }
 
 impl VersionInfo {
@@ -158,6 +195,7 @@ impl VersionInfo {
             name: aigw_core::NAME.to_owned(),
             version: aigw_core::VERSION.to_owned(),
             ui: crate::ui::KIND.to_owned(),
+            snapshot: None,
         }
     }
 }
@@ -169,8 +207,13 @@ impl VersionInfo {
     tag = "system",
     responses((status = 200, description = "Version des Gateways", body = VersionInfo))
 )]
-async fn version() -> Json<VersionInfo> {
-    Json(VersionInfo::current())
+async fn version(
+    snapshot: Option<axum::Extension<aigw_core::snapshot::SnapshotHandle>>,
+) -> Json<VersionInfo> {
+    Json(VersionInfo {
+        snapshot: snapshot.map(|axum::Extension(h)| SnapshotInfo::of(&h)),
+        ..VersionInfo::current()
+    })
 }
 
 async fn openapi() -> impl IntoResponse {

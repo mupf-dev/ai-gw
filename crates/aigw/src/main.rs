@@ -303,7 +303,16 @@ fn serve(
             mcp_task = Some(gateway.spawn(runtime_state.snapshot.clone()));
             data_router = data_router.merge(aigw_proxy::mcp::router(state, gateway));
         }
-        server::run(listeners, data_router, control, shutdown_signal()).await?;
+        // Snapshot-Zustand für GET /admin/api/v1/version (F15, AIGW-75).
+        let control = control.layer(axum::Extension(runtime_state.snapshot.clone()));
+        server::run(
+            listeners,
+            data_router,
+            control,
+            runtime_state.snapshot.clone(),
+            shutdown_signal(),
+        )
+        .await?;
         drop(mcp_task);
         drop(routes_task);
         drop(plugins_task);
@@ -330,7 +339,14 @@ async fn bootstrap_token(
             tracing::info!("Admin-API: Bootstrap-Token abgeschaltet (admin.auth.bootstrap: off)");
             return Ok(None);
         }
-        BootstrapMode::Auto if store.bootstrap_disabled().await? => {
+        // Kaltstart aus dem Snapshot-Cache (F14): Datenbank nicht erreichbar → sicherheitshalber
+        // kein Bootstrap-Token.
+        BootstrapMode::Auto
+            if store.bootstrap_disabled().await.unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "Bootstrap-Zustand nicht lesbar – Token abgeschaltet");
+                true
+            }) =>
+        {
             tracing::info!(
                 "Admin-API: Bootstrap-Token abgeschaltet (OIDC-Admin bzw. Admin-API-Key vorhanden)"
             );

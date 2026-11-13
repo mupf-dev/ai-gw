@@ -932,6 +932,13 @@ pub fn render_snapshot(out: &mut String, version: i64, reload: &ReloadMetrics) {
         ("ok", &reload.reloads_ok),
         ("failed", &reload.reloads_failed),
         ("check_failed", &reload.checks_failed),
+        // AIGW-75: Teilmenge von ok bzw. Rückfälle/Konsistenzprüfung/Platten-Cache
+        ("incremental", &reload.reloads_incremental),
+        ("incremental_fallback", &reload.incremental_fallbacks),
+        ("verify", &reload.verify_runs),
+        ("verify_mismatch", &reload.verify_mismatches),
+        ("cache_write", &reload.cache_writes),
+        ("cache_write_failed", &reload.cache_write_errors),
     ] {
         let _ = writeln!(
             out,

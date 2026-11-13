@@ -9,7 +9,8 @@
 # Audio (AIGW-21, inkl. Fähigkeiten der Modellgruppe), Routing-Ressourcen per REST
 # (Zugangsdaten ohne Geheimwert in der Antwort, Modellgruppe/Deployment/Preis, Alias-Kollision,
 # SSRF-Ablehnung, Freigabe per Key), /metrics, OTLP-Export (gegen einen lokalen Fake-Collector,
-# falls python3 vorhanden) und /admin/.
+# falls python3 vorhanden), /admin/, /readyz und den Kaltstart ohne Datenbank aus dem
+# verschlüsselten Snapshot-Cache (AIGW-75, F14/F15).
 #
 # Modellgruppen und Mock-Deployments kommen per GitOps-Apply (`POST
 # /admin/api/v1/config:apply`) in die laufende Instanz.
@@ -27,8 +28,8 @@ TMP=$(mktemp -d)
 # Erst beenden und warten, dann löschen – sonst schreibt `aigw` beim Herunterfahren noch in die
 # bereits gelöschte SQLite-Datei („disk I/O error“).
 trap 'kill "${PID:-}" "${OTLP_PID:-}" 2>/dev/null || true; wait "${PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
-printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "sqlite://%s/aigw.db?mode=rwc"\n' \
-  "$PORT" "$CPORT" "$TMP" >"$TMP/aigw.yaml"
+printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "sqlite://%s/aigw.db?mode=rwc"\nsnapshot:\n  cache_file: "%s/snapshot.cache"\n  cache_write_interval_secs: 1\n' \
+  "$PORT" "$CPORT" "$TMP" "$TMP" >"$TMP/aigw.yaml"
 # Fake-OTLP-Collector (nur lokal): speichert jeden POST-Body als Datei je Pfad.
 OTLP_PORT=${AIGW_SMOKE_OTLP_PORT:-14318}
 if command -v python3 >/dev/null 2>&1; then
@@ -87,8 +88,9 @@ spec: {modelGroup: mock-media, provider: mock, providerModel: mock}
 YAML
 # Wegwerf-Master-Key nur für diesen Lauf (ohne Key startet `aigw serve` nicht).
 TOKEN="aigw-admin-smoke-$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
+MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')
 # Upstream-Ausnahmen per ENV (wie für einen lokalen Ollama): http + privat nur für localhost.
-AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') AIGW_BOOTSTRAP_TOKEN="$TOKEN" \
+AIGW_MASTER_KEY=$MASTER_KEY AIGW_BOOTSTRAP_TOKEN="$TOKEN" \
   AIGW_ADMIN__ALLOW_INSECURE_UPSTREAMS=localhost AIGW_ADMIN__ALLOW_PRIVATE_UPSTREAMS=localhost \
   target/release/aigw serve --config "$TMP/aigw.yaml" &
 PID=$!
@@ -102,6 +104,10 @@ done
 
 echo "--- GET /healthz (Daten)";       curl -fsS "$BASE/healthz"; echo
 echo "--- GET /healthz (Steuerung)";    curl -fsS "$CBASE/healthz"; echo
+echo "--- GET /readyz (Daten, Steuerung) → ready"
+curl -fsS "$BASE/readyz" | tee "$TMP/readyz.json"; echo
+grep -q '"status":"ready"' "$TMP/readyz.json"
+curl -fsS "$CBASE/readyz" | grep -q '"source":"database"'
 echo "--- Admin-API ohne Token → 401"
 test "$(curl -s -o /dev/null -w '%{http_code}' "$CBASE/admin/api/v1/api-keys")" = 401
 echo "--- POST /admin/api/v1/organizations (Keys brauchen eine Organisation, F3)"
@@ -428,7 +434,9 @@ if [[ -n "${OTLP_PID:-}" ]]; then
   curl -fsS "$CBASE/metrics" | grep '^aigw_otlp_'
 fi
 test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/metrics")" = 404
-echo "--- GET /admin/api/v1/version";   curl -fsS "$CBASE/admin/api/v1/version"; echo
+echo "--- GET /admin/api/v1/version";   curl -fsS "$CBASE/admin/api/v1/version" | tee "$TMP/version.json"; echo
+grep -q '"snapshot":{' "$TMP/version.json"
+grep -q '"source":"database"' "$TMP/version.json"
 echo "--- GET /admin/api/openapi.json"
 curl -fsS -o "$TMP/openapi.json" "$CBASE/admin/api/openapi.json"; head -c 200 "$TMP/openapi.json"; echo
 grep -q "/admin/api/v1/provider-credentials" "$TMP/openapi.json"
@@ -440,4 +448,41 @@ if [[ -n "$ASSET" ]]; then
 else
   echo "Hinweis: keine gebaute UI eingebettet (Fallback-Seite)"
 fi
+
+echo "--- Snapshot-Cache geschrieben (F14)"
+for _ in $(seq 1 50); do
+  [[ -s "$TMP/snapshot.cache" ]] && break
+  sleep 0.1
+done
+test -s "$TMP/snapshot.cache"
+head -c 8 "$TMP/snapshot.cache" | grep -q AIGWSNAP
+if grep -q "$KEY" "$TMP/snapshot.cache"; then echo "FEHLER: Klartext im Cache" >&2; exit 1; fi
+# Warten, bis der letzte Stand (inkl. aller Änderungen oben) im Cache steht.
+sleep 2
+kill "$PID"; wait "$PID" 2>/dev/null || true
+
+echo "--- Kaltstart ohne Datenbank aus dem Cache → /readyz degraded, Anfragen laufen (F14/F15)"
+sed "s#sqlite://$TMP/aigw.db#sqlite://$TMP/later/aigw.db#" "$TMP/aigw.yaml" >"$TMP/aigw-cold.yaml"
+AIGW_MASTER_KEY=$MASTER_KEY AIGW_BOOTSTRAP_TOKEN="$TOKEN" \
+  target/release/aigw serve --config "$TMP/aigw-cold.yaml" &
+PID=$!
+for _ in $(seq 1 50); do
+  curl -fsS "$BASE/healthz" >/dev/null 2>&1 && break
+  sleep 0.1
+done
+curl -fsS "$BASE/readyz" | tee "$TMP/readyz.json"; echo
+grep -q '"status":"degraded"' "$TMP/readyz.json"
+grep -q '"source":"cache"' "$TMP/readyz.json"
+curl -fsS "$CBASE/admin/api/v1/version" | grep -q '"source":"cache"'
+curl -fsS "$BASE/v1/models" -H "authorization: Bearer $KEY" | grep -q '"mock"'
+echo "--- Datenbank wieder erreichbar → normaler Betrieb"
+mkdir -p "$TMP/later"
+for _ in $(seq 1 300); do
+  curl -fsS "$BASE/readyz" 2>/dev/null | grep -q '"status":"ready"' && break
+  sleep 0.1
+done
+curl -fsS "$BASE/readyz" | tee "$TMP/readyz.json"; echo
+grep -q '"status":"ready"' "$TMP/readyz.json"
+grep -q '"source":"database"' "$TMP/readyz.json"
+
 echo "Laufzeitprüfung bestanden"

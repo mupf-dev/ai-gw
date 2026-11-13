@@ -1918,6 +1918,32 @@ export interface components {
             /** @description Kennung im Audit-Log (`user:<name>`, `admin-key:<name>`, `bootstrap-admin`). */
             subject: string;
         };
+        /** @description Zustand des aktiven Konfigurations-Snapshots (F15). */
+        SnapshotInfo: {
+            /**
+             * Format: int64
+             * @description Sekunden seit dem letzten erfolgreichen Abgleich mit der Datenbank (bei `source =
+             *     cache`: seit dem Schreiben des Caches).
+             */
+            ageSeconds: number;
+            /** @description Schlägt der Abgleich mit der Datenbank gerade fehl? */
+            failing: boolean;
+            /**
+             * @description Herkunft: `database` oder `cache` (Kaltstart ohne Datenbank, F14).
+             * @example database
+             */
+            source: string;
+            /**
+             * @description Veraltet (Readiness `degraded`): aus dem Cache oder länger als
+             *     `snapshot.stale_after_secs` nicht mit der Datenbank abgleichbar.
+             */
+            stale: boolean;
+            /**
+             * Format: int64
+             * @description `config_version` des aktiven Snapshots.
+             */
+            version: number;
+        };
         /**
          * @description Bucket-Breite einer Zeitreihe.
          * @enum {string}
@@ -2095,6 +2121,7 @@ export interface components {
         VersionInfo: {
             /** @description Produktname. */
             name: string;
+            snapshot?: components["schemas"]["SnapshotInfo"] | null;
             /** @description Art der eingebetteten UI: `ui` (gebaut) oder `fallback` (Platzhalter). */
             ui: string;
             /** @description Version (SemVer). */

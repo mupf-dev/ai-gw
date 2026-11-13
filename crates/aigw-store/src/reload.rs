@@ -14,21 +14,31 @@
 //!    verlorene Benachrichtigungen (z. B. während eines Verbindungsabbruchs).
 //!
 //! Mehrere Auslöser kurz hintereinander werden zusammengefasst (Debounce, Standard 100 ms).
-//! Der Neubau ist vollständig ([`load_snapshot`]). Schlägt er fehl – oder ist die Datenbank
-//! nicht erreichbar –, bleibt der letzte Snapshot aktiv (Q8); erneut versucht wird mit
+//! Der Neubau ist inkrementell über das Änderungsjournal ([`load_incremental`], F16); bei
+//! Lücken, zu vielen Änderungen usw. vollständig ([`load_snapshot`]). Eine periodische
+//! Konsistenzprüfung baut vollständig neu und vergleicht mit dem aktiven Snapshot
+//! ([`Reloader::verify_now`]). Schlägt der Neubau fehl – oder ist die Datenbank nicht
+//! erreichbar –, bleibt der letzte Snapshot aktiv (Q8); erneut versucht wird mit
 //! exponentiellem Backoff. Zähler für Metriken stehen in [`ReloadMetrics`].
+//!
+//! Mit Platten-Cache (F14) schreibt ein eigener Task jeden aus der Datenbank gebauten Snapshot
+//! verschlüsselt auf Platte (höchstens alle `cache_write_interval`). Startet der Server aus dem
+//! Cache ([`Reloader::from_cache`]), migriert der Reloader die Datenbank, sobald sie erreichbar
+//! ist, und ersetzt den Cache-Stand durch einen vollständigen Neubau.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
-use aigw_core::config::StoreConfig;
-use aigw_core::snapshot::SnapshotHandle;
+use aigw_core::config::{SnapshotConfig, StoreConfig};
+use aigw_core::snapshot::{Snapshot, SnapshotHandle, SnapshotSource};
 use sqlx::postgres::PgListener;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
+use crate::snapshot::{Incremental, load_incremental};
+use crate::snapshot_cache::{CachedSnapshot, SnapshotCache};
 use crate::{Backend, Keyring, Store, StoreError, load_snapshot};
 
 /// Postgres-Kanal für Änderungsbenachrichtigungen (Nutzlast: neue `config_version`).
@@ -45,6 +55,16 @@ pub struct ReloadOptions {
     pub backoff_min: Duration,
     /// Höchste Wartezeit zwischen zwei Versuchen nach Fehlern.
     pub backoff_max: Duration,
+    /// Inkrementeller Neubau (F16).
+    pub incremental: bool,
+    /// Mehr Journal-Einträge → vollständiger Neubau.
+    pub max_incremental_changes: usize,
+    /// Abstand der Konsistenzprüfung (`None` = aus).
+    pub verify_interval: Option<Duration>,
+    /// Ab diesem Alter gilt ein nicht abgleichbarer Snapshot als veraltet (F15).
+    pub stale_after: Duration,
+    /// Mindestabstand zweier Schreibvorgänge des Platten-Caches.
+    pub cache_write_interval: Duration,
 }
 
 impl Default for ReloadOptions {
@@ -54,6 +74,11 @@ impl Default for ReloadOptions {
             debounce: Duration::from_millis(100),
             backoff_min: Duration::from_millis(250),
             backoff_max: Duration::from_secs(30),
+            incremental: true,
+            max_incremental_changes: 1000,
+            verify_interval: Some(Duration::from_secs(600)),
+            stale_after: aigw_core::snapshot::DEFAULT_STALE_AFTER,
+            cache_write_interval: Duration::from_secs(10),
         }
     }
 }
@@ -66,6 +91,18 @@ impl ReloadOptions {
                 .then(|| Duration::from_secs(cfg.reload_poll_secs)),
             ..Self::default()
         }
+    }
+
+    /// Übernimmt den Abschnitt `snapshot` der Startkonfiguration (AIGW-75).
+    #[must_use]
+    pub fn with_snapshot(mut self, cfg: &SnapshotConfig) -> Self {
+        self.incremental = cfg.incremental;
+        self.max_incremental_changes = usize::try_from(cfg.max_incremental_changes).unwrap_or(0);
+        self.verify_interval =
+            (cfg.verify_interval_secs > 0).then(|| Duration::from_secs(cfg.verify_interval_secs));
+        self.stale_after = Duration::from_secs(cfg.stale_after_secs);
+        self.cache_write_interval = Duration::from_secs(cfg.cache_write_interval_secs);
+        self
     }
 }
 
@@ -86,6 +123,18 @@ pub struct ReloadMetrics {
     pub last_build_micros: AtomicU64,
     /// Seit wann (Unix-ms) die Prüfung bzw. der Neubau fehlschlägt (`0` = aktuell; AIGW-44).
     pub stale_since_unix_ms: AtomicU64,
+    /// Davon inkrementell gebaute Snapshots (F16).
+    pub reloads_incremental: AtomicU64,
+    /// Rückfälle vom inkrementellen auf den vollständigen Neubau.
+    pub incremental_fallbacks: AtomicU64,
+    /// Durchgeführte Konsistenzprüfungen.
+    pub verify_runs: AtomicU64,
+    /// Konsistenzprüfungen mit Abweichung (inkrementeller Stand ≠ vollständiger Neubau).
+    pub verify_mismatches: AtomicU64,
+    /// Geschriebene Platten-Caches (F14).
+    pub cache_writes: AtomicU64,
+    /// Fehlgeschlagene Schreibvorgänge des Platten-Caches.
+    pub cache_write_errors: AtomicU64,
 }
 
 impl ReloadMetrics {
@@ -130,6 +179,9 @@ pub struct Reloader {
     handle: SnapshotHandle,
     opts: ReloadOptions,
     metrics: Arc<ReloadMetrics>,
+    cache: Option<Arc<SnapshotCache>>,
+    /// Kaltstart aus dem Cache: vor dem ersten Neubau noch migrieren.
+    needs_migrate: Arc<AtomicBool>,
 }
 
 impl Reloader {
@@ -140,13 +192,38 @@ impl Reloader {
         handle: SnapshotHandle,
         opts: ReloadOptions,
     ) -> Self {
+        handle.set_stale_after(opts.stale_after);
         Self {
             store,
             keyring,
             handle,
             opts,
             metrics: Arc::default(),
+            cache: None,
+            needs_migrate: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Kaltstart aus dem Platten-Cache (F14): `store` ist (noch) nicht erreichbar, der Snapshot
+    /// gilt bis zum ersten erfolgreichen Neubau als veraltet. Der Reloader migriert die
+    /// Datenbank, sobald sie erreichbar ist, und baut dann vollständig neu.
+    pub fn from_cache(
+        store: Store,
+        keyring: Arc<Keyring>,
+        cached: CachedSnapshot,
+        opts: ReloadOptions,
+    ) -> Self {
+        let handle = SnapshotHandle::from_cache(cached.snapshot, cached.saved_at);
+        let this = Self::new(store, keyring, handle, opts);
+        this.needs_migrate.store(true, Ordering::Relaxed);
+        this
+    }
+
+    /// Schreibt aus der Datenbank gebaute Snapshots zusätzlich in `cache` (F14).
+    #[must_use]
+    pub fn with_cache(mut self, cache: Arc<SnapshotCache>) -> Self {
+        self.cache = Some(cache);
+        self
     }
 
     /// Lädt den Startsnapshot und erzeugt den zugehörigen Halter und Reloader.
@@ -174,27 +251,71 @@ impl Reloader {
     /// `Ok(Some(v))`: Snapshot `v` veröffentlicht; `Ok(None)`: bereits aktuell; `Err`: der
     /// bisherige Snapshot bleibt aktiv.
     pub async fn reload_now(&self) -> Result<Option<i64>, StoreError> {
-        let current = self.handle.version();
+        let base = self.handle.load();
+        let current = base.version;
+        if self.needs_migrate.load(Ordering::Relaxed) {
+            if let Err(e) = self.store.migrate().await {
+                self.check_failed();
+                return Err(e);
+            }
+            self.needs_migrate.store(false, Ordering::Relaxed);
+            tracing::info!("Datenbank wieder erreichbar und migriert");
+        }
+        // Ein Stand aus dem Platten-Cache wird immer vollständig ersetzt.
+        let from_cache = self.handle.source() == SnapshotSource::Cache;
         let latest = match self.store.config_version().await {
             Ok(v) => v,
             Err(e) => {
-                ReloadMetrics::inc(&self.metrics.checks_failed);
-                self.metrics.mark_stale();
+                self.check_failed();
                 return Err(e);
             }
         };
-        if latest == current {
-            self.metrics.mark_fresh();
+        if latest == current && !from_cache {
+            self.synced();
             return Ok(None);
         }
         let started = Instant::now();
-        match load_snapshot(&self.store, &self.keyring).await {
+        let mut incremental = false;
+        let result = if self.opts.incremental && !from_cache {
+            match load_incremental(
+                &self.store,
+                &self.keyring,
+                &base,
+                self.opts.max_incremental_changes,
+            )
+            .await
+            {
+                Ok(Incremental::UpToDate) => {
+                    self.synced();
+                    return Ok(None);
+                }
+                Ok(Incremental::Built { snapshot, changes }) => {
+                    incremental = true;
+                    tracing::debug!(changes, "Snapshot inkrementell gebaut");
+                    Ok(*snapshot)
+                }
+                Ok(Incremental::NeedFull(reason)) => {
+                    ReloadMetrics::inc(&self.metrics.incremental_fallbacks);
+                    tracing::info!(
+                        reason = reason.as_str(),
+                        detail = ?reason,
+                        "inkrementeller Snapshot-Neubau nicht möglich – vollständig"
+                    );
+                    load_snapshot(&self.store, &self.keyring).await
+                }
+                Err(e) => Err(e),
+            }
+        } else {
+            load_snapshot(&self.store, &self.keyring).await
+        };
+        match result {
             Ok(snap) => {
                 let version = snap.version;
                 let took = started.elapsed();
-                self.handle.store(snap);
-                ReloadMetrics::inc(&self.metrics.reloads_ok);
-                self.metrics.mark_fresh();
+                self.publish(snap);
+                if incremental {
+                    ReloadMetrics::inc(&self.metrics.reloads_incremental);
+                }
                 self.metrics.last_build_micros.store(
                     u64::try_from(took.as_micros()).unwrap_or(u64::MAX),
                     Ordering::Relaxed,
@@ -202,6 +323,8 @@ impl Reloader {
                 tracing::info!(
                     from = current,
                     to = version,
+                    incremental,
+                    from_cache,
                     build_ms = took.as_millis() as u64,
                     "Konfigurations-Snapshot neu geladen"
                 );
@@ -210,6 +333,7 @@ impl Reloader {
             Err(e) => {
                 ReloadMetrics::inc(&self.metrics.reloads_failed);
                 self.metrics.mark_stale();
+                self.handle.mark_failing();
                 tracing::error!(
                     error = %e,
                     active = current,
@@ -219,6 +343,59 @@ impl Reloader {
                 Err(e)
             }
         }
+    }
+
+    /// Konsistenzprüfung (F16): baut vollständig neu und vergleicht mit dem aktiven Snapshot.
+    ///
+    /// `Ok(true)`: gleich (oder der Neubau ist neuer und wurde veröffentlicht); `Ok(false)`:
+    /// Abweichung bei gleicher Version – der vollständige Snapshot ersetzt den aktiven, die
+    /// Abweichung wird gezählt und als Fehler geloggt.
+    pub async fn verify_now(&self) -> Result<bool, StoreError> {
+        let full = match load_snapshot(&self.store, &self.keyring).await {
+            Ok(s) => s,
+            Err(e) => {
+                self.check_failed();
+                return Err(e);
+            }
+        };
+        ReloadMetrics::inc(&self.metrics.verify_runs);
+        let current = self.handle.load();
+        if self.handle.source() == SnapshotSource::Cache || full.version > current.version {
+            self.publish(full);
+            return Ok(true);
+        }
+        if full.version < current.version {
+            return Ok(true);
+        }
+        if full == *current {
+            self.synced();
+            return Ok(true);
+        }
+        ReloadMetrics::inc(&self.metrics.verify_mismatches);
+        tracing::error!(
+            version = current.version,
+            "Konsistenzprüfung: inkrementeller Snapshot weicht vom vollständigen Neubau ab, \
+             ersetze ihn (bitte als Fehler melden)"
+        );
+        self.publish(full);
+        Ok(false)
+    }
+
+    fn publish(&self, snap: Snapshot) {
+        self.handle.store(snap);
+        ReloadMetrics::inc(&self.metrics.reloads_ok);
+        self.metrics.mark_fresh();
+    }
+
+    fn synced(&self) {
+        self.metrics.mark_fresh();
+        self.handle.mark_synced();
+    }
+
+    fn check_failed(&self) {
+        ReloadMetrics::inc(&self.metrics.checks_failed);
+        self.metrics.mark_stale();
+        self.handle.mark_failing();
     }
 
     /// Startet den Reloader (und bei Postgres den Listener) als Hintergrund-Tasks.
@@ -233,6 +410,18 @@ impl Reloader {
                 self.opts.clone(),
             )));
         }
+        if let Some(cache) = &self.cache {
+            tasks.push(tokio::spawn(write_cache(
+                self.handle.clone(),
+                Arc::clone(cache),
+                self.opts.cache_write_interval,
+                Arc::clone(&self.metrics),
+            )));
+        }
+        // Kaltstart aus dem Cache: sofort (und dann mit Backoff) die Datenbank versuchen.
+        if self.handle.source() == SnapshotSource::Cache {
+            wake.notify_one();
+        }
         tasks.push(tokio::spawn(self.run(wake)));
         ReloaderTask { tasks }
     }
@@ -240,6 +429,11 @@ impl Reloader {
     async fn run(self, wake: Arc<Notify>) {
         let mut commits = self.store.subscribe_commits();
         let mut poll = self.opts.poll_interval.map(|every| {
+            let mut i = tokio::time::interval_at(Instant::now() + every, every);
+            i.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            i
+        });
+        let mut verify = self.opts.verify_interval.map(|every| {
             let mut i = tokio::time::interval_at(Instant::now() + every, every);
             i.set_missed_tick_behavior(MissedTickBehavior::Delay);
             i
@@ -258,6 +452,12 @@ impl Reloader {
                 () = wake.notified() => {}
                 () = maybe_tick(poll.as_mut()) => {}
                 () = maybe_sleep_until(retry_at) => {}
+                () = maybe_tick(verify.as_mut()) => {
+                    if let Err(e) = self.verify_now().await {
+                        tracing::warn!(error = %e, "Konsistenzprüfung des Snapshots fehlgeschlagen");
+                    }
+                    continue;
+                }
             }
             if !self.opts.debounce.is_zero() {
                 tokio::time::sleep(self.opts.debounce).await;
@@ -281,6 +481,49 @@ impl Reloader {
                 }
             }
         }
+    }
+}
+
+/// Schreibt den aktiven Snapshot in den Platten-Cache, sobald er aus der Datenbank stammt und
+/// eine neue Version hat (höchstens alle `every`).
+async fn write_cache(
+    handle: SnapshotHandle,
+    cache: Arc<SnapshotCache>,
+    every: Duration,
+    metrics: Arc<ReloadMetrics>,
+) {
+    let mut rx = handle.subscribe();
+    let mut written: Option<i64> = None;
+    loop {
+        let snap = handle.load();
+        if handle.source() == SnapshotSource::Database && written != Some(snap.version) {
+            let version = snap.version;
+            let c = Arc::clone(&cache);
+            match tokio::task::spawn_blocking(move || c.write(&snap)).await {
+                Ok(Ok(())) => {
+                    written = Some(version);
+                    ReloadMetrics::inc(&metrics.cache_writes);
+                    tracing::debug!(
+                        version,
+                        path = %cache.path().display(),
+                        "Snapshot-Cache geschrieben"
+                    );
+                }
+                Ok(Err(e)) => {
+                    ReloadMetrics::inc(&metrics.cache_write_errors);
+                    tracing::warn!(error = %e, "Snapshot-Cache nicht geschrieben");
+                }
+                Err(e) => {
+                    ReloadMetrics::inc(&metrics.cache_write_errors);
+                    tracing::warn!(error = %e, "Snapshot-Cache: Schreib-Task abgebrochen");
+                }
+            }
+        }
+        if rx.changed().await.is_err() {
+            return;
+        }
+        // Weitere Änderungen in diesem Zeitraum zusammenfassen.
+        tokio::time::sleep(every).await;
     }
 }
 

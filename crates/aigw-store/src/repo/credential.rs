@@ -47,6 +47,22 @@ fn info_from_row(row: &DbRow) -> Result<(ProviderCredential, Sealed), StoreError
     Ok((obj, sealed))
 }
 
+/// Metadaten und entschlüsselte Werte einer Zeile (Snapshot, AIGW-75).
+pub(crate) fn decrypt_row(
+    keyring: &Keyring,
+    row: &DbRow,
+) -> Result<(ProviderCredential, CredentialData), StoreError> {
+    let (info, sealed) = info_from_row(row)?;
+    let plain = keyring.open(info.id.as_bytes(), &sealed)?;
+    let map: BTreeMap<String, String> = serde_json::from_slice(&plain)?;
+    let data = CredentialData(
+        map.into_iter()
+            .map(|(k, v)| (k, SecretString::new(v)))
+            .collect(),
+    );
+    Ok((info, data))
+}
+
 /// Gelesene Sicht (ohne Werte) aus einer Zeile.
 pub(crate) fn credential_from_row(row: &DbRow) -> Result<ProviderCredential, StoreError> {
     Ok(info_from_row(row)?.0)
@@ -296,14 +312,7 @@ impl Store {
             .await?;
         let mut out = HashMap::with_capacity(rows.len());
         for row in &rows {
-            let (info, sealed) = info_from_row(row)?;
-            let plain = keyring.open(info.id.as_bytes(), &sealed)?;
-            let map: BTreeMap<String, String> = serde_json::from_slice(&plain)?;
-            let data = CredentialData(
-                map.into_iter()
-                    .map(|(k, v)| (k, SecretString::new(v)))
-                    .collect(),
-            );
+            let (info, data) = decrypt_row(keyring, row)?;
             out.insert(info.metadata.name.clone(), (info, data));
         }
         Ok(out)

@@ -5,10 +5,13 @@
 //!
 //! Wird aus der Datenbank aufgebaut (`aigw_store::load_snapshot`) und enthält vorberechnete
 //! Indizes, damit Auth und Routing ohne DB-Zugriff in O(1) laufen. Den jeweils aktuellen
-//! Snapshot hält [`SnapshotHandle`] (`ArcSwap`, lock-frei); neu gebaut wird er vom Reloader in
-//! `aigw_store::reload`.
+//! Snapshot hält [`SnapshotHandle`] (`ArcSwap`, lock-frei) samt Zustand für die Readiness
+//! (Quelle, Abgleich mit der Datenbank; F15); neu gebaut wird er vom Reloader in
+//! `aigw_store::reload` – inkrementell über [`Snapshot::apply_patch`], als Rückfall vollständig
+//! über [`Snapshot::from_parts`] (F16, AIGW-75).
 
 mod handle;
+mod parts;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -22,7 +25,8 @@ use crate::resource::{
 };
 use crate::types::ProviderKind;
 
-pub use handle::SnapshotHandle;
+pub use handle::{DEFAULT_STALE_AFTER, SnapshotHandle, SnapshotSource, SnapshotStatus};
+pub use parts::{Change, SnapshotParts, SnapshotPatch};
 
 /// SHA-256 eines API-Keys (Schlüssel des Key-Index).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -60,7 +64,7 @@ impl fmt::Debug for KeyHash {
 }
 
 /// Alles, was der Hot Path zu einem authentifizierten Key braucht.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct KeyCtx {
     /// Der Key (Spezifikation + Status).
     pub key: ApiKey,
@@ -92,7 +96,7 @@ impl KeyCtx {
 }
 
 /// Deployment mit aufgelösten Zugangsdaten.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DeploymentCtx {
     /// Deployment.
     pub deployment: Deployment,
@@ -101,7 +105,7 @@ pub struct DeploymentCtx {
 }
 
 /// MCP-Server mit aufgelösten Zugangsdaten (AIGW-41).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct McpServerCtx {
     /// Server.
     pub server: McpServer,
@@ -110,7 +114,7 @@ pub struct McpServerCtx {
 }
 
 /// Modellgruppe mit ihren aktiven Deployments (nach Priorität, dann Name sortiert).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ModelGroupCtx {
     /// Modellgruppe.
     pub group: ModelGroup,
@@ -126,12 +130,19 @@ impl ModelGroupCtx {
 }
 
 /// Vollständiger Konfigurationsstand einer Version.
-#[derive(Debug, Clone, Default)]
+///
+/// `PartialEq` vergleicht den Inhalt (nicht die Zeiger) – Grundlage der Konsistenzprüfung
+/// „inkrementell = vollständig“ (F16).
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Snapshot {
     /// `config_version`, aus der der Snapshot gebaut wurde.
     pub version: i64,
     /// Key-Hash → Kontext (nur aktive Keys).
     pub keys: HashMap<KeyHash, Arc<KeyCtx>>,
+    /// Key-ID → Hash der aktiven Keys (für den inkrementellen Neubau, F16). Gepflegt von
+    /// [`Snapshot::from_parts`] und [`Snapshot::apply_patch`]; von Hand gebaute Snapshots
+    /// (Tests) brauchen ihn nicht.
+    pub key_ids: HashMap<Id, KeyHash>,
     /// Name **und** Alias → Modellgruppe.
     pub model_groups: HashMap<String, Arc<ModelGroupCtx>>,
     /// Organisationen nach ID.

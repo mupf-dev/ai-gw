@@ -195,7 +195,9 @@ Datenbanken über den `Any`-Treiber) sind in je eine `0001_init.sql` pro Dialekt
 um F3, F34 und F54 ergänzt. Es gab noch keine Produktivdaten; ältere Datenbanken werden **nicht**
 migriert: `Store::migrate` bricht mit `StoreError::IncompatibleSchema` und dem Hinweis ab, die
 Datenbank neu anzulegen und die Konfiguration per `aigw config export`/`apply` zu übertragen.
-Nächste freie Migrationsnummer: **0002** (in beiden Sätzen anlegen).
+Weitere Migrationen: `0002_snapshot_journal.sql` (AIGW-75, Index `audit_log (config_version)`
+für den inkrementellen Snapshot-Neubau, F16). Nächste freie Migrationsnummer: **0003** (in beiden
+Sätzen anlegen).
 
 **Zugriff (Enum-Dispatch):** Das interne Modul `aigw_store::db` kapselt `Pool`/`Tx`/`DbRow` als
 Enums über `SqlitePool`/`PgPool`. Eine Abfrage ist SQL-Text plus typisierte Werte (`Val`: `Uuid`,
@@ -276,6 +278,11 @@ eine Modellgruppe mit Deployments; Aliasse und Freigaben eines MCP-Servers falle
   (AIGW-67) prüfen sie direkt gegen die Organisation.
 - Jede Änderung: **eine** Transaktion → `config_version + 1` → Änderung → `audit_log` → Commit.
   Fehlgeschlagene Änderungen (Konflikt, ungültiger Verweis) hinterlassen weder Version noch Audit.
+  Das `audit_log` ist damit zugleich das **Änderungsjournal** des Snapshots (AIGW-75, F16): Der
+  Reloader liest die Einträge `(aktive Version, neue Version]` und lädt nur die betroffenen
+  Objekte neu. Wer neue Schreibwege baut, muss je geändertem Snapshot-Objekt einen Audit-Eintrag
+  mit `object_id` schreiben (sonst greift erst die Konsistenzprüfung); fehlt für eine Version jeder
+  Eintrag, baut der Reloader vollständig neu.
 - **API-Keys**: `create_api_key` erzeugt `sk-aigw-<12 Zeichen Präfix>-<43 Zeichen Base62 aus 32 Byte
   Zufall>` (aws-lc-rs `SystemRandom`), speichert nur Präfix und SHA-256 und gibt den Klartext einmalig
   zurück (`CreatedApiKey`). Dazu `get_api_key`, `list_api_keys`, `update_api_key`, `revoke_api_key`,

@@ -11081,6 +11081,43 @@
           }
         }
       },
+      "SnapshotInfo": {
+        "type": "object",
+        "description": "Zustand des aktiven Konfigurations-Snapshots (F15).",
+        "required": [
+          "version",
+          "ageSeconds",
+          "source",
+          "stale",
+          "failing"
+        ],
+        "properties": {
+          "ageSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sekunden seit dem letzten erfolgreichen Abgleich mit der Datenbank (bei `source =\ncache`: seit dem Schreiben des Caches).",
+            "minimum": 0
+          },
+          "failing": {
+            "type": "boolean",
+            "description": "Schlägt der Abgleich mit der Datenbank gerade fehl?"
+          },
+          "source": {
+            "type": "string",
+            "description": "Herkunft: `database` oder `cache` (Kaltstart ohne Datenbank, F14).",
+            "example": "database"
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "Veraltet (Readiness `degraded`): aus dem Cache oder länger als\n`snapshot.stale_after_secs` nicht mit der Datenbank abgleichbar."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "`config_version` des aktiven Snapshots."
+          }
+        }
+      },
       "Step": {
         "type": "string",
         "description": "Bucket-Breite einer Zeitreihe.",
@@ -11631,6 +11668,17 @@
           "name": {
             "type": "string",
             "description": "Produktname."
+          },
+          "snapshot": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SnapshotInfo",
+                "description": "Zustand des Konfigurations-Snapshots (F15, für das UI-Banner); fehlt ohne laufenden\nGateway-Zustand (z. B. `aigw openapi`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "ui": {
             "type": "string",

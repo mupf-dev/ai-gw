@@ -220,8 +220,34 @@ pub trait Plugin: Send + Sync {
 
 - Jede Admin-Änderung läuft als DB-Transaktion, erhöht `config_version` und schreibt das `audit_log`.
 - Jede Instanz hält `ArcSwap<Snapshot>`. Ein Snapshot ist unveränderlich und enthält vorberechnete Indizes (Key-Hash → KeyCtx, Alias → Modellgruppe, zusammengesetzte Plugin-Ketten). Laufende Anfragen behalten ihren Snapshot.
-- **Aktualisierung:** SQLite in einer Instanz → direkt nach dem Commit. Postgres → `NOTIFY aigw_config, '<version>'` an alle Instanzen, die neu aufbauen (zunächst vollständig, später inkrementell). Zusätzlich wird alle 30 s die Version abgefragt, falls eine Benachrichtigung verloren geht.
+- **Aktualisierung:** SQLite in einer Instanz → direkt nach dem Commit. Postgres → `NOTIFY aigw_config, '<version>'` an alle Instanzen, die neu aufbauen (inkrementell, siehe unten). Zusätzlich wird alle 30 s die Version abgefragt, falls eine Benachrichtigung verloren geht.
 - **Umsetzung (AIGW-10):** `aigw_core::snapshot::SnapshotHandle` (`load()` lock-frei, Versions-Abo per `tokio::sync::watch`), `aigw_store::reload::Reloader`. Auslöser werden 100 ms zusammengefasst (Debounce). Schlägt der Neubau fehl oder ist die Datenbank nicht erreichbar, bleibt der letzte Snapshot aktiv (Q8); erneuter Versuch mit Backoff (0,25 s → 30 s), LISTEN-Verbindung mit Reconnect. Abfrageintervall: `store.reload_poll_secs` (0 = aus).
+- **Inkrementeller Neubau (AIGW-75, F16):** Änderungsjournal ist das `audit_log` (jede Änderung
+  schreibt in derselben Transaktion `config_version`, Art und Objekt-ID; eine eigene
+  `change_log`-Tabelle wäre eine Doppelung). Der Reloader liest die Einträge seit der aktiven
+  Version, lädt genau diese Objekte (plus Abhängigkeiten ohne eigenen Eintrag: Keys eines geänderten
+  Teams, nach Löschungen alle Plugin-Bindungen/MCP-Freigaben) und arbeitet sie per
+  `Snapshot::apply_patch` ein; abgeleitete Indizes (Key-Kontexte, Modellgruppen samt Aliassen und
+  Deployments, aufgelöste Zugangsdaten) bleiben konsistent. Vollständiger Neubau als Rückfall bei
+  Lücke im Journal, mehr als `snapshot.max_incremental_changes` Einträgen, Version rückwärts,
+  Dauerkonflikt und immer nach einem Kaltstart aus dem Cache. **Konsistenzprüfung** alle
+  `snapshot.verify_interval_secs` (Standard 600): vollständiger Neubau im Hintergrund und
+  inhaltlicher Vergleich (`Snapshot: PartialEq`); bei Abweichung ersetzt der Neubau den Stand,
+  Metrik `aigw_snapshot_reload_total{result="verify_mismatch"}`, Fehler im Log. Messwerte:
+  [messwerte/snapshot-inkrementell-2026-11-13.txt](messwerte/snapshot-inkrementell-2026-11-13.txt).
+- **Snapshot-Cache auf Platte (AIGW-75, F14):** `snapshot.cache_file` (Standard aus). Jeder aus
+  der Datenbank gebaute Snapshot wird höchstens alle `snapshot.cache_write_interval_secs` als
+  Ganzes mit AES-256-GCM und dem Master-Key verschlüsselt geschrieben (Kopf mit Format und Key-ID
+  als AAD; atomar über Temp-Datei, `fsync`, `rename`; Modus 0600). Ist die Datenbank beim Start
+  nicht erreichbar, startet der Gateway mit diesem Stand (Readiness `degraded`), migriert die
+  Datenbank, sobald sie erreichbar ist, und ersetzt den Stand durch einen vollständigen Neubau.
+  Ungültiger Cache (Format, Integrität, fremder Key) wird verworfen; ohne gültigen Cache bricht der
+  Start wie bisher ab.
+- **Readiness (AIGW-75, F15):** `GET /readyz` auf beiden Listenern: `200 {"status":"ready"}`
+  bzw. `200 {"status":"degraded"}`, wenn der Snapshot aus dem Cache stammt oder länger als
+  `snapshot.stale_after_secs` (Standard 300) nicht mit der Datenbank abgeglichen werden konnte;
+  Body enthält `snapshot` (`version`, `ageSeconds`, `source`, `stale`, `failing`). Dasselbe Feld
+  `snapshot` liefert `GET /admin/api/v1/version` (UI-Banner).
 - **GitOps:** `aigw config export > aigw.yaml` und `aigw config apply aigw.yaml` (Diff, `--dry-run`, `--prune`). Geheimnisse stehen im YAML nur als Verweis (`env:`, `file:`), nie im Klartext. Der Modus „nur YAML“ (keine Admin-Schreibrechte, UI schreibgeschützt) ist möglich. **Umsetzung (AIGW-33):** [09-gitops.md](09-gitops.md) (`aigw config export|diff|apply|validate`, `config:export`/`config:apply` in der Admin-API, `gitops.read_only_admin`).
 
 ## 15. Admin-API, Authentifizierung, Rollen

@@ -35,6 +35,8 @@ pub struct Config {
     pub server: ServerConfig,
     /// Persistenz.
     pub store: StoreConfig,
+    /// Konfigurations-Snapshot: inkrementeller Neubau, Platten-Cache, Veraltung (AIGW-75).
+    pub snapshot: SnapshotConfig,
     /// Zähler-Backend für Limits und Budgets.
     pub counters: CountersConfig,
     /// Master-Key für verschlüsselte Zugangsdaten.
@@ -277,6 +279,40 @@ impl Default for StoreConfig {
             url: "sqlite://aigw.db?mode=rwc".to_owned(),
             max_connections: 10,
             reload_poll_secs: 30,
+        }
+    }
+}
+
+/// Einstellungen des Konfigurations-Snapshots (§14; F14–F16, AIGW-75).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SnapshotConfig {
+    /// Nur geänderte Objekte neu einarbeiten (F16); `false` = immer vollständiger Neubau.
+    pub incremental: bool,
+    /// Mehr Audit-Einträge seit dem aktiven Snapshot → vollständiger Neubau.
+    pub max_incremental_changes: u32,
+    /// Abstand (Sekunden) der Konsistenzprüfung: vollständiger Neubau im Hintergrund und
+    /// Vergleich mit dem inkrementell gepflegten Snapshot. `0` = aus.
+    pub verify_interval_secs: u64,
+    /// Ab diesem Alter (Sekunden ohne erfolgreichen Abgleich mit der Datenbank) meldet
+    /// `/readyz` `degraded` (F15).
+    pub stale_after_secs: u64,
+    /// Verschlüsselter Snapshot-Cache (AES-256-GCM mit dem Master-Key) für den Kaltstart ohne
+    /// Datenbank (F14). Ohne Angabe aus.
+    pub cache_file: Option<PathBuf>,
+    /// Mindestabstand (Sekunden) zwischen zwei Schreibvorgängen des Caches.
+    pub cache_write_interval_secs: u64,
+}
+
+impl Default for SnapshotConfig {
+    fn default() -> Self {
+        Self {
+            incremental: true,
+            max_incremental_changes: 1000,
+            verify_interval_secs: 600,
+            stale_after_secs: 300,
+            cache_file: None,
+            cache_write_interval_secs: 10,
         }
     }
 }

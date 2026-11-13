@@ -218,6 +218,61 @@ impl Keyring {
             })?;
         Ok(plain.to_vec())
     }
+
+    /// Verschlüsselt große Datenmengen im Platz (Bytes statt Hex; Snapshot-Cache, AIGW-75).
+    /// Ergebnis: (Key-ID, Nonce, Chiffrat inkl. Tag).
+    pub fn seal_bytes(
+        &self,
+        aad: &[u8],
+        mut data: Vec<u8>,
+    ) -> Result<(String, [u8; NONCE_LEN], Vec<u8>), StoreError> {
+        let mut nonce = [0u8; NONCE_LEN];
+        SystemRandom::new()
+            .fill(&mut nonce)
+            .map_err(|_| StoreError::Crypto("Zufallsquelle nicht verfügbar".into()))?;
+        self.primary
+            .key
+            .seal_in_place_append_tag(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(aad),
+                &mut data,
+            )
+            .map_err(|_| StoreError::Crypto("Verschlüsselung fehlgeschlagen".into()))?;
+        Ok((self.primary.id.clone(), nonce, data))
+    }
+
+    /// Gegenstück zu [`Keyring::seal_bytes`] (Key passend zu `key_id`, auch frühere Keys).
+    pub fn open_bytes(
+        &self,
+        key_id: &str,
+        aad: &[u8],
+        nonce: &[u8],
+        mut data: Vec<u8>,
+    ) -> Result<Vec<u8>, StoreError> {
+        let key = if key_id == self.primary.id {
+            &self.primary
+        } else {
+            self.previous.get(key_id).ok_or_else(|| {
+                StoreError::Crypto(format!(
+                    "Master-Key {key_id} nicht vorhanden (secrets.previous_key_files?)"
+                ))
+            })?
+        };
+        let nonce: [u8; NONCE_LEN] = nonce
+            .try_into()
+            .map_err(|_| StoreError::Crypto("ungültige Nonce".into()))?;
+        let len = key
+            .key
+            .open_in_place(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(aad),
+                &mut data,
+            )
+            .map_err(|_| StoreError::Crypto("Entschlüsselung fehlgeschlagen (Key/Daten?)".into()))?
+            .len();
+        data.truncate(len);
+        Ok(data)
+    }
 }
 
 /// Kleinbuchstaben-Hex.

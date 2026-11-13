@@ -15,7 +15,9 @@ use aigw_core::observe::RequestObserver;
 use aigw_core::snapshot::SnapshotHandle;
 use aigw_observe::ObserveMetrics;
 use aigw_observe::otel::TraceActivator;
-use aigw_store::{Keyring, ReloadMetrics, ReloadOptions, Reloader, ReloaderTask, Store};
+use aigw_store::{
+    Keyring, ReloadMetrics, ReloadOptions, Reloader, ReloaderTask, SnapshotCache, Store, StoreError,
+};
 
 /// Gemeinsamer Zustand für Listener und Hintergrund-Tasks.
 #[derive(Debug)]
@@ -57,14 +59,23 @@ impl Runtime {
         traces: &TraceActivator,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let keyring = Arc::new(Keyring::from_config(&config.secrets)?);
-        let store = Store::connect_with(&config.store).await?;
-        store.migrate().await?;
-        let reloader = Reloader::bootstrap(
-            store.clone(),
-            Arc::clone(&keyring),
-            ReloadOptions::from_config(&config.store),
-        )
-        .await?;
+        let opts = ReloadOptions::from_config(&config.store).with_snapshot(&config.snapshot);
+        let cache = config
+            .snapshot
+            .cache_file
+            .as_ref()
+            .map(|p| Arc::new(SnapshotCache::new(p.clone(), Arc::clone(&keyring))));
+        let (store, reloader) = match connect_and_load(config, &keyring, opts.clone()).await {
+            Ok(v) => v,
+            Err(e) if e.is_unavailable() && cache.is_some() => {
+                cold_start_from_cache(config, &keyring, cache.as_deref(), opts, e).await?
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let reloader = match &cache {
+            Some(c) => reloader.with_cache(Arc::clone(c)),
+            None => reloader,
+        };
         let snapshot = reloader.handle().clone();
         let reload_metrics = reloader.metrics();
         let snap = snapshot.load();
@@ -73,6 +84,7 @@ impl Runtime {
             config_version = snap.version,
             keys = snap.keys.len(),
             model_groups = snap.model_groups.len(),
+            source = snapshot.source().as_str(),
             "Konfigurations-Snapshot geladen"
         );
         let observe = crate::observe::start(config, &store, traces)?;
@@ -163,6 +175,49 @@ impl Runtime {
     }
 }
 
+/// Verbindet und migriert die Datenbank und lädt den Startsnapshot.
+async fn connect_and_load(
+    config: &Config,
+    keyring: &Arc<Keyring>,
+    opts: ReloadOptions,
+) -> Result<(Store, Reloader), StoreError> {
+    let store = Store::connect_with(&config.store).await?;
+    store.migrate().await?;
+    let reloader = Reloader::bootstrap(store.clone(), Arc::clone(keyring), opts).await?;
+    Ok((store, reloader))
+}
+
+/// Kaltstart ohne Datenbank aus dem verschlüsselten Snapshot-Cache (F14). Ohne brauchbaren
+/// Cache bleibt es beim Abbruch mit dem ursprünglichen Fehler.
+async fn cold_start_from_cache(
+    config: &Config,
+    keyring: &Arc<Keyring>,
+    cache: Option<&SnapshotCache>,
+    opts: ReloadOptions,
+    db_error: StoreError,
+) -> Result<(Store, Reloader), Box<dyn std::error::Error>> {
+    let Some(cached) = cache.and_then(SnapshotCache::read_or_discard) else {
+        return Err(format!(
+            "Datenbank nicht erreichbar und kein gültiger Snapshot-Cache vorhanden: {db_error}"
+        )
+        .into());
+    };
+    let age = std::time::SystemTime::now()
+        .duration_since(cached.saved_at)
+        .unwrap_or_default();
+    tracing::warn!(
+        error = %db_error,
+        config_version = cached.snapshot.version,
+        cache_age_secs = age.as_secs(),
+        written_by = %cached.gateway_version,
+        "Datenbank nicht erreichbar – Start mit dem Snapshot-Cache (Readiness: degraded); \
+         der normale Betrieb beginnt, sobald die Datenbank erreichbar ist"
+    );
+    let store = Store::connect_lazy_with(&config.store).await?;
+    let reloader = Reloader::from_cache(store.clone(), Arc::clone(keyring), cached, opts);
+    Ok((store, reloader))
+}
+
 /// Startet die Ereignis-Webhooks (`events.webhooks`, AIGW-61); `None` ohne Empfänger.
 fn start_events(
     config: &Config,
@@ -194,4 +249,90 @@ fn start_events(
         dedup,
         aigw_webhook::DispatcherOptions::from_config(cfg),
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::panic)]
+
+    use super::*;
+    use aigw_core::snapshot::{Snapshot, SnapshotSource};
+    use aigw_store::MasterKey;
+
+    /// Konfiguration mit Datenbank in einem (noch) fehlenden Verzeichnis und Snapshot-Cache.
+    fn config(dir: &std::path::Path) -> (Config, std::path::PathBuf, Arc<Keyring>) {
+        let (key, hex) = MasterKey::generate().unwrap();
+        let key_file = dir.join("master.key");
+        std::fs::write(&key_file, hex).unwrap();
+        let db_dir = dir.join("db");
+        let mut cfg = Config::default();
+        cfg.secrets.master_key_file = Some(key_file);
+        cfg.store.url = format!("sqlite://{}/aigw.db?mode=rwc", db_dir.display());
+        cfg.snapshot.cache_file = Some(dir.join("snapshot.cache"));
+        (cfg, db_dir, Arc::new(Keyring::new(key)))
+    }
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "aigw-runtime-{tag}-{}",
+            aigw_core::resource::new_id()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// F14: Kaltstart ohne Datenbank mit dem letzten Stand aus dem Cache (degraded), danach
+    /// normaler Betrieb, sobald die Datenbank erreichbar ist.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cold_start_from_cache_then_database_returns() {
+        let dir = temp_dir("cold");
+        let (cfg, db_dir, keyring) = config(&dir);
+        SnapshotCache::new(cfg.snapshot.cache_file.clone().unwrap(), keyring)
+            .write(&Snapshot {
+                version: 5,
+                ..Snapshot::default()
+            })
+            .unwrap();
+        let (_sub, traces) = aigw_observe::otel::test_subscriber();
+        let rt = Runtime::start(&cfg, &traces).await.unwrap();
+        let st = rt.snapshot.status();
+        assert_eq!(
+            (st.source, st.version, st.stale),
+            (SnapshotSource::Cache, 5, true)
+        );
+
+        std::fs::create_dir_all(&db_dir).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while rt.snapshot.source() != SnapshotSource::Database {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "kein Wechsel auf die Datenbank"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let st = rt.snapshot.status();
+        assert!(!st.stale, "{st:?}");
+        assert_eq!(st.version, 0);
+        rt.shutdown().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Ohne (gültigen) Cache bleibt es beim Abbruch; ein kaputter Cache wird verworfen.
+    #[tokio::test]
+    async fn no_database_without_valid_cache_fails() {
+        let dir = temp_dir("nocache");
+        let (cfg, _db, _) = config(&dir);
+        let (_sub, traces) = aigw_observe::otel::test_subscriber();
+        let err = Runtime::start(&cfg, &traces).await.unwrap_err();
+        assert!(
+            err.to_string().contains("kein gültiger Snapshot-Cache"),
+            "{err}"
+        );
+
+        let cache = cfg.snapshot.cache_file.clone().unwrap();
+        std::fs::write(&cache, b"AIGWSNAP kaputt").unwrap();
+        assert!(Runtime::start(&cfg, &traces).await.is_err());
+        assert!(!cache.exists(), "kaputter Cache verworfen");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

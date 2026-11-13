@@ -6,15 +6,24 @@
 //! Standard: zwei Listener (`server.data.listen`, `server.control.listen`). Sind beide
 //! Adressen gleich, läuft ein Listener mit beiden Routern. Beide Server fahren auf dasselbe
 //! Signal hin geordnet herunter (laufende Anfragen und Streams werden abgeschlossen).
+//!
+//! Proben auf beiden Listenern: `/healthz` (Prozess lebt) und `/readyz` (F15, AIGW-75):
+//! `200 {"status":"ready"}` im Normalfall, `200 {"status":"degraded"}`, wenn der
+//! Konfigurations-Snapshot veraltet ist (länger als `snapshot.stale_after_secs` nicht mit der
+//! Datenbank abgleichbar) oder aus dem Platten-Cache stammt. Der Gateway bedient Anfragen in
+//! beiden Fällen weiter (letzter bekannter Stand); `degraded` ist ein Signal für Monitoring und
+//! UI, kein Grund, die Instanz aus dem Load Balancer zu nehmen.
 
 use std::future::{Future, IntoFuture as _};
 use std::io;
 use std::net::SocketAddr;
 
 use aigw_core::config::ServerConfig;
-use axum::Router;
+use aigw_core::snapshot::SnapshotHandle;
+use axum::extract::State;
 use axum::routing::get;
 use axum::serve::ListenerExt as _;
+use axum::{Json, Router};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
@@ -50,35 +59,59 @@ impl Listeners {
     }
 }
 
-/// Router der Steuerebene (`control` = Admin-API, -UI, `/metrics` …) plus optional `/healthz`.
-fn control_router(control: Router, with_healthz: bool) -> Router {
-    let r = control;
-    if with_healthz {
-        r.route("/healthz", get(aigw_proxy::healthz))
-    } else {
-        r
+/// Router der Steuerebene (`control` = Admin-API, -UI, `/metrics` …) plus optional die Proben
+/// `/healthz` und `/readyz`.
+fn control_router(control: Router, probes: Option<&SnapshotHandle>) -> Router {
+    match probes {
+        Some(snapshot) => control
+            .route("/healthz", get(aigw_proxy::healthz))
+            .merge(readyz_router(snapshot.clone())),
+        None => control,
     }
+}
+
+/// `/readyz` (F15).
+pub(crate) fn readyz_router(snapshot: SnapshotHandle) -> Router {
+    Router::new()
+        .route("/readyz", get(readyz))
+        .with_state(snapshot)
+}
+
+async fn readyz(State(snapshot): State<SnapshotHandle>) -> Json<serde_json::Value> {
+    let st = snapshot.status();
+    Json(serde_json::json!({
+        "status": if st.stale { "degraded" } else { "ready" },
+        "snapshot": {
+            "version": st.version,
+            "ageSeconds": st.age.as_secs(),
+            "source": st.source.as_str(),
+            "stale": st.stale,
+            "failing": st.failing,
+        },
+    }))
 }
 
 /// Betreibt die Listener, bis `shutdown` fertig ist; wartet dann auf laufende Anfragen.
 ///
 /// `data_router` ist der Router der Datenebene (`aigw_proxy::router(…)`, ggf. mit `/mcp`),
 /// `control` der vollständige Router der Steuerebene (Admin-API/-UI aus
-/// `aigw_admin::router_with(…)`, zusammengeführt mit `/metrics`).
+/// `aigw_admin::router_with(…)`, zusammengeführt mit `/metrics`). `snapshot` speist `/readyz`.
 pub(crate) async fn run(
     listeners: Listeners,
     data_router: Router,
     control_plane: Router,
+    snapshot: SnapshotHandle,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
+    let data_router = data_router.merge(readyz_router(snapshot.clone()));
     // TCP_NODELAY: SSE-Chunks sofort senden statt auf ACKs zu warten (Nagle, Q4).
     let data_listener = listeners.data.tap_io(|tcp| {
         let _ = tcp.set_nodelay(true);
     });
     match listeners.control {
         None => {
-            // `/healthz` liefert bereits der Daten-Router.
-            let app = data_router.merge(control_router(control_plane, false));
+            // `/healthz` und `/readyz` liefert bereits der Daten-Router.
+            let app = data_router.merge(control_router(control_plane, None));
             axum::serve(data_listener, app)
                 .with_graceful_shutdown(shutdown)
                 .await
@@ -95,7 +128,7 @@ pub(crate) async fn run(
             let data = axum::serve(data_listener, data_router)
                 .with_graceful_shutdown(wait(rx.clone()))
                 .into_future();
-            let ctrl = axum::serve(control, control_router(control_plane, true))
+            let ctrl = axum::serve(control, control_router(control_plane, Some(&snapshot)))
                 .with_graceful_shutdown(wait(rx))
                 .into_future();
             tokio::try_join!(data, ctrl).map(|_| ())
@@ -149,6 +182,7 @@ mod tests {
             listeners,
             aigw_proxy::router(aigw_proxy::ProxyState::mock()),
             aigw_admin::router(),
+            SnapshotHandle::default(),
             async move {
                 let _ = rx.await;
             },
@@ -161,6 +195,8 @@ mod tests {
             StatusCode::NOT_FOUND
         );
         assert_eq!(get_status(control, "/healthz").await, StatusCode::OK);
+        assert_eq!(get_status(data, "/readyz").await, StatusCode::OK);
+        assert_eq!(get_status(control, "/readyz").await, StatusCode::OK);
         assert_eq!(
             get_status(control, "/admin/api/v1/version").await,
             StatusCode::OK
@@ -191,11 +227,13 @@ mod tests {
             listeners,
             aigw_proxy::router(aigw_proxy::ProxyState::mock()),
             aigw_admin::router(),
+            SnapshotHandle::default(),
             async move {
                 let _ = rx.await;
             },
         ));
         assert_eq!(get_status(data, "/healthz").await, StatusCode::OK);
+        assert_eq!(get_status(data, "/readyz").await, StatusCode::OK);
         assert_eq!(get_status(data, "/v1/models").await, StatusCode::OK);
         assert_eq!(
             get_status(data, "/admin/api/v1/version").await,
@@ -207,5 +245,37 @@ mod tests {
             .expect("Shutdown hängt")
             .unwrap()
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn readyz_reports_degraded_for_cache_and_stale() {
+        async fn body(h: &SnapshotHandle) -> serde_json::Value {
+            let Json(v) = readyz(State(h.clone())).await;
+            v
+        }
+        let h = SnapshotHandle::default();
+        let v = body(&h).await;
+        assert_eq!(v["status"], "ready");
+        assert_eq!(v["snapshot"]["source"], "database");
+        assert_eq!(v["snapshot"]["stale"], false);
+
+        h.set_stale_after(std::time::Duration::ZERO);
+        h.mark_failing();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let v = body(&h).await;
+        assert_eq!(v["status"], "degraded", "{v}");
+        assert_eq!(v["snapshot"]["failing"], true);
+
+        let c = SnapshotHandle::from_cache(
+            aigw_core::snapshot::Snapshot {
+                version: 9,
+                ..Default::default()
+            },
+            std::time::SystemTime::now(),
+        );
+        let v = body(&c).await;
+        assert_eq!(v["status"], "degraded");
+        assert_eq!(v["snapshot"]["source"], "cache");
+        assert_eq!(v["snapshot"]["version"], 9);
     }
 }

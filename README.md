@@ -32,11 +32,12 @@ Endpunkte – Datenebene (`server.data.listen`, Standard `127.0.0.1:4000`):
   `/v1/audio/translations`, `/v1/audio/speech` – OpenAI-kompatibel (Responses zustandslos;
   Modellgruppe braucht `settings.capabilities`, siehe `docs/konzept/03-ir-und-formate.md` §6)
 - `GET /healthz` – Liveness
+- `GET /readyz` – Readiness (`ready` bzw. `degraded` bei veraltetem Konfigurations-Snapshot)
 
 Steuerebene (`server.control.listen`, Standard `127.0.0.1:4001`; gleiche Adresse → ein Port):
 
-- `GET /healthz` – Liveness
-- `GET /admin/api/v1/version` – Version
+- `GET /healthz`, `GET /readyz` – Liveness, Readiness
+- `GET /admin/api/v1/version` – Version (mit Zustand des Konfigurations-Snapshots)
 - `GET /admin/api/openapi.json` – OpenAPI-Spezifikation der Admin-API
 - `GET /admin/` – Admin-UI (SPA)
 

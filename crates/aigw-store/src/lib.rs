@@ -25,6 +25,7 @@ pub mod observe;
 pub mod reload;
 pub mod repo;
 mod snapshot;
+pub mod snapshot_cache;
 
 use std::str::FromStr as _;
 use std::sync::Arc;
@@ -48,7 +49,8 @@ pub use repo::audit::{
 };
 pub use repo::list::{ListFilter, ListQuery, Page};
 pub use repo::{AuditEntry, PlainResource, Resource, WriteExtras};
-pub use snapshot::load_snapshot;
+pub use snapshot::{Fallback, Incremental, load_incremental, load_parts, load_snapshot};
+pub use snapshot_cache::{CacheError, CachedSnapshot, SnapshotCache};
 
 /// Fehler der Persistenzschicht.
 #[derive(Debug, thiserror::Error)]
@@ -99,6 +101,14 @@ pub enum StoreError {
     Db(#[from] sqlx::Error),
 }
 
+impl StoreError {
+    /// Datenbank nicht erreichbar bzw. Abfrage fehlgeschlagen (nicht: ungültige Daten,
+    /// fremdes Schema, Master-Key)? Grundlage für den Kaltstart aus dem Snapshot-Cache (F14).
+    pub fn is_unavailable(&self) -> bool {
+        matches!(self, Self::Db(_) | Self::Migrate(MigrateError::Execute(_)))
+    }
+}
+
 /// Unterstützte Datenbanken.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
@@ -130,18 +140,32 @@ pub struct Store {
 }
 
 /// Migrationssatz für SQLite (`migrations/sqlite/`): (Version, Beschreibung, SQL).
-const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[(
-    1,
-    "init",
-    include_str!("../migrations/sqlite/0001_init.sql"),
-)];
+const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
+    (
+        1,
+        "init",
+        include_str!("../migrations/sqlite/0001_init.sql"),
+    ),
+    (
+        2,
+        "snapshot_journal",
+        include_str!("../migrations/sqlite/0002_snapshot_journal.sql"),
+    ),
+];
 
 /// Migrationssatz für Postgres (`migrations/postgres/`), gleiche Versionen wie SQLite.
-const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[(
-    1,
-    "init",
-    include_str!("../migrations/postgres/0001_init.sql"),
-)];
+const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
+    (
+        1,
+        "init",
+        include_str!("../migrations/postgres/0001_init.sql"),
+    ),
+    (
+        2,
+        "snapshot_journal",
+        include_str!("../migrations/postgres/0002_snapshot_journal.sql"),
+    ),
+];
 
 /// Eingebettete Migrationen des Backends.
 pub fn migrator(backend: Backend) -> Migrator {
@@ -190,6 +214,17 @@ impl Store {
 
     /// Verbindet sich laut Startkonfiguration.
     pub async fn connect_with(cfg: &StoreConfig) -> Result<Self, StoreError> {
+        Self::open(cfg, false).await
+    }
+
+    /// Wie [`Store::connect_with`], verbindet aber erst bei der ersten Abfrage (Kaltstart aus
+    /// dem Snapshot-Cache bei nicht erreichbarer Datenbank, F14). Fehler zeigen sich dann an
+    /// den einzelnen Abfragen.
+    pub async fn connect_lazy_with(cfg: &StoreConfig) -> Result<Self, StoreError> {
+        Self::open(cfg, true).await
+    }
+
+    async fn open(cfg: &StoreConfig, lazy: bool) -> Result<Self, StoreError> {
         let backend = Backend::from_url(&cfg.url)?;
         let max = cfg.max_connections.max(1);
         let pool = match backend {
@@ -208,17 +243,22 @@ impl Store {
                 } else {
                     pool = pool.acquire_timeout(Duration::from_secs(10));
                 }
-                Pool::Sqlite(pool.connect_with(opts).await?)
+                Pool::Sqlite(if lazy {
+                    pool.connect_lazy_with(opts)
+                } else {
+                    pool.connect_with(opts).await?
+                })
             }
             Backend::Postgres => {
                 let opts = PgConnectOptions::from_str(&cfg.url)?;
-                Pool::Postgres(
-                    PgPoolOptions::new()
-                        .max_connections(max)
-                        .acquire_timeout(Duration::from_secs(10))
-                        .connect_with(opts)
-                        .await?,
-                )
+                let pool = PgPoolOptions::new()
+                    .max_connections(max)
+                    .acquire_timeout(Duration::from_secs(10));
+                Pool::Postgres(if lazy {
+                    pool.connect_lazy_with(opts)
+                } else {
+                    pool.connect_with(opts).await?
+                })
             }
         };
         Ok(Self {
