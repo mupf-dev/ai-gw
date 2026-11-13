@@ -163,7 +163,7 @@ const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
     (
         3,
         "admin_auth",
-        include_str!("../migrations/sqlite/0002_admin_auth.sql"),
+        include_str!("../migrations/sqlite/0003_admin_auth.sql"),
     ),
 ];
 
@@ -182,7 +182,7 @@ const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
     (
         3,
         "admin_auth",
-        include_str!("../migrations/postgres/0002_admin_auth.sql"),
+        include_str!("../migrations/postgres/0003_admin_auth.sql"),
     ),
 ];
 

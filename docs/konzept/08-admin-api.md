@@ -308,7 +308,7 @@ Alle Fehler der Admin-API sind Problem Details mit `Content-Type: application/pr
 Code: `crates/aigw-admin` – `auth.rs` (Principal, Middleware, CSRF, Bootstrap), `oidc.rs`
 (Relying Party), `session.rs` (Login, Session, Abmeldung, Einladungen), `rbac.rs` (Rollen),
 `admin_keys.rs` (Admin-API-Keys); Speicher `aigw-store/src/admin_auth.rs`, Migrationen
-`0001_init.sql` und `0002_admin_auth.sql` (Einladungen, je Dialekt);
+`0001_init.sql` und `0003_admin_auth.sql` (Einladungen, je Dialekt);
 Konfiguration `admin.auth` (`aigw_core::config::AdminAuthConfig`).
 
 ### 5.1 Verfahren
@@ -402,7 +402,7 @@ POST /admin/api/v1/users/anna/invitation
 ```
 
 Token 256 Bit, gespeichert nur SHA-256 (Tabelle `admin_invitation`, Migration
-`0002_admin_auth.sql`), gültig `oidc.invite_ttl_secs` (Standard 7 Tage), höchstens eine je Nutzer
+`0003_admin_auth.sql`), gültig `oidc.invite_ttl_secs` (Standard 7 Tage), höchstens eine je Nutzer
 (eine neue ersetzt die alte), der Link steht nur in dieser Antwort (`Cache-Control: no-store`).
 Ohne OIDC bzw. für Nutzer mit Identität → `409`. `GET` zeigt den Stand ohne Link, `DELETE`
 widerruft. Audit: Art `admin-invitation`, `create`/`delete` (ohne Token).
