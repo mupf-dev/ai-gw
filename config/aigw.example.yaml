@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Beispielkonfiguration für `aigw serve --config config/aigw.example.yaml`.
+# Alle Felder sind optional; gezeigt sind die Standardwerte.
+#
+# Jeder Wert lässt sich per Umgebungsvariable überschreiben:
+#   AIGW_<ABSCHNITT>__<FELD>, z. B. AIGW_STORE__URL=postgres://aigw@db/aigw
+#
+# Modelle, Keys, Teams, Plugins usw. stehen NICHT hier, sondern in der Datenbank
+# (Admin-API/UI) bzw. als GitOps-Ressourcen (`apiVersion: aigw/v1alpha1`).
+
+server:
+  listen: "127.0.0.1:4000"
+
+store:
+  # SQLite (Standard) oder postgres://benutzer@host/datenbank
+  url: "sqlite://aigw.db?mode=rwc"
+  max_connections: 10
+
+counters:
+  # local | postgres-sync | redis
+  backend: local
+  # redis_url: "redis://127.0.0.1:6379/0"
+
+secrets:
+  # Master-Key (32 Byte hex, z. B. `openssl rand -hex 32`) für verschlüsselte Zugangsdaten.
+  # Aus Datei oder – ohne Datei – aus der genannten Umgebungsvariable.
+  # master_key_file: /run/secrets/aigw-master-key
+  master_key_env: AIGW_MASTER_KEY
+  # Frühere Keys, nur zum Entschlüsseln während einer Rotation:
+  previous_key_files: []
+
+log:
+  # Filter wie RUST_LOG
+  level: info
+  # text | json
+  format: text

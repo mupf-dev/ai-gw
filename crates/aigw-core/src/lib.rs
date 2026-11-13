@@ -8,6 +8,8 @@
 
 pub mod config;
 pub mod error;
+pub mod resource;
+pub mod snapshot;
 pub mod types;
 
 pub use config::Config;

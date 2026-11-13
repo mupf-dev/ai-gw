@@ -33,8 +33,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # distroless/cc: glibc + libgcc, keine Shell, kein Paketmanager; Benutzer nonroot (65532).
 FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=build /out/aigw /usr/local/bin/aigw
-COPY config/aigw.container.toml /etc/aigw/aigw.toml
+COPY config/aigw.container.yaml /etc/aigw/aigw.yaml
 USER nonroot:nonroot
 EXPOSE 4000
 ENTRYPOINT ["/usr/local/bin/aigw"]
-CMD ["serve", "--config", "/etc/aigw/aigw.toml"]
+CMD ["serve", "--config", "/etc/aigw/aigw.yaml"]

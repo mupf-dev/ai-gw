@@ -15,8 +15,8 @@ ls -l target/release/aigw
 
 TMP=$(mktemp -d)
 trap 'kill "${PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
-printf '[server]\nlisten = "127.0.0.1:%s"\n' "$PORT" >"$TMP/aigw.toml"
-target/release/aigw serve --config "$TMP/aigw.toml" &
+printf 'server:\n  listen: "127.0.0.1:%s"\n' "$PORT" >"$TMP/aigw.yaml"
+target/release/aigw serve --config "$TMP/aigw.yaml" &
 PID=$!
 
 BASE="http://127.0.0.1:$PORT"

@@ -28,7 +28,7 @@ struct Cli {
 enum Command {
     /// Startet den Server.
     Serve {
-        /// Pfad zur Konfigurationsdatei (TOML).
+        /// Pfad zur Konfigurationsdatei (YAML).
         #[arg(short, long, env = "AIGW_CONFIG")]
         config: PathBuf,
     },

@@ -10,6 +10,9 @@
 # Umgebungsvariablen:
 #   AIGW_SKIP_UI=1     UI-Schritte überspringen
 #   AIGW_STRICT=1      fehlende Werkzeuge (cargo-deny, reuse) sind Fehler statt Warnung (CI)
+#   AIGW_TEST_POSTGRES_URL=postgres://…   Store-Tests zusätzlich gegen Postgres (legt je Lauf
+#                      eine Wegwerf-Datenbank an; der Benutzer braucht CREATEDB)
+#   AIGW_TEST_POSTGRES=docker   startet dafür selbst einen postgres:17-Container
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -33,7 +36,22 @@ cargo fmt --all -- --check
 step "cargo clippy (-D warnings)"
 cargo clippy --workspace --all-targets "${LOCKED[@]}" -- -D warnings
 
-step "cargo test"
+if [[ "${AIGW_TEST_POSTGRES:-}" == docker && -z "${AIGW_TEST_POSTGRES_URL:-}" ]]; then
+  step "Postgres 17 für Store-Tests starten (Docker, Wegwerf-Container)"
+  PG_NAME="aigw-check-pg-$$"
+  trap 'docker rm -f "$PG_NAME" >/dev/null 2>&1 || true' EXIT
+  docker run -d --rm --name "$PG_NAME" -e POSTGRES_PASSWORD=aigw-test \
+    -p 127.0.0.1::5432 postgres:17 >/dev/null
+  # Der Init-Server lauscht nur auf dem Socket; TCP-Bereitschaft = endgültiger Server.
+  for _ in $(seq 1 60); do
+    docker exec "$PG_NAME" pg_isready -q -h 127.0.0.1 -U postgres && break
+    sleep 1
+  done
+  PG_PORT=$(docker port "$PG_NAME" 5432/tcp | head -1 | sed 's/.*://')
+  export AIGW_TEST_POSTGRES_URL="postgres://postgres:aigw-test@127.0.0.1:${PG_PORT}/postgres"
+fi
+
+step "cargo test${AIGW_TEST_POSTGRES_URL:+ (inkl. Postgres)}"
 cargo test --workspace "${LOCKED[@]}"
 
 step "cargo deny check"

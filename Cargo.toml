@@ -47,10 +47,11 @@ rustls = { version = "0.23.35", default-features = false, features = ["aws_lc_rs
 
 # Persistenz (E4): SQLite (gebündelt) Standard, Postgres optional. Ohne Compile-Zeit-Makros
 # (kein DB-Zugriff beim Bauen), ohne SQLite-Erweiterungsladen.
-sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "sqlite-bundled", "postgres", "migrate"] }
+# `any`: ein Code-Pfad für beide Datenbanken (portables Schema, siehe docs/konzept/02-datenmodell.md).
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "sqlite-bundled", "postgres", "migrate", "any"] }
 
 # Admin-API: OpenAPI 3.1 aus Rust-Typen (E3: TS-Typen der UI werden daraus generiert).
-utoipa = { version = "6.0.0", default-features = false, features = ["macros"] }
+utoipa = { version = "6.0.0", default-features = false, features = ["macros", "uuid", "time"] }
 # Eingebettete Admin-UI (ui/dist bzw. Fallback, siehe crates/aigw-admin/build.rs).
 rust-embed = { version = "8.14", default-features = false, features = ["debug-embed", "interpolate-folder-path", "mime-guess"] }
 
@@ -58,7 +59,14 @@ clap = { version = "4.6", default-features = false, features = ["std", "derive",
 serde = { version = "1.0.220", features = ["derive"] }
 serde_json = "1.0.140"
 thiserror = "2.0.17"
-toml = { version = "1.2", default-features = false, features = ["std", "serde", "parse"] }
+# Konfiguration und GitOps-Ressourcen in YAML (E7): reiner Rust-Parser ohne unsafe-C,
+# Auswahl begründet in docs/konzept/02-datenmodell.md.
+serde-saphyr = { version = "2.1", default-features = false, features = ["deserialize", "serialize"] }
+time = { version = "0.3.47", default-features = false, features = ["std", "serde", "formatting", "parsing"] }
+# IDs: UUIDv7 (zeitlich sortierbar, gut für B-Baum-Indizes).
+uuid = { version = "1.18", default-features = false, features = ["std", "v7", "serde"] }
+# Krypto (AES-256-GCM, SHA-256, Zufall) über denselben Provider wie rustls.
+aws-lc-rs = { version = "1.19", default-features = false, features = ["aws-lc-sys"] }
 tracing = { version = "0.1.44", default-features = false, features = ["std", "attributes"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["std", "fmt", "ansi", "env-filter", "json", "registry"] }
 

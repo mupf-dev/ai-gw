@@ -13,7 +13,7 @@ mit Fokus auf Effizienz im Hot Path und einer modernen Web-Administration.
 | E4 | Datenhaltung | Konfiguration liegt im RAM (keine DB-Abfrage pro Request). SQLite ist Standard, Postgres optional für HA (Änderungen per LISTEN/NOTIFY an alle Instanzen). YAML-Export und -Import (GitOps). Zähler-Backend als Trait: `local`, `postgres-sync` (Abgleich alle 1–2 s, unscharf) und `redis` (exakt, verteilt). Logs gepuffert und gebündelt in die DB, zusätzlich Export per OTel oder Datei; ClickHouse ggf. später. |
 | E5 | MVP-Umfang | Vollausbau, siehe unten. |
 | E6 | Lizenz | AGPL-3.0-or-later (wie cloud-project). |
-| E7 | Konfigurationsformat | YAML für Startkonfiguration und GitOps-Ressourcen (gepflegter reiner Rust-Parser, Auswahl in AIGW-9); alle Startwerte zusätzlich per Umgebungsvariable `AIGW_…`. Das TOML-Gerüst aus AIGW-8 wird umgestellt. |
+| E7 | Konfigurationsformat | YAML für Startkonfiguration und GitOps-Ressourcen (gepflegter reiner Rust-Parser, in AIGW-9 gewählt: `serde-saphyr`, siehe [02-datenmodell.md](02-datenmodell.md)); alle Startwerte zusätzlich per Umgebungsvariable `AIGW_…`. Das TOML-Gerüst aus AIGW-8 wird umgestellt. |
 | E8 | RUSTSEC-2026-0459 (libsqlite3-sys über sqlx 0.9) | Ausnahme in `deny.toml` akzeptiert (nur lokal mit fremden DB/WAL-Dateien ausnutzbar); Prüftermin 2027-01-31, Entfernen sobald sqlx es zulässt. |
 | E9 | Lizenz der Dokumentation | CC-BY-4.0 für `docs/**` und README (wie cloud-project); Code bleibt AGPL-3.0-or-later. |
 

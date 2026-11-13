@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Standardkonfiguration im Container-Image (Dockerfile). Datenbank unter /data
+# (Volume einhängen, beschreibbar für UID 65532). Master-Key per AIGW_MASTER_KEY
+# oder als Datei (AIGW_SECRETS__MASTER_KEY_FILE=/run/secrets/…).
+
+server:
+  listen: "0.0.0.0:4000"
+
+store:
+  url: "sqlite:///data/aigw.db?mode=rwc"
