@@ -1,10 +1,11 @@
 # 04 – UX-Konzept und Design-System der Admin-UI
 
-> Status: **Entwurf zur Abnahme** (AIGW-48) · Stand: 2026-11-13 · Grundlage: cloud-project-Portal, Variante C
+> Status: **Entwurf zur Abnahme** (AIGW-48, Verwaltungsseiten AIGW-49) · Stand: 2026-11-13 · Grundlage: cloud-project-Portal, Variante C
 > „Technisch“ (CLOU-106), Vorbild Cloudflare-Dashboard · Umsetzung: `ui/` (Svelte 5, Vite, Bits UI, Tailwind 4)
 >
-> Offene Designfragen (Akzentfarbe, Diagramm-Bibliothek, Schrift, Dichte) sind in §9 gesammelt und **nicht**
-> entschieden; die Musterseiten zeigen jeweils den Vorschlag, Alternativen sind umschaltbar.
+> Designfragen D1–D6 sind entschieden (§9: Violett, Monospace für alle Zahlen, dunkle Seitenleiste,
+> Systemschrift, Mock-Modus standardmäßig aus, uPlot + eigene SVG); offen sind D7–D12. Ältere Hinweise auf
+> „umschaltbare Alternativen“ betreffen nur noch das Farbschema; die Musterseiten zeigen jeweils den Vorschlag, Alternativen sind umschaltbar.
 
 ## 1. Ziel und Prinzipien
 
@@ -60,7 +61,7 @@ eine Serie = eine Achse, Kreuz + Tooltip beim Überfahren, Bildschirmleser-Zusam
 |---|---|
 | Schrift | Systemschriften (`system-ui …`), Monospace `ui-monospace …`; keine Webfonts (CSP, Größe) |
 | Größen | `2xs` 11 · `xs` 12 · `sm` 13 · **`base` 14** · `md` 16 · `lg` 18 · `xl` 22 · `2xl` 28 px |
-| Zahlen | `.num` = Monospace + Tabellenziffern (Tabellen, IDs); KPI-Kacheln Sans mit Tabellenziffern |
+| Zahlen | `.num` = Monospace + Tabellenziffern für **alle** Zahlen (Tabellen, IDs, KPI-Kacheln; D4) |
 | Etiketten | `.label-caps` 11 px, Versalien, Laufweite 0,08 em (Gruppenüberschriften) |
 | Abstände | Tailwind-Raster 4 px; Seitenränder 16/24/32 px; Kartenabstand 16 px |
 | Radien | `xs` 2 · `sm` 3 · `md` 4 · `lg` 6 · `xl` 8 px (Dialoge) |
@@ -72,7 +73,7 @@ eine Serie = eine Achse, Kreuz + Tooltip beim Überfahren, Bildschirmleser-Zusam
 
 `System | Hell | Dunkel` im Nutzer-Menü, in den Einstellungen und in der Befehlspalette (`prefs.svelte.ts`,
 gespeichert in `localStorage`). Am `<html>` steht immer das wirksame Schema (`data-theme`), damit ändert sich bei
-„System“ die Darstellung live mit dem Betriebssystem. Vorbelegung per URL: `?theme=dark&accent=petrol&mock=0`.
+„System“ die Darstellung live mit dem Betriebssystem. Vorbelegung per URL: `?theme=dark&mock=1`.
 
 ## 3. App-Shell und Navigation
 
@@ -83,8 +84,8 @@ gespeichert in `localStorage`). Am `<html>` steht immer das wirksame Schema (`da
 | Gruppe | Einträge |
 |---|---|
 | – | Übersicht, Playground |
-| Gateway | Modelle & Routen, Anbieter, Guardrails & Plugins, Cache, MCP-Server |
-| Zugriff | Keys, Teams & Nutzer, Limits & Budgets |
+| Gateway | Modelle & Routen, Anbieter, Preise, Guardrails & Plugins, Cache, MCP-Server |
+| Zugriff | Keys, Teams & Nutzer, Limits & Budgets, Admin-API-Keys (nur globale Admins) |
 | Beobachten | Logs, Audit |
 | (unten) | Einstellungen |
 
@@ -96,9 +97,9 @@ gespeichert in `localStorage`). Am `<html>` steht immer das wirksame Schema (`da
 - **Responsiv:** < 640 px eine Spalte, Tabellen blenden Nebenspalten aus (`from: 'md' | 'lg' | 'xl'`), Filter
   umbrechen; Dialoge maximal Bildschirmhöhe mit scrollendem Inhalt.
 
-| Schmal: Navigation | Schmal: Übersicht (dunkel) | Befehlspalette |
+| Befehlspalette | Übersicht (dunkel) | Befehlspalette (dunkel) |
 |---|---|---|
-| ![](ux/navigation-hell-schmal.png) | ![](ux/uebersicht-dunkel-schmal.png) | ![](ux/befehlspalette-hell-desktop.png) |
+| ![](ux/befehlspalette-hell-desktop.png) | ![](ux/uebersicht-dunkel-desktop.png) | ![](ux/befehlspalette-dunkel-desktop.png) |
 
 ## 4. Komponenten
 
@@ -119,7 +120,7 @@ Alle interaktiven Bausteine basieren auf **Bits UI 2** (headless) und werden üb
 | Badge / Status | `Badge.svelte` | – | Töne neutral/accent/success/warning/danger/info/outline, Punkt, Monospace |
 | Tabelle | `DataTable.svelte` | Bits `Pagination` | Suche, Filter-Slot, Sortierung (`aria-sort`), Pagination + Zeilen/Seite, Kein-Treffer-Zustand mit „Filter zurücksetzen“, klickbare Zeilen |
 | Karte, KPI-Kachel, Sparkline, Meter | `Card`, `KpiTile`, `Sparkline`, `Meter` | SVG | Veränderung als Pfeil + Text, Bewertung „besser = hoch/niedrig“; Budget-Meter ab 80 % gelb, ab 95 % rot |
-| Zeitreihen-Diagramm | `TimeSeriesChart.svelte` | uPlot | Token-Farben, Kreuz + Tooltip, Neuzeichnen bei Schema/Akzent |
+| Zeitreihen-Diagramm | `TimeSeriesChart.svelte` | uPlot | Token-Farben, Kreuz + Tooltip, Neuzeichnen bei Schemawechsel |
 | Leerer Zustand | `EmptyState.svelte` | – | Icon, Titel, Erklärung, nächste Aktion; auch „API noch nicht verfügbar“ |
 | Toast | `Toaster.svelte`, `toast.svelte.ts` | aria-live | pausiert bei Hover/Fokus, Fehler als `role=alert` |
 | Code-/JSON-Anzeige | `CodeBlock.svelte` | – | immer dunkel, Hervorhebung ohne `{@html}`, Kopieren |
@@ -134,10 +135,12 @@ für bits-ui 2.20.6 im Quelltext erneut bestätigt (einzige Bits-Komponente mit 
 
 ## 5. Musterseiten (klickbar, Mock-Daten)
 
-Mock-Modus: Umschalter in Topbar-Badge, Nutzer-Menü, Einstellungen und Befehlspalette (Standard **an**, solange die
-Admin-API nur `/version` kennt; `MOCK_DEFAULT` in `prefs.svelte.ts`). Die Daten sind deterministisch (fester Seed,
-`lib/mock/data.ts`); die Datenschicht `lib/data.svelte.ts` liefert ohne Mock `unavailable` und die Seiten zeigen
-einen Leerzustand statt erfundener Zahlen. Die Gateway-Version kommt immer von der echten API.
+Mock-Modus (D6): **standardmäßig aus**; einschalten nur per Schalter (Einstellungen, Nutzer-Menü, Befehlspalette)
+oder `?mock=1` (gilt nur für den Aufruf). Eingeschaltet ist er **deutlich gekennzeichnet**: gelbes Band unter der
+Topbar („Mock-Modus: Beispieldaten …“, mit „Mock ausschalten“) plus Badge in der Topbar. Übersicht und Logs zeigen
+Beispieldaten (`lib/data.svelte.ts`, fester Seed), bis Rollups/Logs mit AIGW-46/53 als Endpunkte kommen; ohne Mock
+einen Leerzustand. Die Verwaltungsseiten (§5.5) laufen im Mock-Modus über dasselbe API-Modul gegen ein
+In-Memory-Backend (`lib/mock/backend.ts`). Die Gateway-Version kommt immer von der echten API.
 
 ### 5.1 Übersicht
 
@@ -151,10 +154,12 @@ Zustand und Verkehrsanteil, letzte Fehler (→ Log-Explorer), Gateway-Info (Vers
 
 ### 5.2 Keys
 
-Kennzahlen (aktiv, laufen ab, Budget ≥ 80 %, gesperrt), Tabelle mit Name + Präfix…letzte 4, Team, Modellen, Budget
-(Meter), Limits, letzter Nutzung, Status; Filter Status/Team, Suche, Sortierung, Pagination; Zeilenmenü (Bearbeiten,
-Rotieren, ID kopieren, Sperren mit Bestätigungsdialog). **„Key erstellen“**: Formular (Name, Team, Ablauf,
-Modellzugriff alle/ausgewählte, Budget, RPM/TPM) → **einmalige Klartext-Anzeige** mit Schnellstart-Snippet.
+Seit AIGW-49 echte Seite (§5.5); die Bilder unten zeigen sie im Mock-Modus. Kennzahlen (aktiv, laufen in 14 Tagen
+ab, gesperrt, abgelaufen), Tabelle mit Name + `sk-aigw-<Präfix>…`, Team, Modellen, Budget & Limits, Ablauf, letzter
+Nutzung, Status; Filter Status/Team (serverseitig), Suche, Sortierung, Pagination; Zeilenmenü (Bearbeiten, Rotieren,
+Name kopieren, Sperren/Entsperren, Löschen – je mit Bestätigung). **„Key erstellen“**: Formular (Name, Team, Ablauf,
+Nutzer, Modellzugriff alle/ausgewählte, Budget mit Zeitraum, RPM/TPM) → **einmalige Klartext-Anzeige** mit
+Schnellstart-Snippet. Verbrauch je Budget (Meter) folgt mit `GET /usage/budgets` (AIGW-30/31) in AIGW-50.
 
 | Liste | Erstellen (dunkel) | Einmalige Anzeige |
 |---|---|---|
@@ -162,14 +167,16 @@ Modellzugriff alle/ausgewählte, Budget, RPM/TPM) → **einmalige Klartext-Anzei
 
 ### 5.3 Modelle & Routen
 
-Master/Detail: Modellgruppen (Alias, Strategie, Zustandspunkte je Deployment) → Detail mit Kennwerten
-(Kontextfenster, Preise, Requests), **Deployments nach Prioritätsgruppen** (Anbieter, Upstream-Modell, Region,
-Zustand, Gewichtsanteil, p95, Erfolgsquote) und **Fallback-Kette** (klickbar). Tab „Routing-Regeln“: Muster →
-Modellgruppe, Teams, Notiz, aktiv (Switch); erste passende Regel gewinnt.
+Seit AIGW-49 echte Seite (§5.5). Master/Detail: Modellgruppen (Name, Strategie, Aliasse, aktive/alle Deployments)
+→ Detail mit Aliassen, Strategie, **Fallback-Kette** (klickbar, Auslöser je Ziel), Einstellungen (JSON) und
+**Deployments nach Prioritätsgruppen** (Anbieter, Zugangsdaten, Anbieter-Modell, Endpunkt, Gewichtsanteil,
+Kapazität, aktiv-Schalter). Die Musterseite aus AIGW-48 zeigte zusätzlich Zustand/p95/Erfolgsquote je Deployment
+und einen Tab „Routing-Regeln“ – Laufzeitwerte folgen mit AIGW-46, Routing-Regeln gibt es in der API nicht
+(Aliasse übernehmen die Aufgabe, siehe §9 D10).
 
-| Hell | Dunkel | Schmal |
+| Hell (Mock) | Dunkel (Mock) | Deployment bearbeiten (echt) |
 |---|---|---|
-| ![](ux/modelle-hell-desktop.png) | ![](ux/modelle-dunkel-desktop.png) | ![](ux/modelle-hell-schmal.png) |
+| ![](ux/modelle-hell-desktop.png) | ![](ux/modelle-dunkel-desktop.png) | ![](ux/echt-deployment-bearbeiten-hell-desktop.png) |
 
 ### 5.4 Logs-Explorer
 
@@ -179,12 +186,74 @@ Live/Pause. **Detail-Sheet**: Übersicht (Endpunkt, Eingangsformat, Key, Team, D
 TTFB, Cache, Streaming, **Versuche** inkl. Fallback), Request- und Response-JSON, Zeitleiste der Gateway-Schritte
 (Auth, Limits, Guardrails, Übersetzung über die IR, Upstream …).
 
-| Liste | Detail (dunkel) | Detail schmal |
+| Liste | Detail (dunkel) | Detail (hell) |
 |---|---|---|
-| ![](ux/logs-hell-desktop.png) | ![](ux/log-detail-dunkel-desktop.png) | ![](ux/log-detail-hell-schmal.png) |
+| ![](ux/logs-hell-desktop.png) | ![](ux/log-detail-dunkel-desktop.png) | ![](ux/log-detail-hell-desktop.png) |
 
-Weitere Screenshots (alle Kombinationen hell/dunkel × Desktop 1440 px/schmal 390 px) liegen unter `docs/konzept/ux/`;
-neu erzeugen mit `ui/e2e/run.sh` (Ausgabe `ui/e2e/results/screens/`).
+Im Repo liegen nur Desktop-Screenshots hell/dunkel, auf 1200 px Breite und 64 Farben reduziert, nur die hier eingebundenen (≈ 1,2 MB)
+(`docs/konzept/ux/`, `python3 ui/e2e/docs-screens.py ui/e2e/results/screens docs/konzept/ux`). Alle weiteren
+Varianten (schmal 390 px, Detailzustände) erzeugt `ui/e2e/run.sh` als nicht eingechecktes Artefakt
+(`ui/e2e/results/screens/`).
+
+### 5.5 Verwaltungsseiten gegen die echte Admin-API (AIGW-49)
+
+Screenshots mit Präfix `echt-` entstehen gegen ein echtes `aigw serve` (Daten per Admin-API angelegt,
+Anmeldung per Bootstrap-Token, `ui/e2e/tests/real-screens.spec.js`; hell und dunkel).
+
+| Keys | Modelle & Routen (dunkel) | Anbieter: Zugangsdaten anlegen |
+|---|---|---|
+| ![](ux/echt-keys-hell-desktop.png) | ![](ux/echt-modelle-dunkel-desktop.png) | ![](ux/echt-zugangsdaten-anlegen-hell-desktop.png) |
+| **Preise** | **Teams** | **GitOps-Trockenlauf (Diff)** |
+| ![](ux/echt-preise-hell-desktop.png) | ![](ux/echt-teams-hell-desktop.png) | ![](ux/echt-gitops-trockenlauf-hell-desktop.png) |
+
+| Seite | Inhalt | Schreibaktionen sichtbar für (Admin-API §5.4) |
+|---|---|---|
+| `/teams` (Tabs Organisationen, Teams, Nutzer) | Liste, Detail-Sheet (Metadaten + `spec`), Anlegen/Bearbeiten/Löschen; Nutzer mit Rollen-Editor (Rolle + Organisation/Team) und OIDC-Verknüpfung | Organisation anlegen und Nutzer: globaler Admin; Organisation ändern: Admin der Organisation; Teams: Admin/Org-Admin |
+| `/keys` | wie §5.2; Rotation mit Name + Übergangszeit → neuer Klartext einmalig | Admin/Org-Admin/Team-Admin im Bereich des Teams; Keys ohne Team nur global |
+| `/models` | wie §5.3; Formulare für Gruppe (Aliasse, Strategie, Fallbacks mit Auslösern und Reihenfolge, Einstellungen als JSON mit Feldliste) und Deployment (Anbieter, Modell, Endpunkt je Anbieter Pflicht/optional, Zugangsdaten desselben Anbieters, Priorität, Gewicht, RPM/TPM, aktiv, Einstellungen mit Hinweisen je Anbieter) | globaler Admin (Katalog) |
+| `/providers` | Anbieter-Zugangsdaten **ohne Werte** (Feldnamen, Labels, Verwendung durch Deployments); Anlegen und „Alle Werte ersetzen“ (PUT) mit Pflichtfeldern je Anbieter und Alternativen (z. B. Azure: API-Key **oder** Entra ID), „Werte ändern“ (PATCH/Merge Patch: einzeln setzen/entfernen) | globaler Admin |
+| `/prices` | Versionen je (Anbieter, Modell) mit Zustand gültig/abgelöst/künftig; „Neue Version“ mit Vorlage; künftige ändern/löschen | globaler Admin |
+| `/admin-keys` | Admin-API-Keys mit Rollen, Ablauf, letzter Nutzung; Anlegen → Klartext einmalig; Bearbeiten, Widerrufen | nur globaler Admin (auch der Navigationseintrag) |
+| `/settings` | Anmeldung (Name, Verfahren, Rollen, Ablauf, Abmelden), Hinweis Nur-YAML-Modus, GitOps-Export (Download) und -Apply (Trockenlauf → Diff → Anwenden), Datenquelle, Darstellung | Export: globale Leserolle; Apply: globaler Admin |
+
+**API-Client** (`ui/src/lib/api/client.ts`, `resources.ts`): openapi-fetch mit den generierten Typen
+(`schema.d.ts`); generische Abläufe je Ressource (`list` folgt `nextCursor` bis zum Ende, `listPage` liefert eine
+Seite, `get` liefert das ETag, `update`/`remove`/Aktionen senden es als `If-Match`); Fehler als `ApiError` aus
+Problem Details. Einheitliche Behandlung in `lib/admin/errors.svelte.ts`:
+
+| Antwort | UI |
+|---|---|
+| `412 precondition-failed` | Konflikt-Dialog „Zwischenzeitlich geändert“ mit **Neu laden** (verwirft die Eingaben, lädt Stand + ETag) |
+| `400/409/422` im Formular | Fehlermeldung (Problem-`detail`) im Formular, Dialog bleibt offen; außerhalb von Formularen Toast |
+| `403 read-only` | Toast + Hinweis „Nur-YAML-Modus“ in den Einstellungen |
+| `403` beim Laden | Leerzustand „Keine Berechtigung“ |
+| `401` | mit OIDC: Weiterleitung zum Login (`returnTo`); ohne OIDC: Token-Dialog |
+| Netzwerk | Fehlerzustand mit „Erneut versuchen“ |
+
+**Anmeldung** (`lib/session.svelte.ts`): Start mit `GET /auth/info`. Mit OIDC wie bisher Login-Weiterleitung und
+CSRF-Token der Session für schreibende Anfragen. Ohne OIDC (Bootstrap-Token bzw. Admin-API-Keys) öffnen „Anmelden“
+(Topbar, Nutzer-Menü, Einstellungen, Seitenhinweis) bzw. ein 401 den **Token-Dialog**; das Token wird über
+`auth/info` geprüft und **nur im `sessionStorage`** des Tabs gehalten (nie `localStorage`), Abmelden löscht es.
+Ohne OIDC und ohne Token öffnet sich der Token-Dialog beim Start (Mock ist standardmäßig aus); Verwaltungsseiten
+ohne Anmeldung zeigen statt Abfragen einen Anmelde-Hinweis (keine 401-Flut).
+
+**Rollen** (`lib/rbac.svelte.ts`): Nachbau von `aigw-admin/src/rbac.rs`, nur zum **Ausblenden** von
+Schreibaktionen (Buttons, Zeilenmenüs, Schalter, Navigationseintrag Admin-API-Keys); entscheiden tut der Server.
+
+**Zustände**: Laden (Skelett), Fehler (mit Wiederholen), leer (Erklärung + nächste Aktion nur mit Schreibrecht),
+keine Treffer (Filter zurücksetzen). Destruktive Aktionen mit Bestätigungsdialog und Klartext-Folgen; Secrets
+(API-Keys, Admin-API-Keys) einmalig über `SecretDialog`, Werte von Zugangsdaten nur als Passwortfelder.
+
+**Mock-Backend** (`lib/mock/backend.ts`, eigener Chunk, nur im Mock-Modus geladen): bedient dieselben Pfade wie die
+Admin-API mit ETag/If-Match, Cursor-Pagination, Problem Details und den wichtigsten Prüfungen (Namen, Verweise,
+Löschsperren, Alias-Kollision, Pflichtfelder der Zugangsdaten, unveränderliche Preise) – ein Code-Pfad für Mock und
+Echtbetrieb. Audit-Log (`/audit`, AIGW-66) und Budget-Verbrauch (AIGW-30/31) sind noch nicht angebunden (AIGW-50).
+
+**E2E** (`ui/e2e/tests/admin.spec.js`, gegen `aigw serve` mit Bootstrap-Token aus `run.sh`): Anmeldung per
+Token-Dialog (falsches Token → Fehler, richtiges → echte Daten, Token nur im sessionStorage); Key anlegen →
+Klartext genau einmal, Liste und API zeigen nur das Präfix, Klartext nach Schließen/Neuladen nicht im DOM;
+Modellgruppe + Mock-Deployment anlegen; ETag-Konflikt (paralleles PUT) → Dialog → Neu laden → Speichern;
+Viewer-Admin-API-Key sieht keine Schreibaktionen.
 
 ## 6. Seitenkatalog (alle geplanten Seiten)
 
@@ -192,17 +261,19 @@ neu erzeugen mit `ui/e2e/run.sh` (Ausgabe `ui/e2e/results/screens/`).
 |---|---|---|---|
 | Übersicht | `/` | Kennzahlen, Zeitreihen, Top-Modelle, Anbieterzustand, letzte Fehler, Gateway-Info | Muster |
 | Playground | `/playground` | Chat gegen Modellgruppen/Routen, Vergleich mehrerer Modelle nebeneinander, Parameter, Kosten/Latenz je Antwort, Code-Snippets (OpenAI/Anthropic-SDK, curl) | geplant |
-| Modelle & Routen | `/models` | Modellgruppen mit Deployments, Prioritäten, Gewichten, Fallbacks, Retry/Timeout; Routing-Regeln; Export als YAML | Muster |
-| Anbieter | `/providers` | Upstream-Anbieter, Zugangsdaten-Referenzen (nie Klartext), Health-Checks, Circuit-Breaker-Zustand, Kontingente | geplant |
-| Keys | `/keys` | Virtuelle Keys: erstellen (einmalige Anzeige), rotieren, sperren; Modelle, Budgets, Limits, Ablauf, Tags | Muster |
-| Teams & Nutzer | `/teams` | Organisationen, Teams, Nutzer, Rollen (Admin/Team-Admin/Viewer), OIDC-Gruppen-Zuordnung, Einladungen | geplant |
+| Modelle & Routen | `/models` | Modellgruppen mit Deployments, Prioritäten, Gewichten, Fallbacks, Einstellungen; Laufzeitwerte folgen (AIGW-46) | **echt** (AIGW-49) |
+| Anbieter | `/providers` | Anbieter-Zugangsdaten (nie Klartext), Verwendung; später Health-Checks, Circuit-Breaker-Zustand | **echt** (Zugangsdaten) |
+| Preise | `/prices` | Preisversionen je Anbieter-Modell | **echt** |
+| Keys | `/keys` | Virtuelle Keys: erstellen (einmalige Anzeige), rotieren, sperren; Modelle, Budgets, Limits, Ablauf | **echt** |
+| Teams & Nutzer | `/teams` | Organisationen, Teams, Nutzer, Rollen; später Einladungen | **echt** |
+| Admin-API-Keys | `/admin-keys` | Zugänge für Automatisierung mit Rollen und Ablauf | **echt** |
 | Limits & Budgets | `/limits` | RPM/TPM (gleitendes Fenster) und Budgets je Org/Team/Key/Modell; Verbrauch, Prognose, Schwellen-Alarme | geplant |
 | Guardrails & Plugins | `/guardrails` | Eingangs-/Ausgangsprüfungen (PII, Prompt-Injection, Moderation), Webhook-/WASM-Plugins, Reihenfolge, Testlauf | geplant |
 | Cache | `/cache` | Exakt/semantisch, Trefferquote, Ersparnis, TTL-Regeln, Vektorindex, gezieltes Leeren | geplant |
 | MCP-Server | `/mcp` | MCP-Server und Tools, Freigaben je Team/Key, Aufrufprotokoll, Gesundheit | geplant |
 | Logs | `/logs` | Request-Explorer mit Filtern, Detail-Sheet, Export | Muster |
 | Audit | `/audit` | Unveränderliches Änderungsprotokoll der Steuerungsebene mit Diff, Filter, Export | geplant |
-| Einstellungen | `/settings` | Darstellung, Datenquelle (Mock), Gateway-Konfiguration (YAML, lesend), OIDC, Aufbewahrung, Über | Teilmuster |
+| Einstellungen | `/settings` | Anmeldung/Rollen, Nur-YAML-Hinweis, GitOps Export/Apply, Datenquelle, Darstellung, Über | **echt** |
 | Design-System | `/design` | Komponentenübersicht (Entwicklerseite, nicht in der Navigation, über Befehlspalette) | Muster |
 
 Detailseiten (z. B. `/keys/{id}`, `/models/{alias}`, `/logs/{requestId}`) folgen dem Muster Kopf mit Status +
@@ -219,7 +290,8 @@ aigw-admin liefert die UI mit `default-src 'self'; script-src 'self'; style-src 
 | Bits Select, DropdownMenu (Radio/Checkbox), Dialog, Sheet, Tooltip, Tabs, ToggleGroup, RadioGroup, Checkbox, Switch, Pagination | funktionieren, **0 CSP-Verstöße** |
 | uPlot-Diagramm inkl. Hover-Tooltip, Theme-Wechsel | funktioniert, **0 CSP-Verstöße** |
 | Befehlspalette, Toasts, mobile Navigation, Seitenwechsel | funktionieren, 0 Verstöße |
-| Konsole (`securitypolicyviolation` + Konsolenfehler) | leer in allen 40 Tests (CSP- und Screenshot-Läufe) |
+| Verwaltungsseiten gegen echtes `aigw serve` (Token-Dialog, Formulare, Konflikt-Dialog, Sheets, Rollen-Ausblendung) | funktionieren, 0 CSP-Verstöße (`admin.spec.js`, `real-screens.spec.js`) |
+| Konsole (`securitypolicyviolation` + Konsolenfehler) | leer in allen 66 Tests; einzige erlaubte Meldung: Chromiums „Failed to load resource … 412“ im absichtlich provozierten ETag-Konflikt |
 
 Warum es ohne Nonce/Hash geht: Bits UI (Floating-Positionierung, CSS-Variablen wie `--bits-select-anchor-width`)
 und uPlot setzen Styles per **CSSOM** (`element.style…`, Svelte `set_style` → `style.cssText`); das ist von
@@ -230,23 +302,29 @@ CSSOM; Vite baut CSS als Datei (`assetsInlineLimit: 0`). Eine CSP-Anpassung war 
 
 ## 8. Bundle und Qualität
 
-| Messung (gzip -9, `pnpm sizes`) | Wert |
-|---|---|
-| initial JS (Shell, Svelte, Bits-Grundlagen) | 80,3 KiB (Brotli 71,5 KiB) |
-| initial CSS | ≈ 8,5 KiB |
-| alle Chunks JS (alle Seiten inkl. uPlot) | ≈ 164 KiB |
-| gesamt (JS, CSS, HTML, SVG) | ≈ 174 KiB |
+| Messung (gzip -9, `pnpm sizes`) | AIGW-48 | AIGW-49 |
+|---|---|---|
+| initial JS (Shell, Svelte, Bits-Grundlagen; ab AIGW-49 + API-Client, Anmeldung, Token-/Konflikt-Dialog) | 80,3 KiB | 91,6 KiB (Brotli 81,3 KiB; Budget ≤ 120 KiB) |
+| initial CSS | ≈ 8,5 KiB | ≈ 8,7 KiB |
+| alle Chunks JS (alle Seiten inkl. uPlot und Mock-Backend) | ≈ 164 KiB | ≈ 215 KiB |
 
-Seiten werden per dynamic import geladen; uPlot (~20 KiB gzip) nur mit der Übersicht. `svelte-check`, `vite build`
+Seiten werden per dynamic import geladen; uPlot (~20 KiB gzip) nur mit der Übersicht, das Mock-Backend nur im
+Mock-Modus. `svelte-check`, `vite build`
 und `scripts/check.sh` sind grün; Browser-Tests: `ui/e2e/run.sh` (eigenes pnpm-Projekt, nicht im Bundle).
 
 ## 9. Offene Designfragen (Entscheidung durch den User)
 
 | # | Frage | Optionen | Empfehlung |
 |---|---|---|---|
-| D1 | Akzentfarbe | **Violett** `#5b45d6` (eigenständig, „AI“-typisch) · Petrol `#0f6f68` (Familienlook cloud-project) · Bernstein `#b45309` (warm, aber nah an Warnfarben) – live umschaltbar in Einstellungen | Violett: klar unterscheidbar von cloud-project und von allen Statusfarben |
-| D2 | Diagramm-Bibliothek | **uPlot** (Canvas, ~20 KiB gzip, sehr schnell bei vielen Punkten, CSP-geprüft) · LayerChart (Svelte-nativ/SVG, schöner deklarativ, aber d3-Abhängigkeiten, deutlich größer) · Eigenbau SVG (wie Sparkline; minimal, aber Achsen/Hover selbst pflegen) | uPlot für Zeitreihen, eigene SVG-Bausteine für Kleinstgrafiken (Sparkline, Meter, Balken) |
-| D3 | Schrift | Systemschrift (heute) · Inter selbst gehostet (`font-src 'self'`, ~100 KiB woff2) | Systemschrift beibehalten; Inter nur, falls einheitlicher Look über Plattformen gewünscht |
-| D4 | Zahlen in Monospace | Variante C nutzt Monospace für alle Zahlen; KPI-Kacheln jetzt Sans mit Tabellenziffern | Mischung wie umgesetzt (Tabellen/IDs mono, große Kennzahlen sans) |
-| D5 | Seitenleiste im Hellmodus | dunkel (Variante C) · hell | dunkel (Variante C, klare Trennung von Navigation und Inhalt) |
-| D6 | Mock-Modus Standard | an, solange Endpunkte fehlen · aus | an bis zur ersten echten Daten-API, dann aus und nur per `?mock=1`/Einstellung |
+| D1 | Akzentfarbe | Violett · Petrol · Bernstein | **entschieden: Violett `#5b45d6`** (Umschalter entfernt) |
+| D2 | Diagramm-Bibliothek | uPlot · LayerChart · Eigenbau SVG | **entschieden: uPlot + eigene SVG-Bausteine**; LayerChart nur zusätzlich, wo sinnvoll, und dann per dynamic import |
+| D3 | Schrift | Systemschrift · Inter selbst gehostet | **entschieden: Systemschrift** |
+| D4 | Zahlen in Monospace | alle · gemischt | **entschieden: alle Zahlen Monospace** (auch KPI-Kacheln) |
+| D5 | Seitenleiste im Hellmodus | dunkel · hell | **entschieden: immer dunkel** |
+| D6 | Mock-Modus Standard | an · automatisch · aus | **entschieden: aus**; nur per Schalter/`?mock=1`, dann deutlich gekennzeichnet (Band + Badge) |
+| D7 | Mock-Schalter in Produktion | immer sichtbar (heute) · per Konfiguration ausblendbar | per Konfiguration (`admin.ui.mock: false`) ausblendbar machen, Standard sichtbar |
+| D8 | Bearbeiten | Dialog (heute) · Detailseite je Objekt (`/keys/{name}`) mit Tabs Übersicht/Nutzung/Einstellungen/Audit | Dialoge fürs Anlegen behalten; Detailseiten, sobald Audit (AIGW-66) und Nutzung (AIGW-46) Daten liefern |
+| D9 | Einstellungen von Gruppen/Deployments | JSON-Feld mit Feldliste (heute) · strukturierte Formulare | strukturierte Felder für retry/circuitBreaker/healthCheck; JSON nur für Anbieter-Extras |
+| D10 | Routing-Regeln aus der Musterseite | entfallen (Aliasse decken Eingangsnamen ab) · eigene Ressource (Muster → Gruppe, je Team) | entfallen lassen, bis Bedarf über Aliasse hinaus besteht |
+| D11 | Große Listen | alle Seiten laden (`listAll`) + Filtern im Browser (heute) · serverseitige Pagination/Suche in der Tabelle | ab ca. 1 000 Einträgen je Art auf serverseitige Pagination umstellen (API kann es) |
+| D12 | Bootstrap/Nur-YAML erkennen | Token-Dialog immer ohne OIDC, Nur-YAML erst beim ersten 403 (heute) · `auth/info` meldet `bootstrap` und `readOnly` | kleine API-Erweiterung von `auth/info` (zwei Felder), dann gezielte Hinweise vorab |

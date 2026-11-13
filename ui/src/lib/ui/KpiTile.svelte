@@ -44,14 +44,14 @@
     <span class="truncate">{label}</span>
   </div>
   <span class="flex min-w-0 items-baseline gap-1">
-    <span class="truncate text-2xl font-semibold xl:text-xl 2xl:text-2xl tracking-tight text-fg tabular-nums">{value}</span>
+    <span class="num truncate text-2xl font-semibold xl:text-xl 2xl:text-2xl text-fg">{value}</span>
     {#if unit}<span class="text-sm text-fg-muted">{unit}</span>{/if}
   </span>
   {#if delta !== undefined}
     <span class="flex items-center gap-1 text-xs whitespace-nowrap">
       <span class={['inline-flex items-center gap-0.5 font-medium', good === null ? 'text-fg-muted' : good ? 'text-success-fg' : 'text-danger-fg']}>
         <Icon name={delta >= 0 ? 'arrow-up' : 'arrow-down'} size={12} />
-        <span class="tabular-nums">{deltaText}</span>
+        <span class="num">{deltaText}</span>
       </span>
       <span class="truncate text-fg-muted">ggü. Vorperiode</span>
     </span>

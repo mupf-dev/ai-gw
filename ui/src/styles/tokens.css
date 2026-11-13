@@ -5,8 +5,7 @@
  *
  * Herkunft: cloud-project-Portal, Variante C „Technisch“ (CLOU-106) – neutrale Flächen, kleine Radien,
  * Monospace für Zahlen, dunkle Seitenleiste auch im Hellmodus. Für ai-gw eigenständig benannt und mit
- * eigener Akzentfarbe („Violett“, Vorschlag) versehen; „Petrol“ (= cloud-project) und „Bernstein“ sind
- * zum Vergleich umschaltbar (data-accent am <html>), bis der User entschieden hat.
+ * eigener Akzentfarbe „Violett“ #5b45d6 (User-Entscheidung D1) versehen.
  *
  * Hell/Dunkel: helle Werte im @theme, dunkle Werte als eigener Block für <html data-theme="dark"> und für
  * Teilbäume mit .scheme-dark (Seitenleiste, Code-Flächen sind immer dunkel). prefs.svelte.ts schreibt immer
@@ -129,26 +128,6 @@
   --shadow-dialog: 0 0 0 1px rgb(16 20 24 / 0.06), 0 24px 64px rgb(16 20 24 / 0.24);
 }
 
-/* ---------- Alternative Akzente (nur zum Vergleich, Entscheidung offen) ---------- */
-:root[data-accent='petrol'] {
-  --color-accent: #0f6f68;
-  --color-accent-hover: #0b5853;
-  --color-on-accent: #ffffff;
-  --color-accent-text: #0d6761;
-  --color-accent-soft: #e0f3f0;
-  --color-accent-soft-fg: #0b5853;
-  --color-focus: #0f6f68;
-}
-:root[data-accent='bernstein'] {
-  --color-accent: #b45309;
-  --color-accent-hover: #92400e;
-  --color-on-accent: #ffffff;
-  --color-accent-text: #a64b07;
-  --color-accent-soft: #fdf0e1;
-  --color-accent-soft-fg: #7c3a07;
-  --color-focus: #b45309;
-}
-
 /* ---------- Dunkle Werte (generiert aus den Paaren hell/dunkel, siehe Kopfkommentar) ---------- */
 
 /* Wirksam am <html data-theme="dark"> und für Teilbäume mit .scheme-dark (Seitenleiste, Code-Flächen). */
@@ -258,28 +237,6 @@
     --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.06), 0 12px 32px rgb(0 0 0 / 0.55);
     --shadow-dialog: 0 0 0 1px rgb(255 255 255 / 0.06), 0 24px 64px rgb(0 0 0 / 0.7);
   }
-}
-
-:root[data-accent='petrol'][data-theme='dark'],
-:root[data-accent='petrol'] .scheme-dark {
-  --color-accent: #2fd2bb;
-  --color-accent-hover: #5ee6d1;
-  --color-on-accent: #03201c;
-  --color-accent-text: #5ee6d1;
-  --color-accent-soft: #0e2b28;
-  --color-accent-soft-fg: #7cefdc;
-  --color-focus: #5ee6d1;
-}
-
-:root[data-accent='bernstein'][data-theme='dark'],
-:root[data-accent='bernstein'] .scheme-dark {
-  --color-accent: #f5a524;
-  --color-accent-hover: #f8b84e;
-  --color-on-accent: #2a1700;
-  --color-accent-text: #f8b84e;
-  --color-accent-soft: #33240c;
-  --color-accent-soft-fg: #fcd08a;
-  --color-focus: #f8b84e;
 }
 
 /* ---------- Farbschema ---------- */

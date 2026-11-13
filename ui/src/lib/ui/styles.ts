@@ -55,5 +55,13 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
 }
 
 export const card ='rounded-lg border border-line bg-surface shadow-card';
+
+export const textarea =
+  'min-h-20 w-full min-w-0 rounded-md border border-line bg-surface px-3 py-2 font-mono text-sm text-fg placeholder:text-fg-subtle transition-colors hover:border-line-strong focus-visible:border-accent focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus aria-invalid:border-danger disabled:opacity-60';
+export const checkbox =
+  'grid size-4 shrink-0 place-items-center rounded-sm border border-line-strong bg-surface data-[state=checked]:border-accent data-[state=checked]:bg-accent data-[state=checked]:text-on-accent disabled:opacity-50';
+export const switchRoot =
+  'inline-flex h-5 w-9 shrink-0 items-center rounded-full bg-line-strong p-0.5 transition-colors data-[state=checked]:bg-accent disabled:opacity-50';
+export const switchThumb = 'size-4 rounded-full bg-surface shadow-card transition-transform data-[state=checked]:translate-x-4';
 export const kbd =
   'inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-line bg-surface-2 px-1 font-mono text-2xs text-fg-muted';

@@ -53,11 +53,11 @@ test('Keys: Select-Filter, Dropdown, Dialog „Key erstellen“, einmalige Anzei
   await expect(page.getByRole('menuitem', { name: /Rotieren/ })).toBeVisible();
   await page.keyboard.press('Escape');
   await page.getByTestId('create-key').click();
-  await page.getByTestId('create-key-submit').click();
+  await page.getByTestId('key-form-submit').click();
   await expect(page.getByText('Bitte einen Namen angeben.')).toBeVisible();
   await page.getByRole('textbox', { name: 'Name', exact: true }).fill('csp-test-key');
-  await page.getByTestId('create-key-submit').click();
-  await expect(page.getByTestId('secret-value')).toContainText('sk-gw-');
+  await page.getByTestId('key-form-submit').click();
+  await expect(page.getByTestId('secret-value')).toContainText('sk-aigw-');
   await page.getByRole('checkbox').click();
   await page.getByTestId('key-done').click();
   await expect(page.getByRole('status').filter({ hasText: 'Key erstellt' })).toBeVisible();
@@ -77,12 +77,43 @@ test('Logs: Detail-Sheet mit Tabs und Code-Anzeige', async ({ page }) => {
   clean(page);
 });
 
-test('Modelle: Gruppenwechsel, Tabs, Switch, Tooltip', async ({ page }) => {
+test('Modelle: Gruppenwechsel, Switch, Dialoge', async ({ page }) => {
   await goto(page, '/models');
-  await page.getByRole('button', { name: /claude-sonnet/ }).first().click();
+  await page.getByTestId('group-list').getByRole('button', { name: /^claude-sonnet/ }).click();
   await expect(page.getByTestId('group-detail')).toContainText('claude-sonnet');
-  await page.getByRole('tab', { name: /Routing-Regeln/ }).click();
   await page.getByRole('switch').first().click();
+  await expect(page.getByRole('status').filter({ hasText: /Deployment (de)?aktiviert/ })).toBeVisible();
+  await page.getByTestId('edit-group').click();
+  await expect(page.getByTestId('group-form-dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByTestId('create-deployment').click();
+  await expect(page.getByTestId('deployment-form-dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  clean(page);
+});
+
+test('Teams, Anbieter, Preise, Admin-Keys, Einstellungen (Mock)', async ({ page }) => {
+  await goto(page, '/teams');
+  await expect(page.getByTestId('teams-table')).toContainText('platform');
+  await page.getByRole('tab', { name: 'Nutzer' }).click();
+  await expect(page.getByTestId('users-table')).toContainText('Anna Becker');
+  await page.getByTestId('create-user').click();
+  await expect(page.getByTestId('role-editor')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await goto(page, '/providers');
+  await page.getByTestId('create-credential').click();
+  await page.getByTestId('credential-form-dialog').getByRole('combobox').first().click();
+  await page.getByRole('option', { name: 'Azure OpenAI' }).click();
+  await expect(page.getByText('Entra ID (Service Principal)')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await goto(page, '/prices');
+  await expect(page.getByTestId('prices-table')).toContainText('gültig');
+  await goto(page, '/admin-keys');
+  await expect(page.getByTestId('admin-keys-table')).toContainText('gitops-ci');
+  await goto(page, '/settings');
+  await page.getByTestId('gitops-yaml').fill('apiVersion: aigw/v1alpha1\nkind: ModelGroup\nmetadata: {name: x}\nspec: {}\n');
+  await page.getByTestId('gitops-plan').click();
+  await expect(page.getByTestId('apply-plan')).toBeVisible();
   clean(page);
 });
 
@@ -108,15 +139,21 @@ test('Mobil: Navigation im Sheet', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await goto(page, '/');
   await page.getByTestId('menu-button').click();
-  await page.getByRole('link', { name: 'Keys' }).click();
+  await page.getByRole('link', { name: 'Keys', exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/keys/);
   clean(page);
 });
 
-test('Ohne Mock: echte API (Version), Leerzustände', async ({ page }) => {
+test('Mock-Modus deutlich gekennzeichnet; ohne Mock und ohne Anmeldung: Token-Dialog, Leerzustände', async ({ page }) => {
+  await goto(page, '/keys');
+  await expect(page.getByTestId('mock-banner')).toBeVisible();
+  await expect(page.getByTestId('mock-badge')).toBeVisible();
   await goto(page, '/', { mock: false });
+  await expect(page.getByTestId('token-dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(page.getByTestId('version')).not.toHaveText('–');
   await goto(page, '/keys', { mock: false });
-  await expect(page.getByText('Keys noch nicht verfügbar')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByText('Anmeldung erforderlich')).toBeVisible();
   clean(page);
 });

@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Browser-Tests der Admin-UI gegen ein echtes `aigw serve` (UI eingebettet, CSP aus crates/aigw-admin):
-# CSP-Prüfung der Overlays/Diagramme und Screenshots der Musterseiten (hell/dunkel × Desktop/schmal).
+# CSP-Prüfung der Overlays/Diagramme, Verwaltungsseiten gegen die echte Admin-API (Bootstrap-Token, ohne OIDC)
+# und Screenshots (Musterseiten im Mock-Modus, echte Seiten mit per API angelegten Daten).
 #
 # Voraussetzung: ui/dist gebaut (pnpm build) – das aigw-Binary bettet es beim Übersetzen ein.
 #   AIGW_BIN   fertiges Binary (Standard: target/debug/aigw, wird sonst gebaut)
@@ -24,8 +25,9 @@ rm -rf "$OUT" && mkdir -p "$OUT/screens"
 RUN=$(mktemp -d)
 printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "sqlite://%s/aigw.db?mode=rwc"\n' \
   "$PORT" "$PORT" "$RUN" > "$RUN/aigw.yaml"
-# Wegwerf-Master-Key und -Datenbank nur für diesen Lauf (ohne Key startet `aigw serve` nicht).
-(cd "$RUN" && AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') \
+# Wegwerf-Master-Key, -Bootstrap-Token und -Datenbank nur für diesen Lauf (ohne Key startet `aigw serve` nicht).
+TOKEN="aigw-admin-e2e-$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
+(cd "$RUN" && AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') AIGW_BOOTSTRAP_TOKEN="$TOKEN" \
   exec "$BIN" serve --config "$RUN/aigw.yaml") > "$OUT/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; rm -rf "$RUN"' EXIT
@@ -38,4 +40,4 @@ if [[ -f pnpm-lock.yaml ]]; then pnpm install --frozen-lockfile; else pnpm insta
 if ! ls "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}" 2>/dev/null | grep -q chromium; then
   pnpm exec playwright install --with-deps chromium > "$OUT/playwright-install.log" 2>&1
 fi
-AIGW_URL="http://127.0.0.1:$PORT" E2E_OUT="$OUT" pnpm exec playwright test ${E2E_GREP:+--grep "$E2E_GREP"}
+AIGW_URL="http://127.0.0.1:$PORT" AIGW_TOKEN="$TOKEN" E2E_OUT="$OUT" pnpm exec playwright test ${E2E_GREP:+--grep "$E2E_GREP"}

@@ -6,7 +6,9 @@
   // Befund aus dem cloud-project-Spike, für bits-ui 2.20 erneut geprüft.
   import { Dialog } from 'bits-ui';
   import { tick } from 'svelte';
-  import { prefs, setMock, setTheme } from '../prefs.svelte';
+  import { isMock } from '../mode.svelte';
+  import { isGlobalAdmin } from '../rbac.svelte';
+  import { prefs, setMockMode, setTheme } from '../prefs.svelte';
   import { MOCK, MODEL_GROUPS } from '../mock/data';
   import { NAV, NAV_FOOTER, PAGES } from '../nav';
   import { navigate } from '../router.svelte';
@@ -34,7 +36,7 @@
   const groups = $derived.by<Group[]>(() => [
     {
       label: 'Seiten',
-      items: [...NAV.flatMap((g) => g.items), ...NAV_FOOTER, PAGES.design].map((p) => ({
+      items: [...NAV.flatMap((g) => g.items), ...NAV_FOOTER, PAGES.design].filter((p) => !p.adminOnly || isGlobalAdmin()).map((p) => ({
         id: `nav-${p.id}`,
         label: p.label,
         hint: p.ready ? undefined : 'in Planung',
@@ -57,16 +59,16 @@
         },
         {
           id: 'act-mock',
-          label: prefs.mock ? 'Mock-Daten ausschalten' : 'Mock-Daten einschalten',
+          label: isMock() ? 'Mock-Daten ausschalten' : 'Mock-Daten einschalten',
           icon: 'sparkles' as IconName,
           keywords: 'mock demo beispieldaten',
-          run: () => setMock(!prefs.mock),
+          run: () => setMockMode(isMock() ? 'off' : 'on'),
         },
       ],
     },
     {
       label: 'Modellgruppen',
-      items: prefs.mock
+      items: isMock()
         ? MODEL_GROUPS.map((m) => ({
             id: `model-${m.alias}`,
             label: m.alias,
@@ -79,7 +81,7 @@
     },
     {
       label: 'Keys',
-      items: prefs.mock
+      items: isMock()
         ? MOCK.keys.map((k) => ({
             id: `key-${k.id}`,
             label: k.name,

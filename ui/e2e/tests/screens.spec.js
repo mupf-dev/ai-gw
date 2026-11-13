@@ -21,7 +21,7 @@ const SCENES = [
     act: async (page) => {
       await page.getByTestId('create-key').click();
       await page.getByRole('textbox', { name: 'Name', exact: true }).fill('support-bot-eu');
-      const dlg = page.getByTestId('create-key-dialog');
+      const dlg = page.getByTestId('key-form-dialog');
       await dlg.getByText('Ausgewählte', { exact: true }).click();
       await dlg.getByText('gpt-4o-mini', { exact: true }).click();
     },
@@ -33,7 +33,7 @@ const SCENES = [
     act: async (page) => {
       await page.getByTestId('create-key').click();
       await page.getByRole('textbox', { name: 'Name', exact: true }).fill('support-bot-eu');
-      await page.getByTestId('create-key-submit').click();
+      await page.getByTestId('key-form-submit').click();
       await expect(page.getByTestId('secret-value')).toBeVisible();
     },
   },
@@ -63,7 +63,7 @@ const SCENES = [
     vp: ['schmal'],
     act: async (page) => {
       await page.getByTestId('menu-button').click();
-      await expect(page.getByRole('link', { name: 'Keys' })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Keys', exact: true })).toBeVisible();
     },
   },
   { name: 'design-system', path: '/design', full: true, vp: ['desktop'] },
@@ -85,12 +85,3 @@ for (const theme of ['hell', 'dunkel']) {
   }
 }
 
-test('akzent-vergleich', async ({ page }) => {
-  for (const accent of ['violett', 'petrol', 'bernstein']) {
-    await page.goto(`/admin/keys?theme=light&mock=1&accent=${accent}`);
-    await expect(page.locator('main h1')).toBeVisible();
-    await page.waitForTimeout(300);
-    await page.screenshot({ path: `${OUT}/screens/akzent-${accent}.png`, clip: { x: 0, y: 0, width: 1440, height: 560 } });
-  }
-  clean(page);
-});

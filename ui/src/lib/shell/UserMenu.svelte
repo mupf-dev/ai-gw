@@ -5,8 +5,9 @@
   // Angemeldet (Session/OIDC): echter Nutzer; sonst im Mock-Modus der Beispielnutzer.
   import { DropdownMenu } from 'bits-ui';
   import { USER } from '../context.svelte';
-  import { auth, identity, login, logout, roleLabel } from '../session.svelte';
-  import { prefs, setMock, setTheme, THEMES, type Theme } from '../prefs.svelte';
+  import { isMock } from '../mode.svelte';
+  import { auth, identity, logout, METHOD_LABEL, requestLogin, roleLabel } from '../session.svelte';
+  import { prefs, setMockMode, setTheme, THEMES, type Theme } from '../prefs.svelte';
   import { navigate } from '../router.svelte';
   import { toast } from '../toast.svelte';
   import Icon, { type IconName } from '../ui/Icon.svelte';
@@ -17,9 +18,9 @@
   const me = $derived.by(() => {
     if (auth.session) {
       const id = identity(auth.session);
-      return { ...id, detail: auth.session.email ?? auth.session.subject, role: roleLabel(auth.session.roles) };
+      return { ...id, detail: auth.session.email ?? METHOD_LABEL[auth.session.method] ?? auth.session.subject, role: roleLabel(auth.session.roles) };
     }
-    if (prefs.mock) return { name: USER.name, initials: USER.initials, detail: USER.email, role: USER.role };
+    if (isMock()) return { name: USER.name, initials: USER.initials, detail: USER.email, role: USER.role };
     return { name: 'Nicht angemeldet', initials: '?', detail: auth.oidc ? 'Anmeldung per OIDC' : 'Admin-Token erforderlich', role: '' };
   });
 </script>
@@ -58,7 +59,7 @@
         </DropdownMenu.RadioGroup>
       </DropdownMenu.Group>
       <DropdownMenu.Separator class={menuSeparator} />
-      <DropdownMenu.CheckboxItem checked={prefs.mock} onCheckedChange={(c) => setMock(c)} class={menuItem} closeOnSelect={false}>
+      <DropdownMenu.CheckboxItem checked={isMock()} onCheckedChange={(c) => setMockMode(c ? 'on' : 'off')} class={menuItem} closeOnSelect={false}>
         {#snippet children({ checked })}
           <Icon name="sparkles" size={14} />
           <span class="flex-1">Mock-Daten</span>
@@ -71,16 +72,16 @@
         {/snippet}
       </DropdownMenu.CheckboxItem>
       <DropdownMenu.Item class={menuItem} onSelect={() => navigate('/settings')}><Icon name="settings" size={14} /> Einstellungen</DropdownMenu.Item>
-      <DropdownMenu.Item class={menuItem} onSelect={() => toast('info', 'API-Dokumentation', 'OpenAPI unter /admin/api/v1/openapi.json')}>
+      <DropdownMenu.Item class={menuItem} onSelect={() => toast('info', 'API-Dokumentation', 'OpenAPI unter /admin/api/openapi.json')}>
         <Icon name="file-text" size={14} /> API-Dokumentation
       </DropdownMenu.Item>
       <DropdownMenu.Separator class={menuSeparator} />
-      {#if auth.session?.method === 'session'}
+      {#if auth.session}
         <DropdownMenu.Item class={menuItem} onSelect={() => void logout()} data-testid="logout">
           <Icon name="logout" size={14} /> Abmelden
         </DropdownMenu.Item>
-      {:else if !auth.session && auth.oidc}
-        <DropdownMenu.Item class={menuItem} onSelect={login} data-testid="login">
+      {:else if auth.loaded}
+        <DropdownMenu.Item class={menuItem} onSelect={() => requestLogin()} data-testid="login">
           <Icon name="user" size={14} /> Anmelden
         </DropdownMenu.Item>
       {/if}

@@ -1,26 +1,22 @@
 // SPDX-FileCopyrightText: 2026 ai-gw contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Darstellungs- und Sitzungseinstellungen: Farbschema (System/Hell/Dunkel), Akzentfarbe (Vergleich bis zur
-// Entscheidung) und Mock-Modus. Am <html> stehen immer die wirksamen Werte (data-theme, data-accent), damit
+// Darstellungs- und Sitzungseinstellungen: Farbschema (System/Hell/Dunkel) und Mock-Modus (An/Aus, Standard aus). Am <html> stehen immer die wirksamen Werte (data-theme), damit
 // Tokens (light-dark) und die dark:-Variante ohne Inline-Skript (CSP) stimmen.
-// Vorbelegung per URL für Demo-Links und Screenshots: ?theme=dark&accent=petrol&mock=0
+// Vorbelegung per URL für Demo-Links und Screenshots: ?theme=dark&mock=1
 
 export type Theme = 'system' | 'light' | 'dark';
-export type Accent = 'violett' | 'petrol' | 'bernstein';
 export const THEMES: { value: Theme; label: string }[] = [
   { value: 'system', label: 'System' },
   { value: 'light', label: 'Hell' },
   { value: 'dark', label: 'Dunkel' },
 ];
-export const ACCENTS: { value: Accent; label: string; note: string }[] = [
-  { value: 'violett', label: 'Violett', note: 'Vorschlag für ai-gw' },
-  { value: 'petrol', label: 'Petrol', note: 'wie cloud-project' },
-  { value: 'bernstein', label: 'Bernstein', note: 'warm, nah an Warnfarben' },
-];
 
-/** Solange die Admin-API nur /version kennt, startet die UI im Mock-Modus. */
-const MOCK_DEFAULT = true;
+/**
+ * Mock-Modus (User-Entscheidung D6): standardmäßig **aus**; nur per Schalter (Einstellungen, Nutzer-Menü,
+ * Befehlspalette) oder `?mock=1` (gilt nur für diesen Aufruf, nicht gespeichert) – dann deutlich gekennzeichnet.
+ */
+export type MockMode = 'on' | 'off';
 
 function read(key: string): string | null {
   try {
@@ -49,13 +45,10 @@ export const prefs = $state({
     q.get('theme'),
     read('aigw.theme'),
   ) ?? ('system' as Theme),
-  accent: pick(
-    ACCENTS.map((a) => a.value),
-    q.get('accent'),
-    read('aigw.accent'),
-  ) ?? ('violett' as Accent),
-  mock: mockParam !== null ? mockParam !== '0' : (read('aigw.mock') ?? String(MOCK_DEFAULT)) === 'true',
+  mockMode: mockParam !== null ? (mockParam === '0' ? 'off' : 'on') : (pick(['on', 'off'] as const, read('aigw.mockMode')) ?? 'off'),
 });
+// URL-Vorgabe gilt nur für diesen Aufruf, die gespeicherte Wahl bleibt unberührt.
+let persistMock = mockParam === null;
 
 const media = matchMedia('(prefers-color-scheme: dark)');
 export const env = $state({ systemDark: media.matches });
@@ -72,21 +65,16 @@ export function isDark(): boolean {
 export function applyPrefs() {
   const root = document.documentElement;
   root.dataset.theme = isDark() ? 'dark' : 'light';
-  root.dataset.accent = prefs.accent;
   write('aigw.theme', prefs.theme);
-  write('aigw.accent', prefs.accent);
-  write('aigw.mock', String(prefs.mock));
+  if (persistMock) write('aigw.mockMode', prefs.mockMode);
 }
 
 export function setTheme(t: Theme) {
   prefs.theme = t;
   applyPrefs();
 }
-export function setAccent(a: Accent) {
-  prefs.accent = a;
-  applyPrefs();
-}
-export function setMock(on: boolean) {
-  prefs.mock = on;
+export function setMockMode(m: MockMode) {
+  prefs.mockMode = m;
+  persistMock = true;
   applyPrefs();
 }

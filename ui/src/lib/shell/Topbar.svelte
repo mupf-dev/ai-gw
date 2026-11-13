@@ -2,7 +2,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
   // Kopfzeile: Menü (mobil), Organisation/Team, Suche (⌘K), Mock-Hinweis, Hilfe, Nutzer-Menü.
-  import { prefs, setMock } from '../prefs.svelte';
+  import { isMock } from '../mode.svelte';
+  import { setMockMode } from '../prefs.svelte';
+  import { auth, requestLogin } from '../session.svelte';
   import Badge from '../ui/Badge.svelte';
   import Icon from '../ui/Icon.svelte';
   import Tooltip from '../ui/Tooltip.svelte';
@@ -31,10 +33,15 @@
     <span class="hidden items-center gap-0.5 sm:inline-flex"><span class={kbd}>{mac ? '⌘' : 'Strg'}</span><span class={kbd}>K</span></span>
   </button>
   <div class="ml-auto flex items-center gap-1.5">
-    {#if prefs.mock}
+    {#if auth.loaded && !auth.session}
+      <button type="button" class={btn('secondary', 'sm')} onclick={() => requestLogin()} data-testid="login-button">
+        <Icon name="lock" size={14} /> Anmelden
+      </button>
+    {/if}
+    {#if isMock()}
       <Tooltip text="Beispieldaten – keine echten Messwerte. Klicken zum Ausschalten.">
         {#snippet trigger({ props })}
-          <button {...props} type="button" class="rounded-sm" onclick={() => setMock(false)} data-testid="mock-badge">
+          <button {...props} type="button" class="rounded-sm" onclick={() => setMockMode('off')} data-testid="mock-badge">
             <Badge tone="warning" icon="sparkles">Mock-Daten</Badge>
           </button>
         {/snippet}

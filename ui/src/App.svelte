@@ -5,11 +5,18 @@
   import { Tooltip } from 'bits-ui';
   import type { Component } from 'svelte';
   import { tick } from 'svelte';
+  import ConflictDialog from './lib/admin/ConflictDialog.svelte';
+  import TokenDialog from './lib/admin/TokenDialog.svelte';
+  import { loadCatalog } from './lib/context.svelte';
+  import { dataKey, isMock } from './lib/mode.svelte';
   import { pageForPath, PAGES } from './lib/nav';
   import { interceptLinks, route } from './lib/router.svelte';
+  import { auth } from './lib/session.svelte';
   import CommandPalette from './lib/shell/CommandPalette.svelte';
   import SidebarNav from './lib/shell/SidebarNav.svelte';
   import Topbar from './lib/shell/Topbar.svelte';
+  import { setMockMode } from './lib/prefs.svelte';
+  import Icon from './lib/ui/Icon.svelte';
   import Sheet from './lib/ui/Sheet.svelte';
   import Toaster from './lib/ui/Toaster.svelte';
 
@@ -18,15 +25,28 @@
     overview: () => import('./routes/Overview.svelte'),
     keys: () => import('./routes/Keys.svelte'),
     models: () => import('./routes/Models.svelte'),
+    providers: () => import('./routes/Providers.svelte'),
+    prices: () => import('./routes/Prices.svelte'),
+    teams: () => import('./routes/Teams.svelte'),
+    'admin-keys': () => import('./routes/AdminKeys.svelte'),
     logs: () => import('./routes/Logs.svelte'),
     settings: () => import('./routes/Settings.svelte'),
     design: () => import('./routes/DesignSystem.svelte'),
   };
   const placeholder: Loader = () => import('./routes/Placeholder.svelte');
   const notFound: Loader = () => import('./routes/NotFound.svelte');
+  const gate: Loader = () => import('./routes/LoginRequired.svelte');
 
   const page = $derived(pageForPath(route.path));
-  const loader = $derived(page ? (ROUTES[page.id] ?? placeholder) : notFound);
+  // Verwaltungsseiten ohne Mock-Modus nur angemeldet – sonst würden ihre Abfragen 401 liefern.
+  const gated = $derived(!!page?.needsAuth && !isMock() && !auth.session);
+  const loader = $derived(gated ? gate : page ? (ROUTES[page.id] ?? placeholder) : notFound);
+
+  // Organisationen/Teams für den Kontext-Umschalter bei jedem Wechsel der Datenquelle neu laden.
+  $effect(() => {
+    void dataKey();
+    if (auth.loaded && (isMock() || auth.session)) void loadCatalog();
+  });
 
   let navOpen = $state(false);
   let paletteOpen = $state(false);
@@ -75,12 +95,20 @@
 
     <div class="flex min-h-dvh min-w-0 flex-1 flex-col">
       <Topbar onmenu={() => (navOpen = true)} onsearch={() => (paletteOpen = true)} />
+      {#if isMock()}
+        <!-- Mock-Modus deutlich kennzeichnen (User-Entscheidung D6) -->
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-warning-fg/30 bg-warning-bg px-4 py-2 text-sm text-warning-fg sm:px-6 lg:px-8" role="status" data-testid="mock-banner">
+          <Icon name="sparkles" size={14} />
+          <span class="min-w-0 flex-1"><strong class="font-semibold">Mock-Modus:</strong> Beispieldaten, keine echten Werte – Änderungen bleiben in diesem Browser-Tab.</span>
+          <button type="button" class="font-medium underline underline-offset-2 hover:no-underline" onclick={() => setMockMode('off')}>Mock ausschalten</button>
+        </div>
+      {/if}
       <main id="main" class="mx-auto w-full max-w-[90rem] flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        {#await loader()}
+        {#await auth.loaded ? loader() : new Promise<never>(() => {})}
           <div class="h-8 w-48 animate-pulse rounded-md bg-skeleton" aria-label="Lade Seite"></div>
         {:then mod}
           {@const Page = mod.default}
-          {#key route.path}
+          {#key `${route.path}|${dataKey()}`}
             <Page />
           {/key}
         {/await}
@@ -89,5 +117,7 @@
     </div>
   </div>
   <CommandPalette bind:open={paletteOpen} />
+  <TokenDialog />
+  <ConflictDialog />
   <Toaster />
 </Tooltip.Provider>

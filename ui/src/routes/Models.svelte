@@ -1,223 +1,313 @@
 <!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
-  // Modelle & Routen: Modellgruppen (Alias) als Master/Detail mit Prioritätsgruppen, Gewichten, Zustand und
-  // Fallback-Kette; Routing-Regeln (Eingangsname/Muster → Modellgruppe) als Tabelle.
-  import { Switch, Tabs } from 'bits-ui';
-  import { models } from '../lib/data.svelte';
-  import { ms, num, percent, short } from '../lib/format';
-  import { PROVIDERS, teamName } from '../lib/mock/data';
-  import type { Deployment, Health, ModelGroup, RouteRule, Strategy } from '../lib/mock/types';
-  import { route } from '../lib/router.svelte';
+  // Modelle & Routen (AIGW-49): Master/Detail – Modellgruppen (Aliasse, Strategie, Fallbacks, Einstellungen) und
+  // ihre Deployments nach Prioritätsgruppen (Anbieter, Modell, Gewichtsanteil, Kapazität, aktiv).
+  // Schreiben nur für globale Admins (Katalog); Laufzeit-Kennzahlen (Zustand, p95) folgen mit AIGW-46.
+  import { DropdownMenu, Switch } from 'bits-ui';
+  import { deployments, modelGroups, providerLabel, ROUTING, FALLBACK_TRIGGERS, type Deployment, type ModelGroup } from '../lib/api/resources';
+  import AsyncState from '../lib/admin/AsyncState.svelte';
+  import ConfirmDialog from '../lib/admin/ConfirmDialog.svelte';
+  import { formErrorOf, handleError, Loader } from '../lib/admin/errors.svelte';
+  import { short } from '../lib/format';
+  import { canWrite } from '../lib/rbac.svelte';
+  import { navigate, route } from '../lib/router.svelte';
   import { toast } from '../lib/toast.svelte';
   import Badge from '../lib/ui/Badge.svelte';
   import Button from '../lib/ui/Button.svelte';
   import Card from '../lib/ui/Card.svelte';
-  import DataTable, { type Column } from '../lib/ui/DataTable.svelte';
+  import CodeBlock from '../lib/ui/CodeBlock.svelte';
   import EmptyState from '../lib/ui/EmptyState.svelte';
   import Icon from '../lib/ui/Icon.svelte';
-  import Meter from '../lib/ui/Meter.svelte';
   import PageHeader from '../lib/ui/PageHeader.svelte';
-  import Tooltip from '../lib/ui/Tooltip.svelte';
-  import { tabsList, tabsTrigger } from '../lib/ui/styles';
+  import { btn, cx, menuItem, menuSeparator, popover, switchRoot, switchThumb } from '../lib/ui/styles';
+  import DeploymentFormDialog from './models/DeploymentFormDialog.svelte';
+  import GroupFormDialog from './models/GroupFormDialog.svelte';
 
-  const res = $derived(models());
-  const groups = $derived(res.state === 'ok' ? res.data.groups : []);
-  let routes = $state<RouteRule[]>([]);
-  $effect(() => {
-    routes = res.state === 'ok' ? res.data.routes.map((r) => ({ ...r })) : [];
+  const data = new Loader(async () => {
+    const [g, d] = await Promise.all([modelGroups.list(), deployments.list()]);
+    return { groups: g, deployments: d };
   });
+  let selected = $state(new URLSearchParams(route.search).get('group') ?? '');
+  let filter = $state('');
+  let groupOpen = $state(false);
+  let groupEdit = $state<string | null>(null);
+  let depOpen = $state(false);
+  let depEdit = $state<string | null>(null);
+  let del = $state<{ kind: 'group' | 'deployment'; name: string } | null>(null);
+  let delOpen = $state(false);
 
-  let tab = $state('groups');
-  let selected = $state(new URLSearchParams(route.search).get('group') ?? 'gpt-4o');
-  const group = $derived(groups.find((g) => g.alias === selected) ?? groups[0]);
-
-  const STRATEGY: Record<Strategy, { label: string; text: string }> = {
-    priority: { label: 'Priorität', text: 'Höchste verfügbare Prioritätsgruppe; innerhalb der Gruppe nach Gewicht verteilt.' },
-    weighted: { label: 'Gewichtet', text: 'Last anteilig nach Gewicht über alle gesunden Deployments.' },
-    latency: { label: 'Geringste Latenz', text: 'Deployment mit der niedrigsten gleitenden p95-Latenz zuerst.' },
-    cost: { label: 'Geringste Kosten', text: 'Günstigstes gesundes Deployment zuerst, Gewicht bei Gleichstand.' },
-  };
-  const HEALTH: Record<Health, { tone: 'success' | 'warning' | 'danger'; label: string }> = {
-    healthy: { tone: 'success', label: 'Gesund' },
-    degraded: { tone: 'warning', label: 'Eingeschränkt' },
-    down: { tone: 'danger', label: 'Ausgefallen' },
-  };
-  const DOT: Record<Health, string> = { healthy: 'bg-success', degraded: 'bg-warning', down: 'bg-danger' };
-
-  function byPriority(g: ModelGroup): [number, Deployment[]][] {
+  const writable = $derived(canWrite({ kind: 'catalog' }));
+  const groups = $derived(data.data?.groups ?? []);
+  const shown = $derived(groups.filter((g) => !filter || `${g.metadata.name} ${(g.spec.aliases ?? []).join(' ')}`.toLowerCase().includes(filter.toLowerCase())));
+  const group = $derived(groups.find((g) => g.metadata.name === selected) ?? groups[0]);
+  const depsOf = (g: string) => (data.data?.deployments ?? []).filter((d) => d.spec.modelGroup === g);
+  const deps = $derived(group ? depsOf(group.metadata.name) : []);
+  const tiers = $derived.by(() => {
     const m = new Map<number, Deployment[]>();
-    for (const d of g.deployments) m.set(d.priority, [...(m.get(d.priority) ?? []), d]);
+    for (const d of deps) m.set(d.spec.priority ?? 0, [...(m.get(d.spec.priority ?? 0) ?? []), d]);
     return [...m.entries()].sort((a, b) => a[0] - b[0]);
-  }
-  const share = (d: Deployment, list: Deployment[]) => d.weight / (list.reduce((a, x) => a + x.weight, 0) || 1);
+  });
+  const strategy = (g: ModelGroup) => ROUTING.find((r) => r.value === (g.spec.routing ?? 'weighted'));
 
-  const routeColumns: Column<RouteRule>[] = [
-    { id: 'order', label: '#', cell: orderCell, class: 'w-10' },
-    { id: 'match', label: 'Eingangsmodell (Muster)', cell: matchCell, sort: (r) => r.match },
-    { id: 'target', label: 'Modellgruppe', cell: targetCell, sort: (r) => r.target },
-    { id: 'teams', label: 'Teams', cell: teamsCell, from: 'md' },
-    { id: 'note', label: 'Notiz', cell: noteCell, from: 'lg' },
-    { id: 'enabled', label: 'Aktiv', cell: enabledCell, align: 'right', class: 'w-16' },
-  ];
+  function select(name: string) {
+    selected = name;
+    navigate(`/models?group=${encodeURIComponent(name)}`, true);
+  }
+  function editGroup(name: string | null) {
+    groupEdit = name;
+    groupOpen = true;
+  }
+  function editDeployment(name: string | null) {
+    depEdit = name;
+    depOpen = true;
+  }
+  async function toggle(d: Deployment, enabled: boolean) {
+    try {
+      const { data: cur, etag } = await deployments.get(d.metadata.name);
+      await deployments.update(d.metadata.name, { metadata: { name: d.metadata.name, labels: cur.metadata.labels ?? {} }, spec: { ...cur.spec, enabled } }, etag);
+      toast('success', enabled ? 'Deployment aktiviert' : 'Deployment deaktiviert', d.metadata.name);
+    } catch (e) {
+      handleError(e, { action: 'Deployment umschalten', reload: () => void data.reload() });
+    }
+    void data.reload();
+  }
+  async function runDelete(): Promise<string | null> {
+    if (!del) return null;
+    const { kind, name } = del;
+    const res = kind === 'group' ? modelGroups : deployments;
+    try {
+      const { etag } = await res.get(name);
+      await res.remove(name, etag);
+      toast('success', kind === 'group' ? 'Modellgruppe gelöscht' : 'Deployment gelöscht', name);
+      if (kind === 'group') selected = '';
+      void data.reload();
+      return null;
+    } catch (e) {
+      return formErrorOf(e, kind === 'group' ? 'Modellgruppe löschen' : 'Deployment löschen', () => void data.reload());
+    }
+  }
+  const triggers = (on: string[] | undefined) => (on?.length ? on.map((t) => FALLBACK_TRIGGERS.find((x) => x.value === t)?.label ?? t).join(', ') : 'jeder Fehler');
 </script>
 
-{#snippet orderCell(r: RouteRule)}<span class="num text-fg-subtle">{routes.findIndex((x) => x.id === r.id) + 1}</span>{/snippet}
-{#snippet matchCell(r: RouteRule)}<code class="rounded-sm bg-surface-2 px-1.5 py-0.5 text-sm">{r.match}</code>{/snippet}
-{#snippet targetCell(r: RouteRule)}
-  <span class="inline-flex items-center gap-1.5 text-fg-muted"><Icon name="arrow-left" size={12} class="rotate-180" /><span class="font-mono text-sm text-fg">{r.target}</span></span>
-{/snippet}
-{#snippet teamsCell(r: RouteRule)}
-  {#if r.teams === 'all'}<span class="text-sm text-fg-muted">alle</span>{:else}<span class="flex flex-wrap gap-1"
-      >{#each r.teams as t (t)}<Badge>{teamName(t)}</Badge>{/each}</span
-    >{/if}
-{/snippet}
-{#snippet noteCell(r: RouteRule)}<span class="text-sm text-fg-muted">{r.note}</span>{/snippet}
-{#snippet enabledCell(r: RouteRule)}
-  <Switch.Root
-    checked={r.enabled}
-    onCheckedChange={(c) => {
-      routes = routes.map((x) => (x.id === r.id ? { ...x, enabled: c } : x));
-      toast('info', c ? 'Regel aktiviert' : 'Regel deaktiviert', r.match);
-    }}
-    aria-label="Regel {r.match} aktiv"
-    class="inline-flex h-5 w-9 shrink-0 items-center rounded-full bg-line-strong p-0.5 transition-colors data-[state=checked]:bg-accent"
-  >
-    <Switch.Thumb class="size-4 rounded-full bg-surface shadow-card transition-transform data-[state=checked]:translate-x-4" />
-  </Switch.Root>
-{/snippet}
-
-<PageHeader title="Modelle & Routen" description="Modellgruppen bündeln Deployments verschiedener Anbieter unter einem Alias – mit Prioritäten, Gewichten und Fallbacks.">
+<PageHeader title="Modelle & Routen" description="Modellgruppen sind die öffentlichen Modellnamen der Clients. Dahinter wählt das Gateway ein Deployment nach Priorität und Strategie; bei Fehlern greift die Fallback-Kette.">
   {#snippet actions()}
-    <Button variant="secondary" icon="file-text">Als YAML</Button>
-    <Button variant="primary" icon="plus">Modellgruppe</Button>
+    {#if writable}
+      <Button variant="primary" icon="plus" onclick={() => editGroup(null)} data-testid="create-group">Modellgruppe anlegen</Button>
+    {/if}
   {/snippet}
 </PageHeader>
 
-{#if res.state === 'unavailable'}
-  <Card><EmptyState icon="route" title="Modelle noch nicht verfügbar" text={res.reason} /></Card>
-{:else}
-  <Tabs.Root bind:value={tab}>
-    <Tabs.List class={tabsList} aria-label="Ansicht">
-      <Tabs.Trigger value="groups" class={tabsTrigger}>Modellgruppen <Badge>{groups.length}</Badge></Tabs.Trigger>
-      <Tabs.Trigger value="routes" class={tabsTrigger}>Routing-Regeln <Badge>{routes.length}</Badge></Tabs.Trigger>
-    </Tabs.List>
-
-    <Tabs.Content value="groups" class="mt-4 grid gap-4 lg:grid-cols-[18rem_1fr]">
-      <nav aria-label="Modellgruppen" class="flex flex-col gap-1.5" data-testid="group-list">
-        {#each groups as g (g.alias)}
-          <button
-            type="button"
-            onclick={() => (selected = g.alias)}
-            aria-current={g.alias === group?.alias ? 'true' : undefined}
-            class="flex flex-col gap-1.5 rounded-lg border border-line bg-surface px-3 py-2.5 text-left shadow-card transition-colors hover:border-line-strong aria-[current=true]:border-accent aria-[current=true]:ring-1 aria-[current=true]:ring-accent"
-          >
-            <span class="flex items-center gap-2">
-              <span class="flex-1 truncate font-mono text-sm font-medium text-fg">{g.alias}</span>
-              <span class="flex gap-0.5" aria-hidden="true">{#each g.deployments as d (d.id)}<span class={['size-1.5 rounded-full', DOT[d.health]]}></span>{/each}</span>
-            </span>
-            <span class="flex flex-wrap items-center gap-x-2 text-xs text-fg-muted">
-              <span>{STRATEGY[g.strategy].label}</span><span>{g.deployments.length} Deployments</span>
-            </span>
-          </button>
-        {/each}
-      </nav>
-
-      {#if group}
-        <div class="flex min-w-0 flex-col gap-4" data-testid="group-detail">
-          <Card>
-            <div class="flex flex-wrap items-start gap-4">
-              <div class="min-w-0 flex-1">
-                <div class="flex flex-wrap items-center gap-2">
-                  <h2 class="font-mono text-lg font-semibold text-fg">{group.alias}</h2>
-                  <Badge tone="accent">{group.modality === 'chat' ? 'Chat' : 'Embedding'}</Badge>
-                  <Badge tone="outline">{STRATEGY[group.strategy].label}</Badge>
-                </div>
-                <p class="mt-1 text-base text-fg-muted">{group.description}</p>
-              </div>
-              <Button size="sm" variant="secondary" icon="play">Im Playground testen</Button>
+  <AsyncState loader={data}>
+    {#snippet children()}
+      {#if groups.length === 0}
+        <Card>
+          <EmptyState icon="route" title="Noch keine Modellgruppen" text="Legen Sie eine Modellgruppe an und hängen Sie Deployments (Anbieter-Modelle) dahinter. Alternativ per GitOps (Einstellungen → GitOps).">
+            {#if writable}<Button variant="primary" icon="plus" onclick={() => editGroup(null)}>Modellgruppe anlegen</Button>{/if}
+          </EmptyState>
+        </Card>
+      {:else}
+        <div class="grid gap-4 lg:grid-cols-[20rem_1fr]">
+          <Card flush title="Modellgruppen" description="{groups.length} Gruppen">
+            <div class="border-b border-line px-3 py-2">
+              <label class="relative flex items-center">
+                <span class="sr-only">Modellgruppen filtern</span>
+                <span class="pointer-events-none absolute left-2.5 text-fg-subtle"><Icon name="search" size={14} /></span>
+                <input type="search" bind:value={filter} placeholder="Name oder Alias …" class="h-8 w-full rounded-md border border-line bg-surface pr-2 pl-8 text-sm text-fg placeholder:text-fg-subtle" />
+              </label>
             </div>
-            <dl class="mt-4 grid grid-cols-2 gap-3 border-t border-line pt-4 text-sm sm:grid-cols-4">
-              <div><dt class="text-fg-muted">Kontextfenster</dt><dd class="num mt-0.5 text-base text-fg">{num(group.contextWindow)}</dd></div>
-              <div><dt class="text-fg-muted">Preis Eingabe / 1 Mio.</dt><dd class="num mt-0.5 text-base text-fg">{group.priceIn.toFixed(2)} €</dd></div>
-              <div><dt class="text-fg-muted">Preis Ausgabe / 1 Mio.</dt><dd class="num mt-0.5 text-base text-fg">{group.priceOut.toFixed(2)} €</dd></div>
-              <div><dt class="text-fg-muted">Requests 24 h</dt><dd class="num mt-0.5 text-base text-fg">{short(group.requests24h)}</dd></div>
-            </dl>
+            <ul class="flex flex-col p-1.5" aria-label="Modellgruppen" data-testid="group-list">
+              {#each shown as g (g.metadata.name)}
+                {@const n = depsOf(g.metadata.name)}
+                <li>
+                  <button
+                    type="button"
+                    class={[
+                      'flex w-full flex-col gap-1 rounded-md px-3 py-2 text-left hover:bg-surface-hover',
+                      group?.metadata.name === g.metadata.name && 'bg-accent-soft hover:bg-accent-soft',
+                    ]}
+                    aria-current={group?.metadata.name === g.metadata.name ? 'true' : undefined}
+                    onclick={() => select(g.metadata.name)}
+                  >
+                    <span class="flex items-center gap-2">
+                      <span class="flex-1 truncate font-mono text-sm font-medium text-fg">{g.metadata.name}</span>
+                      <span class="text-xs text-fg-muted">{n.filter((d) => d.spec.enabled !== false).length}/{n.length}</span>
+                    </span>
+                    <span class="flex items-center gap-1.5 text-xs text-fg-muted">
+                      <span>{strategy(g)?.label}</span>
+                      {#if g.spec.aliases?.length}<span>· {g.spec.aliases.length} Alias{g.spec.aliases.length > 1 ? 'se' : ''}</span>{/if}
+                      {#if g.spec.fallbacks?.length}<span>· Fallback → {g.spec.fallbacks[0].modelGroup}</span>{/if}
+                    </span>
+                  </button>
+                </li>
+              {:else}
+                <li class="px-3 py-6 text-center text-sm text-fg-muted">Kein Treffer.</li>
+              {/each}
+            </ul>
           </Card>
 
-          <Card title="Deployments" description={STRATEGY[group.strategy].text} flush>
-            {#each byPriority(group) as [prio, list] (prio)}
-              <div class="border-b border-line last:border-0">
-                <div class="flex items-center gap-2 bg-surface-2 px-4 py-1.5">
-                  <span class="label-caps text-fg-muted">Priorität {prio}</span>
-                  <span class="text-xs text-fg-subtle">{prio === 1 ? 'primär' : 'nur wenn Priorität ' + (prio - 1) + ' nicht verfügbar'}</span>
+          {#if group}
+            <div class="flex min-w-0 flex-col gap-4" data-testid="group-detail">
+              <Card>
+                <div class="flex flex-wrap items-start gap-3">
+                  <div class="min-w-0 flex-1">
+                    <h2 class="font-mono text-lg font-semibold text-fg">{group.metadata.name}</h2>
+                    <div class="mt-1 flex flex-wrap gap-1">
+                      {#each group.spec.aliases ?? [] as a (a)}<Badge mono tone="outline">{a}</Badge>{:else}<span class="text-sm text-fg-muted">keine Aliasse</span>{/each}
+                    </div>
+                  </div>
+                  {#if writable}
+                    <Button size="sm" icon="pencil" onclick={() => editGroup(group.metadata.name)} data-testid="edit-group">Bearbeiten</Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon="trash"
+                      aria-label="Modellgruppe löschen"
+                      onclick={() => {
+                        del = { kind: 'group', name: group.metadata.name };
+                        delOpen = true;
+                      }}
+                    />
+                  {/if}
                 </div>
-                <ul>
-                  {#each list as d (d.id)}
-                    <li class="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2 border-t border-line px-4 py-3 first:border-t-0 md:grid-cols-[minmax(0,1.6fr)_7.5rem_minmax(0,1fr)_4.5rem_4.5rem]">
-                      <div class="min-w-0">
-                        <div class="flex items-center gap-2">
-                          <span class="grid h-5 min-w-8 place-items-center rounded-sm bg-surface-2 px-1 font-mono text-2xs font-semibold text-fg-muted">{PROVIDERS[d.provider].short}</span>
-                          <span class="truncate text-base font-medium text-fg">{d.id}</span>
-                        </div>
-                        <div class="mt-0.5 truncate font-mono text-xs text-fg-muted">{d.upstreamModel} · {d.region}</div>
-                      </div>
-                      <span class="justify-self-end md:justify-self-start"><Badge tone={HEALTH[d.health].tone} dot>{HEALTH[d.health].label}</Badge></span>
-                      <div class="col-span-2 flex flex-col gap-1 md:col-span-1">
-                        <span class="flex justify-between text-xs text-fg-muted"><span>Gewicht</span><span class="num">{percent(share(d, list))}</span></span>
-                        <Meter value={share(d, list)} label="Gewicht {d.id}" />
-                      </div>
-                      <div class="hidden text-right md:block">
-                        <div class="num text-sm text-fg">{d.health === 'down' ? '–' : ms(d.p95)}</div>
-                        <div class="text-xs text-fg-subtle">p95</div>
-                      </div>
-                      <div class="hidden text-right md:block">
-                        <Tooltip text="{num(d.rpm)} von {num(d.rpmLimit)} RPM Kontingent">
-                          {#snippet trigger({ props })}
-                            <button {...props} type="button" class="num cursor-help text-sm text-fg">{d.health === 'down' ? '–' : percent(d.successRate)}</button>
-                          {/snippet}
-                        </Tooltip>
-                        <div class="text-xs text-fg-subtle">Erfolg</div>
-                      </div>
-                    </li>
-                  {/each}
-                </ul>
-              </div>
-            {/each}
-          </Card>
+                <dl class="mt-4 grid gap-x-6 gap-y-3 text-base sm:grid-cols-3">
+                  <div><dt class="text-sm text-fg-muted">Strategie</dt><dd class="font-medium">{strategy(group)?.label}</dd></div>
+                  <div><dt class="text-sm text-fg-muted">Deployments</dt><dd class="num font-medium">{deps.filter((d) => d.spec.enabled !== false).length} aktiv / {deps.length}</dd></div>
+                  <div><dt class="text-sm text-fg-muted">Limits</dt><dd class="font-medium">{group.spec.limits?.length ? `${group.spec.limits.length} Limit(s)` : 'keine'}</dd></div>
+                </dl>
+                <div class="mt-4">
+                  <h3 class="label-caps mb-1.5 text-fg-subtle">Fallback-Kette</h3>
+                  {#if group.spec.fallbacks?.length}
+                    <ol class="flex flex-wrap items-center gap-1.5 text-sm">
+                      <li><Badge mono tone="accent">{group.metadata.name}</Badge></li>
+                      {#each group.spec.fallbacks as f (f.modelGroup)}
+                        <li class="flex items-center gap-1.5">
+                          <Icon name="chevron-right" size={14} class="text-fg-subtle" />
+                          <button type="button" class="rounded-sm" onclick={() => select(f.modelGroup)} title="bei: {triggers(f.on)}"><Badge mono>{f.modelGroup}</Badge></button>
+                          <span class="text-xs text-fg-muted">({triggers(f.on)})</span>
+                        </li>
+                      {/each}
+                    </ol>
+                  {:else}
+                    <p class="text-sm text-fg-muted">Keine Fallbacks – Fehler gehen nach den Retries an den Client.</p>
+                  {/if}
+                </div>
+                {#if group.spec.settings && Object.keys(group.spec.settings).length}
+                  <div class="mt-4"><CodeBlock title="Einstellungen" code={group.spec.settings} maxHeight="max-h-48" /></div>
+                {/if}
+              </Card>
 
-          <Card title="Fallback-Kette" description="Bei 5xx, 429 oder Zeitüberschreitung nach 2 Wiederholungen mit Backoff; höchstens 2 Fallbacks pro Request.">
-            {#if group.fallbacks.length}
-              <ol class="flex flex-wrap items-center gap-2" data-testid="fallbacks">
-                <li><span class="inline-flex h-8 items-center rounded-md border border-accent bg-accent-soft px-3 font-mono text-sm text-accent-soft-fg">{group.alias}</span></li>
-                {#each group.fallbacks as fb, i (fb)}
-                  <li class="flex items-center gap-2">
-                    <Icon name="chevron-right" size={14} class="text-fg-subtle" />
-                    <button
-                      type="button"
-                      class="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-surface px-3 font-mono text-sm text-fg hover:border-line-strong"
-                      onclick={() => (selected = fb)}
-                    >
-                      <span class="num text-2xs text-fg-subtle">{i + 1}</span>{fb}
-                    </button>
-                  </li>
-                {/each}
-              </ol>
-            {:else}
-              <p class="text-base text-fg-muted">Keine Fallbacks – Fehler werden direkt an den Client gemeldet.</p>
-            {/if}
-          </Card>
+              <Card flush title="Deployments" description="Priorität 0 wird vor 1 genutzt; innerhalb einer Priorität entscheidet die Strategie (Gewicht = Anteil).">
+                {#snippet actions()}
+                  {#if writable}<Button size="sm" variant="primary" icon="plus" onclick={() => editDeployment(null)} data-testid="create-deployment">Deployment</Button>{/if}
+                {/snippet}
+                {#if deps.length === 0}
+                  <EmptyState compact icon="server" title="Keine Deployments" text="Ohne Deployment antwortet die Gruppe mit „nicht verfügbar“ (bzw. Fallback)." />
+                {:else}
+                  <div class="scrollbar-thin overflow-x-auto">
+                    <table class="w-full text-left text-base" data-testid="deployments-table">
+                      <caption class="sr-only">Deployments von {group.metadata.name}</caption>
+                      <thead>
+                        <tr class="border-b border-line bg-surface-2 text-sm text-fg-muted">
+                          <th scope="col" class="h-9 px-3 font-medium">Deployment</th>
+                          <th scope="col" class="hidden h-9 px-3 font-medium md:table-cell">Anbieter</th>
+                          <th scope="col" class="h-9 px-3 text-right font-medium">Anteil</th>
+                          <th scope="col" class="hidden h-9 px-3 text-right font-medium lg:table-cell">Kapazität</th>
+                          <th scope="col" class="h-9 px-3 font-medium">Aktiv</th>
+                          <th scope="col" class="h-9 w-10 px-3"><span class="sr-only">Aktionen</span></th>
+                        </tr>
+                      </thead>
+                      {#each tiers as [prio, list] (prio)}
+                        {@const total = list.filter((d) => d.spec.enabled !== false).reduce((s, d) => s + (d.spec.weight ?? 1), 0)}
+                        <tbody>
+                          <tr class="border-b border-line bg-surface-2/60">
+                            <th scope="rowgroup" colspan="6" class="px-3 py-1.5 text-left text-xs font-medium text-fg-muted">Priorität {prio}{prio === tiers[0][0] ? ' · zuerst' : ' · wenn höhere Priorität ausfällt'}</th>
+                          </tr>
+                          {#each list as d (d.metadata.name)}
+                            <tr class="border-b border-line last:border-b-0" data-key={d.metadata.name}>
+                              <td class="px-3 py-2.5">
+                                <span class="block font-mono text-sm font-medium text-fg">{d.metadata.name}</span>
+                                <span class="block truncate font-mono text-xs text-fg-muted">{d.spec.providerModel}{d.spec.endpoint ? ` · ${d.spec.endpoint.replace(/^https?:\/\//, '')}` : ''}</span>
+                              </td>
+                              <td class="hidden px-3 py-2.5 md:table-cell">
+                                <span class="block text-sm">{providerLabel(d.spec.provider)}</span>
+                                <span class="block text-xs text-fg-muted">{d.spec.credential ?? 'ohne Zugangsdaten'}</span>
+                              </td>
+                              <td class="num px-3 py-2.5 text-right text-sm">
+                                {d.spec.enabled === false || !total ? '–' : `${Math.round(((d.spec.weight ?? 1) / total) * 100)} %`}
+                                <span class="block text-xs text-fg-muted">Gewicht {d.spec.weight ?? 1}</span>
+                              </td>
+                              <td class="num hidden px-3 py-2.5 text-right text-xs text-fg-muted lg:table-cell">
+                                {d.spec.capacity?.rpm ? `${short(d.spec.capacity.rpm)} RPM` : '–'}<br />{d.spec.capacity?.tpm ? `${short(d.spec.capacity.tpm)} TPM` : ''}
+                              </td>
+                              <td class="px-3 py-2.5">
+                                {#if writable}
+                                  <Switch.Root checked={d.spec.enabled !== false} onCheckedChange={(c) => toggle(d, c)} class={switchRoot} aria-label="{d.metadata.name} aktiv">
+                                    <Switch.Thumb class={switchThumb} />
+                                  </Switch.Root>
+                                {:else}
+                                  <Badge tone={d.spec.enabled === false ? 'neutral' : 'success'} dot>{d.spec.enabled === false ? 'aus' : 'aktiv'}</Badge>
+                                {/if}
+                              </td>
+                              <td class="px-3 py-2.5 text-right">
+                                {#if writable}
+                                  <DropdownMenu.Root>
+                                    <DropdownMenu.Trigger class={btn('ghost', 'icon-sm')} aria-label="Aktionen für {d.metadata.name}"><Icon name="more" /></DropdownMenu.Trigger>
+                                    <DropdownMenu.Portal>
+                                      <DropdownMenu.Content class={cx(popover, 'w-44')} align="end" sideOffset={4}>
+                                        <DropdownMenu.Item class={menuItem} onSelect={() => editDeployment(d.metadata.name)}><Icon name="pencil" size={14} /> Bearbeiten</DropdownMenu.Item>
+                                        <DropdownMenu.Separator class={menuSeparator} />
+                                        <DropdownMenu.Item
+                                          class={cx(menuItem, 'text-danger-fg [&_svg]:text-danger-fg')}
+                                          onSelect={() => {
+                                            del = { kind: 'deployment', name: d.metadata.name };
+                                            delOpen = true;
+                                          }}><Icon name="trash" size={14} /> Löschen …</DropdownMenu.Item
+                                        >
+                                      </DropdownMenu.Content>
+                                    </DropdownMenu.Portal>
+                                  </DropdownMenu.Root>
+                                {/if}
+                              </td>
+                            </tr>
+                          {/each}
+                        </tbody>
+                      {/each}
+                    </table>
+                  </div>
+                {/if}
+              </Card>
+            </div>
+          {/if}
         </div>
       {/if}
-    </Tabs.Content>
+    {/snippet}
+  </AsyncState>
 
-    <Tabs.Content value="routes" class="mt-4">
-      <Card flush>
-        <DataTable rows={routes} columns={routeColumns} key={(r) => r.id} caption="Routing-Regeln" search={(r) => `${r.match} ${r.target} ${r.note}`} searchPlaceholder="Muster oder Ziel …" testid="routes-table" />
-      </Card>
-      <p class="mt-2 flex items-center gap-1.5 text-sm text-fg-muted">
-        <Icon name="info" size={14} /> Regeln werden von oben nach unten geprüft; die erste passende gewinnt. Unbekannte Modelle → 404.
-      </p>
-    </Tabs.Content>
-  </Tabs.Root>
-{/if}
+<GroupFormDialog
+  bind:open={groupOpen}
+  editName={groupEdit}
+  groups={groups.map((g) => g.metadata.name)}
+  onsaved={(n) => {
+    toast('success', 'Modellgruppe gespeichert', n);
+    selected = n;
+    void data.reload();
+  }}
+/>
+<DeploymentFormDialog
+  bind:open={depOpen}
+  editName={depEdit}
+  group={group?.metadata.name ?? ''}
+  groups={groups.map((g) => g.metadata.name)}
+  onsaved={() => {
+    toast('success', 'Deployment gespeichert');
+    void data.reload();
+  }}
+/>
+<ConfirmDialog bind:open={delOpen} title={del?.kind === 'group' ? 'Modellgruppe löschen?' : 'Deployment löschen?'} confirmLabel="Löschen" onconfirm={runDelete}>
+  {#if del?.kind === 'group'}
+    <p>„<span class="font-mono text-fg">{del.name}</span>“ wird gelöscht. Nur möglich ohne Deployments und wenn keine andere Gruppe sie als Fallback nutzt. Clients erhalten danach „Modell unbekannt“.</p>
+  {:else if del}
+    <p>„<span class="font-mono text-fg">{del.name}</span>“ wird gelöscht und nach dem Hot Reload nicht mehr geroutet. Zum vorübergehenden Abschalten stattdessen „aktiv“ ausschalten.</p>
+  {/if}
+</ConfirmDialog>

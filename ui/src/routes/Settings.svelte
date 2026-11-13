@@ -1,25 +1,97 @@
 <!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
-  // Einstellungen: Darstellung (Schema, Akzent zum Vergleich), Datenquelle (Mock-Modus), Über.
+  // Einstellungen: Anmeldung (Principal, Verfahren, Rollen, Abmelden), Nur-YAML-Modus, GitOps (Export, Apply mit
+  // Trockenlauf), Datenquelle (Mock-Modus), Darstellung (Schema), Über.
   import { RadioGroup, Switch } from 'bits-ui';
-  import { ACCENTS, prefs, setAccent, setMock, setTheme, THEMES, type Accent, type Theme } from '../lib/prefs.svelte';
+  import { isMock } from '../lib/mode.svelte';
+  import { prefs, setMockMode, setTheme, THEMES, type Theme } from '../lib/prefs.svelte';
+  import { auth, bindingLabel, identity, logout, METHOD_LABEL, requestLogin } from '../lib/session.svelte';
+  import { dateTime } from '../lib/format';
   import Badge from '../lib/ui/Badge.svelte';
+  import Button from '../lib/ui/Button.svelte';
   import Card from '../lib/ui/Card.svelte';
   import Icon, { type IconName } from '../lib/ui/Icon.svelte';
+  import { switchRoot, switchThumb } from '../lib/ui/styles';
   import PageHeader from '../lib/ui/PageHeader.svelte';
   import { gateway, loadVersion } from '../lib/version.svelte';
+  import GitOpsCard from './settings/GitOpsCard.svelte';
 
   loadVersion();
   const THEME_ICON: Record<Theme, IconName> = { system: 'monitor', light: 'sun', dark: 'moon' };
-  const SWATCH: Record<Accent, string> = { violett: 'bg-[#5b45d6]', petrol: 'bg-[#0f6f68]', bernstein: 'bg-[#b45309]' };
   const option =
     'flex items-center gap-3 rounded-lg border border-line bg-surface p-3 text-left hover:border-line-strong data-[state=checked]:border-accent data-[state=checked]:ring-1 data-[state=checked]:ring-accent';
 </script>
 
-<PageHeader title="Einstellungen" description="Darstellung gilt pro Browser; Gateway-Einstellungen kommen aus der YAML-Konfiguration (GitOps)." />
+<PageHeader title="Einstellungen" description="Anmeldung, GitOps und Darstellung. Gateway-Einstellungen kommen aus der YAML-Startkonfiguration; Ressourcen lassen sich per GitOps verwalten." />
 
 <div class="flex max-w-3xl flex-col gap-4">
+  <Card title="Anmeldung" testid="session-card">
+    {#if auth.session}
+      {@const s = auth.session}
+      <div class="flex flex-wrap items-start gap-4">
+        <span class="grid size-10 place-items-center rounded-full bg-accent-soft text-sm font-semibold text-accent-soft-fg">{identity(s).initials}</span>
+        <dl class="grid min-w-0 flex-1 grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-base">
+          <dt class="text-fg-muted">Angemeldet als</dt>
+          <dd data-testid="session-name">{identity(s).name}{#if s.email}<span class="text-fg-muted"> · {s.email}</span>{/if}</dd>
+          <dt class="text-fg-muted">Verfahren</dt>
+          <dd>{METHOD_LABEL[s.method] ?? s.method} <span class="font-mono text-xs text-fg-muted">({s.subject})</span></dd>
+          <dt class="text-fg-muted">Rollen</dt>
+          <dd class="flex flex-wrap gap-1" data-testid="session-roles">
+            {#each s.roles as r, i (i)}<Badge tone={r.role === 'admin' && !r.organization && !r.team ? 'accent' : 'neutral'}>{bindingLabel(r)}</Badge>{:else}<span class="text-fg-muted">keine</span>{/each}
+          </dd>
+          {#if s.expiresAt}<dt class="text-fg-muted">Gültig bis</dt><dd class="num">{dateTime(Date.parse(s.expiresAt))}</dd>{/if}
+        </dl>
+        <Button icon="logout" onclick={() => void logout()} data-testid="settings-logout">Abmelden</Button>
+      </div>
+      {#if s.method === 'bootstrap-token'}
+        <p class="mt-4 flex gap-2 rounded-md bg-warning-bg px-3 py-2 text-sm text-warning-fg">
+          <Icon name="alert" size={14} class="mt-0.5" />
+          Bootstrap-Token: Notfall-/Ersteinrichtungszugang. Nach dem ersten globalen Admin per OIDC oder Admin-API-Key wird es abgeschaltet (Modus „auto“).
+        </p>
+      {/if}
+    {:else}
+      <div class="flex flex-wrap items-center gap-4">
+        <p class="min-w-0 flex-1 text-base text-fg-muted">
+          Nicht angemeldet{isMock() ? ' – die Seiten zeigen Mock-Daten' : ''}. {auth.oidc ? 'Anmeldung über den Identitätsanbieter (OIDC).' : 'Ohne OIDC: Bootstrap-Token oder Admin-API-Key.'}
+        </p>
+        <Button variant="primary" icon="lock" onclick={() => requestLogin()}>Anmelden</Button>
+      </div>
+    {/if}
+  </Card>
+
+  <Card title="Nur-YAML-Modus">
+    <div class="flex items-start gap-3">
+      <Icon name="file-text" size={18} class="mt-0.5 text-fg-muted" />
+      <div class="min-w-0 flex-1 text-sm text-fg-muted">
+        <p>
+          Mit <code class="font-mono">gitops.read_only_admin: true</code> lehnt die Admin-API alle Änderungen ab (403 „read-only“) – außer GitOps-Apply. Die UI bleibt lesbar; Änderungen
+          laufen dann ausschließlich über Manifeste im Repository (<code class="font-mono">aigw config apply</code> bzw. unten).
+        </p>
+        {#if auth.readOnly}
+          <p class="mt-2"><Badge tone="warning" icon="lock">aktiv</Badge> Dieses Gateway hat eine Änderung mit „read-only“ abgelehnt.</p>
+        {/if}
+      </div>
+    </div>
+  </Card>
+
+  <GitOpsCard />
+
+  <Card title="Datenquelle">
+    <div class="flex items-start gap-4">
+      <div class="min-w-0 flex-1">
+        <label for="mock-switch" class="text-base font-medium">Mock-Daten verwenden</label>
+        <p class="mt-0.5 text-sm text-fg-muted">
+          Standardmäßig aus. Eingeschaltet zeigen alle Seiten deterministische Beispieldaten (Demo, Entwicklung) und die UI ist deutlich als
+          Mock gekennzeichnet; Änderungen bleiben im Browser. Übersicht und Logs haben ohne Mock noch keine Daten (Endpunkte folgen mit AIGW-46/53).
+        </p>
+      </div>
+      <Switch.Root id="mock-switch" checked={prefs.mockMode === 'on'} onCheckedChange={(c) => setMockMode(c ? 'on' : 'off')} class={switchRoot} data-testid="mock-switch">
+        <Switch.Thumb class={switchThumb} />
+      </Switch.Root>
+    </div>
+  </Card>
+
   <Card title="Farbschema" description="System folgt der Einstellung des Betriebssystems.">
     <RadioGroup.Root value={prefs.theme} onValueChange={(v) => setTheme(v as Theme)} class="grid gap-2 sm:grid-cols-3" aria-label="Farbschema">
       {#each THEMES as t (t.value)}
@@ -29,41 +101,6 @@
         </RadioGroup.Item>
       {/each}
     </RadioGroup.Root>
-  </Card>
-
-  <Card title="Akzentfarbe" description="Zum Vergleich umschaltbar, bis die Entscheidung gefallen ist (offene Designfrage).">
-    <RadioGroup.Root value={prefs.accent} onValueChange={(v) => setAccent(v as Accent)} class="grid gap-2 sm:grid-cols-3" aria-label="Akzentfarbe" data-testid="accent-picker">
-      {#each ACCENTS as a (a.value)}
-        <RadioGroup.Item value={a.value} class={option}>
-          <span class={['size-8 shrink-0 rounded-md', SWATCH[a.value]]} aria-hidden="true"></span>
-          <span class="min-w-0">
-            <span class="block text-base font-medium">{a.label}</span>
-            <span class="block truncate text-xs text-fg-muted">{a.note}</span>
-          </span>
-        </RadioGroup.Item>
-      {/each}
-    </RadioGroup.Root>
-  </Card>
-
-  <Card title="Datenquelle">
-    <div class="flex items-start gap-4">
-      <div class="min-w-0 flex-1">
-        <label for="mock-switch" class="text-base font-medium">Mock-Daten verwenden</label>
-        <p class="mt-0.5 text-sm text-fg-muted">
-          Zeigt deterministische Beispieldaten, solange die Admin-API die Endpunkte noch nicht bereitstellt. Ausgeschaltet zeigen die Seiten nur echte
-          Daten (bzw. einen Hinweis).
-        </p>
-      </div>
-      <Switch.Root
-        id="mock-switch"
-        checked={prefs.mock}
-        onCheckedChange={setMock}
-        class="mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full bg-line-strong p-0.5 transition-colors data-[state=checked]:bg-accent"
-        data-testid="mock-switch"
-      >
-        <Switch.Thumb class="size-4 rounded-full bg-surface shadow-card transition-transform data-[state=checked]:translate-x-4" />
-      </Switch.Root>
-    </div>
   </Card>
 
   <Card title="Über">

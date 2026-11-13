@@ -3,8 +3,8 @@
 <script lang="ts">
   // Organisation/Team-Umschalter (Bits UI DropdownMenu mit Radiogruppen). Team '' = alle Teams.
   import { DropdownMenu } from 'bits-ui';
-  import { ctx, currentOrg } from '../context.svelte';
-  import { ORGS } from '../mock/data';
+  import { catalog, ctx, currentOrg, label } from '../context.svelte';
+  import { navigate } from '../router.svelte';
   import { toast } from '../toast.svelte';
   import Icon from '../ui/Icon.svelte';
   import { cx, menuItem, menuLabel, menuSeparator, popover } from '../ui/styles';
@@ -32,29 +32,31 @@
       {org.name.slice(0, 1)}
     </span>
     <span class="hidden min-w-0 flex-col leading-tight sm:flex">
-      <span class="truncate text-sm font-medium text-fg">{org.name}</span>
+      <span class="truncate text-sm font-medium text-fg">{catalog.loaded ? org.name : '…'}</span>
       <span class="truncate text-2xs text-fg-muted">{team?.name ?? 'Alle Teams'}</span>
     </span>
     <Icon name="chevrons" size={14} class="text-fg-subtle" />
   </DropdownMenu.Trigger>
   <DropdownMenu.Portal>
     <DropdownMenu.Content class={cx(popover, 'w-72')} sideOffset={6} align="start">
-      <DropdownMenu.Group>
-        <DropdownMenu.GroupHeading class={menuLabel}>Organisation</DropdownMenu.GroupHeading>
-        <DropdownMenu.RadioGroup value={ctx.orgId} onValueChange={setOrg}>
-          {#each ORGS as o (o.id)}
-            <DropdownMenu.RadioItem value={o.id} class={menuItem}>
-              {#snippet children({ checked })}
-                <span class="grid size-5 place-items-center rounded-sm bg-surface-2 text-2xs font-semibold text-fg-muted">{o.name.slice(0, 1)}</span>
-                <span class="flex-1 truncate">{o.name}</span>
-                <span class="text-2xs text-fg-subtle">{o.plan}</span>
-                <Icon name="check" size={14} class={checked ? 'text-accent-text' : 'invisible'} />
-              {/snippet}
-            </DropdownMenu.RadioItem>
-          {/each}
-        </DropdownMenu.RadioGroup>
-      </DropdownMenu.Group>
-      <DropdownMenu.Separator class={menuSeparator} />
+      {#if catalog.orgs.length}
+        <DropdownMenu.Group>
+          <DropdownMenu.GroupHeading class={menuLabel}>Organisation</DropdownMenu.GroupHeading>
+          <DropdownMenu.RadioGroup value={ctx.orgId} onValueChange={setOrg}>
+            {#each catalog.orgs as o (o.metadata.name)}
+              <DropdownMenu.RadioItem value={o.metadata.name} class={menuItem}>
+                {#snippet children({ checked })}
+                  <span class="grid size-5 place-items-center rounded-sm bg-surface-2 text-2xs font-semibold text-fg-muted">{label(o).slice(0, 1)}</span>
+                  <span class="flex-1 truncate">{label(o)}</span>
+                  <span class="font-mono text-2xs text-fg-subtle">{o.metadata.name}</span>
+                  <Icon name="check" size={14} class={checked ? 'text-accent-text' : 'invisible'} />
+                {/snippet}
+              </DropdownMenu.RadioItem>
+            {/each}
+          </DropdownMenu.RadioGroup>
+        </DropdownMenu.Group>
+        <DropdownMenu.Separator class={menuSeparator} />
+      {/if}
       <DropdownMenu.Group>
         <DropdownMenu.GroupHeading class={menuLabel}>Team</DropdownMenu.GroupHeading>
         <DropdownMenu.RadioGroup value={ctx.teamId} onValueChange={setTeam}>
@@ -70,7 +72,7 @@
         </DropdownMenu.RadioGroup>
       </DropdownMenu.Group>
       <DropdownMenu.Separator class={menuSeparator} />
-      <DropdownMenu.Item class={menuItem} onSelect={() => toast('info', 'Organisationen verwalten', 'Folgt mit „Teams & Nutzer“.')}>
+      <DropdownMenu.Item class={menuItem} onSelect={() => navigate('/teams')}>
         <Icon name="building" size={14} /> Organisationen verwalten
       </DropdownMenu.Item>
     </DropdownMenu.Content>

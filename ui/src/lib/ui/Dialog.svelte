@@ -16,6 +16,7 @@
     children,
     footer,
     testid,
+    top = false,
   }: {
     open?: boolean;
     title: string;
@@ -26,19 +27,22 @@
     children: Snippet;
     footer?: Snippet;
     testid?: string;
+    /** Über anderen offenen Dialogen (Konflikt, Anmeldung). */
+    top?: boolean;
   } = $props();
   const width = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' };
 </script>
 
 <Dialog.Root bind:open>
   <Dialog.Portal>
-    <Dialog.Overlay class="anim-fade fixed inset-0 z-40" />
+    <Dialog.Overlay class={cx('anim-fade fixed inset-0', top ? 'z-[60]' : 'z-40')} />
     <Dialog.Content
       data-testid={testid}
       interactOutsideBehavior={dismissible ? 'close' : 'ignore'}
       escapeKeydownBehavior={dismissible ? 'close' : 'ignore'}
       class={cx(
-        'anim-dialog fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-line bg-surface shadow-dialog outline-none',
+        top ? 'z-[61]' : 'z-50',
+        'anim-dialog fixed top-1/2 left-1/2 flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-line bg-surface shadow-dialog outline-none',
         width[size],
       )}
     >

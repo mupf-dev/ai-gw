@@ -164,7 +164,7 @@
 
   $effect(() => {
     // Abhängigkeiten: Daten, Schema, Akzent
-    void [t, series, prefs.theme, prefs.accent, env.systemDark];
+    void [t, series, prefs.theme, env.systemDark];
     build();
   });
 

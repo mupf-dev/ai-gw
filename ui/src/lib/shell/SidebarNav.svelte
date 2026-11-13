@@ -3,6 +3,7 @@
 <script lang="ts">
   // Navigationsinhalt der Seitenleiste (Desktop fest, mobil im Sheet). Läuft in .scheme-dark.
   import { NAV, NAV_FOOTER, type Page } from '../nav';
+  import { isGlobalAdmin } from '../rbac.svelte';
   import { href, route } from '../router.svelte';
   import Icon from '../ui/Icon.svelte';
   import Logo from './Logo.svelte';
@@ -36,7 +37,7 @@
     {#each NAV as group, gi (gi)}
       <div class="flex flex-col gap-0.5">
         {#if group.label}<div class="label-caps px-2.5 pb-1 text-fg-subtle">{group.label}</div>{/if}
-        {#each group.items as p (p.id)}{@render link(p)}{/each}
+        {#each group.items.filter((p) => !p.adminOnly || isGlobalAdmin()) as p (p.id)}{@render link(p)}{/each}
       </div>
     {/each}
   </nav>
