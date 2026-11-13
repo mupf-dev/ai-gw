@@ -56,17 +56,17 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 39. [x] Unbekanntes Modell: C immer präzise (403 nicht freigegeben, 404 existiert nicht) (Umsetzung nötig)
 40. [x] /v1/models: A kanonisch, Aliasse per Option (global + je Gruppe) (Umsetzung nötig)
 41. [x] Rotation: A 24 h Übergang, Name+Zeitstempel
-42. [ ] Paginierung in SQL ab einigen tausend (Empf. später)
+42. [x] Pagination: A jetzt echte SQL-Pagination (zusammen mit F7-Store-Umbau) (Umsetzung nötig)
 
 ## AIGW-14/15 Streaming/Anbieter
-43. [ ] Upstream-401/403 → 502 (Empf. ja)
-44. [ ] Timeouts 120/120/600/10 s, je Modellgruppe übersteuerbar (Empf. ja)
-45. [ ] Azure-Standard Deployment-URL + api-version (Empf. ja); 65: apiVersion Pflicht
-46. [ ] Usage-Schätzung Heuristik, Tokenizer später (Empf. ja)
-47. [ ] ErrorClass im RequestRecord (Empf. ja)
-48. [ ] Eigene CA-Datei/System-CAs für Upstreams (Empf. CA-Datei-Option)
-49. [ ] Upstream-Modellname in Antwort statt Alias (Empf. ja)
-50. [ ] p50-Optimierung in AIGW-57 (Empf. ja)
+43. [x] Upstream-401/403: A → 502 ohne Anbietermeldung
+44. [x] Timeouts: A 10/120/120/600 s, je Modellgruppe settings.timeouts überschreibbar (prüfen ob schon in AIGW-24 umgesetzt)
+45. [x] Azure: A Deployment-URL Standard, apiVersion Pflicht, apiStyle v1 wählbar
+46. [x] Usage-Schätzung: B eigene Tokenizer (OpenAI o200k/cl100k, Llama/Mistral), Heuristik+Sprachfaktor für Claude/Gemini (Umsetzung nötig)
+47. [x] ErrorClass: A eigenes Feld error_class in request_log, Filter + Dashboard-Dimension (Umsetzung nötig)
+48. [x] Upstream-CAs: B upstream.roots webpki|system|both + ca_file global und je Deployment (Umsetzung nötig)
+49. [x] Modellname: C settings.responseModel upstream|requested (Std. upstream) + Header x-aigw-model (Umsetzung nötig)
+50. [x] p50: A Optimierung in AIGW-57 nach Feature-Vollständigkeit
 
 ## AIGW-33 GitOps
 51. [ ] ApiKeys Standard include vs ignore bei apply/prune (Empf. include)
@@ -250,3 +250,9 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 164. [ ] Entropie-Heuristik an, je Bindung abschaltbar (Empf. ja)
 165. [ ] Plugin-Bindungen beim Speichern validieren (Empf. ja) – vgl. 118
 166. [ ] content-safety 3 s + closed, UI-Anzeige (Empf. ja)
+- F42: Admin-Listen mit SQL-Pagination (Keyset-Cursor, Filter in SQL) – im Store-Umbau F7
+- F44: settings.timeouts je Modellgruppe (connect/firstByte/idle/total) – prüfen, ob durch AIGW-24 bereits vorhanden
+- F46: Crate aigw-tokenizer: BPE (o200k/cl100k eingebettet), HF tokenizer.json (Llama/Mistral), Heuristik mit Sprachfaktor; genutzt für Abbruch-Usage + Limit-Reservierung (Prompt-Schätzung)
+- F47: RequestRecord/request_log.error_class (feine Klasse), Log-Explorer-Filter, analytics groupBy=error_class
+- F48: upstream.roots (webpki|system|both) + ca_file global/je Deployment (settings.caFile), einheitlich mit OIDC-Client
+- F49: settings.responseModel upstream|requested je Modellgruppe, Header x-aigw-model immer
