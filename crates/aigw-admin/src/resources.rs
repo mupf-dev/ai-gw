@@ -25,7 +25,7 @@ use aigw_core::resource::{
     OrganizationSpec, TeamSpec, UserSpec,
 };
 use aigw_core::validate;
-use aigw_store::{PlainResource, Store};
+use aigw_store::{PlainResource, Store, WriteExtras};
 use aws_lc_rs::digest;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Extension, Path, Query, State};
@@ -40,6 +40,7 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::AdminState;
 use crate::auth::{Permission, Principal, Target};
+use crate::bounds::{self, BoundsQuery, KeyBoundsQuery};
 use crate::problem::Problem;
 
 pub(crate) type St = State<AdminState>;
@@ -291,6 +292,19 @@ pub(crate) trait AdminResource: PlainResource {
         async { Ok(()) }
     }
 
+    /// Grenzen Key ≤ Team ≤ Organisation (AIGW-67, unter der Schreibsperre); liefert
+    /// zusätzliche Schreibvorgänge (`?cascade=clamp`, Audit bei `?force=true`).
+    fn bounds<'a>(
+        _st: &'a AdminState,
+        _p: &'a Principal,
+        _name: &'a str,
+        _spec: &'a Self,
+        _current: Option<&'a Object<Self>>,
+        _q: &'a BoundsQuery,
+    ) -> impl Future<Output = Result<WriteExtras, Problem>> + Send + 'a {
+        async { Ok(WriteExtras::default()) }
+    }
+
     /// Geltungsbereich eines Objekts für die Rollenprüfung (AIGW-32).
     fn target(_name: &str, _spec: &Self) -> Target {
         Target::Global
@@ -337,6 +351,7 @@ pub(crate) async fn create_impl<R: AdminResource>(
     p: &Principal,
     mut meta: ObjectMeta,
     spec: R,
+    q: &BoundsQuery,
 ) -> ApiResult {
     if meta.name.is_empty()
         && let Some(name) = R::default_name(&spec)
@@ -347,7 +362,8 @@ pub(crate) async fn create_impl<R: AdminResource>(
     check_models(&st.store, spec.allowed_models()).await?;
     let _guard = st.write_lock.lock().await;
     R::check(st, &meta.name, &spec, None).await?;
-    let obj = st.store.create(p.actor(), meta, spec).await?;
+    let extras = R::bounds(st, p, &meta.name, &spec, None, q).await?;
+    let obj = st.store.create_with(p.actor(), meta, spec, &extras).await?;
     let tag = etag_of(&obj);
     let location = format!("{BASE}/{}/{}", R::COLLECTION, obj.metadata.name);
     Ok(created_at(
@@ -363,6 +379,7 @@ pub(crate) async fn put_impl<R: AdminResource>(
     headers: &HeaderMap,
     meta: ObjectMeta,
     spec: R,
+    q: &BoundsQuery,
 ) -> ApiResult {
     let meta = same_name(name, meta)?;
     // Neuer Zustand im Geltungsbereich (z. B. Team nicht in fremde Organisation verschieben).
@@ -373,7 +390,8 @@ pub(crate) async fn put_impl<R: AdminResource>(
     p.require_on(Permission::Write, &R::target(name, &current.spec))?;
     check_if_match(headers, &etag_of(&current))?;
     R::check(st, name, &spec, Some(&current)).await?;
-    let obj = st.store.update(p.actor(), meta, spec).await?;
+    let extras = R::bounds(st, p, name, &spec, Some(&current), q).await?;
+    let obj = st.store.update_with(p.actor(), meta, spec, &extras).await?;
     let tag = etag_of(&obj);
     Ok(json_with(StatusCode::OK, Some(tag), &R::Res::from(obj)))
 }
@@ -401,6 +419,7 @@ macro_rules! plain_resource {
         path = $path:tt, item_path = $item:tt, what = $what:tt,
         handlers = [$list_fn:ident, $create_fn:ident, $get_fn:ident, $put_fn:ident, $delete_fn:ident]
         $(, input_meta = [$($iattr:meta),*])?
+        $(, bounds = $bq:ty)?
     ) => {
         #[doc = concat!($what, " (gelesen).")]
         #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -470,7 +489,7 @@ macro_rules! plain_resource {
 
         #[doc = concat!("Legt an: ", $what, ".")]
         #[utoipa::path(
-            post, path = $path, tag = $tag, request_body = $input,
+            post, path = $path, tag = $tag, request_body = $input, $(params($bq),)?
             responses(
                 (status = 201, description = "Angelegt", body = $res,
                     headers(("ETag" = String, description = "Version"), ("Location" = String, description = "Pfad"))),
@@ -485,10 +504,14 @@ macro_rules! plain_resource {
         pub(crate) async fn $create_fn(
             State(st): St,
             Extension(p): Extension<Principal>,
+            $(bq: Result<Query<$bq>, QueryRejection>,)?
             body: Result<Json<$input>, JsonRejection>,
         ) -> ApiResult {
+            #[allow(unused_variables)] // mit `bounds = …` überdeckt
+            let q = $crate::bounds::BoundsQuery::default();
+            $(let Query::<$bq>(q) = bq?;)?
             let Json(input) = body?;
-            create_impl(&st, &p, input.metadata, input.spec).await
+            create_impl(&st, &p, input.metadata, input.spec, &q).await
         }
 
         #[doc = concat!("Liest: ", $what, ".")]
@@ -518,6 +541,7 @@ macro_rules! plain_resource {
             params(
                 ("name" = String, Path, description = "Name"),
                 ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+                $($bq)?
             ),
             responses(
                 (status = 200, description = "Geändert", body = $res,
@@ -526,6 +550,7 @@ macro_rules! plain_resource {
                 (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
                 (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
                 (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
+                (status = 409, description = "Konflikt (z. B. bestehende Objekte über neuen Grenzen)", body = Problem, content_type = "application/problem+json"),
                 (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
                 (status = 422, description = "Ungültige Eingabe oder Verweis", body = Problem, content_type = "application/problem+json"),
             ),
@@ -536,10 +561,14 @@ macro_rules! plain_resource {
             Extension(p): Extension<Principal>,
             Path(name): Path<String>,
             headers: HeaderMap,
+            $(bq: Result<Query<$bq>, QueryRejection>,)?
             body: Result<Json<$input>, JsonRejection>,
         ) -> ApiResult {
+            #[allow(unused_variables)] // mit `bounds = …` überdeckt
+            let q = $crate::bounds::BoundsQuery::default();
+            $(let Query::<$bq>(q) = bq?;)?
             let Json(input) = body?;
-            put_impl(&st, &p, &name, &headers, input.metadata, input.spec).await
+            put_impl(&st, &p, &name, &headers, input.metadata, input.spec, &q).await
         }
 
         #[doc = concat!("Löscht: ", $what, ".")]
@@ -607,7 +636,8 @@ plain_resource!(
         get_organization,
         put_organization,
         delete_organization
-    ]
+    ],
+    bounds = BoundsQuery
 );
 
 impl AdminResource for OrganizationSpec {
@@ -621,6 +651,17 @@ impl AdminResource for OrganizationSpec {
 
     fn create_target(_name: &str, _spec: &Self) -> Target {
         Target::Global
+    }
+
+    async fn bounds(
+        st: &AdminState,
+        p: &Principal,
+        name: &str,
+        spec: &Self,
+        current: Option<&Object<Self>>,
+        q: &BoundsQuery,
+    ) -> Result<WriteExtras, Problem> {
+        bounds::organization(&st.store, p, name, spec, current.map(|c| &c.spec), q).await
     }
 
     fn list_args(q: &Self::Query) -> ListArgs<'_> {
@@ -664,7 +705,8 @@ plain_resource!(
     path = "/admin/api/v1/teams",
     item_path = "/admin/api/v1/teams/{name}",
     what = "Team",
-    handlers = [list_teams, create_team, get_team, put_team, delete_team]
+    handlers = [list_teams, create_team, get_team, put_team, delete_team],
+    bounds = BoundsQuery
 );
 
 impl AdminResource for TeamSpec {
@@ -693,6 +735,17 @@ impl AdminResource for TeamSpec {
 
     fn target(name: &str, spec: &Self) -> Target {
         Target::team(spec.organization.clone(), name)
+    }
+
+    async fn bounds(
+        st: &AdminState,
+        p: &Principal,
+        name: &str,
+        spec: &Self,
+        current: Option<&Object<Self>>,
+        q: &BoundsQuery,
+    ) -> Result<WriteExtras, Problem> {
+        bounds::team(&st.store, p, name, spec, current.map(|c| &c.spec), q).await
     }
 }
 
@@ -1026,6 +1079,7 @@ pub(crate) async fn list_api_keys(
 /// Legt einen API-Key an. Der Klartext (`secret`) steht **nur** in dieser Antwort.
 #[utoipa::path(
     post, path = "/admin/api/v1/api-keys", tag = "api-keys", request_body = ApiKeyInput,
+    params(KeyBoundsQuery),
     responses(
         (status = 201, description = "Angelegt (mit Klartext)", body = CreatedApiKey,
             headers(("ETag" = String, description = "Version"), ("Location" = String, description = "Pfad"))),
@@ -1040,17 +1094,21 @@ pub(crate) async fn list_api_keys(
 pub(crate) async fn create_api_key(
     State(st): St,
     Extension(p): Extension<Principal>,
+    q: Result<Query<KeyBoundsQuery>, QueryRejection>,
     body: Result<Json<ApiKeyInput>, JsonRejection>,
 ) -> ApiResult {
+    let Query(q) = q?;
     let Json(input) = body?;
     p.require_on(
         Permission::Write,
         &key_target(&st.store, &input.spec).await?,
     )?;
     check_models(&st.store, &input.spec.allowed_models).await?;
+    let _guard = st.write_lock.lock().await;
+    let extras = bounds::api_key(&st.store, &p, &input.metadata.name, &input.spec, &q).await?;
     let created = st
         .store
-        .create_api_key(p.actor(), input.metadata, input.spec)
+        .create_api_key_with(p.actor(), input.metadata, input.spec, &extras)
         .await?;
     let tag = key_etag(&created.key);
     let location = format!("{BASE}/api-keys/{}", created.key.metadata.name);
@@ -1089,6 +1147,7 @@ pub(crate) async fn get_api_key(
     params(
         ("name" = String, Path, description = "Name"),
         ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+        KeyBoundsQuery,
     ),
     responses(
         (status = 200, description = "Geändert", body = ApiKey,
@@ -1107,8 +1166,10 @@ pub(crate) async fn put_api_key(
     Extension(p): Extension<Principal>,
     Path(name): Path<String>,
     headers: HeaderMap,
+    q: Result<Query<KeyBoundsQuery>, QueryRejection>,
     body: Result<Json<ApiKeyInput>, JsonRejection>,
 ) -> ApiResult {
+    let Query(q) = q?;
     let Json(input) = body?;
     let meta = same_name(&name, input.metadata)?;
     p.require_on(
@@ -1123,7 +1184,11 @@ pub(crate) async fn put_api_key(
         &key_target(&st.store, &current.spec).await?,
     )?;
     check_if_match(&headers, &key_etag(&current))?;
-    let k = st.store.update_api_key(p.actor(), meta, input.spec).await?;
+    let extras = bounds::api_key(&st.store, &p, &name, &input.spec, &q).await?;
+    let k = st
+        .store
+        .update_api_key_with(p.actor(), meta, input.spec, &extras)
+        .await?;
     Ok(json_with(StatusCode::OK, Some(key_etag(&k)), &k))
 }
 

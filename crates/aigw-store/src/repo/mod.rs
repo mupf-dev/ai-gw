@@ -15,7 +15,10 @@
 mod api_key;
 pub mod audit;
 pub(crate) mod credential;
+mod extras;
 mod kinds;
+
+pub use extras::WriteExtras;
 
 pub(crate) use api_key::api_key_from_row;
 pub use audit::AuditEntry;
@@ -248,6 +251,10 @@ pub(crate) enum Action {
     Revoke,
     /// API-Key entsperren.
     Reactivate,
+    /// Auf neue Grenzen gekürzt (AIGW-67, `?cascade=clamp`).
+    Clamp,
+    /// Grenzen bewusst überschritten (AIGW-67, `?force=true`).
+    Force,
 }
 
 impl Action {
@@ -259,6 +266,8 @@ impl Action {
             Self::Rotate => "rotate",
             Self::Revoke => "revoke",
             Self::Reactivate => "reactivate",
+            Self::Clamp => "clamp",
+            Self::Force => "force",
         }
     }
 }
@@ -674,6 +683,18 @@ impl Store {
         meta: ObjectMeta,
         spec: R,
     ) -> Result<Object<R>, StoreError> {
+        self.create_with(actor, meta, spec, &WriteExtras::default())
+            .await
+    }
+
+    /// Wie [`Store::create`], mit zusätzlichen Schreibvorgängen in derselben Transaktion.
+    pub async fn create_with<R: PlainResource>(
+        &self,
+        actor: &str,
+        meta: ObjectMeta,
+        spec: R,
+        extras: &WriteExtras,
+    ) -> Result<Object<R>, StoreError> {
         validate_name(&meta.name).map_err(StoreError::Invalid)?;
         spec.validate()?;
         let id = new_id();
@@ -697,6 +718,8 @@ impl Store {
             Some(&created),
         )
         .await?;
+        tx.apply_extras(extras, R::KIND, id, &created.metadata.name)
+            .await?;
         tx.commit().await?;
         self.get_by_id(id).await
     }
@@ -707,6 +730,18 @@ impl Store {
         actor: &str,
         meta: ObjectMeta,
         spec: R,
+    ) -> Result<Object<R>, StoreError> {
+        self.update_with(actor, meta, spec, &WriteExtras::default())
+            .await
+    }
+
+    /// Wie [`Store::update`], mit zusätzlichen Schreibvorgängen in derselben Transaktion.
+    pub async fn update_with<R: PlainResource>(
+        &self,
+        actor: &str,
+        meta: ObjectMeta,
+        spec: R,
+        extras: &WriteExtras,
     ) -> Result<Object<R>, StoreError> {
         spec.validate()?;
         let before: Object<R> = self.get(&meta.name).await?;
@@ -739,6 +774,8 @@ impl Store {
             tx.end_user_sessions(before.id, &after.metadata.name, "roles-changed")
                 .await?;
         }
+        tx.apply_extras(extras, R::KIND, before.id, &after.metadata.name)
+            .await?;
         tx.commit().await?;
         self.get_by_id(before.id).await
     }

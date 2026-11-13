@@ -36,7 +36,7 @@ pub use reload::{ReloadMetrics, ReloadOptions, Reloader, ReloaderTask};
 pub use repo::audit::{
     ActorType, AuditCursor, AuditEvent, AuditPage, AuditQuery, AuditScope, ScopeRule,
 };
-pub use repo::{AuditEntry, PlainResource, Resource};
+pub use repo::{AuditEntry, PlainResource, Resource, WriteExtras};
 pub use snapshot::load_snapshot;
 
 /// Fehler der Persistenzschicht.

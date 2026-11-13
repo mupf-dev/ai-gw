@@ -207,7 +207,7 @@ pub struct AuditEntry {
     /// `gitops:<principal>`, `oidc-login`, `system`.
     pub actor: String,
     /// `create` | `update` | `delete` | `rotate` | `revoke` | `reactivate` | `login` |
-    /// `login-failed` | `logout` | `first-use` | `disable`.
+    /// `login-failed` | `logout` | `first-use` | `disable` | `clamp` | `force` (AIGW-67).
     pub action: String,
     /// Art (`Organization`, `Team`, `User`, `ApiKey`, `ModelGroup`, `Deployment`,
     /// `ProviderCredential`, `Price` …, `admin-api-key`, `admin-session`, `bootstrap-token`).

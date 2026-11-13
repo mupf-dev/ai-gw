@@ -8,6 +8,7 @@
 //! (bequemer in Clients), `instance` der angefragte Pfad. Interne Fehler geben keine Details
 //! preis; die Ursache steht im Log.
 
+use aigw_core::validate::bounds::Violation;
 use aigw_store::StoreError;
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
@@ -38,6 +39,11 @@ pub struct Problem {
     pub instance: Option<String>,
     /// Maschinenlesbarer Code (`not-found`, `conflict`, `precondition-failed` …).
     pub code: &'static str,
+    /// Einzelne Grenzverstöße (AIGW-67: `422` beim Objekt selbst, `409` bei betroffenen
+    /// bestehenden Keys/Teams); fehlt sonst. Geboxt, damit `Result<_, Problem>` klein bleibt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Vec<Violation>>)]
+    pub violations: Option<Box<Vec<Violation>>>,
 }
 
 impl Problem {
@@ -55,6 +61,7 @@ impl Problem {
             detail: Some(detail.into()),
             instance: None,
             code,
+            violations: None,
         }
     }
 
@@ -126,6 +133,13 @@ impl Problem {
             "Interner Fehler",
             "Interner Fehler, Details im Server-Log",
         )
+    }
+
+    /// Setzt die einzelnen Grenzverstöße.
+    #[must_use]
+    pub fn with_violations(mut self, violations: Vec<Violation>) -> Self {
+        self.violations = (!violations.is_empty()).then(|| Box::new(violations));
+        self
     }
 
     /// Setzt `instance`.

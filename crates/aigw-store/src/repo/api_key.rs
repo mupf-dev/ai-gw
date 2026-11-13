@@ -11,7 +11,7 @@ use aigw_core::snapshot::KeyHash;
 use sqlx::any::AnyRow;
 use time::OffsetDateTime;
 
-use super::{Action, AdminTx, Col, Resource, Row, Val, millis, now};
+use super::{Action, AdminTx, Col, Resource, Row, Val, WriteExtras, millis, now};
 use crate::keys::generate_api_key;
 use crate::{Store, StoreError};
 
@@ -43,6 +43,18 @@ impl Store {
         meta: ObjectMeta,
         spec: ApiKeySpec,
     ) -> Result<CreatedApiKey, StoreError> {
+        self.create_api_key_with(actor, meta, spec, &WriteExtras::default())
+            .await
+    }
+
+    /// Wie [`Store::create_api_key`], mit zusätzlichen Schreibvorgängen (AIGW-67).
+    pub async fn create_api_key_with(
+        &self,
+        actor: &str,
+        meta: ObjectMeta,
+        spec: ApiKeySpec,
+        extras: &WriteExtras,
+    ) -> Result<CreatedApiKey, StoreError> {
         validate_name(&meta.name).map_err(StoreError::Invalid)?;
         let generated = generate_api_key()?;
         let id = new_id();
@@ -72,6 +84,8 @@ impl Store {
             Some(&audit),
         )
         .await?;
+        tx.apply_extras(extras, ResourceKind::ApiKey, id, &audit.metadata.name)
+            .await?;
         tx.commit().await?;
         Ok(CreatedApiKey {
             key: self.get_api_key_by_id(id).await?,
@@ -124,6 +138,18 @@ impl Store {
         meta: ObjectMeta,
         spec: ApiKeySpec,
     ) -> Result<ApiKey, StoreError> {
+        self.update_api_key_with(actor, meta, spec, &WriteExtras::default())
+            .await
+    }
+
+    /// Wie [`Store::update_api_key`], mit zusätzlichen Schreibvorgängen (AIGW-67).
+    pub async fn update_api_key_with(
+        &self,
+        actor: &str,
+        meta: ObjectMeta,
+        spec: ApiKeySpec,
+        extras: &WriteExtras,
+    ) -> Result<ApiKey, StoreError> {
         let before = self.get_api_key(&meta.name).await?;
         let mut tx = AdminTx::begin(self, actor).await?;
         let cols = tx.resolve_cols(spec.to_columns()?).await?;
@@ -142,6 +168,13 @@ impl Store {
             &after.metadata.name,
             Some(&before),
             Some(&after),
+        )
+        .await?;
+        tx.apply_extras(
+            extras,
+            ResourceKind::ApiKey,
+            before.id,
+            &after.metadata.name,
         )
         .await?;
         tx.commit().await?;

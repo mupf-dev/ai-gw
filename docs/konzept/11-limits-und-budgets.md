@@ -1,4 +1,4 @@
-# ai-gw – Limits, Budgets und Kostenabrechnung (AIGW-30, AIGW-31)
+# ai-gw – Limits, Budgets und Kostenabrechnung (AIGW-30, AIGW-31, AIGW-67)
 
 Stand: 2026-11-13 · Status: umgesetzt (Entwurf zur Durchsicht)
 Grundlage: [01-architektur.md](01-architektur.md) §3 Schritt 4 und §8, [05-zaehler.md](05-zaehler.md),
@@ -252,6 +252,65 @@ Verbrauch, Rest, Prozent, Schwellen, `hardLimit`, `exhausted` sowie die Zeitzone
    "warnAtPercent": [50, 80, 100], "hardLimit": true, "exhausted": false}]}
 ```
 
+## 6a. Grenzen Key ≤ Team ≤ Organisation (AIGW-67)
+
+Code: `aigw_core::validate::bounds` (Regeln, gemeinsam für Admin-API und GitOps),
+`crates/aigw-admin/src/bounds.rs` (Rollen, `force`, `cascade`), `aigw-store`
+(`WriteExtras`: Kürzungen und Audit in derselben Transaktion), GitOps `plan.rs`
+(`check_bounds` in `check_rules`).
+
+### 6a.1 Regeln
+
+| Was | Regel |
+|---|---|
+| Limits | Ein Limit von Key bzw. Team darf ein **vergleichbares** Limit von Team bzw. Organisation nicht überschreiten. Vergleichbar: gleiche Metrik, gleiches Fenster (`concurrency`: ohne Fenster) und das obere Limit gilt für die Modellgruppe des unteren (gleiche Gruppe – Aliasse werden aufgelöst – oder oben ohne Gruppe). Geprüft wird gegen **alle** Ebenen darüber (ein Key auch direkt gegen die Organisation), gemeldet das engste Limit. |
+| Fenster | Verschiedene Fenster werden **nicht** umgerechnet (Key `tokens/hour` gegen Team `tokens/minute` ist kein Verstoß). |
+| Gruppenlimits | Oben gruppenbezogen, unten ohne Gruppe → nicht vergleichbar (das untere gilt für mehr Anfragen). Oben ohne Gruppe, unten gruppenbezogen → vergleichbar. |
+| Budgets | Nur bei **gleichem Zeitraum** (`day`, `week`, `month`, `total`): Betrag unten ≤ Betrag oben. Keine Umrechnung (Monat ≠ 4 × Woche). Es gibt eine Abrechnungswährung, Beträge sind direkt vergleichbar. `hardLimit`/Warnschwellen werden nicht verglichen. |
+| Modelle | Schränkt das Team `allowedModels` ein, muss jede Freigabe des Keys darin liegen (Name oder Alias, kanonisch verglichen). Leere Liste am Key = „alles, was das Team erlaubt“ → immer zulässig. |
+| Fehlt etwas | Ohne vergleichbares Limit/Budget oben gibt es keine Grenze; ohne Limit unten gilt zur Laufzeit ohnehin das obere. Keys ohne Team haben keine Grenzen. |
+
+### 6a.2 Admin-API
+
+| Fall | Ergebnis |
+|---|---|
+| Geschriebenes Objekt (Key, Team) verstößt selbst | `422 validation-failed`, `detail` mit allen Verstößen, `violations[]` (`level`, `name`, `field`, `message`) |
+| Team/Organisation wird gesenkt, bestehende Keys/Teams lägen darüber | `409 conflict` mit `violations[]` je betroffenem Objekt |
+| … mit `?cascade=clamp` | Betroffene Teams/Keys werden in **derselben Transaktion** auf die neue Grenze gesetzt (Limit = Grenze, Budget = Grenze, nicht erlaubte Modelle entfernt); Audit `clamp` je Objekt (`before`/`after`) |
+| … Key verlöre alle Modellfreigaben | auch mit `clamp` `409` (eine leere Liste hieße „alle“ – das wäre eine Erweiterung) |
+| `?force=true` | nur **globaler** `admin` (sonst `403`, auch für `admin` einer Organisation); lässt eigene Verstöße und betroffene Objekte zu; zusätzlicher Audit-Eintrag `force` am Objekt mit `{force, violations, affected}` |
+
+- Gilt für `team-admin`, `org-admin`, eingeschränkte `admin` und den globalen `admin` gleich
+  (hart); nur `force` unterscheidet.
+- Parameter: `POST/PUT /teams…`, `/organizations…` mit `?force=` und `?cascade=reject|clamp`;
+  `POST/PUT /api-keys…` mit `?force=` (unbekannte Parameter → `400`).
+- **Nur neue Verstöße blockieren:** Betroffene Objekte werden nur gemeldet, wenn der Verstoß
+  durch die Änderung entsteht (Prüfung zusätzlich gegen die bisherigen Grenzen). Ältere
+  Verstöße (vor AIGW-67 entstanden oder per `force`) blockieren andere Änderungen nicht;
+  `clamp` bereinigt sie mit. Das geschriebene Objekt selbst muss immer passen.
+- Rotation übernimmt die Spezifikation unverändert (keine neue Prüfung); Sperren/Entsperren
+  prüft nicht.
+
+```json
+PUT /admin/api/v1/teams/platform   → 409
+{"type": "urn:aigw:problem:conflict", "code": "conflict", "status": 409,
+ "detail": "1 bestehende(s) Objekt(e) lägen über den neuen Grenzen – anpassen oder ?cascade=clamp verwenden: Key \"ci\": limits[0]: tokens/minute = 5000 überschreitet das Limit von Team \"platform\" (4000)",
+ "violations": [{"level": "api-key", "name": "ci", "field": "limits[0]",
+                 "message": "tokens/minute = 5000 überschreitet das Limit von Team \"platform\" (4000)"}]}
+```
+
+### 6a.3 GitOps
+
+Dieselben Regeln in `check_rules` (Plan, Trockenlauf und Anwenden); alle Verstöße gesammelt
+als `Issue`s. Geprüft wird jedes Team/jeder Key, bei dem das Objekt selbst oder eine Ebene
+darüber im Manifest steht:
+
+- Objekt im Manifest: Verstoß an seinem Dokument (`limits[0]: …`).
+- Bestehendes Objekt außerhalb des Manifests (z. B. Keys bei `--api-keys ignore` oder ohne
+  `--prune`): Verstoß am Dokument der geänderten Ebene (`bestehend: Key "ci": …`), aber nur,
+  wenn er durch das Manifest neu entsteht.
+- Kein `force`, kein `cascade` – das Manifest muss stimmig sein (Keys im Manifest anpassen).
+
 ## 7. Messwerte
 
 Release-Build auf der Buildbox (AMD EPYC, geteilt), `cargo test --release -p aigw-proxy --lib
@@ -296,3 +355,5 @@ zusätzlich je Budget einen Map-Zugriff und eine Mutex-Sperre (keine I/O).
 - Audio-/Bildpreise, sobald die IR-Usage diese Mengen führt.
 - Budgets je Nutzer (`user`) und je Modellgruppe sind im Ressourcenmodell nicht vorgesehen.
 - Rate-Limit-Header für Budgets (z. B. `x-aigw-budget-remaining`) – bisher nur im Fehlertext.
+- AIGW-67: Budgets verschiedener Zeiträume und Limits verschiedener Fenster werden nicht
+  verglichen; `force`/`cascade` in GitOps nicht vorgesehen (siehe Fragen im Bericht).

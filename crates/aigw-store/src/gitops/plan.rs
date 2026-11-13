@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use aigw_core::resource::{
-    LimitSpec, Manifest, ModelGroupSpec, ResourceKind, ResourceSpec, Scope, ScopeLevel,
-    SecretString,
+    ApiKeySpec, LimitSpec, Manifest, ModelGroupSpec, OrganizationSpec, ResourceKind, ResourceSpec,
+    Scope, ScopeLevel, SecretString, TeamSpec,
 };
 use aigw_core::types::ProviderKind;
 use aigw_core::validate;
@@ -803,6 +803,149 @@ fn check_rules(
                 issues.push(Issue::at(Some(*doc), *kind, name, e));
             }
         }
+    }
+    check_bounds(fin, state, &groups, issues);
+}
+
+/// Organisation, Team oder Key im Endzustand: (Dokument, Spezifikation).
+type Entry<'a, T> = (Option<usize>, &'a T);
+
+/// Grenzen Key ≤ Team ≤ Organisation (AIGW-67), alle Verstöße gesammelt.
+///
+/// Geprüft wird jedes Team/jeder Key, bei dem das Objekt selbst oder eine übergeordnete Ebene
+/// im Manifest steht. Verstöße eines Objekts im Manifest stehen an seinem Dokument; Verstöße
+/// bestehender Objekte außerhalb des Manifests nur, wenn sie durch das Manifest **neu**
+/// entstehen (gegen den Ist-Stand der Eltern geprüft), am Dokument der geänderten Ebene.
+fn check_bounds(
+    fin: &Final<'_>,
+    state: &State,
+    groups: &BTreeMap<&str, &ModelGroupSpec>,
+    issues: &mut Vec<Issue>,
+) {
+    use validate::bounds::{self, ModelNames, Node};
+    let models = ModelNames::new(groups.iter().map(|(n, g)| (*n, *g)));
+    let of = |kind: ResourceKind| fin.objects.get(&kind).into_iter().flatten();
+    let orgs: BTreeMap<&str, Entry<'_, OrganizationSpec>> = of(ResourceKind::Organization)
+        .filter_map(|(n, (d, m))| match &m.spec {
+            ResourceSpec::Organization(o) => Some((n.as_str(), (*d, o))),
+            _ => None,
+        })
+        .collect();
+    let teams: BTreeMap<&str, Entry<'_, TeamSpec>> = of(ResourceKind::Team)
+        .filter_map(|(n, (d, m))| match &m.spec {
+            ResourceSpec::Team(t) => Some((n.as_str(), (*d, t))),
+            _ => None,
+        })
+        .collect();
+    let keys: BTreeMap<&str, Entry<'_, ApiKeySpec>> = of(ResourceKind::ApiKey)
+        .filter_map(|(n, (d, m))| match &m.spec {
+            ResourceSpec::ApiKey(k) => Some((n.as_str(), (*d, k))),
+            _ => None,
+        })
+        .collect();
+    // Ist-Stand (vor dem Anwenden) einer Organisation bzw. eines Teams.
+    let cur_org = |n: &str| match state
+        .get(ResourceKind::Organization, n)
+        .map(|c| &c.manifest.spec)
+    {
+        Some(ResourceSpec::Organization(o)) => Some(o),
+        _ => None,
+    };
+    let cur_team = |n: &str| match state.get(ResourceKind::Team, n).map(|c| &c.manifest.spec) {
+        Some(ResourceSpec::Team(t)) => Some(t),
+        _ => None,
+    };
+    // Kette (Ebene, Name, Dokument) von unten nach oben; Ergebnis wird am ersten Glied mit
+    // Dokument gemeldet.
+    let mut report = |chain: &[(ResourceKind, &str, Option<usize>)],
+                      v: Vec<bounds::Violation>,
+                      old: Vec<bounds::Violation>| {
+        let Some(&(kind, name, doc)) = chain.iter().find(|(_, _, d)| d.is_some()) else {
+            return;
+        };
+        let own = chain.first().is_some_and(|(_, _, d)| d.is_some());
+        for v in v {
+            if own {
+                issues.push(Issue::at(
+                    doc,
+                    kind,
+                    name,
+                    format!("{}: {}", v.field, v.message),
+                ));
+            } else if !old
+                .iter()
+                .any(|o| o.name == v.name && o.level == v.level && o.field == v.field)
+            {
+                issues.push(Issue::at(doc, kind, name, format!("bestehend: {v}")));
+            }
+        }
+    };
+    for (&tname, &(tdoc, t)) in &teams {
+        let org = orgs.get(t.organization.as_str()).copied();
+        let odoc = org.and_then(|(d, _)| d);
+        if tdoc.is_none() && odoc.is_none() {
+            continue;
+        }
+        let parents: Vec<Node<'_>> = org
+            .map(|(_, o)| Node::organization(&t.organization, o))
+            .into_iter()
+            .collect();
+        let node = Node::team(tname, t);
+        let v = bounds::check(&node, &parents, &models);
+        if v.is_empty() {
+            continue;
+        }
+        let old_parents: Vec<Node<'_>> = cur_org(&t.organization)
+            .map(|o| Node::organization(&t.organization, o))
+            .into_iter()
+            .collect();
+        let old = bounds::check(&node, &old_parents, &models);
+        report(
+            &[
+                (ResourceKind::Team, tname, tdoc),
+                (ResourceKind::Organization, t.organization.as_str(), odoc),
+            ],
+            v,
+            old,
+        );
+    }
+    for (&kname, &(kdoc, k)) in &keys {
+        let Some(tname) = k.team.as_deref() else {
+            continue;
+        };
+        let Some(&(tdoc, t)) = teams.get(tname) else {
+            continue; // unbekanntes Team meldet die Verweisprüfung
+        };
+        let org = orgs.get(t.organization.as_str()).copied();
+        let odoc = org.and_then(|(d, _)| d);
+        if kdoc.is_none() && tdoc.is_none() && odoc.is_none() {
+            continue;
+        }
+        let mut parents = vec![Node::team(tname, t)];
+        parents.extend(org.map(|(_, o)| Node::organization(&t.organization, o)));
+        let node = Node::api_key(kname, k);
+        let v = bounds::check(&node, &parents, &models);
+        if v.is_empty() {
+            continue;
+        }
+        let mut old_parents: Vec<Node<'_>> = cur_team(tname)
+            .map(|c| Node::team(tname, c))
+            .into_iter()
+            .collect();
+        if let Some(c) = cur_team(tname) {
+            old_parents
+                .extend(cur_org(&c.organization).map(|o| Node::organization(&c.organization, o)));
+        }
+        let old = bounds::check(&node, &old_parents, &models);
+        report(
+            &[
+                (ResourceKind::ApiKey, kname, kdoc),
+                (ResourceKind::Team, tname, tdoc),
+                (ResourceKind::Organization, t.organization.as_str(), odoc),
+            ],
+            v,
+            old,
+        );
     }
 }
 

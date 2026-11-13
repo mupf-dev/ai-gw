@@ -7,6 +7,10 @@
 //! beide Wege dieselben Regeln anwenden. Die Funktionen sind rein (ohne Datenbank); Verweise
 //! übergibt der Aufrufer. Fehler sind deutschsprachige Meldungen mit Feldpfad
 //! (Admin-API: `422`, GitOps: `Issue`).
+//!
+//! [`bounds`]: Grenzen Key ≤ Team ≤ Organisation (AIGW-67).
+
+pub mod bounds;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 

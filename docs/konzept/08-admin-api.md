@@ -402,6 +402,12 @@ eingeschränkt. Jede Operation fordert `Permission::Read`/`Write` auf einem `Tar
 | `viewer` | im Bereich (global: alles), Katalog | – |
 | `auditor` | wie `viewer`; dazu das Audit-Log (§5.10) | – |
 
+- **Grenzen (AIGW-67):** Limits, Budgets und Modellfreigaben eines Keys dürfen die seines
+  Teams und seiner Organisation nicht überschreiten, die eines Teams nicht die der
+  Organisation – für alle Rollen hart (`422` mit `violations[]`). Senken eines Team-/Org-Werts
+  unter bestehende Keys/Teams → `409` mit Liste, `?cascade=clamp` kürzt sie mit (Audit
+  `clamp`); `?force=true` nur für den globalen `admin` (Audit `force`). Details:
+  [11-limits-und-budgets.md](11-limits-und-budgets.md) §6a.
 - `org-admin` ohne `organization` und `team-admin` ohne `team` sind wirkungslos.
 - Listen sind gefiltert (eingeschränkte Rollen sehen nur ihren Bereich, z. B. `GET /teams`
   nur das eigene Team); Einzelobjekte außerhalb des Bereichs ergeben `403`.
@@ -638,7 +644,6 @@ Anbieterart `mock` (`providerModel` `mock`, `mock-error`, `mock-stream-error`).
   historischer Preise); bereits berechnete Kosten im Request-Log ändern sich dadurch nicht.
 - AIGW-32 (Vorschläge, noch nicht entschieden): Höchstlaufzeit bzw. Pflichtablauf für
   Admin-API-Keys; Verwaltung von Admin-Keys auch durch `org-admin` (nur im eigenen Bereich);
-  `team-admin`-Grenzen für Key-Limits/-Budgets („im Rahmen der Team-Grenzen“) inhaltlich prüfen;
   IdP-Gruppen bei jedem Request statt nur beim Login (Refresh-Token/Introspection).
 - AIGW-66 (Vorschläge, noch nicht entschieden): Aufbewahrungsfrist bzw. Archivierung des
   Audit-Logs; Manipulationsschutz (Hash-Kette über die Einträge); Löschen eines Admin-API-Keys
