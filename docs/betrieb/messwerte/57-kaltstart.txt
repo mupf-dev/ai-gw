@@ -1,0 +1,9 @@
+# 2026-11-13T22:30:56Z 8 vCPU,  AMD EPYC-Genoa Processor, Last: 17.13 14.94 14.35
+== postgres: Apply in 14 Teilen (10000 Keys, 1000 Modellgruppen, 2000 Deployments): 16160 ms
+== postgres: Start 1: /readyz nach 183 ms, RSS 65.2 MiB; Snapshot: keys=10000 model_groups=2000 load_ms=153 
+== postgres: Start 2: /readyz nach 152 ms, RSS 75.6 MiB; Snapshot: keys=10000 model_groups=2000 load_ms=135 
+== postgres: Start 3: /readyz nach 169 ms, RSS 68.1 MiB; Snapshot: keys=10000 model_groups=2000 load_ms=149 
+== sqlite: Apply in 14 Teilen (10000 Keys, 1000 Modellgruppen, 2000 Deployments): 3994 ms
+== sqlite: Start 1: /readyz nach 147 ms, RSS 92.4 MiB; Snapshot: keys=10000 model_groups=2000 load_ms=124 
+== sqlite: Start 2: /readyz nach 143 ms, RSS 92.0 MiB; Snapshot: keys=10000 model_groups=2000 load_ms=121 
+== sqlite: Start 3: /readyz nach 136 ms, RSS 90.9 MiB; Snapshot: keys=10000 model_groups=2000 load_ms=122 

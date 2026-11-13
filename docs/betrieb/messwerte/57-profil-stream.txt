@@ -1,0 +1,122 @@
+# perf-Profil des Gateways (aigw serve), stream, 10 000 req/s, vor den Optimierungen; Auszug
+# libc.so.6 0xb2…–0xb3… = glibc-malloc-Interna (_int_malloc/_int_free, hinter __default_morecore), 0x1a…–0x1b… vermutlich mem*/str*-Routinen (Zuordnung per readelf, libc ohne Debug-Symbole).
+### eigene Zeit
+ 3.29% libc.so.6 [.] 0x00000000000b237c - -
+ 2.81% libc.so.6 [.] 0x00000000000b3c9c - -
+ 2.65% libc.so.6 [.] 0x00000000000b2369 - -
+ 2.59% libc.so.6 [.] 0x00000000000b3cb8 - -
+ 1.55% libc.so.6 [.] realloc - -
+ 1.10% libc.so.6 [.] malloc - -
+ 0.97% [kernel.kallsyms] [k] __raw_spin_lock_irqsave - -
+ 0.92% [kernel.kallsyms] [k] __nf_conntrack_find_get - -
+ 0.87% libc.so.6 [.] 0x00000000001a7425 - -
+ 0.85% libc.so.6 [.] 0x00000000001b0a53 - -
+ 0.83% [kernel.kallsyms] [k] srso_alias_safe_ret - -
+ 0.83% [kernel.kallsyms] [k] skb_release_data - -
+ 0.78% [kernel.kallsyms] [k] __inet_lookup_established - -
+ 0.78% libc.so.6 [.] pthread_mutex_lock - -
+ 0.76% aigw [.] sqlite3VdbeExec - -
+ 0.73% aigw [.] <aigw_core::wire::openai::stream::StreamDecoder>::decode - -
+ 0.72% aigw [.] <hyper_util::client::legacy::client::Client<hyper_rustls::connector::HttpsConnector<hyper_util::client::legacy::connect::http::HttpConnector<aigw_outbound::resolve::GuardedResolver>>, 
+ 0.71% aigw [.] bytes::bytes::shared_drop - -
+ 0.71% [kernel.kallsyms] [k] asm_sysvec_apic_timer_interrupt - -
+ 0.67% aigw [.] <aigw_proxy::limits::Limiter>::admit::{closure#0} - -
+ 0.67% aigw [.] <serde_json::read::SliceRead>::skip_to_escape - -
+ 0.63% aigw [.] <serde::private::de::FlatMapDeserializer<serde_json::error::Error> as serde_core::de::Deserializer>::deserialize_map::<<serde_json::map::Map<alloc::string::String, serde_json::value::V
+ 0.63% [vdso] [.] 0x000000000000093b - -
+ 0.61% [kernel.kallsyms] [k] tcp_clean_rtx_queue - -
+ 0.60% aigw [.] <aigw_billing::budget::Budgets>::charge_local_releasing - -
+ 0.58% aigw [.] <serde_json::read::StrRead as serde_json::read::Read>::parse_str - -
+ 0.57% aigw [.] <tokio::runtime::io::registration::Registration>::poll_ready - -
+ 0.57% libc.so.6 [.] cfree - -
+ 0.54% [kernel.kallsyms] [k] _raw_spin_lock_bh - -
+ 0.53% aigw [.] <&mut serde_json::ser::Serializer<&mut alloc::vec::Vec<u8>> as serde_core::ser::Serializer>::serialize_str - -
+ 0.53% [kernel.kallsyms] [k] __tcp_transmit_skb - -
+ 0.52% [kernel.kallsyms] [k] fput - -
+ 0.51% aigw [.] <aigw_core::wire::sse::SseParser>::lines - -
+ 0.50% [kernel.kallsyms] [k] tcp_rcv_established - -
+ 0.48% aigw [.] <aigw_billing::budget::Budgets>::entry - -
+ 0.45% [kernel.kallsyms] [k] nft_do_chain - -
+ 0.44% aigw [.] core::str::converts::from_utf8 - -
+ 0.43% [kernel.kallsyms] [k] tcp_ack - -
+ 0.42% aigw [.] aigw_proxy::routing::exec::execute_op::<aigw_proxy::routing::exec::ChatOp>::{closure#0} - -
+ 0.42% aigw [.] <tower::util::map_future::MapFuture<axum::util::MapIntoResponse<axum::handler::service::HandlerService<aigw_proxy::handlers::chat_completions, (axum_core::extract::private::ViaRequest,
+ 0.41% [kernel.kallsyms] [k] vfs_writev - -
+ 0.40% aigw [.] bytes::bytes_mut::shared_v_drop - -
+ 0.40% [kernel.kallsyms] [k] ep_poll_callback - -
+ 0.40% [kernel.kallsyms] [k] tcp_sendmsg_locked - -
+ 0.38% aigw [.] bytes::bytes::shared_clone - -
+ 0.38% [kernel.kallsyms] [k] tcp_poll - -
+ 0.36% libc.so.6 [.] pthread_mutex_unlock - -
+ 0.36% aigw [.] axum::serve::handle_connection::<axum::serve::listener::TapIo<tokio::net::tcp::listener::TcpListener, aigw::server::run<aigw::shutdown_signal::{closure#0}>::{closure#0}::{closure#0}>, 
+ 0.35% [kernel.kallsyms] [k] skb_defer_free_flush - -
+ 0.35% [kernel.kallsyms] [k] tcp_write_xmit - -
+ 0.35% [kernel.kallsyms] [k] aa_inet_msg_perm - -
+ 0.34% [kernel.kallsyms] [k] aa_file_perm - -
+ 0.34% libc.so.6 [.] 0x00000000000b26c8 - -
+ 0.34% [kernel.kallsyms] [k] nf_hook_slow - -
+ 0.34% libc.so.6 [.] 0x00000000001b0b5d - -
+ 0.33% [kernel.kallsyms] [k] native_queued_spin_lock_slowpath - -
+ 0.33% aigw [.] <aigw_observe::process::Processor>::process - -
+ 0.33% aigw [.] bytes::bytes_mut::shared_v_clone - -
+ 0.33% aigw [.] <tokio::sync::notify::NotifiedProject>::poll_notified - -
+ 0.32% [kernel.kallsyms] [k] pvclock_clocksource_read_nowd - -
+ 0.32% libc.so.6 [.] 0x00000000001b0c46 - -
+ 0.32% [kernel.kallsyms] [k] kfree_skbmem - -
+ 0.31% aigw [.] <aigw_counters::engine::Engine>::reserve - -
+ 0.30% aigw [.] <hyper::body::incoming::Incoming as http_body::Body>::poll_frame - -
+ 0.30% aigw [.] <serde_json::de::MapAccess<_> as serde_core::de::MapAccess>::next_key_seed::has_next_key::<serde_json::read::StrRead> - -
+ 0.30% [kernel.kallsyms] [k] mod_memcg_state - -
+### inklusive Zeit
+### inklusive Zeit (Auszug: Funktionen von ai-gw, hyper, SQLite)
+ 61.49% 0.23% [.] tokio::runtime::task::raw::poll::<axum::serve::handle_connection<axum::serve::listener::TapIo<tokio::net::tcp::listener::TcpListener, aigw::server::run<aigw::shutdown_signal::{closur
+ 61.14% 0.36% [.] axum::serve::handle_connection::<axum::serve::listener::TapIo<tokio::net::tcp::listener::TcpListener, aigw::server::run<aigw::shutdown_signal::{closure#0}>::{closure#0}::{closure#0}>
+ 41.81% 0.06% [.] <hyper::proto::h1::dispatch::Dispatcher<hyper::proto::h1::dispatch::Server<hyper_util::service::glue::TowerToHyperService<tower::util::map_request::MapRequest<axum::routing::Router, 
+ 33.06% 0.02% [.] <hyper_util::service::glue::TowerToHyperServiceFuture<tower::util::map_request::MapRequest<axum::routing::Router, axum::serve::handle_connection<axum::serve::listener::TapIo<tokio::n
+ 31.26% 0.12% [.] <axum::middleware::from_fn::FromFn<aigw_proxy::request_id::middleware, (), axum::routing::route::Route, (http::request::Request<axum_core::body::Body>,)> as tower_service::Service<ht
+ 28.93% 0.29% [.] <aigw_proxy::handlers::chat_completions as axum::handler::Handler<(axum_core::extract::private::ViaRequest, axum::extract::state::State<alloc::sync::Arc<aigw_proxy::ProxyState>>, axu
+ 27.06% 0.15% [.] aigw_proxy::handlers::chat::{closure#0} - -
+ 23.75% 0.25% [.] aigw_proxy::handlers::chat_inner::{closure#0} - -
+ 17.69% 0.16% [.] <futures_util::future::future::Map<futures_util::future::try_future::MapErr<hyper::client::conn::http1::upgrades::UpgradeableConnection<hyper_rustls::stream::MaybeHttpsStream<hyper_u
+ 16.62% 0.12% [.] <aigw_proxy::pipeline::Pipeline>::execute::<aigw_proxy::routing::exec::ChatOp>::{closure#0} - -
+ 16.13% 0.42% [.] aigw_proxy::routing::exec::execute_op::<aigw_proxy::routing::exec::ChatOp>::{closure#0} - -
+ 14.70% 0.01% [.] <hyper::proto::h1::dispatch::Dispatcher<hyper::proto::h1::dispatch::Server<hyper_util::service::glue::TowerToHyperService<tower::util::map_request::MapRequest<axum::routing::Router, 
+ 14.66% 0.12% [.] <hyper::proto::h1::io::Buffered<hyper_util::common::rewind::Rewind<hyper_util::rt::tokio::TokioIo<tokio::net::tcp::stream::TcpStream>>, hyper::proto::h1::encode::EncodedBuf<bytes::by
+ 14.44% 0.08% [.] aigw_proxy::routing::exec::attempt::{closure#0} - -
+ 12.61% 0.01% [.] <hyper::proto::h1::dispatch::Dispatcher<hyper::proto::h1::dispatch::Client<http_body_util::full::Full<bytes::bytes::Bytes>>, http_body_util::full::Full<bytes::bytes::Bytes>, hyper_ru
+ 12.56% 0.19% [.] <hyper::proto::h1::io::Buffered<hyper_rustls::stream::MaybeHttpsStream<hyper_util::rt::tokio::TokioIo<tokio::net::tcp::stream::TcpStream>>, hyper::proto::h1::encode::EncodedBuf<bytes
+ 8.32% 0.00% [.] <std::thread::lifecycle::spawn_unchecked<<sqlx_sqlite::connection::worker::ConnectionWorker>::establish::{closure#0}::{closure#0}, ()>::{closure#1} as core::ops::function::FnOnce<()>>
+ 7.47% 0.08% [.] <http_body_util::combinators::map_err::MapErr<axum_core::body::StreamBody<futures_util::stream::stream::map::Map<futures_util::stream::stream::filter::Filter<futures_util::stream::unf
+ 7.14% 0.11% [.] <aigw_providers::upstream::UpstreamEvents as futures_core::stream::Stream>::poll_next - -
+ 7.05% 0.08% [.] tokio::runtime::task::raw::poll::<<aigw_observe::writer::Writer>::run::{closure#0}, alloc::sync::Arc<tokio::runtime::scheduler::multi_thread::handle::Handle>> - -
+ 6.95% 0.18% [.] <aigw_providers::upstream::Upstream as aigw_proxy::provider::ChatProvider>::chat_stream::{closure#0} - -
+ 6.81% 0.07% [.] <aigw_observe::writer::Writer>::run::{closure#0} - -
+ 6.46% 0.00% [.] <aigw_observe::writer::Writer>::flush::{closure#0} - -
+ 6.40% 0.01% [.] std::sys::backtrace::__rust_begin_short_backtrace::<<sqlx_sqlite::connection::worker::ConnectionWorker>::establish::{closure#0}::{closure#0}, ()> - -
+ 6.23% 0.06% [.] <aigw_providers::openai::OpenAiSseDecoder as aigw_providers::StreamDecoder>::push - -
+ 5.50% 0.10% [.] <sqlx_sqlite::connection::execute::ExecuteIter as core::iter::traits::iterator::Iterator>::next - -
+ 5.37% 0.10% [.] <aigw_observe::writer::Writer>::write_store::{closure#0} - -
+ 5.37% 0.00% [.] sqlite3_step - -
+ 5.23% 0.76% [.] sqlite3VdbeExec - -
+ 4.53% 0.06% [.] <aigw_providers::upstream::Upstream>::send::{closure#0} - -
+ 4.00% 0.05% [.] <aigw_outbound::client::OutboundClient>::send::{closure#0} - -
+ 3.91% 0.73% [.] <aigw_core::wire::openai::stream::StreamDecoder>::decode - -
+ 3.56% 0.06% [.] <aigw_proxy::pipeline::Pipeline>::route::{closure#0} - -
+ 3.37% 0.06% [.] <aigw_proxy::observe::ObservedStream as futures_core::stream::Stream>::poll_next - -
+ 3.13% 0.06% [.] <aigw_core::wire::openai::stream::StreamEncoder>::encode - -
+ 2.93% 0.72% [.] <hyper_util::client::legacy::client::Client<hyper_rustls::connector::HttpsConnector<hyper_util::client::legacy::connect::http::HttpConnector<aigw_outbound::resolve::GuardedResolver>>,
+ 2.87% 0.17% [.] sqlite3BtreeInsert - -
+ 2.87% 0.06% [.] <hyper::proto::h1::conn::Conn<hyper_util::common::rewind::Rewind<hyper_util::rt::tokio::TokioIo<tokio::net::tcp::stream::TcpStream>>, bytes::bytes::Bytes, hyper::proto::h1::role::Serv
+ 2.80% 0.25% [.] <aigw_core::wire::openai::stream::StreamEncoder>::write - -
+ 2.78% 0.67% [.] <aigw_proxy::limits::Limiter>::admit::{closure#0} - -
+ 2.71% 0.02% [.] <hyper::proto::h1::io::Buffered<hyper_rustls::stream::MaybeHttpsStream<hyper_util::rt::tokio::TokioIo<tokio::net::tcp::stream::TcpStream>>, hyper::proto::h1::encode::EncodedBuf<bytes:
+ 2.52% 0.10% [.] <aigw_proxy::observe::Recorder>::finish - -
+ 2.46% 0.02% [.] <hyper::proto::h1::io::Buffered<hyper_util::common::rewind::Rewind<hyper_util::rt::tokio::TokioIo<tokio::net::tcp::stream::TcpStream>>, hyper::proto::h1::encode::EncodedBuf<bytes::byt
+ 2.01% 0.25% [.] <aigw_store::db::Q>::execute::<&mut aigw_store::db::Tx>::{closure#0} - -
+ 1.98% 0.09% [.] aigw_proxy::pipeline::apply_headers - -
+ 1.86% 0.00% [.] std::sys::backtrace::__rust_begin_short_backtrace::<<sqlx_sqlite::connection::worker::ConnectionWorker>::establish::{closure#0}::{closure#0}, ()> - -
+ 1.68% 0.05% [.] <aigw_providers::upstream::Upstream>::build - -
+ 1.66% 0.14% [.] aigw_store::db::bind_sqlite - -
+ 1.62% 0.11% [.] <aigw_providers::openai::OpenAiAdapter as aigw_providers::Provider>::build_request - -
+ 1.54% 0.01% [.] <aigw_core::wire::sse::SseParser>::push_into - -
+ 1.50% 0.00% [.] tokio::runtime::task::raw::poll::<tokio::runtime::blocking::task::BlockingTask<<aigw_observe::writer::Writer>::flush::{closure#0}::{closure#0}>, tokio::runtime::blocking::schedule::Bl

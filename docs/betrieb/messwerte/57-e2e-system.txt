@@ -1,0 +1,135 @@
+# 2026-11-13T22:14:09Z 8 vCPU,  AMD EPYC-Genoa Processor
+# Upstream: Kerne 0-1, Gateway (aigw serve, Allokator system): Kerne 2-3, Last: Kerne 4-7, RT=1, Last vorher: 18.20 16.55 17.54
+2026-11-13T22:14:10.000875Z  INFO aigw: Konfiguration geladen config=/tmp/tmp.8xUjIzDZ1f/aigw.yaml
+2026-11-13T22:14:10.006122Z  INFO aigw::runtime: Konfigurations-Snapshot geladen backend=Sqlite config_version=1 keys=1 model_groups=1 source="database" load_ms=4
+2026-11-13T22:14:10.006176Z  INFO aigw::observe: Beobachtung gestartet payload="off" request_log=true jsonl=false metrics=true otlp_traces=false otlp_logs=false otlp_endpoint= sampling_ratio=1.0
+2026-11-13T22:14:10.006363Z  INFO aigw::runtime: Limits und Budgets bereit counters=Local timezone="UTC"
+2026-11-13T22:14:10.006429Z  INFO aigw: ai-gw gestartet data=127.0.0.1:9200 control=127.0.0.1:9201 combined=false version="0.1.0" ui="fallback"
+2026-11-13T22:14:10.006584Z  INFO aigw_proxy::routing::snapshot: Routing-Tabelle aufgebaut config_version=1 model_groups=1 deployments=1
+2026-11-13T22:14:10.006688Z  INFO aigw_plugins::index: Plugin-Ketten aufgebaut config_version=1 bindings=0 prefixes=1 model_groups=0
+2026-11-13T22:14:10.006921Z  INFO aigw_cache: semantischer Cache: Warmstart aus der Datenbank entries=0
+2026-11-13T22:14:10.006940Z  INFO aigw_cache: Antwort-Cache bereit enabled=true memory_max_bytes=268435456 redis=false semantic_backend=Memory
+## Latenz (Zähler: local), 200 Verbindungen
+== Gateway (json, openai, 200 Verbindungen, Sättigung)
+40000 Anfragen, 200 Verbindungen, 14669 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50= 11832µs p90= 22007µs p99= 49232µs p99.9=  81160µs max=   89901µs
+gesamt   p50= 11832µs p90= 22007µs p99= 49233µs p99.9=  81160µs max=   89901µs
+== Gateway (json, anthropic, 200 Verbindungen, Sättigung)
+40000 Anfragen, 200 Verbindungen, 15127 req/s (Ziel None), stream=false, format=anthropic, Fehler={}
+ttfb     p50= 11816µs p90= 21465µs p99= 40962µs p99.9=  61383µs max=   67858µs
+gesamt   p50= 11817µs p90= 21465µs p99= 40962µs p99.9=  61384µs max=   67858µs
+== direkt (json, 200 Verbindungen, Sättigung)
+40000 Anfragen, 200 Verbindungen, 154867 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=  1215µs p90=  1540µs p99=  1617µs p99.9=   1790µs max=    2367µs
+gesamt   p50=  1216µs p90=  1540µs p99=  1618µs p99.9=   1791µs max=    2367µs
+== Gateway (stream, openai, 200 Verbindungen, Sättigung)
+40000 Anfragen, 200 Verbindungen, 12225 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50= 14810µs p90= 26409µs p99= 41014µs p99.9=  67932µs max=   86232µs
+gesamt   p50= 14811µs p90= 26410µs p99= 41015µs p99.9=  67934µs max=   86233µs
+== Gateway (stream, anthropic, 200 Verbindungen, Sättigung)
+40000 Anfragen, 200 Verbindungen, 11899 req/s (Ziel None), stream=true, format=anthropic, Fehler={}
+ttfb     p50= 15348µs p90= 25638µs p99= 45111µs p99.9=  82535µs max=   98937µs
+gesamt   p50= 15349µs p90= 25639µs p99= 45112µs p99.9=  82536µs max=   98938µs
+== direkt (stream, 200 Verbindungen, Sättigung)
+40000 Anfragen, 200 Verbindungen, 153044 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=  1336µs p90=  1566µs p99=  1771µs p99.9=   2227µs max=    2546µs
+gesamt   p50=  1337µs p90=  1567µs p99=  1772µs p99.9=   2227µs max=    2547µs
+== direkt (json, 200 Verbindungen, 2000 req/s)
+20000 Anfragen, 200 Verbindungen, 2000 req/s (Ziel Some(2000.0)), stream=false, format=openai, Fehler={}
+ttfb     p50=   100µs p90=   135µs p99=   170µs p99.9=    299µs max=    1513µs
+gesamt   p50=   100µs p90=   135µs p99=   171µs p99.9=    299µs max=    1513µs
+== Gateway (json, openai, 200 Verbindungen, 2000 req/s)
+20000 Anfragen, 200 Verbindungen, 2000 req/s (Ziel Some(2000.0)), stream=false, format=openai, Fehler={}
+ttfb     p50=   230µs p90=   326µs p99=   417µs p99.9=   1023µs max=    2265µs
+gesamt   p50=   230µs p90=   327µs p99=   417µs p99.9=   1023µs max=    2265µs
+== Gateway (json, anthropic, 200 Verbindungen, 2000 req/s)
+20000 Anfragen, 200 Verbindungen, 2000 req/s (Ziel Some(2000.0)), stream=false, format=anthropic, Fehler={}
+ttfb     p50=   294µs p90=   375µs p99=   459µs p99.9=    864µs max=    3424µs
+gesamt   p50=   294µs p90=   376µs p99=   459µs p99.9=    865µs max=    3425µs
+== direkt (stream, 200 Verbindungen, 2000 req/s)
+20000 Anfragen, 200 Verbindungen, 2000 req/s (Ziel Some(2000.0)), stream=true, format=openai, Fehler={}
+ttfb     p50=   102µs p90=   143µs p99=   184µs p99.9=    413µs max=    1982µs
+gesamt   p50=   102µs p90=   143µs p99=   184µs p99.9=    413µs max=    1982µs
+== Gateway (stream, openai, 200 Verbindungen, 2000 req/s)
+20000 Anfragen, 200 Verbindungen, 2000 req/s (Ziel Some(2000.0)), stream=true, format=openai, Fehler={}
+ttfb     p50=   216µs p90=   338µs p99=   480µs p99.9=    858µs max=    2200µs
+gesamt   p50=   217µs p90=   340µs p99=   482µs p99.9=    860µs max=    2202µs
+== Gateway (stream, anthropic, 200 Verbindungen, 2000 req/s)
+20000 Anfragen, 200 Verbindungen, 2000 req/s (Ziel Some(2000.0)), stream=true, format=anthropic, Fehler={}
+ttfb     p50=   283µs p90=   355µs p99=   433µs p99.9=    561µs max=    1283µs
+gesamt   p50=   285µs p90=   357µs p99=   434µs p99.9=    563µs max=    1284µs
+== direkt (json, 200 Verbindungen, 10000 req/s)
+20000 Anfragen, 200 Verbindungen, 9994 req/s (Ziel Some(10000.0)), stream=false, format=openai, Fehler={}
+ttfb     p50=   121µs p90=   181µs p99=   231µs p99.9=    276µs max=     367µs
+gesamt   p50=   122µs p90=   182µs p99=   232µs p99.9=    280µs max=     368µs
+== Gateway (json, openai, 200 Verbindungen, 10000 req/s)
+20000 Anfragen, 200 Verbindungen, 9993 req/s (Ziel Some(10000.0)), stream=false, format=openai, Fehler={}
+ttfb     p50=   626µs p90=  1204µs p99=  3397µs p99.9=   4688µs max=    6090µs
+gesamt   p50=   627µs p90=  1205µs p99=  3398µs p99.9=   4692µs max=    6090µs
+== Gateway (json, anthropic, 200 Verbindungen, 10000 req/s)
+20000 Anfragen, 200 Verbindungen, 9992 req/s (Ziel Some(10000.0)), stream=false, format=anthropic, Fehler={}
+ttfb     p50=   536µs p90=  1018µs p99=  2486µs p99.9=   4147µs max=    4758µs
+gesamt   p50=   537µs p90=  1018µs p99=  2486µs p99.9=   4148µs max=    4758µs
+== direkt (stream, 200 Verbindungen, 10000 req/s)
+20000 Anfragen, 200 Verbindungen, 9992 req/s (Ziel Some(10000.0)), stream=true, format=openai, Fehler={}
+ttfb     p50=   100µs p90=   148µs p99=   204µs p99.9=    250µs max=     297µs
+gesamt   p50=   100µs p90=   148µs p99=   205µs p99.9=    251µs max=     297µs
+== Gateway (stream, openai, 200 Verbindungen, 10000 req/s)
+20000 Anfragen, 200 Verbindungen, 9992 req/s (Ziel Some(10000.0)), stream=true, format=openai, Fehler={}
+ttfb     p50=   924µs p90=  3515µs p99=  7682µs p99.9=  11500µs max=   15296µs
+gesamt   p50=   925µs p90=  3516µs p99=  7683µs p99.9=  11501µs max=   15297µs
+== Gateway (stream, anthropic, 200 Verbindungen, 10000 req/s)
+20000 Anfragen, 200 Verbindungen, 9992 req/s (Ziel Some(10000.0)), stream=true, format=anthropic, Fehler={}
+ttfb     p50=   932µs p90=  3603µs p99=  7686µs p99.9=  10807µs max=   14026µs
+gesamt   p50=   933µs p90=  3604µs p99=  7687µs p99.9=  10808µs max=   14027µs
+== direkt (json, 1 Verbindung)
+5000 Anfragen, 1 Verbindungen, 22025 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=    42µs p90=    50µs p99=    66µs p99.9=    168µs max=     370µs
+gesamt   p50=    43µs p90=    50µs p99=    66µs p99.9=    168µs max=     370µs
+== Gateway (json, openai, 1 Verbindung)
+5000 Anfragen, 1 Verbindungen, 6302 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=   153µs p90=   208µs p99=   301µs p99.9=    442µs max=    1514µs
+gesamt   p50=   153µs p90=   208µs p99=   301µs p99.9=    442µs max=    1514µs
+== Gateway (json, anthropic, 1 Verbindung)
+5000 Anfragen, 1 Verbindungen, 8355 req/s (Ziel None), stream=false, format=anthropic, Fehler={}
+ttfb     p50=   111µs p90=   149µs p99=   220µs p99.9=    270µs max=     377µs
+gesamt   p50=   111µs p90=   150µs p99=   220µs p99.9=    270µs max=     377µs
+== direkt (stream, 1 Verbindung)
+5000 Anfragen, 1 Verbindungen, 21484 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=    45µs p90=    56µs p99=    76µs p99.9=    109µs max=     228µs
+gesamt   p50=    45µs p90=    56µs p99=    76µs p99.9=    109µs max=     229µs
+== Gateway (stream, openai, 1 Verbindung)
+5000 Anfragen, 1 Verbindungen, 7391 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=   124µs p90=   173µs p99=   268µs p99.9=    364µs max=     787µs
+gesamt   p50=   125µs p90=   174µs p99=   270µs p99.9=    365µs max=     789µs
+== Gateway (stream, anthropic, 1 Verbindung)
+5000 Anfragen, 1 Verbindungen, 8127 req/s (Ziel None), stream=true, format=anthropic, Fehler={}
+ttfb     p50=   114µs p90=   151µs p99=   226µs p99.9=    323µs max=     511µs
+gesamt   p50=   114µs p90=   152µs p99=   226µs p99.9=    324µs max=     511µs
+== Speicher nach dem Latenzteil: RSS=84.5 MiB, Höchststand=84.9 MiB
+2026-11-13T22:15:53.872118Z  INFO aigw: Beenden angefordert
+2026-11-13T22:15:53.881032Z  INFO aigw: ai-gw beendet
+== Beispiel-Gateway (json, 200 Verbindungen, Sättigung)
+40000 Anfragen, 200 Verbindungen, 29997 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=  6378µs p90= 10366µs p99= 12710µs p99.9=  13704µs max=   15121µs
+gesamt   p50=  6378µs p90= 10366µs p99= 12710µs p99.9=  13704µs max=   15144µs
+== Beispiel-Gateway (json, 200 Verbindungen, 2000 req/s)
+20000 Anfragen, 200 Verbindungen, 2000 req/s (Ziel Some(2000.0)), stream=false, format=openai, Fehler={}
+ttfb     p50=   175µs p90=   254µs p99=   353µs p99.9=    702µs max=    2185µs
+gesamt   p50=   175µs p90=   255µs p99=   354µs p99.9=    703µs max=    2186µs
+== Beispiel-Gateway (json, 1 Verbindung)
+5000 Anfragen, 1 Verbindungen, 9592 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=    97µs p90=   131µs p99=   173µs p99.9=    234µs max=    2512µs
+gesamt   p50=    97µs p90=   131µs p99=   173µs p99.9=    235µs max=    2512µs
+== Beispiel-Gateway (stream, 200 Verbindungen, Sättigung)
+40000 Anfragen, 200 Verbindungen, 36858 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=  5306µs p90=  7987µs p99=  9819µs p99.9=  10999µs max=   11755µs
+gesamt   p50=  5307µs p90=  7988µs p99=  9820µs p99.9=  11001µs max=   11756µs
+== Beispiel-Gateway (stream, 200 Verbindungen, 2000 req/s)
+20000 Anfragen, 200 Verbindungen, 2000 req/s (Ziel Some(2000.0)), stream=true, format=openai, Fehler={}
+ttfb     p50=   187µs p90=   270µs p99=   361µs p99.9=    681µs max=    2357µs
+gesamt   p50=   188µs p90=   271µs p99=   363µs p99.9=    684µs max=    2362µs
+== Beispiel-Gateway (stream, 1 Verbindung)
+5000 Anfragen, 1 Verbindungen, 8575 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=   108µs p90=   147µs p99=   204µs p99.9=    278µs max=     426µs
+gesamt   p50=   109µs p90=   148µs p99=   205µs p99.9=    279µs max=     427µs

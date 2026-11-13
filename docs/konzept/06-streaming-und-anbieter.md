@@ -543,8 +543,11 @@ Bewertung: **Q1 p99 < 1 ms ist in allen Szenarien unterhalb der Sättigung erfü
 bei 10 000 req/s auf 2 Kernen (≈ 30 % Auslastung) nicht (≈ 320 µs). Ein großer Teil des
 Aufschlags ist der zusätzliche Netzwerk-Hop (zweimal Aufwecken über Loopback in einer VM); der
 reine CPU-Anteil liegt bei ≈ 60 µs je Anfrage (2 Kerne / 33 000 req/s, Server- *und* Client-Seite
-HTTP plus Übersetzung). Optimierungen (Profiling, Allokationen im Encoder, `Bytes` statt
-`String` im SSE-Parser) folgen mit AIGW-57.
+HTTP plus Übersetzung).
+
+**AIGW-57:** End-to-End-Messung mit dem echten `aigw`-Binary (Key-Prüfung, Limits/Budgets,
+Request-Log), Profil, Optimierungen (u. a. mimalloc), Lasttests und Kaltstart:
+[../betrieb/leistung.md](../betrieb/leistung.md).
 
 ## 10. Offene Punkte
 

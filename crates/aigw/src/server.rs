@@ -36,10 +36,29 @@ pub(crate) struct Listeners {
     pub(crate) control: Option<TcpListener>,
 }
 
+/// Länge der Accept-Warteschlange der Datenebene (vom Kernel auf `net.core.somaxconn`
+/// begrenzt, Linux-Standard 4096). Tokios `TcpListener::bind` nimmt fest 1024; bei Lastspitzen
+/// mit tausenden neuen Verbindungen liefen SYNs über und Clients warteten auf
+/// SYN-Wiederholungen (1 s, 3 s, 7 s, … – AIGW-57, docs/betrieb/leistung.md).
+const DATA_BACKLOG: u32 = 4096;
+
+/// Bindet den Listener der Datenebene (`SO_REUSEADDR` wie bei `TcpListener::bind`, größere
+/// Accept-Warteschlange).
+fn bind_data(addr: SocketAddr) -> io::Result<TcpListener> {
+    let socket = if addr.is_ipv4() {
+        tokio::net::TcpSocket::new_v4()?
+    } else {
+        tokio::net::TcpSocket::new_v6()?
+    };
+    socket.set_reuseaddr(true)?;
+    socket.bind(addr)?;
+    socket.listen(DATA_BACKLOG)
+}
+
 impl Listeners {
     /// Bindet die konfigurierten Adressen.
     pub(crate) async fn bind(cfg: &ServerConfig) -> io::Result<Self> {
-        let data = TcpListener::bind(cfg.data.listen).await?;
+        let data = bind_data(cfg.data.listen)?;
         let control = if cfg.is_combined() {
             None
         } else {

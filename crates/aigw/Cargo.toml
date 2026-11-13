@@ -30,12 +30,19 @@ aigw-webhook.workspace = true
 axum.workspace = true
 base64.workspace = true
 clap.workspace = true
+mimalloc = { workspace = true, optional = true }
 rustls.workspace = true
 serde_json.workspace = true
 time.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[features]
+# mimalloc als globaler Allokator (AIGW-57, docs/betrieb/leistung.md); ohne dieses Feature
+# (`--no-default-features`) gilt der System-Allokator.
+default = ["mimalloc"]
+mimalloc = ["dep:mimalloc"]
 
 [dev-dependencies]
 bytes.workspace = true

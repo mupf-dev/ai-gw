@@ -102,40 +102,48 @@ impl RateHeaders {
 
     /// Setzt die Header passend zum Eingangsformat.
     pub(crate) fn apply(&self, format: ErrorFormat, h: &mut HeaderMap, now: SystemTime) {
+        // Header-Namen als statische Konstanten, Zahlen ohne Zwischen-String (Hot Path,
+        // AIGW-57).
         match format {
             ErrorFormat::OpenAi => {
                 let mut tokens = None;
                 for q in [self.tokens, self.input, self.output].into_iter().flatten() {
                     tighter(&mut tokens, q);
                 }
-                for (name, q) in [("requests", self.requests), ("tokens", tokens)] {
+                for (names, q) in [
+                    (&OPENAI_NAMES[0], self.requests),
+                    (&OPENAI_NAMES[1], tokens),
+                ] {
                     let Some(q) = q else { continue };
-                    set(h, &format!("x-ratelimit-limit-{name}"), q.limit.to_string());
-                    set(
-                        h,
-                        &format!("x-ratelimit-remaining-{name}"),
-                        q.remaining.to_string(),
+                    h.insert(
+                        HeaderName::from_static(names[0]),
+                        HeaderValue::from(q.limit),
                     );
-                    set(
-                        h,
-                        &format!("x-ratelimit-reset-{name}"),
-                        go_duration(q.reset),
+                    h.insert(
+                        HeaderName::from_static(names[1]),
+                        HeaderValue::from(q.remaining),
                     );
+                    set(h, names[2], go_duration(q.reset));
                 }
             }
             ErrorFormat::Anthropic => {
-                for (name, q) in [
-                    ("requests", self.requests),
-                    ("tokens", self.tokens),
-                    ("input-tokens", self.input),
-                    ("output-tokens", self.output),
+                for (names, q) in [
+                    (&ANTHROPIC_NAMES[0], self.requests),
+                    (&ANTHROPIC_NAMES[1], self.tokens),
+                    (&ANTHROPIC_NAMES[2], self.input),
+                    (&ANTHROPIC_NAMES[3], self.output),
                 ] {
                     let Some(q) = q else { continue };
-                    let p = format!("anthropic-ratelimit-{name}");
-                    set(h, &format!("{p}-limit"), q.limit.to_string());
-                    set(h, &format!("{p}-remaining"), q.remaining.to_string());
+                    h.insert(
+                        HeaderName::from_static(names[0]),
+                        HeaderValue::from(q.limit),
+                    );
+                    h.insert(
+                        HeaderName::from_static(names[1]),
+                        HeaderValue::from(q.remaining),
+                    );
                     if let Some(at) = rfc3339(now, q.reset) {
-                        set(h, &format!("{p}-reset"), at);
+                        set(h, names[2], at);
                     }
                 }
             }
@@ -143,12 +151,47 @@ impl RateHeaders {
     }
 }
 
-fn set(h: &mut HeaderMap, name: &str, value: String) {
-    if let (Ok(n), Ok(v)) = (
-        HeaderName::from_bytes(name.as_bytes()),
-        HeaderValue::from_str(&value),
-    ) {
-        h.insert(n, v);
+/// OpenAI-Header je Größe: Limit, Rest, Rücksetzung (Anfragen, Tokens).
+const OPENAI_NAMES: [[&str; 3]; 2] = [
+    [
+        "x-ratelimit-limit-requests",
+        "x-ratelimit-remaining-requests",
+        "x-ratelimit-reset-requests",
+    ],
+    [
+        "x-ratelimit-limit-tokens",
+        "x-ratelimit-remaining-tokens",
+        "x-ratelimit-reset-tokens",
+    ],
+];
+
+/// Anthropic-Header je Größe: Limit, Rest, Rücksetzung (Anfragen, Tokens, Eingabe, Ausgabe).
+const ANTHROPIC_NAMES: [[&str; 3]; 4] = [
+    [
+        "anthropic-ratelimit-requests-limit",
+        "anthropic-ratelimit-requests-remaining",
+        "anthropic-ratelimit-requests-reset",
+    ],
+    [
+        "anthropic-ratelimit-tokens-limit",
+        "anthropic-ratelimit-tokens-remaining",
+        "anthropic-ratelimit-tokens-reset",
+    ],
+    [
+        "anthropic-ratelimit-input-tokens-limit",
+        "anthropic-ratelimit-input-tokens-remaining",
+        "anthropic-ratelimit-input-tokens-reset",
+    ],
+    [
+        "anthropic-ratelimit-output-tokens-limit",
+        "anthropic-ratelimit-output-tokens-remaining",
+        "anthropic-ratelimit-output-tokens-reset",
+    ],
+];
+
+fn set(h: &mut HeaderMap, name: &'static str, value: String) {
+    if let Ok(v) = HeaderValue::try_from(value) {
+        h.insert(HeaderName::from_static(name), v);
     }
 }
 

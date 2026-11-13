@@ -1,0 +1,87 @@
+# 2026-11-13T22:39:27Z 8 vCPU,  AMD EPYC-Genoa Processor
+# Upstream: Kerne 0-1, Gateway (aigw serve, Allokator mimalloc): Kerne 2-3, Last: Kerne 4-7, RT=1, Last vorher: 6.88 9.93 12.33
+2026-11-13T22:39:28.553948Z  INFO aigw: Konfiguration geladen config=/tmp/tmp.LF3GITcKkB/aigw.yaml
+2026-11-13T22:39:28.559478Z  INFO aigw::runtime: Konfigurations-Snapshot geladen backend=Sqlite config_version=1 keys=1 model_groups=1 source="database" load_ms=5
+2026-11-13T22:39:28.559663Z  INFO aigw::observe: Beobachtung gestartet payload="off" request_log=true jsonl=false metrics=true otlp_traces=false otlp_logs=false otlp_endpoint= sampling_ratio=1.0
+2026-11-13T22:39:28.559857Z  INFO aigw::runtime: Limits und Budgets bereit counters=Local timezone="UTC"
+2026-11-13T22:39:28.559924Z  INFO aigw: ai-gw gestartet data=127.0.0.1:9200 control=127.0.0.1:9201 combined=false version="0.1.0" ui="ui"
+2026-11-13T22:39:28.560067Z  INFO aigw_proxy::routing::snapshot: Routing-Tabelle aufgebaut config_version=1 model_groups=1 deployments=1
+2026-11-13T22:39:28.560132Z  INFO aigw_plugins::index: Plugin-Ketten aufgebaut config_version=1 bindings=0 prefixes=1 model_groups=0
+2026-11-13T22:39:28.560345Z  INFO aigw_cache: semantischer Cache: Warmstart aus der Datenbank entries=0
+2026-11-13T22:39:28.560362Z  INFO aigw_cache: Antwort-Cache bereit enabled=true memory_max_bytes=268435456 redis=false semantic_backend=Memory
+## Hohe Parallelität, lange Streams (200 Chunks × 5 ms)
+== direkt: 1000 Verbindungen, 10000 Streams (Grenze des Fake-Upstreams)
+10000 Anfragen, 1000 Verbindungen, 722 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=   760µs p90=  6142µs p99= 37272µs p99.9=  40888µs max=   46215µs
+gesamt   p50=1368493µs p90=1396491µs p99=1432770µs p99.9=1457761µs max= 1465758µs
+== Speicher vor dem Test: RSS=53.7 MiB, Höchststand=53.7 MiB
+== Runde 1: 1000 Verbindungen, 10000 Streams
+2026-11-13T22:39:49.689943Z  WARN sqlx::query: slow statement: execution time exceeded alert threshold summary="INSERT INTO budget_usage (level, …" db.statement="\n\nINSERT INTO budget_usage (level, target_id, period, period_start, amount, updated_at) VALUES ($1, $2, $3, $4, $5, $6), ($7, $8, $9, $1 …
+2026-11-13T22:39:52.791370Z  WARN sqlx::pool::acquire: acquired connection, but time to acquire exceeded slow threshold acquired_after_secs=2.035301847 slow_acquire_threshold_secs=2.0
+2026-11-13T22:39:56.019469Z  WARN sqlx::query: slow statement: execution time exceeded alert threshold summary="INSERT INTO request_log (id, …" db.statement="\n\nINSERT INTO request_log (id, at, endpoint, api_key_id, team_id, organization_id, model_requested, model_group, deployment_id, provider, pr …
+2026-11-13T22:39:58.486001Z  WARN sqlx::query: slow statement: execution time exceeded alert threshold summary="INSERT INTO budget_usage (level, …" db.statement="\n\nINSERT INTO budget_usage (level, target_id, period, period_start, amount, updated_at) VALUES ($1, $2, $3, $4, $5, $6), ($7, $8, $9, $1 …
+10000 Anfragen, 1000 Verbindungen, 479 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50= 22769µs p90= 87031µs p99=688760µs p99.9= 747814µs max=  801827µs
+gesamt   p50=1940982µs p90=2334463µs p99=2654212µs p99.9=2834507µs max= 2997437µs
+== Speicher nach Runde 1: RSS=186.5 MiB, Höchststand=203.4 MiB; Gateway-CPU: 39.9 s
+== Runde 2: 1000 Verbindungen, 10000 Streams
+2026-11-13T22:40:07.388527Z  WARN sqlx::pool::acquire: acquired connection, but time to acquire exceeded slow threshold acquired_after_secs=3.094103762 slow_acquire_threshold_secs=2.0
+2026-11-13T22:40:10.433576Z  WARN sqlx::pool::acquire: acquired connection, but time to acquire exceeded slow threshold acquired_after_secs=3.045134321 slow_acquire_threshold_secs=2.0
+2026-11-13T22:40:22.009610Z  WARN sqlx::query: slow statement: execution time exceeded alert threshold summary="INSERT INTO budget_usage (level, …" db.statement="\n\nINSERT INTO budget_usage (level, target_id, period, period_start, amount, updated_at) VALUES ($1, $2, $3, $4, $5, $6), ($7, $8, $9, $1 …
+10000 Anfragen, 1000 Verbindungen, 431 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50= 21471µs p90= 73891µs p99=5370280µs p99.9=5432182µs max= 5435322µs
+gesamt   p50=1778298µs p90=2262669µs p99=6759388µs p99.9=7298181µs max= 7695525µs
+== Speicher nach Runde 2: RSS=177.7 MiB, Höchststand=205.4 MiB; Gateway-CPU: 38.8 s
+== Runde 3: 1000 Verbindungen, 10000 Streams
+2026-11-13T22:40:30.271402Z  WARN sqlx::pool::acquire: acquired connection, but time to acquire exceeded slow threshold acquired_after_secs=3.260878557 slow_acquire_threshold_secs=2.0
+2026-11-13T22:40:34.994007Z  WARN sqlx::query: slow statement: execution time exceeded alert threshold summary="INSERT INTO observe_batch (batch_id, …" db.statement="\n\nINSERT INTO observe_batch (batch_id, applied_at) VALUES ($1, $2) ON CONFLICT (batch_id) DO NOTHING\n" rows_affected=1 rows_returne …
+2026-11-13T22:40:39.969972Z  WARN sqlx::query: slow statement: execution time exceeded alert threshold summary="INSERT INTO budget_usage (level, …" db.statement="\n\nINSERT INTO budget_usage (level, target_id, period, period_start, amount, updated_at) VALUES ($1, $2, $3, $4, $5, $6), ($7, $8, $9, $1 …
+2026-11-13T22:40:45.785835Z  WARN sqlx::query: slow statement: execution time exceeded alert threshold summary="INSERT INTO observe_batch (batch_id, …" db.statement="\n\nINSERT INTO observe_batch (batch_id, applied_at) VALUES ($1, $2) ON CONFLICT (batch_id) DO NOTHING\n" rows_affected=1 rows_returne …
+2026-11-13T22:40:45.892652Z  WARN sqlx::query: slow statement: execution time exceeded alert threshold summary="INSERT INTO budget_usage (level, …" db.statement="\n\nINSERT INTO budget_usage (level, target_id, period, period_start, amount, updated_at) VALUES ($1, $2, $3, $4, $5, $6), ($7, $8, $9, $1 …
+10000 Anfragen, 1000 Verbindungen, 444 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50= 22528µs p90= 77258µs p99=3500246µs p99.9=3579112µs max= 3582094µs
+gesamt   p50=1850400µs p90=2270533µs p99=5335939µs p99.9=5856566µs max= 6253165µs
+== Speicher nach Runde 3: RSS=182.1 MiB, Höchststand=205.4 MiB; Gateway-CPU: 39.7 s
+== 4000 Verbindungen, 8000 Streams
+2026-11-13T22:40:52.758205Z  WARN sqlx::pool::acquire: acquired connection, but time to acquire exceeded slow threshold acquired_after_secs=2.85366509 slow_acquire_threshold_secs=2.0
+2026-11-13T22:40:54.877596Z  WARN sqlx::query: slow statement: execution time exceeded alert threshold summary="INSERT INTO budget_usage (level, …" db.statement="\n\nINSERT INTO budget_usage (level, target_id, period, period_start, amount, updated_at) VALUES ($1, $2, $3, $4, $5, $6), ($7, $8, $9, $1 …
+2026-11-13T22:41:04.038830Z  WARN sqlx::query: slow statement: execution time exceeded alert threshold summary="INSERT INTO budget_usage (level, …" db.statement="\n\nINSERT INTO budget_usage (level, target_id, period, period_start, amount, updated_at) VALUES ($1, $2, $3, $4, $5, $6), ($7, $8, $9, $1 …
+8000 Anfragen, 4000 Verbindungen, 455 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=295485µs p90=683880µs p99=997203µs p99.9=1185675µs max= 1212011µs
+gesamt   p50=8221540µs p90=10722935µs p99=12846148µs p99.9=14273772µs max=15486295µs
+== Speicher danach: RSS=531.6 MiB, Höchststand=531.6 MiB; Gateway-CPU: 35.2 s
+== 1000 Verbindungen, JSON-Sättigung, 200000 Anfragen (kurze Antworten)
+2026-11-13T22:41:12.499134Z  WARN sqlx::query: slow statement: execution time exceeded alert threshold summary="INSERT INTO budget_usage (level, …" db.statement="\n\nINSERT INTO budget_usage (level, target_id, period, period_start, amount, updated_at) VALUES ($1, $2, $3, $4, $5, $6), ($7, $8, $9, $1 …
+2026-11-13T22:41:16.228864Z  WARN sqlx::query: slow statement: execution time exceeded alert threshold summary="INSERT INTO budget_usage (level, …" db.statement="\n\nINSERT INTO budget_usage (level, target_id, period, period_start, amount, updated_at) VALUES ($1, $2, $3, $4, $5, $6), ($7, $8, $9, $1 …
+200000 Anfragen, 1000 Verbindungen, 22520 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50= 14784µs p90= 90699µs p99=165904µs p99.9= 304705µs max=  457363µs
+gesamt   p50= 14785µs p90= 90700µs p99=165904µs p99.9= 304706µs max=  457364µs
+== Speicher danach: RSS=198.4 MiB, Höchststand=536.3 MiB
+== Speicher nach 2 s Leerlauf: RSS=176.6 MiB, Höchststand=536.3 MiB
+2026-11-13T22:41:18.395247Z  INFO aigw: Beenden angefordert
+2026-11-13T22:41:18.405338Z  INFO aigw: ai-gw beendet
+
+# Zähler-Backend redis: Lauf 2026-11-13T22:28:10Z
+## Zähler-Backend redis (redis://127.0.0.1:16379/0)
+== Gateway (json, openai, 200 Verbindungen, Sättigung, redis)
+40000 Anfragen, 200 Verbindungen, 13326 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50= 14179µs p90= 18188µs p99= 37701µs p99.9=  48403µs max=   52460µs
+gesamt   p50= 14179µs p90= 18188µs p99= 37702µs p99.9=  48403µs max=   52461µs
+== Gateway (json, openai, 200 Verbindungen, 2000 req/s, redis)
+20000 Anfragen, 200 Verbindungen, 2000 req/s (Ziel Some(2000.0)), stream=false, format=openai, Fehler={}
+ttfb     p50=   631µs p90=  1267µs p99=  2338µs p99.9=   4278µs max=    6803µs
+gesamt   p50=   632µs p90=  1268µs p99=  2339µs p99.9=   4278µs max=    6803µs
+== Gateway (stream, openai, 200 Verbindungen, Sättigung, redis)
+40000 Anfragen, 200 Verbindungen, 13222 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50= 14717µs p90= 17269µs p99= 22019µs p99.9=  24149µs max=   26360µs
+gesamt   p50= 14718µs p90= 17270µs p99= 22020µs p99.9=  24150µs max=   26361µs
+== Gateway (stream, openai, 200 Verbindungen, 2000 req/s, redis)
+20000 Anfragen, 200 Verbindungen, 2000 req/s (Ziel Some(2000.0)), stream=true, format=openai, Fehler={}
+ttfb     p50=   706µs p90=  1324µs p99=  2440µs p99.9=   3864µs max=    6189µs
+gesamt   p50=   708µs p90=  1327µs p99=  2443µs p99.9=   3865µs max=    6192µs
+== Gateway (json, openai, 1 Verbindung, redis)
+5000 Anfragen, 1 Verbindungen, 1585 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=   400µs p90=  1088µs p99=  4056µs p99.9=   5141µs max=    5685µs
+gesamt   p50=   401µs p90=  1088µs p99=  4056µs p99.9=   5142µs max=    5685µs
+2026-11-13T22:30:38.563018Z  INFO aigw: Beenden angefordert
+2026-11-13T22:30:38.575007Z  INFO aigw: ai-gw beendet

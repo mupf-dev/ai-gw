@@ -67,6 +67,8 @@ impl Runtime {
             .cache_file
             .as_ref()
             .map(|p| Arc::new(SnapshotCache::new(p.clone(), Arc::clone(&keyring))));
+        // Dauer bis zum geladenen Startsnapshot (Kaltstart-Messung, AIGW-57).
+        let load_started = std::time::Instant::now();
         let (store, reloader) = match connect_and_load(config, &keyring, opts.clone()).await {
             Ok(v) => v,
             Err(e) if e.is_unavailable() && cache.is_some() => {
@@ -87,6 +89,7 @@ impl Runtime {
             keys = snap.keys.len(),
             model_groups = snap.model_groups.len(),
             source = snapshot.source().as_str(),
+            load_ms = u64::try_from(load_started.elapsed().as_millis()).unwrap_or(u64::MAX),
             "Konfigurations-Snapshot geladen"
         );
         let observe = crate::observe::start(config, &store, traces)?;

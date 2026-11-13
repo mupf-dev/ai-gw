@@ -9,6 +9,12 @@
 //! - `aigw openapi` gibt die OpenAPI-Spezifikation der Admin-API aus (für `ui/` → TS-Typen).
 //! - `aigw config export|diff|apply|validate` – GitOps (siehe [`cli_config`]).
 
+/// Globaler Allokator (AIGW-57): mimalloc statt glibc-malloc – weniger CPU je Anfrage und
+/// keine Arena-Sperren unter Last (Messung: docs/betrieb/leistung.md).
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod cli_audit;
 mod cli_config;
 mod keygen;
