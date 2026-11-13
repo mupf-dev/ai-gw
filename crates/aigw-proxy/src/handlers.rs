@@ -19,10 +19,11 @@ use tracing::Instrument as _;
 use crate::ProxyState;
 use crate::auth::extract_api_key;
 use crate::error::ErrorFormat;
-use crate::limits::{RateHeaders, retry_after_secs};
+use crate::limits::RateHeaders;
 use crate::observe::{ObservedStream, Recorder};
+use crate::pipeline::Pipeline;
 use crate::plugins::{PluginPhase, PluginRun, Pre, response_stream};
-use crate::provider::EventStream;
+use crate::provider::{Capability, EventStream};
 use crate::request_id::{RequestId, RequestStart};
 use crate::routing::ResponseModel;
 use crate::routing::exec::{self, Outcome};
@@ -271,6 +272,8 @@ pub(crate) async fn apply_response_model(
     }
 }
 
+/// Chat/Messages über die gemeinsame [`Pipeline`] (AIGW-78): Fehler und Rate-Limit-Header im
+/// Eingangsformat.
 async fn chat(
     st: &ProxyState,
     rid: &RequestId,
@@ -279,70 +282,34 @@ async fn chat(
     body: Result<Bytes, BytesRejection>,
     format: ErrorFormat,
 ) -> Response {
-    let mut rec = Recorder::new(st.observer.clone(), rid.0.clone(), started, ingress(format));
-    let mut info = RouteInfo::default();
-    let span = crate::trace::request_span(&rid.0, ingress(format), headers);
-    rec.set_span(span.clone());
-    rec.set_client_request_id(headers);
-    let mut res = match chat_inner(st, rid, headers, body, format, &mut rec, &mut info)
+    let mut p = Pipeline::new(st, rid, started, ingress(format), headers, "chat")
+        .with_error_format(format);
+    let span = p.span.clone();
+    match chat_inner(&mut p, headers, body, format)
         .instrument(span)
         .await
     {
-        Ok(Reply::Json(out)) => {
-            let out = Bytes::from(out);
-            if rec.captures() {
-                rec.set_response_payload(out.clone());
-            }
-            rec.finish(false);
-            json_response(StatusCode::OK, out)
-        }
+        Ok(Reply::Json(out)) => p.reply("application/json", out),
         Ok(Reply::Stream(events, include_usage)) => {
-            let events: EventStream = Box::pin(ObservedStream::new(events, rec));
-            sse_response(format, events, include_usage, !info.hide_reasoning)
+            let reasoning = !p.info().hide_reasoning;
+            p.stream(|rec| {
+                let events: EventStream = Box::pin(ObservedStream::new(events, rec));
+                sse_response(format, events, include_usage, reasoning)
+            })
         }
-        Err(e) => {
-            tracing::debug!(request_id = %rid.0, error = %e, "Anfrage abgelehnt");
-            let mut res = format.response(&e.error, Some(&rid.0));
-            if let Some(after) = e.retry_after {
-                let secs = retry_after_secs(after);
-                if let Ok(v) = HeaderValue::from_str(&secs.to_string()) {
-                    res.headers_mut().insert(header::RETRY_AFTER, v);
-                }
-            }
-            rec.fail(res.status().as_u16(), &e);
-            rec.finish(false);
-            res
-        }
-    };
-    if st.config.routing_headers {
-        info.apply(&mut res);
+        Err(e) => p.fail(e),
     }
-    if let Some(h) = &info.ratelimit {
-        h.apply(format, res.headers_mut(), std::time::SystemTime::now());
-    }
-    info.apply_plugins(&mut res);
-    res
 }
 
 async fn chat_inner(
-    st: &ProxyState,
-    rid: &RequestId,
+    p: &mut Pipeline<'_>,
     headers: &HeaderMap,
     body: Result<Bytes, BytesRejection>,
     format: ErrorFormat,
-    rec: &mut Recorder,
-    info: &mut RouteInfo,
 ) -> Result<Reply, UpstreamError> {
-    let auth = {
-        let span = crate::trace::auth_span();
-        let _g = span.enter();
-        st.auth
-            .authenticate(extract_api_key(headers).as_ref())
-            .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?
-    };
-    rec.set_key(&auth);
-    let body = body.map_err(|r| body_error(&r, st.config.max_body_bytes))?;
-    rec.set_request_payload(headers, &body);
+    let auth = p.authenticate(headers)?;
+    let limit = p.state().config.max_body_bytes;
+    let body = p.body(headers, body, limit)?;
     let mut req = match format {
         ErrorFormat::OpenAi => openai::decode_request(&body)?,
         ErrorFormat::Anthropic => anthropic::decode_request(&body)?,
@@ -361,54 +328,23 @@ async fn chat_inner(
     }
     drop(body);
     validate(&req)?;
-    // Modellfreigabe (Architektur §3, Schritt 3); die Gruppe nutzt später das Routing.
+    // Modellfreigabe (Architektur §3, Schritt 3) und Schätzung des Token-Bedarfs mit dem
+    // Tokenizer der Modellgruppe (F46); `route` prüft die Freigabe verbindlich.
     let group = auth.authorize_model(&req.model)?;
-    rec.set_request(&req);
-
-    // Limits und Budgets (Architektur §3, Schritt 4; AIGW-30/31): genau eine Reservierung je
-    // Client-Anfrage – Retries und Fallbacks laufen darin. Abgeschlossen wird im Recorder
-    // (Kosten, Budget, Abgleich mit der tatsächlichen Usage).
-    // Prompt-Tokens mit dem Tokenizer der Modellgruppe (F46).
-    let est = st.limits.estimate(&req, group.as_ref());
-    match st
-        .limits
-        .admit(&auth, group.as_ref(), est, std::time::SystemTime::now())
-        .await
-    {
-        Ok(admission) => {
-            if st.limits.response_headers() && !admission.headers().is_empty() {
-                info.ratelimit = Some(admission.headers().clone());
-            }
-            rec.set_admission(admission);
-        }
-        Err(denied) => {
-            let denied = *denied;
-            info.ratelimit = (!denied.headers.is_empty()).then_some(denied.headers);
-            return Err(denied.error);
-        }
-    }
-
-    let route_span = crate::trace::route_span(&req.model);
-    let route = route_span
-        .in_scope(|| st.routes.route(&req.model))
-        .ok_or_else(|| {
-            crate::trace::fail(&route_span, "not_found");
-            ApiError::new(
-                ErrorKind::NotFound,
-                format!("Modell {:?} ist nicht konfiguriert", req.model),
-            )
-            .with_param("model")
-            .with_code("model_not_found")
-        })?;
-    route_span.record("aigw.model_group", route.name());
-    drop(route_span);
+    p.rec.set_request(&req);
+    let est = p.state().limits.estimate(&req, group.as_ref());
+    // Route, Fähigkeit `chat` und Limits/Budgets (Schritt 4): genau eine Reservierung je
+    // Client-Anfrage – Retries und Fallbacks laufen darin; abgeschlossen im Recorder.
+    let route = p.route(&auth, &req.model, Capability::Chat, est).await?;
+    let st = p.state();
+    let rid = p.request_id().to_owned();
     let policy = route.policy();
     // anthropic-beta des Clients nach settings.clientBetas (F60).
     let dropped = policy.client_betas.filter(&mut req.hints.anthropic_beta);
     if !dropped.is_empty() {
-        tracing::debug!(request_id = %rid.0, betas = ?dropped, "anthropic-beta des Clients verworfen");
+        tracing::debug!(request_id = %rid, betas = ?dropped, "anthropic-beta des Clients verworfen");
     }
-    info.hide_reasoning = !policy.expose_reasoning || auth.hides_reasoning();
+    p.info_mut().hide_reasoning = !policy.expose_reasoning || auth.hides_reasoning();
     let response_model = policy.response_model;
     let requested = req.model.clone();
     let choices = req.choices();
@@ -424,39 +360,40 @@ async fn chat_inner(
     // – es bleibt kein reserviertes Kontingent stehen.
     let model_group = group
         .as_ref()
-        .map_or_else(|| route.name(), |g| g.group.metadata.name.as_str());
+        .map_or_else(|| route.name(), |g| g.group.metadata.name.as_str())
+        .to_owned();
     let req_stream = req.is_stream();
     let mut plugins = PluginRun::new(
         st,
         &auth,
-        Some(model_group),
-        &rid.0,
+        Some(&model_group),
+        &rid,
         ingress(format),
         req_stream,
     );
     if let Some(hits) = plugins.guardrail_hits() {
-        rec.set_guardrails(hits);
+        p.rec.set_guardrails(hits);
     }
     let span = crate::trace::plugins_span("request", plugins.hooks(PluginPhase::Request));
     let mut req = match plugins
-        .run_pre_plugins(req, headers, &mut info.plugin_headers)
+        .run_pre_plugins(req, headers, &mut p.info_mut().plugin_headers)
         .instrument(span.clone())
         .await
         .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?
     {
         Pre::Continue(req) => req,
         Pre::Respond(resp) => {
-            info.model = Some(resp.model.clone());
-            return plugin_reply(resp, req_stream, format, rec, include_usage, info);
+            p.info_mut().model = Some(resp.model.clone());
+            return plugin_reply(resp, req_stream, format, p, include_usage);
         }
     };
     // Gepufferter Modus: Upstream nicht streamen, Antwort-Plugins auf der ganzen Antwort.
     let buffered = plugins.buffers(&req);
     if buffered {
-        tracing::debug!(request_id = %rid.0, "Antwort wird für Ausgabe-Plugins gepuffert");
+        tracing::debug!(request_id = %rid, "Antwort wird für Ausgabe-Plugins gepuffert");
         req.stream = Some(false);
         req.stream_options = None;
-        info.buffered = true;
+        p.info_mut().buffered = true;
     }
 
     // Schritt 6: Antwort-Cache (AIGW-39/40) – nach allen Pre-Plugins, vor dem Routing.
@@ -469,8 +406,8 @@ async fn chat_inner(
                 Some(c),
                 plugins.cache_policy(),
                 &auth,
-                &rid.0,
-                model_group,
+                &rid,
+                &model_group,
                 &req,
                 headers,
             )
@@ -479,12 +416,12 @@ async fn chat_inner(
         None => None,
     };
     if let Some(c) = &cache {
-        info.cache = Some(c.outcome());
-        rec.set_cache(c.outcome());
+        p.info_mut().cache = Some(c.outcome());
+        p.rec.set_cache(c.outcome());
     }
     let outcome = match cache.as_mut().and_then(crate::cache::CacheStep::take_hit) {
         Some(hit) => {
-            rec.set_cache_hit(model_group, &hit);
+            p.rec.set_cache_hit(&model_group, &hit);
             if req.is_stream() {
                 let chunk = cache
                     .as_ref()
@@ -498,20 +435,10 @@ async fn chat_inner(
         None => {
             // Auswahl, Retries, Fallbacks (AIGW-24/25/26); Fallbacks nur auf für Key/Team
             // freigegebene Gruppen (F80).
-            let grants = |name: &str| auth.allows_group(name);
-            let mut routed = exec::execute(
-                st.routes.as_ref(),
-                Arc::clone(&route),
-                req,
-                exec::CapacityCtx {
-                    counters: st.limits.counters(),
-                    tokens: est.total(),
-                    grants: auth.key.is_some().then_some(&grants as exec::Grants<'_>),
-                },
-            )
-            .await;
-            info.take_routed(&mut routed, rec, &tracing::Span::current());
-            match (routed.result?, cache.as_mut()) {
+            let op = exec::ChatOp {
+                stream: req.is_stream(),
+            };
+            match (p.execute(Arc::clone(&route), &op, req).await?, cache.as_mut()) {
                 (Outcome::Stream(events), Some(c)) => Outcome::Stream(c.tee(events)),
                 (Outcome::Json(resp), Some(c)) => {
                     c.store_response(&resp);
@@ -522,7 +449,7 @@ async fn chat_inner(
         }
     };
 
-    let outcome = apply_response_model(outcome, &requested, response_model, info).await;
+    let outcome = apply_response_model(outcome, &requested, response_model, p.info_mut()).await;
     let resp = match outcome {
         // Schritt 10: Stream-Plugins je Ereignis vor dem Encoder; mehrere Varianten dafür
         // nacheinander (F12).
@@ -541,7 +468,7 @@ async fn chat_inner(
     let resp = if plugins.hooks(PluginPhase::Response) > 0 {
         let span = crate::trace::plugins_span("response", plugins.hooks(PluginPhase::Response));
         plugins
-            .run_post_plugins(resp, &mut info.plugin_headers)
+            .run_post_plugins(resp, &mut p.info_mut().plugin_headers)
             .instrument(span.clone())
             .await
             .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?
@@ -552,12 +479,11 @@ async fn chat_inner(
         let events = plugins.wrap_stream(response_stream(&resp), ChunkMode::Buffered);
         return Ok(Reply::Stream(events, include_usage));
     }
-    rec.set_response(&resp);
+    p.rec.set_response(&resp);
     let mut losses = Losses::new();
+    let reasoning = !p.info().hide_reasoning;
     let out = match format {
-        ErrorFormat::OpenAi => {
-            openai::encode_response_with(resp, !info.hide_reasoning, &mut losses)?
-        }
+        ErrorFormat::OpenAi => openai::encode_response_with(resp, reasoning, &mut losses)?,
         ErrorFormat::Anthropic => anthropic::encode_response(resp, &mut losses)?,
     };
     if !losses.is_empty() {
@@ -572,18 +498,17 @@ fn plugin_reply(
     resp: aigw_core::ir::ChatResponse,
     stream: bool,
     format: ErrorFormat,
-    rec: &mut Recorder,
+    p: &mut Pipeline<'_>,
     include_usage: bool,
-    info: &RouteInfo,
 ) -> Result<Reply, UpstreamError> {
-    rec.set_plugin_response(&resp);
+    p.rec.set_plugin_response(&resp);
     if stream {
         return Ok(Reply::Stream(response_stream(&resp), include_usage));
     }
     let mut losses = Losses::new();
     let out = match format {
         ErrorFormat::OpenAi => {
-            openai::encode_response_with(resp, !info.hide_reasoning, &mut losses)?
+            openai::encode_response_with(resp, !p.info().hide_reasoning, &mut losses)?
         }
         ErrorFormat::Anthropic => anthropic::encode_response(resp, &mut losses)?,
     };

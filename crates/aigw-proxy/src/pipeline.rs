@@ -1,20 +1,21 @@
 // SPDX-FileCopyrightText: 2026 ai-gw contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Gemeinsamer Ablauf der weiteren Endpunkte (AIGW-21: Embeddings, Bilder, Audio, Responses):
+//! Gemeinsamer Ablauf aller Endpunkte der Datenebene (Chat/Messages, Responses, Embeddings,
+//! Bilder, Audio; AIGW-21/AIGW-78):
 //!
 //! ```text
 //! Recorder ─► Auth (Key) ─► Body (Größe, Payload-Mitschnitt) ─► IR ─► Modellfreigabe
-//!          ─► Route + Fähigkeit der Gruppe ─► Routing (exec: Auswahl, Retries, Fallbacks)
+//!          ─► Route + Fähigkeit der Gruppe ─► Limits/Budgets ─► [Plugins, Cache]
+//!          ─► Routing (exec: Auswahl, Retries, Fallbacks)
 //!          ─► Antwort bzw. Fehler im Eingangsformat (+ Routing-Header, Request-Log)
 //! ```
 //!
-//! Limits und Budgets (AIGW-30/31) greifen wie im Chat-Pfad mit genau einer Reservierung je
-//! Client-Anfrage ([`Pipeline::route`]; Tokens geschätzt je Endpunkt, abgerechnet mit der
-//! tatsächlichen Usage). Die Plugin-Kette (AIGW-36) arbeitet auf der Chat-IR und läuft daher
-//! für `/v1/responses` (wie im Chat-Pfad nach der Admission); für Embeddings, Bilder und
-//! Audio gibt es noch keine Plugin-Haken. Ziel ist, dass auch der Chat-Handler über diese
-//! Pipeline läuft.
+//! Limits und Budgets (AIGW-30/31) greifen mit genau einer Reservierung je Client-Anfrage
+//! ([`Pipeline::route`]; Tokens geschätzt je Endpunkt, abgerechnet mit der tatsächlichen
+//! Usage). Die Plugin-Kette (AIGW-36) arbeitet auf der Chat-IR und läuft für Chat/Messages
+//! und `/v1/responses`; Embeddings, Bilder und Audio haben die Anfrage-Haken über eine
+//! Chat-Sicht der Eingabe ([`crate::plugins::PluginRun::check_input`]).
 
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -52,6 +53,8 @@ pub(crate) struct Pipeline<'a> {
     est: TokenEstimate,
     /// Geprüfter Key (Freigaben der Fallback-Gruppen, F80).
     auth: Option<AuthContext>,
+    /// Format der Fehlerantworten und Rate-Limit-Header (Chat: OpenAI oder Anthropic).
+    format: ErrorFormat,
 }
 
 impl<'a> Pipeline<'a> {
@@ -76,11 +79,19 @@ impl<'a> Pipeline<'a> {
             span,
             est: TokenEstimate::default(),
             auth: None,
+            format: ErrorFormat::OpenAi,
         }
     }
 
+    /// Fehler und Rate-Limit-Header in diesem Format (Standard OpenAI).
+    #[must_use]
+    pub(crate) fn with_error_format(mut self, format: ErrorFormat) -> Self {
+        self.format = format;
+        self
+    }
+
     /// Zustand der Datenebene.
-    pub(crate) fn state(&self) -> &ProxyState {
+    pub(crate) fn state(&self) -> &'a ProxyState {
         self.st
     }
 
@@ -210,7 +221,12 @@ impl<'a> Pipeline<'a> {
     }
 
     fn headers(&self, res: &mut Response) {
-        apply_headers(self.st, &self.info, res);
+        apply_headers(self.st, &self.info, self.format, res);
+    }
+
+    /// Routing-/Plugin-Informationen (lesend).
+    pub(crate) fn info(&self) -> &RouteInfo {
+        &self.info
     }
 
     /// Erfolgreiche, vollständige Antwort.
@@ -230,16 +246,22 @@ impl<'a> Pipeline<'a> {
     /// Gestreamte Antwort: `build` erhält den Recorder (er gibt den Datensatz am Ende des
     /// Stroms ab) und baut die Antwort.
     pub(crate) fn stream(self, build: impl FnOnce(Recorder) -> Response) -> Response {
-        let Self { st, info, rec, .. } = self;
+        let Self {
+            st,
+            info,
+            rec,
+            format,
+            ..
+        } = self;
         let mut res = build(rec);
-        apply_headers(st, &info, &mut res);
+        apply_headers(st, &info, format, &mut res);
         res
     }
 
-    /// Fehlerantwort im OpenAI-Format (alle weiteren Endpunkte sind OpenAI-Endpunkte).
+    /// Fehlerantwort im Format des Endpunkts.
     pub(crate) fn fail(mut self, e: UpstreamError) -> Response {
         tracing::debug!(request_id = %self.rid.0, error = %e, "Anfrage abgelehnt");
-        let mut res = ErrorFormat::OpenAi.response(&e.error, Some(&self.rid.0));
+        let mut res = self.format.response(&e.error, Some(&self.rid.0));
         if let Some(after) = e.retry_after {
             let secs = retry_after_secs(after);
             if let Ok(v) = HeaderValue::from_str(&secs.to_string()) {
@@ -254,12 +276,12 @@ impl<'a> Pipeline<'a> {
 }
 
 /// Routing-Header (falls eingeschaltet) und Rate-Limit-Header.
-fn apply_headers(st: &ProxyState, info: &RouteInfo, res: &mut Response) {
+fn apply_headers(st: &ProxyState, info: &RouteInfo, format: ErrorFormat, res: &mut Response) {
     if st.config.routing_headers {
         info.apply(res);
     }
     if let Some(h) = &info.ratelimit {
-        h.apply(ErrorFormat::OpenAi, res.headers_mut(), SystemTime::now());
+        h.apply(format, res.headers_mut(), SystemTime::now());
     }
     info.apply_plugins(res);
 }
