@@ -222,7 +222,8 @@ Anfragestarts.
   wenn Verbrauch ≥ Betrag (`Retry-After` bis Zeitraumende), Verbrauch + Schätzung > Betrag
   („max_tokens verringern“, Zeitraumende) oder Verbrauch + laufende Reservierungen + Schätzung >
   Betrag (`Retry-After: 1`). Im Abschluss wird die Reservierung gegen die tatsächlichen Kosten
-  getauscht (`Budgets::settle`); Fehler ohne Verbrauch geben sie frei. Ohne Preis wird nichts
+  getauscht (`Budgets::settle`, je Budgetstand atomar unter derselben Sperre – sonst könnte ein
+  paralleles `reserve` zwischen Freigabe und Buchung überbuchen); Fehler ohne Verbrauch geben sie frei. Ohne Preis wird nichts
   reserviert (nur geprüft). `soft` verhält sich wie vor F106 (Ablehnung erst bei erreichtem
   Verbrauch, gleichzeitige Anfragen können überziehen).
 - **Genauigkeit strict:** je Instanz keine Überschreitung, solange die tatsächlichen Kosten die

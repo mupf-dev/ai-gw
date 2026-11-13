@@ -725,9 +725,12 @@ impl Budgets {
         cost: Amount,
         at_ms: i64,
     ) {
-        hold.release_local();
         let held = hold.shared.take();
-        self.charge_local(targets, cost, at_ms);
+        // Reservierung und Buchung je Budgetstand unter derselben Sperre tauschen: Würde erst
+        // freigegeben und dann gebucht, sähe ein paralleles `reserve` dazwischen weder
+        // Reservierung noch Kosten und könnte das Budget überbuchen (F106).
+        self.charge_local_releasing(targets, cost, at_ms, &mut hold.local);
+        hold.release_local();
         // Geteilter Zähler: Reservierung gegen die tatsächlichen Kosten tauschen.
         let shared = held
             .as_ref()
@@ -910,6 +913,19 @@ impl Budgets {
     }
 
     fn charge_local(&self, targets: &[BudgetTarget<'_>], cost: Amount, at_ms: i64) {
+        self.charge_local_releasing(targets, cost, at_ms, &mut Vec::new());
+    }
+
+    /// Wie [`Self::charge_local`], gibt aber zugleich die lokalen Reservierungen in `held`
+    /// frei, die denselben Budgetstand betreffen – atomar unter dessen Sperre. Nicht
+    /// zugeordnete Reservierungen bleiben in `held`.
+    fn charge_local_releasing(
+        &self,
+        targets: &[BudgetTarget<'_>],
+        cost: Amount,
+        at_ms: i64,
+        held: &mut Vec<(Arc<Entry>, i64)>,
+    ) {
         if cost.nanos() == 0 {
             return;
         }
@@ -920,6 +936,10 @@ impl Budgets {
             let mut st = lock(&entry.st);
             st.configure(t.budget);
             st.pending = st.pending.saturating_add(cost.nanos());
+            if let Some(i) = held.iter().position(|(e, _)| Arc::ptr_eq(e, &entry)) {
+                let (_, n) = held.swap_remove(i);
+                st.reserved = st.reserved.saturating_sub(n);
+            }
             if entry.loaded.initialized() {
                 st.events(key, &mut events);
             }
