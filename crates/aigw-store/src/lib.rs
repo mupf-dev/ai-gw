@@ -48,8 +48,8 @@ pub use repo::audit::{
     ActorType, AuditCursor, AuditEvent, AuditPage, AuditQuery, AuditScope, ScopeRule,
 };
 pub use repo::audit_chain::{AUDIT_LOG_KIND, AuditChainIssue, AuditChainReport};
-pub use repo::secret::validate_secret;
 pub use repo::list::{ListFilter, ListQuery, Page};
+pub use repo::secret::validate_secret;
 pub use repo::{AuditEntry, Expect, PlainResource, Resource, WriteExtras};
 pub use snapshot::{Fallback, Incremental, load_incremental, load_parts, load_snapshot};
 pub use snapshot_cache::{CacheError, CachedSnapshot, SnapshotCache};

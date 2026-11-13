@@ -15,8 +15,8 @@
 use std::collections::BTreeMap;
 
 use aigw_core::resource::{
-    McpServerSpec, ObjectMeta, OrganizationSpec, PluginBindingSpec, PluginFailMode,
-    ResourceKind, SecretRef, SecretSpec, SecretString, TeamSpec, new_id,
+    McpServerSpec, ObjectMeta, OrganizationSpec, PluginBindingSpec, PluginFailMode, ResourceKind,
+    SecretRef, SecretSpec, SecretString, TeamSpec, new_id,
 };
 use aigw_store::gitops::{ApplyOptions, SecretSource, apply, export_yaml, parse_documents};
 use aigw_store::{Keyring, MasterKey, Store, StoreError, load_snapshot};
@@ -88,7 +88,10 @@ async fn secrets(store: &Store, raw: &Raw) {
     assert_eq!(s.spec.fields, ["value"]);
     assert_eq!(s.spec.description.as_deref(), Some("HMAC für hooks"));
     let json = serde_json::to_string(&s).unwrap();
-    assert!(!json.contains("hmac-1"), "keine Werte in der gelesenen Sicht");
+    assert!(
+        !json.contains("hmac-1"),
+        "keine Werte in der gelesenen Sicht"
+    );
     // Ungültig: keine Felder, schlechter Feldname.
     assert!(matches!(
         store
@@ -106,7 +109,10 @@ async fn secrets(store: &Store, raw: &Raw) {
     ));
     // Audit ohne Wert, Art kebab-case.
     let log = store.audit_log(1).await.unwrap();
-    assert_eq!((log[0].kind.as_str(), log[0].action.as_str()), ("secret", "create"));
+    assert_eq!(
+        (log[0].kind.as_str(), log[0].action.as_str()),
+        ("secret", "create")
+    );
     assert!(!serde_json::to_string(&log[0]).unwrap().contains("hmac-1"));
 
     // Patch: Feld hinzufügen, Beschreibung entfernen; Wert bleibt.
@@ -150,7 +156,15 @@ async fn secrets(store: &Store, raw: &Raw) {
     );
     let gh = &snap.mcp_servers["gh"];
     assert_eq!(gh.server.spec.secret.as_deref(), Some("hooks"));
-    assert_eq!(gh.credential.as_ref().unwrap().get("apiKey").unwrap().expose(), "k-2");
+    assert_eq!(
+        gh.credential
+            .as_ref()
+            .unwrap()
+            .get("apiKey")
+            .unwrap()
+            .expose(),
+        "k-2"
+    );
     // In Verwendung → Löschen 409.
     assert!(matches!(
         store.delete(ACTOR, ResourceKind::Secret, "hooks").await,
@@ -198,7 +212,10 @@ async fn secrets(store: &Store, raw: &Raw) {
         .unwrap();
     assert!(out.contains("kind: Secret"), "{out}");
     assert!(out.contains("CS_KEY"), "Verweis originalgetreu: {out}");
-    assert!(out.contains("AIGW_SECRET_HOOKS_VALUE"), "Platzhalter: {out}");
+    assert!(
+        out.contains("AIGW_SECRET_HOOKS_VALUE"),
+        "Platzhalter: {out}"
+    );
     assert!(!out.contains("cs-1") && !out.contains("hmac-1"));
     // Unverändert → kein Plan.
     let r = apply(store, &ring2, &docs, &ApplyOptions::default(), &env)
@@ -245,10 +262,7 @@ async fn run(store: Store, raw: Raw) {
         raw.bool(false)
     ))
     .await;
-    let read = store
-        .get::<PluginBindingSpec>("pii-global")
-        .await
-        .unwrap();
+    let read = store.get::<PluginBindingSpec>("pii-global").await.unwrap();
     assert_eq!(read.spec.fail_mode, Some(PluginFailMode::Closed));
     assert!(read.spec.locked);
     assert_eq!(read.spec.timeout_ms, None);
@@ -261,10 +275,7 @@ async fn run(store: Store, raw: Raw) {
         "UPDATE plugin_binding SET config = '{\"failMode\":\"sometimes\"}' WHERE name = 'pii-global'",
     )
     .await;
-    let read = store
-        .get::<PluginBindingSpec>("pii-global")
-        .await
-        .unwrap();
+    let read = store.get::<PluginBindingSpec>("pii-global").await.unwrap();
     assert!(read.spec.config.contains_key("failMode"));
 
     // --- F115/F116: Audit-Kette ---------------------------------------------------------
@@ -382,7 +393,10 @@ async fn run(store: Store, raw: Raw) {
     assert_eq!(after.checked, 1, "nur der Eintrag über die Löschung");
     assert_eq!(after.unchained, 0);
     let log = store.audit_log(1).await.unwrap();
-    assert_eq!((log[0].kind.as_str(), log[0].action.as_str()), ("audit-log", "prune"));
+    assert_eq!(
+        (log[0].kind.as_str(), log[0].action.as_str()),
+        ("audit-log", "prune")
+    );
     // Weiter anhängen nach dem Anker.
     store
         .create(ACTOR, ObjectMeta::named("d3"), OrganizationSpec::default())

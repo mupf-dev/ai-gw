@@ -1196,8 +1196,10 @@ mod tests {
             [ModelCapability::Embeddings, ModelCapability::Images]
         );
         // Alte Form in settings → Feld (sortiert), Schlüssel entfernt.
-        let old = g(json!({"settings": {"capabilities": ["images", "embeddings"],
-            "retry": {"maxAttempts": 2}}}))
+        let old = g(
+            json!({"settings": {"capabilities": ["images", "embeddings"],
+            "retry": {"maxAttempts": 2}}}),
+        )
         .unwrap();
         assert_eq!(old.capabilities, new.capabilities);
         assert!(!old.settings.contains_key("capabilities"));
@@ -1207,8 +1209,7 @@ mod tests {
         assert!(g(json!({"settings": {"capabilities": ["video"]}})).is_err());
         assert!(g(json!({"settings": {"capabilities": []}})).is_err());
         assert!(
-            g(json!({"capabilities": ["chat"], "settings": {"capabilities": ["images"]}}))
-                .is_err()
+            g(json!({"capabilities": ["chat"], "settings": {"capabilities": ["images"]}})).is_err()
         );
         // Standard: nur Chat.
         assert_eq!(

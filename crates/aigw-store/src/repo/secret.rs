@@ -259,7 +259,6 @@ impl Store {
             .collect()
     }
 
-
     /// Gespeicherte `valueFrom`-Verweise aller Geheimnisse, Schlüssel: Name.
     pub async fn secret_refs(&self) -> Result<HashMap<String, CredentialRefs>, StoreError> {
         let rows = Q::new("SELECT name, refs FROM secret")

@@ -249,7 +249,8 @@ impl Inner {
             (None, Some(n)) => (n, self.host.credential(n), "Zugangsdaten"),
             (None, None) => return Err(PluginError::new("keine Zugangsdaten konfiguriert")),
         };
-        let data = data.ok_or_else(|| PluginError::new(format!("{what} {name:?} nicht gefunden")))?;
+        let data =
+            data.ok_or_else(|| PluginError::new(format!("{what} {name:?} nicht gefunden")))?;
         data.get("apiKey")
             .or_else(|| data.get("api_key"))
             .or_else(|| data.get(aigw_core::resource::SecretSpec::DEFAULT_FIELD))

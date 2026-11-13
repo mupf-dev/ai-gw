@@ -513,7 +513,10 @@ pub(crate) async fn delete_secret(
 pub(crate) fn router() -> axum::Router<AdminState> {
     use axum::routing::get;
     axum::Router::new()
-        .route("/admin/api/v1/secrets", get(list_secrets).post(create_secret))
+        .route(
+            "/admin/api/v1/secrets",
+            get(list_secrets).post(create_secret),
+        )
         .route(
             "/admin/api/v1/secrets/{name}",
             get(get_secret)

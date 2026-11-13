@@ -290,7 +290,8 @@ pub(crate) fn prepare(
         let issue = |m: String| Issue::at(Some(d.index), d.kind(), d.name(), m);
         match &d.manifest.spec {
             ResourceSpec::ProviderCredential(aigw_core::resource::ProviderCredentialSpec {
-                data, ..
+                data,
+                ..
             })
             | ResourceSpec::Secret(aigw_core::resource::SecretSpec { data, .. }) => {
                 let mut values = BTreeMap::new();

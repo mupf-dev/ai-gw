@@ -108,14 +108,24 @@ pub struct Reply {
 
 type Inner = Client<HttpsConnector<HttpConnector<GuardedResolver>>, Full<Bytes>>;
 
+/// Schlüssel einer Pool-Variante: Vertrauensanker und Zeitlimit des Verbindungsaufbaus.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct VariantKey {
+    tls: TlsOptions,
+    connect: Duration,
+}
+
 /// Gemeinsamer Teil aller Varianten eines Clients.
 struct Base {
     options: OutboundOptions,
     resolver: Arc<dyn Resolve>,
     /// Vertrauensanker der Basisvariante.
     tls: TlsOptions,
-    /// Weitere Varianten mit anderen Vertrauensankern (eigener Pool je Variante).
-    variants: Mutex<HashMap<TlsOptions, (Fingerprint, Inner)>>,
+    /// Pool der Basisvariante.
+    inner: Inner,
+    /// Weitere Varianten mit anderen Vertrauensankern bzw. anderem Zeitlimit für den
+    /// Verbindungsaufbau (eigener Pool je Variante).
+    variants: Mutex<HashMap<VariantKey, (Fingerprint, Inner)>>,
 }
 
 /// Client für ausgehende Verbindungen (günstig klonbar, Klone teilen den Pool).
@@ -124,6 +134,8 @@ pub struct OutboundClient {
     inner: Inner,
     guard: AddressGuard,
     tls: TlsOptions,
+    /// Zeitlimit des Verbindungsaufbaus dieser Variante.
+    connect: Duration,
     base: Arc<Base>,
 }
 
@@ -180,13 +192,15 @@ impl OutboundBuilder {
         };
         let inner = build_inner(&self.options, &self.guard, &self.resolver, rustls);
         Ok(OutboundClient {
-            inner,
+            inner: inner.clone(),
             guard: self.guard,
             tls: tls.clone(),
+            connect: self.options.connect_timeout,
             base: Arc::new(Base {
                 options: self.options,
                 resolver: self.resolver,
                 tls,
+                inner,
                 variants: Mutex::new(HashMap::new()),
             }),
         })
@@ -261,32 +275,54 @@ impl OutboundClient {
         &self.base.options
     }
 
+    /// Zeitlimit des Verbindungsaufbaus dieser Variante.
+    pub fn connect_timeout(&self) -> Duration {
+        self.connect
+    }
+
     /// Variante mit anderen Vertrauensankern (gleicher Adressfilter, gleiche Einstellungen,
     /// eigener Pool). Varianten werden wiederverwendet; ändert sich eine CA-Datei, entsteht
     /// beim nächsten Aufruf ein neuer Pool.
     pub fn with_tls(&self, tls: TlsOptions) -> Result<Self, OutboundError> {
-        if tls == self.base.tls {
+        self.variant(tls, self.connect)
+    }
+
+    /// Variante mit anderem Zeitlimit für den Verbindungsaufbau (z. B. `settings.timeouts.
+    /// connectMs` eines Deployments, F187; eigener Pool, gleiche Vertrauensanker und
+    /// SSRF-Regeln). Varianten werden wiederverwendet.
+    pub fn with_connect_timeout(&self, connect: Duration) -> Result<Self, OutboundError> {
+        self.variant(self.tls.clone(), connect)
+    }
+
+    fn variant(&self, tls: TlsOptions, connect: Duration) -> Result<Self, OutboundError> {
+        if tls == self.base.tls && connect == self.base.options.connect_timeout {
             return Ok(Self {
+                inner: self.base.inner.clone(),
+                guard: self.guard.clone(),
                 tls,
-                ..self.clone()
+                connect,
+                base: Arc::clone(&self.base),
             });
         }
         let (fp, cfg) = tls.resolve()?;
+        let key = VariantKey {
+            tls: tls.clone(),
+            connect,
+        };
         let mut variants = self
             .base
             .variants
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        let inner = match variants.get(&tls) {
+        let inner = match variants.get(&key) {
             Some((f, inner)) if *f == fp => inner.clone(),
             _ => {
-                let inner = build_inner(
-                    &self.base.options,
-                    &self.guard,
-                    &self.base.resolver,
-                    (*cfg).clone(),
-                );
-                variants.insert(tls.clone(), (fp, inner.clone()));
+                let options = OutboundOptions {
+                    connect_timeout: connect,
+                    ..self.base.options.clone()
+                };
+                let inner = build_inner(&options, &self.guard, &self.base.resolver, (*cfg).clone());
+                variants.insert(key, (fp, inner.clone()));
                 inner
             }
         };
@@ -294,13 +330,14 @@ impl OutboundClient {
             inner,
             guard: self.guard.clone(),
             tls,
+            connect,
             base: Arc::clone(&self.base),
         })
     }
 
     /// Variante mit einer zusätzlichen CA-Datei (z. B. `settings.caFile` eines Deployments).
     pub fn with_ca_file(&self, path: &std::path::Path) -> Result<Self, OutboundError> {
-        self.with_tls(self.base.tls.clone().with_ca_file(path))
+        self.variant(self.base.tls.clone().with_ca_file(path), self.connect)
     }
 
     /// Prüft Schema und – bei IP-Literalen, die die Namensauflösung umgehen – die Zieladresse.

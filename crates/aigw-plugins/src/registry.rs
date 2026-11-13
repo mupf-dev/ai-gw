@@ -133,7 +133,10 @@ impl Registry {
 
     /// Prüft eine Bindung (Steuerfelder + Plugin-Konfiguration, F117), ohne sie zu verwenden –
     /// z. B. für Admin-API und `aigw config validate`.
-    pub fn validate_spec(&self, spec: &aigw_core::resource::PluginBindingSpec) -> Result<(), String> {
+    pub fn validate_spec(
+        &self,
+        spec: &aigw_core::resource::PluginBindingSpec,
+    ) -> Result<(), String> {
         self.validate(&spec.plugin, &spec.merged_config())
     }
 

@@ -68,9 +68,8 @@ const EMBEDDING_CONCURRENCY: usize = 8;
 /// Zeitlimits je Deployment (`settings.timeouts`, Architektur §6; an der Modellgruppe
 /// gesetzt, gelten sie für alle ihre Deployments ohne eigene Angabe, F44).
 ///
-/// Den Verbindungsaufbau regelt derzeit der [`ClientConfig`](crate::ClientConfig) für den
-/// gemeinsamen Pool; `connect` wird gelesen und geprüft, je Deployment wirksam wird es mit
-/// einer eigenen Pool-Variante (Folgepunkt).
+/// `connect` wirkt je Deployment über eine eigene Pool-Variante des Clients (F187), sobald
+/// `connectMs` gesetzt ist und vom Standard des Clients abweicht.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Timeouts {
     /// Verbindungsaufbau (`connectMs`, Standard 10 s).
@@ -189,6 +188,18 @@ impl Upstream {
                 .for_ca_file(std::path::Path::new(path.trim()))
                 .map_err(|e| settings.invalid(format!("settings.caFile: {e}")))?,
             _ => client.clone(),
+        };
+        // Eigenes Zeitlimit für den Verbindungsaufbau (`timeouts.connectMs`, F187): Variante
+        // mit eigenem Pool – nur wenn ausdrücklich gesetzt und abweichend.
+        let connect_set = settings
+            .object("timeouts")?
+            .is_some_and(|o| o.contains_key("connectMs"));
+        let client = if connect_set && timeouts.connect != client.outbound().connect_timeout() {
+            client
+                .for_connect_timeout(timeouts.connect)
+                .map_err(|e| settings.invalid(format!("settings.timeouts.connectMs: {e}")))?
+        } else {
+            client
         };
         let mut up = Self::new(
             dep.deployment.metadata.name.clone(),

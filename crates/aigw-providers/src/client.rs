@@ -159,6 +159,14 @@ impl UpstreamClient {
         })
     }
 
+    /// Variante mit anderem Zeitlimit für den Verbindungsaufbau (`settings.timeouts.
+    /// connectMs` eines Deployments, F187; eigener Pool, gleiche SSRF-Regeln).
+    pub fn for_connect_timeout(&self, connect: Duration) -> Result<Self, OutboundError> {
+        self.inner
+            .with_connect_timeout(connect)
+            .map(Self::from_outbound)
+    }
+
     /// Sendet eine Anfrage; das Ergebnis liegt vor, sobald die Antwort-Header da sind.
     pub(crate) async fn send(
         &self,

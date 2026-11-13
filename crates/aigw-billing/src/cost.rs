@@ -167,7 +167,10 @@ mod tests {
         assert_eq!(cost(&p, &u(None, None, Some(2_000))).to_string(), "0.03");
         // Ohne Preise: 0.
         let free = price(datetime!(2026-01-01 0:00 UTC), "0", "0");
-        assert_eq!(cost(&free, &u(Some(3), Some(60_000), Some(10))), Amount::ZERO);
+        assert_eq!(
+            cost(&free, &u(Some(3), Some(60_000), Some(10))),
+            Amount::ZERO
+        );
     }
 
     #[test]

@@ -404,7 +404,10 @@ impl Resource for PluginBindingSpec {
             // Kettensteuerung als eigene Spalten (F117, Migration 0002).
             ("inherit", Col::opt_text(self.inherit.map(|i| i.as_str()))),
             ("locked", Col::bool(self.locked)),
-            ("fail_mode", Col::opt_text(self.fail_mode.map(|f| f.as_str()))),
+            (
+                "fail_mode",
+                Col::opt_text(self.fail_mode.map(|f| f.as_str())),
+            ),
             ("timeout_ms", u64_col(self.timeout_ms)?),
             (
                 "output_reject_mode",
@@ -415,7 +418,10 @@ impl Resource for PluginBindingSpec {
     }
 
     fn from_row(row: &Row<'_>) -> Result<Self, StoreError> {
-        fn opt_enum<T: DeserializeOwned>(row: &Row<'_>, col: &str) -> Result<Option<T>, StoreError> {
+        fn opt_enum<T: DeserializeOwned>(
+            row: &Row<'_>,
+            col: &str,
+        ) -> Result<Option<T>, StoreError> {
             row.opt_text(col)?
                 .map(|s| serde_json::from_value(serde_json::Value::String(s)))
                 .transpose()

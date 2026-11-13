@@ -16,10 +16,10 @@ mod api_key;
 pub mod audit;
 pub mod audit_chain;
 pub(crate) mod credential;
-pub(crate) mod secret;
 mod extras;
 mod kinds;
 pub mod list;
+pub(crate) mod secret;
 
 pub use extras::WriteExtras;
 

@@ -251,9 +251,10 @@ fn row_of(row: &DbRow) -> Result<(NewAuditRow, i64, String, String), StoreError>
 impl Store {
     /// Prüft die Hash-Kette des Audit-Logs vollständig (seitenweise, 1000 Einträge je Abfrage).
     pub async fn verify_audit_chain(&self) -> Result<AuditChainReport, StoreError> {
-        let head = Q::new("SELECT seq, head, anchor_seq, anchor_hash FROM audit_chain WHERE id = 1")
-            .fetch_one(&self.pool)
-            .await?;
+        let head =
+            Q::new("SELECT seq, head, anchor_seq, anchor_hash FROM audit_chain WHERE id = 1")
+                .fetch_one(&self.pool)
+                .await?;
         let (head_seq, head_hash) = (head.i64("seq")?, head.text("head")?);
         let anchor_seq = head.i64("anchor_seq")?;
         let mut prev = head.text("anchor_hash")?;
@@ -285,10 +286,7 @@ impl Store {
                         &mut issues,
                         expected,
                         None,
-                        format!(
-                            "Einträge {expected}–{} fehlen (gelöscht?)",
-                            seq - 1
-                        ),
+                        format!("Einträge {expected}–{} fehlen (gelöscht?)", seq - 1),
                     );
                 }
                 if prev_hash != prev {

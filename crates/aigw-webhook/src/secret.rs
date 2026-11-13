@@ -156,7 +156,9 @@ impl SecretResolver {
                     .secret_field(name, field)
                     .filter(|s| !s.expose().is_empty())
                     .map(Some)
-                    .ok_or_else(|| format!("Secret {name:?} ohne Feld {field:?} (Webhook-Geheimnis)"))
+                    .ok_or_else(|| {
+                        format!("Secret {name:?} ohne Feld {field:?} (Webhook-Geheimnis)")
+                    })
             }
             Self::Credential {
                 name,
@@ -188,7 +190,8 @@ mod tests {
 
     impl CredentialSource for Src {
         fn credential_field(&self, name: &str, field: &str) -> Option<SecretString> {
-            (name == "c" && field == WebhookSecret::DEFAULT_FIELD).then(|| SecretString::new("cred"))
+            (name == "c" && field == WebhookSecret::DEFAULT_FIELD)
+                .then(|| SecretString::new("cred"))
         }
 
         fn secret_field(&self, name: &str, field: &str) -> Option<SecretString> {

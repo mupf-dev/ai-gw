@@ -78,6 +78,42 @@ fn limits() -> FetchLimits {
     FetchLimits::new(Duration::from_secs(5), 64 * 1024)
 }
 
+/// F187: Variante je Zeitlimit für den Verbindungsaufbau (eigener Pool, gleicher Filter).
+#[tokio::test]
+async fn connect_timeout_variants() {
+    let addr = server().await;
+    let base = client(AddressGuard::policy(policy(&["api.example.com"])));
+    assert_eq!(base.connect_timeout(), Duration::from_secs(10));
+    let fast = base
+        .with_connect_timeout(Duration::from_millis(300))
+        .unwrap();
+    assert_eq!(fast.connect_timeout(), Duration::from_millis(300));
+    // Gleiche Adressregeln wie die Basis: erlaubtes Ziel klappt, verbotenes nicht.
+    let url = format!("http://api.example.com:{}/ok", addr.port());
+    let r = fast.fetch(get_req(&url), &limits()).await.unwrap();
+    assert_eq!(&r.body[..], b"hallo");
+    let err = fast
+        .fetch(get_req(&format!("http://{addr}/ok")), &limits())
+        .await
+        .unwrap_err();
+    assert!(err.is_blocked(), "{err}");
+    // Zurück zum Standardwert = Basis; CA-Varianten behalten das Zeitlimit.
+    let back = fast.with_connect_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(back.connect_timeout(), Duration::from_secs(10));
+    let tls = fast.with_tls(fast.tls().clone()).unwrap();
+    assert_eq!(tls.connect_timeout(), Duration::from_millis(300));
+    // Nicht routbares Ziel: das kurze Zeitlimit greift (statt 10 s).
+    let trusted = client(AddressGuard::Trusted)
+        .with_connect_timeout(Duration::from_millis(300))
+        .unwrap();
+    let started = std::time::Instant::now();
+    let err = trusted
+        .fetch(get_req("http://10.255.255.1:81/x"), &limits())
+        .await
+        .unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(4), "{err}");
+}
+
 #[tokio::test]
 async fn rebinding_to_private_address_is_blocked() {
     let addr = server().await;

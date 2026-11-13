@@ -565,9 +565,7 @@ impl WebhookSecret {
             + usize::from(self.env.is_some())
             + usize::from(self.file.is_some());
         if n != 1 {
-            return Err(
-                "secret: genau eines von secret, credential, env oder file angeben".into(),
-            );
+            return Err("secret: genau eines von secret, credential, env oder file angeben".into());
         }
         if self.field.is_some() && self.credential.is_none() && self.secret.is_none() {
             return Err("secret.field gilt nur zusammen mit secret.secret/credential".into());

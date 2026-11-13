@@ -122,7 +122,11 @@ impl WebhookEvents {
         });
         if let Some(h) = &self.snapshot {
             let (target, team, org) = names(&h.load(), k.level, k.target);
-            for (field, v) in [("targetName", target), ("team", team), ("organization", org)] {
+            for (field, v) in [
+                ("targetName", target),
+                ("team", team),
+                ("organization", org),
+            ] {
                 if let (Some(v), Some(obj)) = (v, data.as_object_mut()) {
                     obj.insert(field.to_owned(), serde_json::Value::String(v));
                 }

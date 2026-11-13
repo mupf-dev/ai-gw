@@ -32,7 +32,8 @@ async fn app() -> (Router, Store, Arc<Keyring>) {
     let (master, _) = MasterKey::generate().unwrap();
     let keyring = Arc::new(Keyring::new(master));
     let auth: Arc<dyn AdminAuthenticator> = Arc::new(BootstrapToken::new(TOKEN).unwrap());
-    let router = router_with(AdminState::new(store.clone(), auth).with_keyring(Arc::clone(&keyring)));
+    let router =
+        router_with(AdminState::new(store.clone(), auth).with_keyring(Arc::clone(&keyring)));
     (router, store, keyring)
 }
 
@@ -152,8 +153,14 @@ async fn secrets_crud_without_values() {
     assert_eq!(v["spec"]["fields"], json!(["apiKey", "value"]));
     assert!(v["spec"].get("description").is_none());
     let plain = store.decrypt_secrets(&keyring).await.unwrap();
-    assert_eq!(plain["hooks"].1.get("value").unwrap().expose(), "hmac-geheim");
-    assert_eq!(plain["hooks"].1.get("apiKey").unwrap().expose(), "neu-geheim");
+    assert_eq!(
+        plain["hooks"].1.get("value").unwrap().expose(),
+        "hmac-geheim"
+    );
+    assert_eq!(
+        plain["hooks"].1.get("apiKey").unwrap().expose(),
+        "neu-geheim"
+    );
     // Letztes Feld entfernen → 422.
     let (s, _, _) = call(
         &app,
@@ -211,7 +218,14 @@ async fn secrets_crud_without_values() {
     )
     .await;
     assert!(s.is_client_error());
-    let (_, _, mcp_etag) = call(&app, Method::GET, "/admin/api/v1/mcp-servers/gh", None, None).await;
+    let (_, _, mcp_etag) = call(
+        &app,
+        Method::GET,
+        "/admin/api/v1/mcp-servers/gh",
+        None,
+        None,
+    )
+    .await;
     let (s, _, _) = call(
         &app,
         Method::DELETE,
@@ -244,7 +258,14 @@ async fn secrets_crud_without_values() {
     let items = v["items"].as_array().unwrap();
     assert!(items.len() >= 4, "{v}");
     assert!(items.iter().all(|e| e["kind"] == "secret"));
-    let (s, v, _) = call(&app, Method::GET, "/admin/api/v1/audit-log/verify", None, None).await;
+    let (s, v, _) = call(
+        &app,
+        Method::GET,
+        "/admin/api/v1/audit-log/verify",
+        None,
+        None,
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["ok"], true, "{v}");
     assert!(v["checked"].as_u64().unwrap() >= 6);

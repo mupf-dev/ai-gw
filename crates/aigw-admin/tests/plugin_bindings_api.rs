@@ -187,9 +187,15 @@ async fn bindings_are_validated_and_show_effective_fail_mode() {
     // `config`) werden schon beim Lesen der Eingabe abgelehnt.
     for (spec_extra, want) in [
         (json!({"config": {"failMode": "sometimes"}}), "failMode"),
-        (json!({"config": {"outputRejectMode": "drop"}}), "outputRejectMode"),
+        (
+            json!({"config": {"outputRejectMode": "drop"}}),
+            "outputRejectMode",
+        ),
         (json!({"failMode": "sometimes"}), "failMode"),
-        (json!({"failMode": "open", "config": {"failMode": "closed"}}), "failMode"),
+        (
+            json!({"failMode": "open", "config": {"failMode": "closed"}}),
+            "failMode",
+        ),
         (json!({"timeoutMs": 0}), "timeoutMs"),
     ] {
         let mut body = binding("x", "pii", json!({}));

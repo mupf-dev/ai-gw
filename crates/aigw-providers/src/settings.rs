@@ -144,9 +144,7 @@ impl<'a> Settings<'a> {
 
     /// `settings.timeouts` = `{connectMs, firstByteMs, idleMs, totalMs}` (alle optional).
     ///
-    /// `connectMs` wird gelesen und geprüft; wirksam ist derzeit der Verbindungsaufbau-Wert
-    /// des gemeinsamen Outbound-Pools (10 s) – je Deployment bräuchte es eine Pool-Variante
-    /// wie bei `caFile` (Folgepunkt).
+    /// `connectMs` wirkt über eine Pool-Variante des Clients (F187, wie `caFile`).
     pub(crate) fn timeouts(&self) -> Result<Timeouts, ConfigError> {
         let mut t = Timeouts::default();
         let Some(o) = self.object("timeouts")? else {

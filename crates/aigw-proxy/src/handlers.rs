@@ -282,8 +282,8 @@ async fn chat(
     body: Result<Bytes, BytesRejection>,
     format: ErrorFormat,
 ) -> Response {
-    let mut p = Pipeline::new(st, rid, started, ingress(format), headers, "chat")
-        .with_error_format(format);
+    let mut p =
+        Pipeline::new(st, rid, started, ingress(format), headers, "chat").with_error_format(format);
     let span = p.span.clone();
     match chat_inner(&mut p, headers, body, format)
         .instrument(span)
@@ -438,7 +438,10 @@ async fn chat_inner(
             let op = exec::ChatOp {
                 stream: req.is_stream(),
             };
-            match (p.execute(Arc::clone(&route), &op, req).await?, cache.as_mut()) {
+            match (
+                p.execute(Arc::clone(&route), &op, req).await?,
+                cache.as_mut(),
+            ) {
                 (Outcome::Stream(events), Some(c)) => Outcome::Stream(c.tee(events)),
                 (Outcome::Json(resp), Some(c)) => {
                     c.store_response(&resp);
