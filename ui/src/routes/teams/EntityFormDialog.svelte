@@ -45,6 +45,8 @@
     roles: [] as RoleBinding[],
     payloadMode: '',
     exposeReasoning: '',
+    payloadModeMax: '',
+    payloadModeLocked: 'false',
     limits: [] as LimitRow[],
   });
   let f = $state(blank());
@@ -99,6 +101,8 @@
         roles: [...((s.roles as RoleBinding[] | undefined) ?? [])],
         payloadMode: (s.payloadMode as string | null) ?? '',
         exposeReasoning: s.exposeReasoning == null ? '' : String(s.exposeReasoning),
+        payloadModeMax: (s.payloadModeMax as string | null) ?? '',
+        payloadModeLocked: String(s.payloadModeLocked === true),
         limits: toRows(s.limits as S['LimitSpec'][] | undefined),
       };
     } catch (e) {
@@ -125,7 +129,13 @@
     if (Object.keys(e).length) return;
     const name = editName ?? f.name;
     const opt = (s: string) => s.trim() || null;
-    const inherit = { payloadMode: (f.payloadMode || null) as S['PayloadMode'] | null, exposeReasoning: f.exposeReasoning === '' ? null : f.exposeReasoning === 'true' };
+    const inherit = {
+      payloadMode: (f.payloadMode || null) as S['PayloadMode'] | null,
+      exposeReasoning: f.exposeReasoning === '' ? null : f.exposeReasoning === 'true',
+      // S-09: Payload-Richtlinie für die Ebenen darunter (Prüfung serverseitig).
+      payloadModeMax: (f.payloadModeMax || null) as S['PayloadMode'] | null,
+      payloadModeLocked: f.payloadModeLocked === 'true',
+    };
     const metadata = { name, labels };
     busy = true;
     try {
@@ -195,6 +205,9 @@
     <InheritFields
       bind:payloadMode={f.payloadMode}
       bind:exposeReasoning={f.exposeReasoning}
+      bind:payloadModeMax={f.payloadModeMax}
+      bind:payloadModeLocked={f.payloadModeLocked}
+      policy
       parents={kind === 'team' && f.organization ? [{ label: `Organisation ${f.organization}`, spec: orgSpec(f.organization) }] : []}
     />
     <fieldset class="flex flex-col gap-1.5 sm:col-span-2">

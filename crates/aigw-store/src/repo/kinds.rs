@@ -83,6 +83,11 @@ impl Resource for OrganizationSpec {
                 Col::opt_text(self.payload_mode.map(PayloadMode::as_str)),
             ),
             ("expose_reasoning", Col::opt_bool(self.expose_reasoning)),
+            (
+                "payload_mode_max",
+                Col::opt_text(self.payload_mode_max.map(PayloadMode::as_str)),
+            ),
+            ("payload_mode_locked", Col::bool(self.payload_mode_locked)),
         ])
     }
 
@@ -92,19 +97,22 @@ impl Resource for OrganizationSpec {
             limits: row.json("limits")?,
             budget: row.opt_json("budget")?,
             metadata: row.json("metadata")?,
-            payload_mode: payload_mode(row)?,
+            payload_mode: payload_mode(row, "payload_mode")?,
             expose_reasoning: row.opt_bool("expose_reasoning")?,
+            payload_mode_max: payload_mode(row, "payload_mode_max")?,
+            payload_mode_locked: row.bool("payload_mode_locked")?,
         })
     }
 }
 impl PlainResource for OrganizationSpec {}
 
-/// Spalte `payload_mode` (F30); unbekannte Werte gelten als beschädigt.
-fn payload_mode(row: &Row<'_>) -> Result<Option<PayloadMode>, StoreError> {
-    row.opt_text("payload_mode")?
+/// Spalte `payload_mode` bzw. `payload_mode_max` (F30, S-09); unbekannte Werte gelten als
+/// beschädigt.
+fn payload_mode(row: &Row<'_>, col: &str) -> Result<Option<PayloadMode>, StoreError> {
+    row.opt_text(col)?
         .map(|s| {
             serde_json::from_value(serde_json::Value::String(s.clone()))
-                .map_err(|_| StoreError::Corrupt(format!("payload_mode {s:?} unbekannt")))
+                .map_err(|_| StoreError::Corrupt(format!("{col} {s:?} unbekannt")))
         })
         .transpose()
 }
@@ -129,6 +137,11 @@ impl Resource for TeamSpec {
                 Col::opt_text(self.payload_mode.map(PayloadMode::as_str)),
             ),
             ("expose_reasoning", Col::opt_bool(self.expose_reasoning)),
+            (
+                "payload_mode_max",
+                Col::opt_text(self.payload_mode_max.map(PayloadMode::as_str)),
+            ),
+            ("payload_mode_locked", Col::bool(self.payload_mode_locked)),
         ])
     }
 
@@ -140,8 +153,10 @@ impl Resource for TeamSpec {
             limits: row.json("limits")?,
             budget: row.opt_json("budget")?,
             metadata: row.json("metadata")?,
-            payload_mode: payload_mode(row)?,
+            payload_mode: payload_mode(row, "payload_mode")?,
             expose_reasoning: row.opt_bool("expose_reasoning")?,
+            payload_mode_max: payload_mode(row, "payload_mode_max")?,
+            payload_mode_locked: row.bool("payload_mode_locked")?,
         })
     }
 }
@@ -228,7 +243,7 @@ impl Resource for ApiKeySpec {
             limits: row.json("limits")?,
             budget: row.opt_json("budget")?,
             metadata: row.json("metadata")?,
-            payload_mode: payload_mode(row)?,
+            payload_mode: payload_mode(row, "payload_mode")?,
             expose_reasoning: row.opt_bool("expose_reasoning")?,
         })
     }

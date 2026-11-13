@@ -61,7 +61,7 @@ Schweregrade: **hoch** – ausnutzbar mit geringen Rechten, deutlicher Schaden;
 | S-06 | **Bootstrap-Token im Klartext über `tracing`** – landete in zentralem Logging. | **behoben:** einmalig direkt auf stderr, `tracing` nur ohne Token. Fehlversuche werden weiterhin nicht gezählt (S-29). |
 | S-07 | **Snapshot-Cache ohne Altersgrenze:** Beim Kaltstart ohne DB galt jeder entschlüsselbare Cache – inzwischen gesperrte/widerrufene Keys wurden wieder gültig. | **behoben:** `snapshot.cache_max_age_secs` (Standard 86 400, `0` = unbegrenzt); Test `cache_max_age`. Rest: Einspielen einer älteren gültigen Datei innerhalb der Frist (Dateirechte, haertung.md). |
 | S-08 | **Audit-Kette: unverkettete Einträge** (`seq IS NULL`) wurden nur gezählt; per DB eingeschobene Einträge ohne Kettenfelder ließen `ok` auf `true`. | **teilweise behoben:** unverkettete Einträge mit `at` ab Kettenbeginn sind ein Befund (Test in `restpunkte.rs`). Mit rückdatiertem `at` bleibt es bei der Zählung (`unchained`); Abgleich des Kettenkopfs mit externer Kopie empfohlen. |
-| S-09 | **payloadMode durch `team-admin` steuerbar:** spezifischstes Feld gewinnt (F203) – ein Team-Admin kann Protokollierung für eigene Keys abschalten oder `full` erzwingen. | **offen** (Folgepunkt F203: `payloadModeMax`/`locked` an Org/global; Datenmodell + UI, kollidiert mit AIGW-52). |
+| S-09 | **payloadMode durch `team-admin` steuerbar:** spezifischstes Feld gewinnt (F203) – ein Team-Admin kann Protokollierung für eigene Keys abschalten oder `full` erzwingen. | **behoben (AIGW-79):** `payloadModeMax` (off < metadata < masked < full) und `payloadModeLocked` an Organisation/Team; Prüfung beim Schreiben (Admin-API, GitOps: `422`/`409`/`cascade=clamp`, Team-Richtlinie nur `admin`/`org-admin`) und Begrenzung zur Laufzeit (`KeyCtx::payload_mode`). Tests `payload_policy_sqlite`, `payload_policy`, `payload_mode_clamped_by_max_and_lock`, e2e `aigw79.spec.js`. Ein globales Maximum gibt es nicht (global setzt nur der Betreiber den Standard `observe.payload`). |
 | S-10 | **content-safety im Stream prüft keine Tool-Call-Argumente** (ohne Stream schon). | **offen** (eigener Puffer je Tool-Block nötig). Bis dahin für Tool-lastige Gruppen `outputMode: buffered`. |
 | S-11 | **PII im Reasoning:** Reasoning wird nicht geschwärzt (Signaturen) und ging bei `exposeReasoning` ungeprüft an den Client. | **behoben:** Bei aktiver PII-Ausgabeprüfung wird lesbares Reasoning verworfen (Stream) bzw. entfernt (Antwort); verschlüsseltes Reasoning bleibt. Test `reasoning_is_removed_when_output_is_checked`. |
 | S-12 | **Limit `concurrency` wird still ignoriert** (UI bietet es an). | **teilweise:** Hinweis `concurrency-not-enforced` in `GET /usage/limit-warnings` und Start-Log; Durchsetzung **offen**. |
@@ -142,7 +142,7 @@ Schweregrade: **hoch** – ausnutzbar mit geringen Rechten, deutlicher Schaden;
 
 ## 6 Folgepunkte (Empfehlung)
 
-1. S-09 `payloadModeMax`/`locked` an Org/global (F203-Folgepunkt).
+1. ~~S-09 `payloadModeMax`/`locked` an Org/global (F203-Folgepunkt)~~ – behoben (AIGW-79).
 2. S-32 Verbindungs-/Nebenläufigkeitsgrenzen und Lese-Timeouts im Server (bis dahin Proxy).
 3. S-10/S-13 content-safety: Tool-Calls im Stream, Kosten des Prüfmodells zurechnen.
 4. S-12 `concurrency` durchsetzen.

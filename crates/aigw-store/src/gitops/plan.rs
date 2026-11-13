@@ -917,6 +917,20 @@ fn check_bounds(
         Some(ResourceSpec::Team(t)) => Some(t),
         _ => None,
     };
+    // S-09: payloadMode einer Organisation nicht über ihrem eigenen payloadModeMax.
+    for (&oname, &(odoc, o)) in &orgs {
+        if odoc.is_none() {
+            continue;
+        }
+        for v in bounds::check_payload(&Node::organization(oname, o), &[]) {
+            issues.push(Issue::at(
+                odoc,
+                ResourceKind::Organization,
+                oname,
+                format!("{}: {}", v.field, v.message),
+            ));
+        }
+    }
     // Kette (Ebene, Name, Dokument) von unten nach oben; Ergebnis wird am ersten Glied mit
     // Dokument gemeldet.
     let mut report = |chain: &[(ResourceKind, &str, Option<usize>)],

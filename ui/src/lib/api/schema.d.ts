@@ -1918,6 +1918,13 @@ export interface components {
             /** @description Freie Metadaten. */
             metadata?: components["schemas"]["BTreeMap"];
             payloadMode?: components["schemas"]["PayloadMode"] | null;
+            /**
+             * @description `true`: Untergeordnete Ebenen dürfen `payloadMode` nicht setzen; es gilt der Modus
+             *     dieser Ebene (bzw. der darüber, sonst `observe.payload`), begrenzt durch die
+             *     Obergrenzen (S-09).
+             */
+            payloadModeLocked?: boolean;
+            payloadModeMax?: components["schemas"]["PayloadMode"] | null;
         };
         /**
          * @description Wirkung einer Guardrail-Ablehnung **der Ausgabe** (F160). Eingabe-Ablehnungen sind immer
@@ -1927,6 +1934,9 @@ export interface components {
         OutputRejectMode: "finish" | "error";
         /**
          * @description Umfang des Payload-Loggings.
+         *
+         *     Die Stufen sind geordnet (`off` < `metadata` < `masked` < `full`, S-09): `payloadModeMax`
+         *     begrenzt mit [`Ord::min`].
          * @enum {string}
          */
         PayloadMode: "off" | "metadata" | "masked" | "full";
@@ -2664,6 +2674,13 @@ export interface components {
             /** @description Organisation (Name). */
             organization: string;
             payloadMode?: components["schemas"]["PayloadMode"] | null;
+            /**
+             * @description `true`: Untergeordnete Ebenen dürfen `payloadMode` nicht setzen; es gilt der Modus
+             *     dieser Ebene (bzw. der darüber, sonst `observe.payload`), begrenzt durch die
+             *     Obergrenzen (S-09).
+             */
+            payloadModeLocked?: boolean;
+            payloadModeMax?: components["schemas"]["PayloadMode"] | null;
         };
         /** @description Zeitreihe. */
         Timeseries: {

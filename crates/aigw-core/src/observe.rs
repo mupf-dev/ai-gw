@@ -67,8 +67,22 @@ pub fn is_sensitive_header(name: &str) -> bool {
 }
 
 /// Umfang des Payload-Loggings.
+///
+/// Die Stufen sind geordnet (`off` < `metadata` < `masked` < `full`, S-09): `payloadModeMax`
+/// begrenzt mit [`Ord::min`].
 #[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    utoipa::ToSchema,
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum PayloadMode {
@@ -421,9 +435,10 @@ pub trait RequestObserver: Send + Sync + fmt::Debug + 'static {
 }
 
 /// Wirksamer Payload-Modus: das spezifischste `payloadMode` (Key → Team → Organisation), sonst
-/// `default` (F30).
+/// `default` (F30), unter Beachtung von `payloadModeLocked` und `payloadModeMax` (S-09, siehe
+/// [`KeyCtx::payload_mode`]). Ohne Key gilt `default`.
 pub fn effective_payload_mode(key: Option<&KeyCtx>, default: PayloadMode) -> PayloadMode {
-    key.and_then(KeyCtx::payload_mode).unwrap_or(default)
+    key.map_or(default, |k| k.payload_mode(default))
 }
 
 /// `target` der `tracing`-Spans und -Events, die als OpenTelemetry-Traces exportiert werden

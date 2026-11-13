@@ -12274,6 +12274,21 @@
                 "type": "null"
               }
             ]
+          },
+          "payloadModeLocked": {
+            "type": "boolean",
+            "description": "`true`: Untergeordnete Ebenen dürfen `payloadMode` nicht setzen; es gilt der Modus\ndieser Ebene (bzw. der darüber, sonst `observe.payload`), begrenzt durch die\nObergrenzen (S-09)."
+          },
+          "payloadModeMax": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PayloadMode",
+                "description": "Obergrenze für `payloadMode` auf dieser und allen untergeordneten Ebenen (S-09, F203;\nStufen `off` < `metadata` < `masked` < `full`). Wird beim Schreiben geprüft und zur\nLaufzeit erzwungen (wirksamer Modus = Minimum aus Modus und allen Obergrenzen).\nSetzen dürfen sie nur `admin` (Organisation) bzw. `admin`/`org-admin` (Team)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -12288,7 +12303,7 @@
       },
       "PayloadMode": {
         "type": "string",
-        "description": "Umfang des Payload-Loggings.",
+        "description": "Umfang des Payload-Loggings.\n\nDie Stufen sind geordnet (`off` < `metadata` < `masked` < `full`, S-09): `payloadModeMax`\nbegrenzt mit [`Ord::min`].",
         "enum": [
           "off",
           "metadata",
@@ -14215,6 +14230,21 @@
               {
                 "$ref": "#/components/schemas/PayloadMode",
                 "description": "Payload-Logging (F30): `off` | `metadata` | `masked` | `full`. Vererbung Key → Team →\nOrganisation → `observe.payload`; das spezifischste gesetzte Feld gilt."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payloadModeLocked": {
+            "type": "boolean",
+            "description": "`true`: Untergeordnete Ebenen dürfen `payloadMode` nicht setzen; es gilt der Modus\ndieser Ebene (bzw. der darüber, sonst `observe.payload`), begrenzt durch die\nObergrenzen (S-09)."
+          },
+          "payloadModeMax": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PayloadMode",
+                "description": "Obergrenze für `payloadMode` auf dieser und allen untergeordneten Ebenen (S-09, F203;\nStufen `off` < `metadata` < `masked` < `full`). Wird beim Schreiben geprüft und zur\nLaufzeit erzwungen (wirksamer Modus = Minimum aus Modus und allen Obergrenzen).\nSetzen dürfen sie nur `admin` (Organisation) bzw. `admin`/`org-admin` (Team)."
               },
               {
                 "type": "null"

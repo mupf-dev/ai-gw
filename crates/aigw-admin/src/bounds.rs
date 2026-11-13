@@ -184,6 +184,7 @@ fn clamp_key(
     models: &ModelNames,
 ) -> Result<Option<ApiKeySpec>, Violation> {
     let mut spec = key.spec.clone();
+    let payload = bounds::clamp_payload(&mut spec.payload_mode, None, parents);
     match bounds::clamp(
         &mut spec.limits,
         &mut spec.budget,
@@ -191,6 +192,7 @@ fn clamp_key(
         parents,
         models,
     ) {
+        Clamp::Unchanged if payload => Ok(Some(spec)),
         Clamp::Unchanged => Ok(None),
         Clamp::Changed => Ok(Some(spec)),
         Clamp::Impossible(why) => Err(Violation {
@@ -200,6 +202,41 @@ fn clamp_key(
             message: why,
         }),
     }
+}
+
+/// S-09: `payloadModeMax`/`payloadModeLocked` eines Teams setzen nur Rollen mit Schreibrecht
+/// auf Organisationsebene (`admin`, `org-admin`) – nie `team-admin`, auch wenn dessen Rechte
+/// künftig erweitert würden.
+fn payload_policy_role(
+    p: &Principal,
+    spec: &TeamSpec,
+    current: Option<&TeamSpec>,
+) -> Result<(), Problem> {
+    let (old_max, old_locked) = current.map_or((None, false), |c| {
+        (c.payload_mode_max, c.payload_mode_locked)
+    });
+    let field = if spec.payload_mode_max != old_max {
+        "payloadModeMax"
+    } else if spec.payload_mode_locked != old_locked {
+        "payloadModeLocked"
+    } else {
+        return Ok(());
+    };
+    let orgs = [spec.organization.as_str()]
+        .into_iter()
+        .chain(current.map(|c| c.organization.as_str()));
+    for org in orgs {
+        if !p.can(
+            crate::auth::Permission::Write,
+            &rbac::Target::InOrganization(org.to_owned()),
+        ) {
+            return Err(Problem::forbidden(format!(
+                "{field}: nur admin oder org-admin der Organisation {org:?} dürfen die \
+                 Payload-Richtlinie eines Teams ändern"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Prüft ein Team gegen seine Organisation und seine bestehenden Keys gegen die neuen
@@ -218,6 +255,7 @@ pub(crate) async fn team(
             "cascade=remove gibt es nur beim Löschen/Ändern von Modellgruppen",
         ));
     }
+    payload_policy_role(p, spec, current)?;
     let clamp = q.cascade == Some(Cascade::Clamp);
     let models = model_names(store).await?;
     let org = org_of(store, &spec.organization).await?;
@@ -310,6 +348,11 @@ pub(crate) async fn organization(
         let v = bounds::check(&node, &[org_node], &models);
         if !v.is_empty() && clamp {
             let mut new = t.spec.clone();
+            let payload = bounds::clamp_payload(
+                &mut new.payload_mode,
+                Some(&mut new.payload_mode_max),
+                &[org_node],
+            );
             // Teams haben keine Modelleinschränkung durch die Organisation → immer möglich.
             if bounds::clamp(
                 &mut new.limits,
@@ -318,6 +361,7 @@ pub(crate) async fn organization(
                 &[org_node],
                 &models,
             ) == Clamp::Changed
+                || payload
             {
                 effective.insert(tname.clone(), new.clone());
                 extras.clamp_teams.push((t, new));
@@ -359,5 +403,7 @@ pub(crate) async fn organization(
             below.extend(new_only(v, &bounds::check(&node, &old_parents, &models)));
         }
     }
-    conclude(spec, vec![], below, unclampable, force, extras)
+    // S-09: payloadMode nicht über dem eigenen payloadModeMax.
+    let own = bounds::check_payload(&org_node, &[]);
+    conclude(spec, own, below, unclampable, force, extras)
 }

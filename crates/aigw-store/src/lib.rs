@@ -177,6 +177,11 @@ const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
         "restpunkte",
         include_str!("../migrations/sqlite/0005_restpunkte.sql"),
     ),
+    (
+        6,
+        "payload_policy",
+        include_str!("../migrations/sqlite/0006_payload_policy.sql"),
+    ),
 ];
 
 /// Migrationssatz für Postgres (`migrations/postgres/`), gleiche Versionen wie SQLite.
@@ -205,6 +210,11 @@ const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
         5,
         "restpunkte",
         include_str!("../migrations/postgres/0005_restpunkte.sql"),
+    ),
+    (
+        6,
+        "payload_policy",
+        include_str!("../migrations/postgres/0006_payload_policy.sql"),
     ),
 ];
 

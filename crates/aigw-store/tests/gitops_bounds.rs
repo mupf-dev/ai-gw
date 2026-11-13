@@ -236,6 +236,115 @@ spec:
     assert_eq!(found[0].name.as_deref(), Some("legacy"));
 }
 
+/// S-09/F203: payloadModeMax/payloadModeLocked im GitOps-Plan, Rundlauf über den Store.
+#[tokio::test]
+async fn payload_policy() {
+    let store = Store::connect("sqlite::memory:").await.unwrap();
+    store.migrate().await.unwrap();
+    let ring = Keyring::new(MasterKey::generate().unwrap().0);
+    let mut env = Secrets::default();
+    env.0
+        .insert("AIGW_SECRET_k1".into(), generate_api_key().unwrap().secret);
+    let opts = ApplyOptions {
+        api_keys: ApiKeyMode::Include,
+        ..ApplyOptions::default()
+    };
+    let doc = |org: &str, team: &str, key: &str| {
+        format!(
+            r#"
+apiVersion: aigw/v1alpha1
+kind: Organization
+metadata: {{name: acme}}
+spec: {{{org}}}
+---
+apiVersion: aigw/v1alpha1
+kind: Team
+metadata: {{name: platform}}
+spec: {{organization: acme{team}}}
+---
+apiVersion: aigw/v1alpha1
+kind: ApiKey
+metadata: {{name: k1}}
+spec:
+  organization: acme
+  team: platform
+  secret: {{valueFrom: {{env: AIGW_SECRET_k1}}}}
+{key}
+"#
+        )
+    };
+    // Verstöße: Organisation über eigenem Maximum, Team-Maximum über dem der Organisation,
+    // Key über dem Maximum.
+    let bad = doc(
+        "payloadMode: full, payloadModeMax: metadata",
+        ", payloadModeMax: full",
+        "  payloadMode: masked",
+    );
+    let found = issues(&store, &ring, &env, &bad).await;
+    let l = lines(&found);
+    assert_eq!(found.len(), 3, "{l:#?}");
+    for want in [
+        "Organization acme: payloadMode: full überschreitet die eigene Obergrenze",
+        "Team platform: payloadModeMax: full überschreitet die Obergrenze payloadModeMax = metadata",
+        "ApiKey k1: payloadMode: masked überschreitet die Obergrenze payloadModeMax = metadata",
+    ] {
+        assert!(l.iter().any(|m| m.starts_with(want)), "{want}: {l:#?}");
+    }
+    // Gesperrt: Key darf payloadMode nicht setzen.
+    let locked = doc(
+        "payloadModeMax: masked",
+        ", payloadMode: metadata, payloadModeLocked: true",
+        "  payloadMode: \"off\"",
+    );
+    let l = lines(&issues(&store, &ring, &env, &locked).await);
+    assert_eq!(l.len(), 1, "{l:#?}");
+    assert!(
+        l[0].starts_with("ApiKey k1: payloadMode: Team \"platform\" hat payloadMode gesperrt"),
+        "{l:#?}"
+    );
+    // Gültig: angewendet, Felder kommen unverändert zurück.
+    let good = doc(
+        "payloadModeMax: masked",
+        ", payloadMode: metadata, payloadModeLocked: true",
+        "",
+    );
+    let docs = parse_documents(&good).unwrap();
+    assert!(
+        apply(&store, &ring, &docs, &opts, &env)
+            .await
+            .unwrap()
+            .applied
+    );
+    let t: aigw_core::resource::Object<aigw_core::resource::TeamSpec> =
+        store.get("platform").await.unwrap();
+    assert!(t.spec.payload_mode_locked);
+    assert_eq!(
+        t.spec.payload_mode,
+        Some(aigw_core::observe::PayloadMode::Metadata)
+    );
+    let o: aigw_core::resource::Object<aigw_core::resource::OrganizationSpec> =
+        store.get("acme").await.unwrap();
+    assert_eq!(
+        o.spec.payload_mode_max,
+        Some(aigw_core::observe::PayloadMode::Masked)
+    );
+    // Rundlauf: gleiches Manifest erneut – Organisation und Team unverändert
+    let r = plan(&store, &ring, &docs, &opts, &env).await.unwrap();
+    for c in &r.changes {
+        if matches!(
+            c.kind,
+            aigw_core::resource::ResourceKind::Organization
+                | aigw_core::resource::ResourceKind::Team
+        ) {
+            assert_eq!(
+                c.action,
+                aigw_store::gitops::ChangeAction::Unchanged,
+                "{c:?}"
+            );
+        }
+    }
+}
+
 #[tokio::test]
 async fn sqlite() {
     run(Store::connect("sqlite::memory:").await.unwrap()).await;

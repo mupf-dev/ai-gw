@@ -143,6 +143,27 @@ trotz Organisation `full`). Ausgewertet wird nach der Schlüsselprüfung
 Anfragen ohne Key (Fehler vor der Anmeldung) folgen dem globalen Wert. Der Modus reist im
 `RawPayload` mit und steht in `request_payload.mode`.
 
+**Payload-Richtlinie (S-09, F203, AIGW-79).** Damit ein `team-admin` das Logging für eigene
+Keys nicht gegen die Vorgaben der Organisation ab- oder auf `full` hochschalten kann, haben
+Organisation und Team zwei weitere Felder:
+
+- `payloadModeMax` – Obergrenze für diese und alle Ebenen darunter; die Stufen sind geordnet
+  `off` < `metadata` < `masked` < `full`. Ein Team-Maximum darf das der Organisation nicht
+  überschreiten.
+- `payloadModeLocked: true` – Teams/Keys darunter dürfen `payloadMode` **nicht setzen** (auch
+  nicht absenken); es gilt der Modus der sperrenden Ebene bzw. der darüber, sonst
+  `observe.payload`.
+
+Durchsetzung doppelt: beim **Schreiben** (Admin-API und GitOps, gemeinsame Regeln in
+`aigw_core::validate::bounds::check_payload`; `422` mit `violations[]` und Meldung
+`payloadMode: …`, beim Senken/Sperren oben `409` bzw. `?cascade=clamp`, siehe
+[08-admin-api.md](08-admin-api.md)) und zur **Laufzeit** (`KeyCtx::payload_mode`): von oben nach
+unten gilt der spezifischste Wert bis zur ersten gesperrten Ebene, das Ergebnis wird auf das
+engste `payloadModeMax` begrenzt – auch der globale Standard. So bleiben Altdaten, `?force=true`
+und direkte Datenbank-Importe wirkungslos. Setzen dürfen die Felder an der Organisation nur
+`admin`, am Team `admin`/`org-admin` (nie `team-admin`). Spalten: Migration
+`0006_payload_policy` (beide Dialekte).
+
 | Modus | Gespeichert |
 |---|---|
 | `off` (Standard) | nichts; der Proxy schneidet nichts mit |

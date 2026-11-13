@@ -71,9 +71,10 @@ AIGW-58). Verweise `S-xx` beziehen sich auf die dortigen Befunde.
   - Prüfmodell-Aufrufe (`provider: model`) zählen nicht gegen Limits des Keys (S-13) –
     eigene Kostenstelle/Modellgruppe mit Kapazitätsgrenzen verwenden.
 - Policy-Webhooks auf `failMode: closed` setzen und mit Secret signieren lassen.
-- Payload-Logging: `full` nur, wo nötig. Lesen dürfen nur `admin`/`auditor`. Ein
-  `team-admin` kann den Modus für eigene Keys ändern (S-09) – bei Compliance-Pflichten die
-  Audit-Einträge zu `payloadMode` überwachen.
+- Payload-Logging: `full` nur, wo nötig. Lesen dürfen nur `admin`/`auditor`. Bei
+  Compliance-Pflichten an der Organisation `payloadModeMax` setzen und den Modus mit
+  `payloadModeLocked: true` sperren (S-09, AIGW-79) – sonst kann ein `team-admin` den Modus für
+  eigene Keys innerhalb des Maximums ändern (auch abschalten).
 
 ## Audit
 

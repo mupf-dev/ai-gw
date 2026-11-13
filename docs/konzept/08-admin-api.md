@@ -514,6 +514,17 @@ eingeschränkt. Jede Operation fordert `Permission::Read`/`Write` auf einem `Tar
   unter bestehende Keys/Teams → `409` mit Liste, `?cascade=clamp` kürzt sie mit (Audit
   `clamp`); `?force=true` nur für den globalen `admin` (Audit `force`). Details:
   [11-limits-und-budgets.md](11-limits-und-budgets.md) §6a.
+- **Payload-Richtlinie (S-09, AIGW-79):** `payloadModeMax`/`payloadModeLocked` an Organisation
+  und Team laufen über dieselben Grenzprüfungen: `payloadMode` über dem engsten Maximum (oder
+  über dem eigenen), ein Team-Maximum über dem der Organisation oder ein gesetztes
+  `payloadMode` unter einer gesperrten Ebene → `422` (`violations[].field` = `payloadMode` bzw.
+  `payloadModeMax`, `detail` z. B. `Key "k1": payloadMode: full überschreitet die Obergrenze
+  payloadModeMax = masked von Organisation "acme"`). Senken/Sperren oben mit bestehenden
+  Werten darunter → `409`; `?cascade=clamp` kürzt auf das Maximum bzw. entfernt `payloadMode`
+  unter einer Sperre (Audit `clamp` je Objekt). Ändern von `payloadModeMax`/`payloadModeLocked`
+  eines Teams verlangt Schreibrecht auf Organisationsebene (`admin`, `org-admin`), sonst `403`
+  (`payloadModeMax: …`); die Organisation schreibt ohnehin nur `admin`. Zur Laufzeit wird
+  zusätzlich begrenzt ([07-beobachtung.md](07-beobachtung.md) §5).
 - `org-admin` ohne `organization` und `team-admin` ohne `team` sind wirkungslos.
 - Listen sind gefiltert (eingeschränkte Rollen sehen nur ihren Bereich, z. B. `GET /teams`
   nur das eigene Team); Einzelobjekte außerhalb des Bereichs ergeben `403`.

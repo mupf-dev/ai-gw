@@ -82,14 +82,46 @@ impl KeyCtx {
         self.expires_at.is_none_or(|e| now < e)
     }
 
-    /// Payload-Modus aus `payloadMode` (Key → Team → Organisation; F30), `None` = nicht gesetzt
-    /// (es gilt `observe.payload`).
-    pub fn payload_mode(&self) -> Option<crate::observe::PayloadMode> {
-        self.key
-            .spec
-            .payload_mode
-            .or_else(|| self.team.as_ref().and_then(|t| t.spec.payload_mode))
-            .or_else(|| self.organization.as_ref().and_then(|o| o.spec.payload_mode))
+    /// Wirksamer Payload-Modus (F30, S-09): Ausgangspunkt `default` (`observe.payload`), dann
+    /// von oben nach unten Organisation → Team → Key – das spezifischste gesetzte
+    /// `payloadMode` gilt, aber nur bis zur ersten Ebene mit `payloadModeLocked` (darunter wird
+    /// `payloadMode` ignoriert). Das Ergebnis wird auf das Minimum aller `payloadModeMax` von
+    /// Organisation und Team begrenzt. Die Prüfung beim Schreiben verhindert solche Werte
+    /// bereits; hier greift sie auch für Altdaten, `force` und Importe.
+    pub fn payload_mode(
+        &self,
+        default: crate::observe::PayloadMode,
+    ) -> crate::observe::PayloadMode {
+        let mut mode = default;
+        let mut cap = crate::observe::PayloadMode::Full;
+        let mut locked = false;
+        let levels = [
+            self.organization.as_ref().map(|o| {
+                (
+                    o.spec.payload_mode,
+                    o.spec.payload_mode_max,
+                    o.spec.payload_mode_locked,
+                )
+            }),
+            self.team.as_ref().map(|t| {
+                (
+                    t.spec.payload_mode,
+                    t.spec.payload_mode_max,
+                    t.spec.payload_mode_locked,
+                )
+            }),
+            Some((self.key.spec.payload_mode, None, false)),
+        ];
+        for (m, max, lock) in levels.into_iter().flatten() {
+            if !locked && let Some(m) = m {
+                mode = m;
+            }
+            if let Some(max) = max {
+                cap = cap.min(max);
+            }
+            locked |= lock;
+        }
+        mode.min(cap)
     }
 
     /// `exposeReasoning` (Key → Team → Organisation; F185), `None` = nicht gesetzt.

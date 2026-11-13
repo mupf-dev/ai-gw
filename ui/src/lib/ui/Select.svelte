@@ -25,6 +25,7 @@
     size = 'md',
     describedby,
     invalid = false,
+    disabled = false,
     class: cls = '',
     onchange,
   }: {
@@ -38,20 +39,22 @@
     size?: 'sm' | 'md';
     describedby?: string;
     invalid?: boolean;
+    /** Ganze Auswahl gesperrt (z. B. durch eine übergeordnete Richtlinie). */
+    disabled?: boolean;
     class?: string;
     onchange?: (v: string) => void;
   } = $props();
   const selected = $derived(items.find((i) => i.value === value));
 </script>
 
-<Select.Root type="single" bind:value {items} onValueChange={(v) => onchange?.(v)}>
+<Select.Root type="single" bind:value {items} {disabled} onValueChange={(v) => onchange?.(v)}>
   <Select.Trigger
     {id}
     aria-label={label}
     aria-describedby={describedby}
     aria-invalid={invalid || undefined}
     class={cx(
-      'inline-flex w-full min-w-0 items-center gap-2 rounded-md border border-line bg-surface text-left text-fg transition-colors hover:border-line-strong data-[state=open]:border-accent aria-invalid:border-danger',
+      'inline-flex w-full min-w-0 items-center gap-2 rounded-md border border-line bg-surface text-left text-fg transition-colors hover:border-line-strong data-[state=open]:border-accent aria-invalid:border-danger data-disabled:cursor-not-allowed data-disabled:opacity-60 data-disabled:hover:border-line',
       size === 'sm' ? 'h-7 px-2 text-sm' : 'h-9 px-3 text-base',
       cls,
     )}

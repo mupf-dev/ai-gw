@@ -20,6 +20,8 @@ metadata:
 spec:
   displayName: ACME GmbH
   budget: {amount: "5000", period: month, warnAtPercent: [80, 100]}
+  # Payload-Logging höchstens maskiert (S-09); payloadModeLocked: true sperrte Teams/Keys darunter.
+  payloadModeMax: masked
 ---
 apiVersion: aigw/v1alpha1
 kind: Team

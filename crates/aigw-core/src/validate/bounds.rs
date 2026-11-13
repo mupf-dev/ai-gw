@@ -19,6 +19,12 @@
 //!   des Kindes darin enthalten sein (Namen und Aliasse werden auf den kanonischen
 //!   Gruppennamen abgebildet). Eine leere Liste unten heißt „alles, was oben erlaubt ist“.
 //!
+//! - **Payload-Logging (S-09, F203):** `payloadMode` eines Objekts darf `payloadModeMax`
+//!   keiner Ebene darüber (und nicht das eigene) überschreiten; `payloadModeMax` eines Teams
+//!   nicht das der Organisation. Hat eine Ebene darüber `payloadModeLocked`, darf das Objekt
+//!   `payloadMode` nicht setzen. Zur Laufzeit wird zusätzlich begrenzt
+//!   ([`crate::snapshot::KeyCtx::payload_mode`]).
+//!
 //! Die Funktionen sind rein; Eltern und Modellnamen übergibt der Aufrufer.
 
 use std::collections::HashMap;
@@ -27,6 +33,7 @@ use std::fmt;
 use serde::Serialize;
 use utoipa::ToSchema;
 
+use crate::observe::PayloadMode;
 use crate::resource::{
     ApiKeySpec, Budget, BudgetPeriod, LimitMetric, LimitSpec, LimitWindow, ModelGroupSpec,
     OrganizationSpec, TeamSpec,
@@ -68,6 +75,12 @@ pub struct Node<'a> {
     pub budget: Option<&'a Budget>,
     /// Modellfreigaben (leer = keine Einschränkung durch diese Ebene).
     pub allowed_models: &'a [String],
+    /// `payloadMode` (F30).
+    pub payload_mode: Option<PayloadMode>,
+    /// `payloadModeMax` (S-09; Keys: `None`).
+    pub payload_mode_max: Option<PayloadMode>,
+    /// `payloadModeLocked` (S-09; Keys: `false`).
+    pub payload_mode_locked: bool,
 }
 
 impl<'a> Node<'a> {
@@ -79,6 +92,9 @@ impl<'a> Node<'a> {
             limits: &spec.limits,
             budget: spec.budget.as_ref(),
             allowed_models: &[],
+            payload_mode: spec.payload_mode,
+            payload_mode_max: spec.payload_mode_max,
+            payload_mode_locked: spec.payload_mode_locked,
         }
     }
 
@@ -90,6 +106,9 @@ impl<'a> Node<'a> {
             limits: &spec.limits,
             budget: spec.budget.as_ref(),
             allowed_models: &spec.allowed_models,
+            payload_mode: spec.payload_mode,
+            payload_mode_max: spec.payload_mode_max,
+            payload_mode_locked: spec.payload_mode_locked,
         }
     }
 
@@ -101,6 +120,9 @@ impl<'a> Node<'a> {
             limits: &spec.limits,
             budget: spec.budget.as_ref(),
             allowed_models: &spec.allowed_models,
+            payload_mode: spec.payload_mode,
+            payload_mode_max: None,
+            payload_mode_locked: false,
         }
     }
 
@@ -312,6 +334,111 @@ fn forbidding_parent<'a>(
     })
 }
 
+/// Engste `payloadModeMax` der Eltern: (Stufe, Elternteil).
+fn tightest_payload_max<'a>(parents: &[Node<'a>]) -> Option<(PayloadMode, Node<'a>)> {
+    parents
+        .iter()
+        .filter_map(|p| p.payload_mode_max.map(|m| (m, *p)))
+        .min_by_key(|(m, _)| *m)
+}
+
+/// Erster Elternteil mit `payloadModeLocked`.
+fn locking_parent<'a>(parents: &[Node<'a>]) -> Option<Node<'a>> {
+    parents.iter().copied().find(|p| p.payload_mode_locked)
+}
+
+/// Prüft nur die Payload-Regeln (S-09); Teil von [`check`].
+pub fn check_payload(node: &Node<'_>, parents: &[Node<'_>]) -> Vec<Violation> {
+    let mut out = Vec::new();
+    let mut push = |field: &str, message: String| {
+        out.push(Violation {
+            level: node.level,
+            name: node.name.to_owned(),
+            field: field.to_owned(),
+            message,
+        });
+    };
+    let parent_max = tightest_payload_max(parents);
+    if let Some(m) = node.payload_mode {
+        if let Some(p) = locking_parent(parents) {
+            push(
+                "payloadMode",
+                format!(
+                    "{} hat payloadMode gesperrt (payloadModeLocked) – hier nicht setzbar",
+                    p.describe()
+                ),
+            );
+        } else if let Some((max, p)) = parent_max
+            && m > max
+        {
+            push(
+                "payloadMode",
+                format!(
+                    "{} überschreitet die Obergrenze payloadModeMax = {} von {}",
+                    m.as_str(),
+                    max.as_str(),
+                    p.describe()
+                ),
+            );
+        } else if let Some(max) = node.payload_mode_max
+            && m > max
+        {
+            push(
+                "payloadMode",
+                format!(
+                    "{} überschreitet die eigene Obergrenze payloadModeMax = {}",
+                    m.as_str(),
+                    max.as_str()
+                ),
+            );
+        }
+    }
+    if let Some(own) = node.payload_mode_max
+        && let Some((max, p)) = parent_max
+        && own > max
+    {
+        push(
+            "payloadModeMax",
+            format!(
+                "{} überschreitet die Obergrenze payloadModeMax = {} von {}",
+                own.as_str(),
+                max.as_str(),
+                p.describe()
+            ),
+        );
+    }
+    out
+}
+
+/// Setzt `payloadMode`/`payloadModeMax` eines Objekts unterhalb von `parents` auf die Regeln
+/// der Eltern herab (gesperrt → `payloadMode` entfernen; sonst auf die Obergrenze kürzen).
+/// `true`, wenn sich etwas geändert hat.
+pub fn clamp_payload(
+    payload_mode: &mut Option<PayloadMode>,
+    payload_mode_max: Option<&mut Option<PayloadMode>>,
+    parents: &[Node<'_>],
+) -> bool {
+    let mut changed = false;
+    let parent_max = tightest_payload_max(parents).map(|(m, _)| m);
+    if let Some(slot) = payload_mode_max
+        && let (Some(own), Some(max)) = (*slot, parent_max)
+        && own > max
+    {
+        *slot = Some(max);
+        changed = true;
+    }
+    if payload_mode.is_some() && locking_parent(parents).is_some() {
+        *payload_mode = None;
+        changed = true;
+    } else if let (Some(m), Some(max)) = (*payload_mode, parent_max)
+        && m > max
+    {
+        *payload_mode = Some(max);
+        changed = true;
+    }
+    changed
+}
+
 /// Prüft `node` gegen alle übergeordneten Ebenen `parents` (z. B. Key gegen Team und
 /// Organisation) und liefert alle Verstöße.
 pub fn check(node: &Node<'_>, parents: &[Node<'_>], models: &ModelNames) -> Vec<Violation> {
@@ -363,6 +490,7 @@ pub fn check(node: &Node<'_>, parents: &[Node<'_>], models: &ModelNames) -> Vec<
             );
         }
     }
+    out.extend(check_payload(node, parents));
     out
 }
 
@@ -681,5 +809,82 @@ mod tests {
         assert!(matches!(r, Clamp::Impossible(_)));
         assert_eq!(key.allowed_models, ["claude"]);
         assert_eq!(key.limits[0].limit, 999);
+    }
+
+    #[test]
+    fn payload_mode_max_and_lock() {
+        use crate::observe::PayloadMode::{Full, Masked, Metadata, Off};
+        let m = models();
+        let org = OrganizationSpec {
+            payload_mode_max: Some(Masked),
+            ..OrganizationSpec::default()
+        };
+        let mut team = TeamSpec {
+            payload_mode_max: Some(Metadata),
+            ..TeamSpec::default()
+        };
+        let fields = |v: Vec<Violation>| v.into_iter().map(|v| v.field).collect::<Vec<_>>();
+        // Team: Maximum nicht über dem der Organisation, Modus nicht darüber
+        let o = [Node::organization("acme", &org)];
+        assert!(check(&Node::team("t", &team), &o, &m).is_empty());
+        team.payload_mode_max = Some(Full);
+        team.payload_mode = Some(Full);
+        assert_eq!(
+            fields(check(&Node::team("t", &team), &o, &m)),
+            ["payloadMode", "payloadModeMax"]
+        );
+        // eigenes Maximum (Organisation ohne Eltern)
+        let bad_org = OrganizationSpec {
+            payload_mode: Some(Full),
+            payload_mode_max: Some(Off),
+            ..OrganizationSpec::default()
+        };
+        let v = check_payload(&Node::organization("acme", &bad_org), &[]);
+        assert_eq!(v.len(), 1);
+        assert_eq!(
+            v[0].to_string(),
+            "Organisation \"acme\": payloadMode: full überschreitet die eigene Obergrenze \
+             payloadModeMax = off"
+        );
+        // Key: engstes Maximum aus Team und Organisation
+        team.payload_mode = None;
+        team.payload_mode_max = Some(Metadata);
+        let parents = [Node::team("t", &team), Node::organization("acme", &org)];
+        let mut key = ApiKeySpec {
+            payload_mode: Some(Masked),
+            ..ApiKeySpec::default()
+        };
+        let v = check(&Node::api_key("k", &key), &parents, &m);
+        assert_eq!(v.len(), 1);
+        assert!(
+            v[0].message
+                .contains("payloadModeMax = metadata von Team \"t\"")
+        );
+        key.payload_mode = Some(Off);
+        assert!(check(&Node::api_key("k", &key), &parents, &m).is_empty());
+        // Gesperrt: jeder gesetzte Wert ist ein Verstoß, auch ein niedrigerer
+        team.payload_mode_locked = true;
+        let parents = [Node::team("t", &team), Node::organization("acme", &org)];
+        let v = check(&Node::api_key("k", &key), &parents, &m);
+        assert_eq!(fields(v), ["payloadMode"]);
+        // clamp: gesperrt → entfernen; sonst auf das Maximum
+        assert!(clamp_payload(&mut key.payload_mode, None, &parents));
+        assert_eq!(key.payload_mode, None);
+        assert!(!clamp_payload(&mut key.payload_mode, None, &parents));
+        let mut t = TeamSpec {
+            payload_mode: Some(Full),
+            payload_mode_max: Some(Full),
+            ..TeamSpec::default()
+        };
+        assert!(clamp_payload(
+            &mut t.payload_mode,
+            Some(&mut t.payload_mode_max),
+            &o
+        ));
+        assert_eq!(
+            (t.payload_mode, t.payload_mode_max),
+            (Some(Masked), Some(Masked))
+        );
+        assert!(check(&Node::team("t", &t), &o, &m).is_empty());
     }
 }

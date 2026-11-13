@@ -498,6 +498,176 @@ async fn scenario(store: Store) {
         .ok(ok);
 }
 
+/// S-09/F203: `payloadModeMax`/`payloadModeLocked` an Organisation und Team; ein
+/// `team-admin` kann Payload-Logging nicht über die Vorgaben hinaus ändern.
+async fn payload_scenario(store: Store) {
+    let env = Env::start(store).await;
+    let created = StatusCode::CREATED;
+    let ok = StatusCode::OK;
+    let invalid = StatusCode::UNPROCESSABLE_ENTITY;
+    let forbidden = StatusCode::FORBIDDEN;
+    let org = |spec: Value| json!({"metadata": {"name": "acme"}, "spec": spec});
+
+    // Organisation: payloadMode über dem eigenen Maximum → 422, feldgenau
+    let (detail, v) = env
+        .post(
+            "admin",
+            "/organizations",
+            org(json!({"payloadMode": "full", "payloadModeMax": "masked"})),
+        )
+        .await
+        .problem(invalid, "validation-failed");
+    assert_eq!(v, ["acme/payloadMode"], "{detail}");
+    assert!(
+        detail.contains("payloadMode: full überschreitet die eigene Obergrenze"),
+        "{detail}"
+    );
+    env.post(
+        "admin",
+        "/organizations",
+        org(json!({"payloadModeMax": "masked"})),
+    )
+    .await
+    .ok(created);
+    // org-admin darf die Organisation (und damit ihre Payload-Richtlinie) nicht ändern
+    env.put(
+        "org",
+        "/organizations/acme",
+        org(json!({"payloadModeMax": "full"})),
+    )
+    .await
+    .problem(forbidden, "forbidden");
+
+    // Team: über dem Maximum der Organisation → 422
+    let (detail, v) = env
+        .post("org", "/teams", team("t2", json!({"payloadMode": "full"})))
+        .await
+        .problem(invalid, "validation-failed");
+    assert_eq!(v, ["t2/payloadMode"], "{detail}");
+    let (detail, v) = env
+        .post(
+            "org",
+            "/teams",
+            team("t2", json!({"payloadModeMax": "full"})),
+        )
+        .await
+        .problem(invalid, "validation-failed");
+    assert_eq!(v, ["t2/payloadModeMax"], "{detail}");
+    env.post("org", "/teams", team("platform", json!({})))
+        .await
+        .ok(created);
+
+    // team-admin: Key über dem Maximum → 422; darunter erlaubt
+    let (detail, v) = env
+        .post(
+            "team",
+            "/api-keys",
+            key("k1", "platform", json!({"payloadMode": "full"})),
+        )
+        .await
+        .problem(invalid, "validation-failed");
+    assert_eq!(v, ["k1/payloadMode"], "{detail}");
+    assert!(
+        detail.contains(
+            "payloadMode: full überschreitet die Obergrenze payloadModeMax = masked von \
+             Organisation \"acme\""
+        ),
+        "{detail}"
+    );
+    env.post(
+        "team",
+        "/api-keys",
+        key("k1", "platform", json!({"payloadMode": "off"})),
+    )
+    .await
+    .ok(created);
+    // team-admin kann die Team-Richtlinie nicht ändern
+    env.put(
+        "team",
+        "/teams/platform",
+        team("platform", json!({"payloadModeMax": "off"})),
+    )
+    .await
+    .problem(forbidden, "forbidden");
+
+    // org-admin sperrt das Team: bestehender Key mit payloadMode → 409, mit clamp entfernt
+    let locked = json!({"payloadMode": "metadata", "payloadModeLocked": true});
+    let (detail, v) = env
+        .put("org", "/teams/platform", team("platform", locked.clone()))
+        .await
+        .problem(StatusCode::CONFLICT, "conflict");
+    assert_eq!(v, ["k1/payloadMode"], "{detail}");
+    env.put(
+        "org",
+        "/teams/platform?cascade=clamp",
+        team("platform", locked.clone()),
+    )
+    .await
+    .ok(ok);
+    let k1 = env.get("/api-keys/k1").await;
+    assert!(k1["spec"].get("payloadMode").is_none(), "{k1}");
+    let t = env.get("/teams/platform").await;
+    assert_eq!(t["spec"]["payloadModeLocked"], true);
+    let clamped = env.audit("clamp").await;
+    assert!(clamped.iter().any(|(n, _)| n == "k1"), "{clamped:?}");
+
+    // Gesperrt: team-admin kann payloadMode weder setzen noch ändern (auch nicht senken)
+    for mode in ["off", "full"] {
+        let (detail, v) = env
+            .post(
+                "team",
+                "/api-keys",
+                key("k2", "platform", json!({"payloadMode": mode})),
+            )
+            .await
+            .problem(invalid, "validation-failed");
+        assert_eq!(v, ["k2/payloadMode"], "{detail}");
+        assert!(detail.contains("gesperrt"), "{detail}");
+    }
+    let mut k1_spec = k1["spec"].clone();
+    k1_spec["payloadMode"] = json!("off");
+    env.put(
+        "team",
+        "/api-keys/k1",
+        json!({"metadata": {"name": "k1"}, "spec": k1_spec}),
+    )
+    .await
+    .problem(invalid, "validation-failed");
+
+    // Organisation senkt das Maximum: Team darüber → 409, mit clamp gekürzt (+ Audit)
+    let (detail, v) = env
+        .put(
+            "admin",
+            "/organizations/acme",
+            org(json!({"payloadModeMax": "off"})),
+        )
+        .await
+        .problem(StatusCode::CONFLICT, "conflict");
+    assert_eq!(v, ["platform/payloadMode"], "{detail}");
+    env.put(
+        "admin",
+        "/organizations/acme?cascade=clamp",
+        org(json!({"payloadModeMax": "off"})),
+    )
+    .await
+    .ok(ok);
+    assert_eq!(
+        env.get("/teams/platform").await["spec"]["payloadMode"],
+        "off"
+    );
+    assert!(
+        env.audit("clamp")
+            .await
+            .iter()
+            .any(|(n, a)| n == "platform" && a["spec"]["payloadMode"] == "off"),
+    );
+}
+
+#[tokio::test]
+async fn payload_policy_sqlite() {
+    payload_scenario(Store::connect("sqlite::memory:").await.unwrap()).await;
+}
+
 #[tokio::test]
 async fn sqlite() {
     scenario(Store::connect("sqlite::memory:").await.unwrap()).await;
@@ -519,6 +689,19 @@ async fn postgres() {
     let store = Store::connect(&format!("{prefix}/{db}")).await.unwrap();
     scenario(store.clone()).await;
     store.close().await;
+    // S-09 in eigener Datenbank
+    let db2 = format!("{db}_payload");
+    sqlx::query(AssertSqlSafe(format!("CREATE DATABASE {db2}")))
+        .execute(&admin)
+        .await
+        .unwrap();
+    let store2 = Store::connect(&format!("{prefix}/{db2}")).await.unwrap();
+    payload_scenario(store2.clone()).await;
+    store2.close().await;
+    sqlx::query(AssertSqlSafe(format!("DROP DATABASE {db2} WITH (FORCE)")))
+        .execute(&admin)
+        .await
+        .unwrap();
     sqlx::query(AssertSqlSafe(format!("DROP DATABASE {db} WITH (FORCE)")))
         .execute(&admin)
         .await

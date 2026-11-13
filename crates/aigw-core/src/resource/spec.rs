@@ -208,6 +208,17 @@ pub struct OrganizationSpec {
     /// (`settings.exposeReasoning` muss zusätzlich an sein).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expose_reasoning: Option<bool>,
+    /// Obergrenze für `payloadMode` auf dieser und allen untergeordneten Ebenen (S-09, F203;
+    /// Stufen `off` < `metadata` < `masked` < `full`). Wird beim Schreiben geprüft und zur
+    /// Laufzeit erzwungen (wirksamer Modus = Minimum aus Modus und allen Obergrenzen).
+    /// Setzen dürfen sie nur `admin` (Organisation) bzw. `admin`/`org-admin` (Team).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_mode_max: Option<PayloadMode>,
+    /// `true`: Untergeordnete Ebenen dürfen `payloadMode` nicht setzen; es gilt der Modus
+    /// dieser Ebene (bzw. der darüber, sonst `observe.payload`), begrenzt durch die
+    /// Obergrenzen (S-09).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub payload_mode_locked: bool,
     /// Freie Metadaten.
     #[serde(default, skip_serializing_if = "Metadata::is_empty")]
     pub metadata: Metadata,
@@ -240,6 +251,17 @@ pub struct TeamSpec {
     /// (`settings.exposeReasoning` muss zusätzlich an sein).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expose_reasoning: Option<bool>,
+    /// Obergrenze für `payloadMode` auf dieser und allen untergeordneten Ebenen (S-09, F203;
+    /// Stufen `off` < `metadata` < `masked` < `full`). Wird beim Schreiben geprüft und zur
+    /// Laufzeit erzwungen (wirksamer Modus = Minimum aus Modus und allen Obergrenzen).
+    /// Setzen dürfen sie nur `admin` (Organisation) bzw. `admin`/`org-admin` (Team).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_mode_max: Option<PayloadMode>,
+    /// `true`: Untergeordnete Ebenen dürfen `payloadMode` nicht setzen; es gilt der Modus
+    /// dieser Ebene (bzw. der darüber, sonst `observe.payload`), begrenzt durch die
+    /// Obergrenzen (S-09).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub payload_mode_locked: bool,
     /// Freie Metadaten.
     #[serde(default, skip_serializing_if = "Metadata::is_empty")]
     pub metadata: Metadata,
