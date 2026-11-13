@@ -132,13 +132,16 @@ aktualisieren.
 - Ablage in eigener Tabelle `request_payload` (ID = Request-ID, `at`, `mode`, JSON):
   `{"request":{"bytes","body","truncated?","binary?","headers"},"response":{…}}`. Nicht-UTF-8 →
   `binary: true` ohne Inhalt.
-- **Maskierung** über den Trait `PayloadMasker` (Schnittstelle für die PII-Engine AIGW-37,
-  einsetzbar per `ObserveBuilder::masker`). Basis `RegexMasker`:
-  - E-Mail → `[EMAIL]`,
-  - Kreditkarte: 13–19 Ziffern (Leerzeichen/Bindestrich erlaubt), erste Ziffer 2–6, Luhn → `[CARD]`,
-  - IBAN: Ländercode + Prüfziffern + 11–30 Zeichen, mod 97 → `[IBAN]`.
-  Gierige Treffer werden von hinten verkürzt, bis die Prüfung passt (z. B.
-  „4111 1111 1111 1111 22“ → „[CARD] 22“).
+- **Maskierung** über den Trait `PayloadMasker` (austauschbar per `ObserveBuilder::masker`).
+  Standard ist `PiiMasker` mit der PII-Engine `aigw-pii` – dieselbe Erkennung wie das
+  Guardrail-Plugin `pii` (AIGW-37, [13-guardrails.md](13-guardrails.md) §2): E-Mail, Telefon,
+  IBAN (Länderlänge + mod 97), Kreditkarte (BIN + Luhn), Steuer-ID, SVNR, Ausweis/Pass,
+  IP-Adressen, Zugangsdaten in URLs und API-Keys werden zu `[EMAIL]`, `[PHONE]`, `[IBAN]`,
+  `[CARD]`, `[TAX_ID]`, `[SVNR]`, `[ID_CARD]`, `[PASSPORT]`, `[IP]`, `[URL_CREDENTIALS]`,
+  `[API_KEY]`. Gierige Treffer werden an Gruppengrenzen verkürzt
+  („4111 1111 1111 1111 22“ → „[CARD] 22“). Der frühere `RegexMasker` (nur E-Mail, Karte,
+  IBAN) ist entfallen; Falsch-Positive der breiteren Erkennung im Log sind akzeptiert
+  (User-Entscheidung 2026-11-13).
 - **Kürzen ohne Lecks:** Im Modus `masked` wird zuerst grob auf 4 × `payload_max_bytes` an einem
   harten Trenner (`"`, Zeilenumbruch, `,`, Klammern …) vorgekürzt – dort kann kein maskiertes
   Muster zerschnitten werden –, dann maskiert, dann auf die Zielgröße gekürzt.

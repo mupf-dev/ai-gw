@@ -35,6 +35,7 @@ pub mod auth;
 pub mod cache;
 mod endpoints;
 mod error;
+mod guard_host;
 mod handlers;
 pub mod limits;
 pub mod mock;
@@ -68,8 +69,9 @@ pub use routing::{GroupRoute, RoutesTask, SnapshotRoutes};
 
 pub use aigw_cache::ResponseCache;
 pub use aigw_core::config::{DEFAULT_MAX_AUDIO_BYTES, DEFAULT_MAX_BODY_BYTES};
-pub use aigw_plugins::PluginChains;
+pub use aigw_plugins::{IndexOptions, PluginChains, Registry as PluginRegistry};
 pub use cache::{CACHE_HEADER, CACHE_TTL_HEADER};
+pub use guard_host::GatewayHost;
 
 /// Antwort-Header: gewähltes Deployment (Name).
 pub const DEPLOYMENT_HEADER: &str = "x-aigw-deployment";

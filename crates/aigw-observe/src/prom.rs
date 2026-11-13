@@ -40,6 +40,9 @@ use crate::process::endpoint_name;
 /// Sammelwert für Label-Werte jenseits der Obergrenze.
 pub const OTHER: &str = "other";
 
+/// Höchstzahl der Serien von `aigw_guardrail_hits_total` (darüber Kategorie `other`).
+pub const MAX_GUARDRAIL_SERIES: usize = 500;
+
 /// Bucket-Grenzen von `aigw_request_duration_seconds` (Mikrosekunden).
 const DURATION_BOUNDS_US: &[u64] = &[
     50_000,
@@ -298,6 +301,9 @@ struct Admission {
     entries: usize,
 }
 
+/// Serie von `aigw_guardrail_hits_total`: (Plugin, Kategorie, Aktion).
+type GuardrailKey = (&'static str, Box<str>, &'static str);
+
 /// Prometheus-Metriken des Gateways.
 pub struct GatewayMetrics {
     max_model_groups: usize,
@@ -311,6 +317,8 @@ pub struct GatewayMetrics {
     inflight: AtomicI64,
     upstream_errors: [AtomicU64; ERROR_CLASSES.len()],
     counter_degraded: OnceLock<Box<dyn Fn() -> bool + Send + Sync>>,
+    /// `aigw_guardrail_hits_total{plugin,category,action}` (nur angefasst bei Erkennungen).
+    guardrails: Mutex<BTreeMap<GuardrailKey, u64>>,
 }
 
 impl fmt::Debug for GatewayMetrics {
@@ -345,6 +353,7 @@ impl GatewayMetrics {
             inflight: AtomicI64::new(0),
             upstream_errors: Default::default(),
             counter_degraded: OnceLock::new(),
+            guardrails: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -382,6 +391,9 @@ impl GatewayMetrics {
     #[inline]
     pub fn observe(&self, r: &RequestRecord) {
         self.inflight.fetch_sub(1, Ordering::Relaxed);
+        if !r.guardrails.is_empty() {
+            self.count_guardrails(r);
+        }
         // Upstream-Fehler: jeder fehlgeschlagene Versuch (Retries/Fallbacks) und ein Fehler
         // nach erfolgreichem letztem Versuch (im Stream).
         for class in r.attempts.iter().filter_map(|a| a.error) {
@@ -405,6 +417,25 @@ impl GatewayMetrics {
             }
         }
         self.insert(hash, r, class).observe(r);
+    }
+
+    /// Guardrail-Erkennungen zählen; Kategorien jenseits von [`MAX_GUARDRAIL_SERIES`]
+    /// Serien landen unter `other` (Kategorien externer Dienste sind nicht fest).
+    #[cold]
+    fn count_guardrails(&self, r: &RequestRecord) {
+        let mut m = self
+            .guardrails
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for h in &r.guardrails {
+            let key = (h.plugin, Box::<str>::from(h.category.as_str()), h.action);
+            let key = if m.contains_key(&key) || m.len() < MAX_GUARDRAIL_SERIES {
+                key
+            } else {
+                (h.plugin, OTHER.into(), h.action)
+            };
+            *m.entry(key).or_insert(0) += u64::from(h.count);
+        }
     }
 
     /// Langsamer Pfad: Serie anlegen (bzw. auf `other` abbilden) und veröffentlichen.
@@ -589,6 +620,27 @@ impl GatewayMetrics {
                 "aigw_upstream_errors_total{{class=\"{class}\"}} {}",
                 c.load(Ordering::Relaxed)
             );
+        }
+        {
+            let m = self
+                .guardrails
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !m.is_empty() {
+                header(
+                    out,
+                    "aigw_guardrail_hits_total",
+                    "counter",
+                    "Erkennungen der Guardrail-Plugins je Plugin, Kategorie und Aktion",
+                );
+                for ((plugin, category, action), n) in m.iter() {
+                    let _ = writeln!(
+                        out,
+                        "aigw_guardrail_hits_total{{plugin=\"{plugin}\",category=\"{}\",action=\"{action}\"}} {n}",
+                        escape(category)
+                    );
+                }
+            }
         }
         header(
             out,
@@ -900,6 +952,32 @@ mod tests {
             .filter_map(|l| l.rsplit(' ').next()?.parse::<u64>().ok())
             .sum();
         assert_eq!(total, 50);
+    }
+
+    #[test]
+    fn guardrail_hits() {
+        let m = GatewayMetrics::default();
+        let mut r = RequestRecord::new("r", WireFormat::OpenAiChat, 400);
+        m.request_started();
+        m.observe(&r);
+        let mut out = String::new();
+        m.render_prometheus(&mut out);
+        assert!(!out.contains("aigw_guardrail_hits_total"));
+        let hits = aigw_core::observe::GuardrailHits::default();
+        hits.add("pii", "email", "mask", 2);
+        hits.add("pii", "email", "mask", 1);
+        hits.add("prompt-filter", "injection", "reject", 1);
+        r.guardrails = hits.take();
+        m.request_started();
+        m.observe(&r);
+        let mut out = String::new();
+        m.render_prometheus(&mut out);
+        assert!(out.contains(
+            "aigw_guardrail_hits_total{plugin=\"pii\",category=\"email\",action=\"mask\"} 3\n"
+        ));
+        assert!(out.contains(
+            "aigw_guardrail_hits_total{plugin=\"prompt-filter\",category=\"injection\",action=\"reject\"} 1\n"
+        ));
     }
 
     #[test]

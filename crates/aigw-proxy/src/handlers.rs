@@ -310,6 +310,9 @@ async fn chat_inner(
         ingress(format),
         req_stream,
     );
+    if let Some(hits) = plugins.guardrail_hits() {
+        rec.set_guardrails(hits);
+    }
     let span = crate::trace::plugins_span("request", plugins.hooks(PluginPhase::Request));
     let mut req = match plugins
         .run_pre_plugins(req, headers, &mut info.plugin_headers)

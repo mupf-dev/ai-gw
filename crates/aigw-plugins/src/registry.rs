@@ -13,6 +13,7 @@ use serde_json::Value;
 
 use crate::binding::FailMode;
 use crate::builtin;
+use crate::host::{NoHost, PluginHost};
 use crate::plugin::Plugin;
 
 /// Standard-Zeitlimit asynchroner Haken, wenn weder Bindung noch Fabrik eines vorgeben.
@@ -57,13 +58,25 @@ impl Registry {
         Self::default()
     }
 
-    /// Registry mit den eingebauten Plugins (`header`, `request-transform`, `webhook`, `cache`).
+    /// Registry mit den eingebauten Plugins (`header`, `request-transform`, `webhook`, `cache`,
+    /// `pii`, `prompt-filter`, `content-safety`). `content-safety` hat hier keinen Gateway-Host
+    /// (Konfiguration prüfbar, Aufrufe schlagen fehl) – im Betrieb
+    /// [`Registry::with_builtin_host`].
     pub fn with_builtin() -> Self {
+        Self::with_builtin_host(Arc::new(NoHost::default()))
+    }
+
+    /// Wie [`Registry::with_builtin`], `content-safety` mit den Diensten des Gateways
+    /// (Zugangsdaten, HTTP mit SSRF-Regeln, Modellgruppen).
+    pub fn with_builtin_host(host: Arc<dyn PluginHost>) -> Self {
         let mut r = Self::new();
         r.register(Arc::new(builtin::cache::Factory));
         r.register(Arc::new(builtin::header::Factory));
         r.register(Arc::new(builtin::request_transform::Factory));
         r.register(Arc::new(builtin::webhook::Factory::default()));
+        r.register(Arc::new(builtin::pii::Factory));
+        r.register(Arc::new(builtin::prompt_filter::Factory));
+        r.register(Arc::new(builtin::content_safety::Factory::new(host)));
         r
     }
 

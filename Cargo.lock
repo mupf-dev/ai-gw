@@ -144,6 +144,7 @@ name = "aigw-observe"
 version = "0.1.0"
 dependencies = [
  "aigw-core",
+ "aigw-pii",
  "aigw-providers",
  "aigw-proxy",
  "aigw-store",
@@ -157,7 +158,6 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "hyper-util",
- "regex",
  "rustls",
  "serde",
  "serde_json",
@@ -170,16 +170,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "aigw-pii"
+version = "0.1.0"
+dependencies = [
+ "divan",
+]
+
+[[package]]
 name = "aigw-plugins"
 version = "0.1.0"
 dependencies = [
+ "aho-corasick",
  "aigw-core",
+ "aigw-pii",
  "aigw-webhook",
  "arc-swap",
  "bytes",
  "divan",
  "futures-util",
  "http",
+ "regex",
  "serde",
  "serde_json",
  "time",

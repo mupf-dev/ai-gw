@@ -21,6 +21,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use aigw_core::ir::{ApiError, ChatRequest, ChatResponse, StreamEvent};
+use aigw_core::observe::GuardrailHits;
 use aigw_core::snapshot::KeyCtx;
 use aigw_core::wire::WireFormat;
 use http::{HeaderMap, HeaderName, HeaderValue};
@@ -28,6 +29,27 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 /// Metadaten, die Plugins zwischen den Phasen einer Anfrage weitergeben (z. B. Zuordnungen
 /// einer Pseudonymisierung). JSON, damit Webhook- und spätere WASM-Plugins sie lesen können.
 pub type Meta = serde_json::Map<String, serde_json::Value>;
+
+/// Präfix interner [`Meta`]-Schlüssel der eingebauten Plugins (z. B. `aigw.pii`, die
+/// Pseudonym-Zuordnung mit Originalwerten). Solche Schlüssel verlassen **nie** das Gateway.
+pub const INTERNAL_META_PREFIX: &str = "aigw.";
+
+/// Sicht auf [`Meta`] für externe Plugins und Dienste (Webhook, später WASM): alle
+/// Schlüssel außer den internen (`aigw.*`, [`INTERNAL_META_PREFIX`]). Einzige Stelle, über die
+/// Meta nach außen gehen darf.
+pub trait MetaExt {
+    /// Kopie ohne interne Schlüssel.
+    fn external_view(&self) -> Meta;
+}
+
+impl MetaExt for Meta {
+    fn external_view(&self) -> Meta {
+        self.iter()
+            .filter(|(k, _)| !k.starts_with(INTERNAL_META_PREFIX))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+}
 
 /// Geboxte, `Send`-fähige Future mit Lebensdauer `'a`.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -154,6 +176,9 @@ pub struct CallInfo {
     pub model_group: Option<String>,
     /// Hat der Client gestreamt angefragt?
     pub stream: bool,
+    /// Sammelstelle für Guardrail-Erkennungen (Zähler ohne Inhalte, landen im
+    /// `RequestRecord` und in `aigw_guardrail_hits_total`).
+    pub guardrails: GuardrailHits,
 }
 
 impl CallInfo {
@@ -165,6 +190,7 @@ impl CallInfo {
             key: None,
             model_group: None,
             stream: false,
+            guardrails: GuardrailHits::default(),
         }
     }
 }
@@ -338,5 +364,25 @@ pub trait Plugin: Any + Send + Sync + 'static {
     /// `ChunkFlow::Reject` beendet den Stream mit Fehler; `Drop` wirkt wie `Continue`.
     fn on_stream_end(&self, _ctx: &mut ChunkCtx<'_>) -> Result<ChunkFlow, PluginError> {
         Ok(ChunkFlow::Continue)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_view_drops_internal_keys() {
+        let mut m = Meta::new();
+        m.insert(
+            "aigw.pii".into(),
+            serde_json::json!({"map": {"[EMAIL_1]": "bob@example.com"}}),
+        );
+        m.insert("aigw.".into(), serde_json::json!(1));
+        m.insert("aigwx".into(), serde_json::json!(2));
+        m.insert("team".into(), serde_json::json!("research"));
+        let v = m.external_view();
+        let keys: Vec<&str> = v.keys().map(String::as_str).collect();
+        assert_eq!(keys, ["aigwx", "team"]);
     }
 }

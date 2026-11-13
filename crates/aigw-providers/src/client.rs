@@ -100,6 +100,25 @@ impl UpstreamClient {
         Self::new(&ClientConfig::default())
     }
 
+    /// Sendet eine Anfrage und liest die Antwort vollständig (höchstens `max_bytes`) – für
+    /// Hilfsaufrufe außerhalb der Anbieter-Adapter (z. B. Content-Safety-Dienste, AIGW-38).
+    /// Die SSRF-Prüfung des Ziels ist Sache des Aufrufers.
+    pub async fn fetch(
+        &self,
+        req: UpstreamRequest,
+        max_bytes: usize,
+    ) -> Result<(http::StatusCode, Bytes), String> {
+        use http_body_util::BodyExt as _;
+        let resp = self.send(req).await.map_err(|e| e.to_string())?;
+        let status = resp.status();
+        let body = http_body_util::Limited::new(resp.into_body(), max_bytes)
+            .collect()
+            .await
+            .map_err(|e| e.to_string())?
+            .to_bytes();
+        Ok((status, body))
+    }
+
     /// Sendet eine Anfrage; das Ergebnis liegt vor, sobald die Antwort-Header da sind.
     pub(crate) async fn send(
         &self,

@@ -76,6 +76,7 @@ impl PluginRun {
                 key: auth.key.clone(),
                 model_group: model_group.map(str::to_owned),
                 stream,
+                guardrails: aigw_core::observe::GuardrailHits::default(),
             })
         });
         Self {
@@ -134,6 +135,11 @@ impl PluginRun {
             return None;
         }
         aigw_plugins::builtin::cache::policy_of(&self.chain)
+    }
+
+    /// Sammelstelle der Guardrail-Erkennungen (nur wenn die Anfrage Plugins hat).
+    pub(crate) fn guardrail_hits(&self) -> Option<aigw_core::observe::GuardrailHits> {
+        self.info.as_ref().map(|i| i.guardrails.clone())
     }
 
     /// Anzahl der Plugins mit Haken in `phase`.

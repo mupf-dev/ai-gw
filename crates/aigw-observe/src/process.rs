@@ -213,7 +213,7 @@ mod tests {
     use aigw_core::resource::new_id;
 
     use super::*;
-    use crate::mask::RegexMasker;
+    use crate::mask::PiiMasker;
 
     fn rec(at_ms: u64, latency: u64, team: Option<aigw_core::resource::Id>) -> RequestRecord {
         let mut r = RequestRecord::new(new_id().to_string(), WireFormat::OpenAiChat, 200);
@@ -248,7 +248,7 @@ mod tests {
         let p = Processor {
             payload_mode: PayloadMode::Masked,
             payload_max_bytes: 1024,
-            masker: Arc::new(RegexMasker::new()),
+            masker: Arc::new(PiiMasker::new()),
         };
         let batch = p.process(vec![a, b, c, d]);
         assert_eq!(batch.entries.len(), 4);

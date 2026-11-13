@@ -545,3 +545,76 @@ async fn ssrf_is_rejected() {
     let cfg = json!({"url": "https://hooks.example.org/x", "timeoutMs": 150});
     assert!(reg.validate("webhook", cfg.as_object().unwrap()).is_ok());
 }
+
+// ---------------------------------------------------------------------------------------------
+// Interne Meta-Schlüssel (`aigw.*`) verlassen das Gateway nie (Sicherheitsfix AIGW-37/61)
+// ---------------------------------------------------------------------------------------------
+
+/// Schreibt einen internen und einen externen Meta-Schlüssel.
+struct MetaWriter;
+
+impl aigw_plugins::Plugin for MetaWriter {
+    fn name(&self) -> &'static str {
+        "meta-writer"
+    }
+    fn phases(&self) -> aigw_plugins::Phases {
+        aigw_plugins::Phases::REQUEST
+    }
+    fn on_request<'a>(
+        &'a self,
+        ctx: &'a mut aigw_plugins::ReqCtx<'_>,
+    ) -> aigw_plugins::Hook<'a, aigw_plugins::Flow> {
+        ctx.meta
+            .insert("aigw.intern".into(), json!({"geheim": "nicht-raus"}));
+        ctx.meta.insert("app.hint".into(), json!("darf-raus"));
+        aigw_plugins::Hook::ok(aigw_plugins::Flow::Continue)
+    }
+}
+
+#[tokio::test]
+async fn internal_meta_never_leaves_the_gateway() {
+    let (wh, seen) = fake_webhook().await;
+    let pii = builtin::pii::Factory
+        .build(&json!({"categories": {"email": "pseudonymize"}}))
+        .unwrap();
+    let plugin = factory()
+        .build(&json!({
+            "url": format!("http://{wh}/hook/continue"),
+            "phases": ["request", "response"],
+            "secret": {"file": secret_file()},
+        }))
+        .unwrap();
+    let gw = gateway(vec![
+        Arc::new(Entry::new("pii", pii).with_order(1)),
+        Arc::new(Entry::new("meta", Arc::new(MetaWriter)).with_order(2)),
+        Arc::new(Entry::new("wh", plugin).with_order(3)),
+    ])
+    .await;
+    let r = post(gw, OAI, openai("Ich bin bob@example.com", false)).await;
+    assert_eq!(r.status, StatusCode::OK);
+    // Pseudonym in der Antwort zurückübersetzt (pii läuft in der Antwort-Phase nach dem Webhook).
+    assert!(r.text().contains("bob@example.com"), "{}", r.text());
+
+    let s = seen.lock().unwrap();
+    assert_eq!(s.calls.len(), 2, "Anfrage- und Antwort-Phase");
+    for (_, p) in &s.calls {
+        let meta = p["meta"].as_object().expect("externe Meta-Sicht");
+        assert_eq!(meta.get("app.hint"), Some(&json!("darf-raus")));
+        assert!(
+            meta.keys().all(|k| !k.starts_with("aigw.")),
+            "interner Meta-Schlüssel im Webhook-Payload: {meta:?}"
+        );
+        let text = p.to_string();
+        // Weder die Pseudonym-Zuordnung noch andere interne Daten.
+        assert!(!text.contains("aigw."), "{text}");
+        assert!(!text.contains("nicht-raus"), "{text}");
+    }
+    // Anfrage-Phase: der Webhook sieht nur den Platzhalter, nie den Originalwert. (In der
+    // Antwort-Phase laufen die Plugins in derselben Reihenfolge – `pii` hat dort schon
+    // zurückübersetzt; siehe offene Frage zur Reihenfolge der Antwort-Haken.)
+    let req = s.calls[0].1.to_string();
+    assert!(
+        req.contains("[EMAIL_1]") && !req.contains("bob@example.com"),
+        "{req}"
+    );
+}

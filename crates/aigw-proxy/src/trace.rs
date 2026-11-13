@@ -76,6 +76,7 @@ pub(crate) fn request_span_op(
         aigw.attempts = Empty,
         aigw.fallback = Empty,
         aigw.cache = Empty,
+        aigw.guardrail_hits = Empty,
     )
 }
 

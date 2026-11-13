@@ -44,7 +44,7 @@ use tokio::task::JoinHandle;
 
 pub use export::{ExportError, ExportFuture, JsonLinesExporter, LogExporter};
 pub use logger::RequestLogger;
-pub use mask::{PayloadMasker, RegexMasker};
+pub use mask::{PayloadMasker, PiiMasker};
 pub use metrics::{MetricsSnapshot, ObserveMetrics};
 pub use process::LogEntry;
 pub use prom::{GatewayMetrics, MetricsObserver};
@@ -84,7 +84,7 @@ impl ObserveBuilder {
         self
     }
 
-    /// Eigene Maskierung (PII-Engine, AIGW-37); Standard ist [`RegexMasker`].
+    /// Eigene Maskierung; Standard ist [`PiiMasker`] (PII-Engine, AIGW-37).
     pub fn masker(mut self, masker: Arc<dyn PayloadMasker>) -> Self {
         self.masker = Some(masker);
         self
@@ -111,7 +111,7 @@ impl ObserveBuilder {
             processor: Processor {
                 payload_mode: cfg.payload,
                 payload_max_bytes: cfg.payload_max_bytes,
-                masker: self.masker.unwrap_or_else(|| Arc::new(RegexMasker::new())),
+                masker: self.masker.unwrap_or_else(|| Arc::new(PiiMasker::new())),
             },
             metrics: Arc::clone(&metrics),
             batch_size: cfg.batch_size,

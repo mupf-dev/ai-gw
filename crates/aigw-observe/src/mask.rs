@@ -3,164 +3,47 @@
 
 //! Payload-Aufbereitung: sensible Header entfernen, kürzen, maskieren.
 //!
-//! [`PayloadMasker`] ist die Schnittstelle für die PII-Engine (AIGW-37). Bis dahin maskiert
-//! [`RegexMasker`] als Basis E-Mail-Adressen, Kreditkartennummern (Luhn-geprüft) und IBANs
-//! (Prüfziffer mod 97). Alles läuft im Writer, nie im Hot Path.
+//! [`PayloadMasker`] ist die Schnittstelle der Maskierung; Standard ist [`PiiMasker`] mit
+//! derselben PII-Engine wie das Guardrail-Plugin `pii` (`aigw-pii`, AIGW-37): E-Mail,
+//! Telefon, IBAN, Kreditkarte, Steuer-ID, SVNR, Ausweis/Pass, IP-Adressen, Zugangsdaten in
+//! URLs und API-Keys werden durch `[LABEL]` ersetzt. Alles läuft im Writer, nie im Hot Path.
 
 use std::borrow::Cow;
 use std::fmt;
 
 use aigw_core::observe::{PayloadMode, RawPayload, is_sensitive_header};
-use regex::Regex;
+use aigw_pii::Engine;
 use serde_json::{Map, Value, json};
 
-/// Maskiert personenbezogene Daten in Text (Schnittstelle für die PII-Engine, AIGW-37).
+/// Maskiert personenbezogene Daten in Text.
 pub trait PayloadMasker: Send + Sync + fmt::Debug + 'static {
     /// Liefert `text` mit ersetzten Fundstellen (unverändert ausgeliehen, wenn nichts fiel).
     fn mask<'a>(&self, text: &'a str) -> Cow<'a, str>;
 }
 
-/// Ersatztext für E-Mail-Adressen.
-pub const EMAIL_TOKEN: &str = "[EMAIL]";
-/// Ersatztext für Kreditkartennummern.
-pub const CARD_TOKEN: &str = "[CARD]";
-/// Ersatztext für IBANs.
-pub const IBAN_TOKEN: &str = "[IBAN]";
-
-/// Basis-Maskierung über reguläre Ausdrücke.
-#[derive(Debug, Clone)]
-pub struct RegexMasker {
-    email: Regex,
-    card: Regex,
-    iban: Regex,
+/// Maskierung über die PII-Engine: jede Fundstelle wird zu `[LABEL]` (`[EMAIL]`, `[CARD]`,
+/// `[IBAN]`, `[PHONE]`, `[API_KEY]` …).
+#[derive(Debug, Clone, Default)]
+pub struct PiiMasker {
+    engine: Engine,
 }
 
-impl Default for RegexMasker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl RegexMasker {
-    /// Erzeugt den Masker (Muster sind fest und geprüft).
-    #[allow(clippy::expect_used)] // feste, getestete Muster
+impl PiiMasker {
+    /// Alle Kategorien inkl. Entropie-Heuristik für API-Keys.
     pub fn new() -> Self {
-        Self {
-            email: Regex::new(
-                r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,24}",
-            )
-            .expect("E-Mail-Muster"),
-            // 13–19 Ziffern, optional mit Leerzeichen/Bindestrich gruppiert.
-            card: Regex::new(r"\b[0-9](?:[ \-]?[0-9]){12,18}\b").expect("Karten-Muster"),
-            // Ländercode, Prüfziffern, 11–30 alphanumerische Zeichen (optional in Gruppen).
-            iban: Regex::new(r"\b[A-Z]{2}[0-9]{2}(?:[ ]?[A-Z0-9]){11,30}\b").expect("IBAN-Muster"),
-        }
+        Self::default()
+    }
+
+    /// Mit eigener Engine (z. B. andere Kategorien oder Allowlist).
+    pub fn with_engine(engine: Engine) -> Self {
+        Self { engine }
     }
 }
 
-impl PayloadMasker for RegexMasker {
+impl PayloadMasker for PiiMasker {
     fn mask<'a>(&self, text: &'a str) -> Cow<'a, str> {
-        let t = self.email.replace_all(text, EMAIL_TOKEN);
-        let t = replace_validated(t, &self.iban, 15, is_valid_iban, IBAN_TOKEN);
-        replace_validated(t, &self.card, 13, is_card_number, CARD_TOKEN)
+        self.engine.mask_labels(text)
     }
-}
-
-/// Ersetzt Treffer von `re`, deren längster gültiger Anfang (≥ `min_alnum` Zeichen ohne
-/// Trenner) `valid` erfüllt. Gierige Treffer, die angrenzende Ziffern/Buchstaben mitnehmen
-/// (z. B. „4111 1111 1111 1111 2024“), werden so von hinten verkürzt.
-fn replace_validated<'a>(
-    text: Cow<'a, str>,
-    re: &Regex,
-    min_alnum: usize,
-    valid: fn(&str) -> bool,
-    token: &str,
-) -> Cow<'a, str> {
-    let mut out: Option<String> = None;
-    let mut last = 0;
-    for m in re.find_iter(&text) {
-        let s = m.as_str();
-        // Kandidaten-Enden: nach jedem alphanumerischen Zeichen, längste zuerst.
-        let compact_len = s.bytes().filter(u8::is_ascii_alphanumeric).count();
-        let mut hit = None;
-        let mut alnum = compact_len;
-        for (i, c) in s.char_indices().rev() {
-            if !c.is_ascii_alphanumeric() {
-                continue;
-            }
-            if alnum < min_alnum {
-                break;
-            }
-            let end = i + c.len_utf8();
-            if valid(&s[..end]) {
-                hit = Some(end);
-                break;
-            }
-            alnum -= 1;
-        }
-        if let Some(end) = hit {
-            let buf = out.get_or_insert_with(|| String::with_capacity(text.len()));
-            buf.push_str(&text[last..m.start()]);
-            buf.push_str(token);
-            last = m.start() + end;
-        }
-    }
-    match out {
-        None => text,
-        Some(mut buf) => {
-            buf.push_str(&text[last..]);
-            Cow::Owned(buf)
-        }
-    }
-}
-
-/// Luhn-Prüfung über die Ziffern von `s` (Trenner werden ignoriert); 13–19 Ziffern,
-/// erste Ziffer 2–6 (Kartennetze Amex, Visa, Mastercard, Discover …).
-pub fn is_card_number(s: &str) -> bool {
-    let digits: Vec<u32> = s.chars().filter_map(|c| c.to_digit(10)).collect();
-    if !(13..=19).contains(&digits.len()) || !matches!(digits.first(), Some(2..=6)) {
-        return false;
-    }
-    let sum: u32 = digits
-        .iter()
-        .rev()
-        .enumerate()
-        .map(|(i, &d)| {
-            if i % 2 == 1 {
-                let x = d * 2;
-                if x > 9 { x - 9 } else { x }
-            } else {
-                d
-            }
-        })
-        .sum();
-    sum.is_multiple_of(10)
-}
-
-/// IBAN-Prüfung (ISO 13616, mod 97 = 1); Leerzeichen werden ignoriert, 15–34 Zeichen.
-pub fn is_valid_iban(s: &str) -> bool {
-    let compact: Vec<u8> = s.bytes().filter(|b| *b != b' ').collect();
-    if !(15..=34).contains(&compact.len())
-        || !compact.iter().all(u8::is_ascii_alphanumeric)
-        || !compact[..2].iter().all(u8::is_ascii_uppercase)
-        || !compact[2..4].iter().all(u8::is_ascii_digit)
-    {
-        return false;
-    }
-    let mut rem: u32 = 0;
-    for &b in compact[4..].iter().chain(&compact[..4]) {
-        let v = match b {
-            b'0'..=b'9' => u32::from(b - b'0'),
-            b'A'..=b'Z' => u32::from(b - b'A') + 10,
-            _ => return false,
-        };
-        rem = if v >= 10 {
-            (rem * 100 + v) % 97
-        } else {
-            (rem * 10 + v) % 97
-        };
-    }
-    rem == 1
 }
 
 /// Zeichen, die in keinem maskierten Muster vorkommen: Kürzen an diesen Stellen kann keine
@@ -277,7 +160,7 @@ mod tests {
     use super::*;
 
     fn mask(s: &str) -> String {
-        RegexMasker::new().mask(s).into_owned()
+        PiiMasker::new().mask(s).into_owned()
     }
 
     #[test]
@@ -288,41 +171,37 @@ mod tests {
         );
         assert_eq!(mask("kein@ treffer"), "kein@ treffer");
         assert!(matches!(
-            RegexMasker::new().mask("nichts zu tun"),
+            PiiMasker::new().mask("nichts zu tun"),
             Cow::Borrowed(_)
         ));
     }
 
     #[test]
-    fn credit_cards_with_luhn() {
-        assert!(is_card_number("4111111111111111"));
-        assert!(is_card_number("4111 1111 1111 1111"));
-        assert!(is_card_number("378282246310005")); // Amex
-        assert!(!is_card_number("4111111111111112")); // Luhn falsch
-        assert!(!is_card_number("1111111111111117")); // kein Kartennetz
+    fn credit_cards_and_iban() {
         assert_eq!(mask("Karte 4111 1111 1111 1111."), "Karte [CARD].");
         assert_eq!(mask("Karte 4111-1111-1111-1111"), "Karte [CARD]");
         assert_eq!(mask("{\"cc\":5555555555554444}"), "{\"cc\":[CARD]}");
-        // Luhn-ungültig → bleibt.
         assert_eq!(mask("Nr 4111 1111 1111 1112"), "Nr 4111 1111 1111 1112");
-        // Angrenzende Ziffern: gieriger Treffer wird verkürzt.
         assert_eq!(mask("4111 1111 1111 1111 22"), "[CARD] 22");
-        // Zeitstempel (13 Ziffern, beginnt mit 1) wird nicht maskiert.
         assert_eq!(mask("ts 1731489600000"), "ts 1731489600000");
-    }
-
-    #[test]
-    fn iban_mod97() {
-        assert!(is_valid_iban("DE89370400440532013000"));
-        assert!(is_valid_iban("DE89 3704 0044 0532 0130 00"));
-        assert!(is_valid_iban("GB82WEST12345698765432"));
-        assert!(!is_valid_iban("DE89370400440532013001"));
         assert_eq!(
             mask("IBAN DE89 3704 0044 0532 0130 00, danke"),
             "IBAN [IBAN], danke"
         );
-        assert_eq!(mask("DE89370400440532013000 EUR"), "[IBAN] EUR");
         assert_eq!(mask("DE89370400440532013001"), "DE89370400440532013001");
+    }
+
+    #[test]
+    fn same_engine_as_guardrails() {
+        // Weitere Kategorien der PII-Engine (AIGW-37) wirken auch im Request-Log.
+        assert_eq!(
+            mask("Tel +49 30 1234567, Key ghp_1234567890abcdefghijABCDEFGHIJ123456, IP 10.0.0.7"),
+            "Tel [PHONE], Key [API_KEY], IP [IP]"
+        );
+        assert_eq!(
+            mask("{\"content\":\"Steuer-ID 86095742719\\n0171 1234567\"}"),
+            "{\"content\":\"Steuer-ID [TAX_ID]\\n[PHONE]\"}"
+        );
     }
 
     fn raw() -> RawPayload {
@@ -341,7 +220,7 @@ mod tests {
 
     #[test]
     fn sensitive_headers_never_logged() {
-        let m = RegexMasker::new();
+        let m = PiiMasker::new();
         for mode in [
             PayloadMode::Metadata,
             PayloadMode::Masked,
@@ -358,7 +237,7 @@ mod tests {
 
     #[test]
     fn modes() {
-        let m = RegexMasker::new();
+        let m = PiiMasker::new();
         let meta = build_payload(&raw(), PayloadMode::Metadata, 1 << 20, &m).unwrap();
         assert!(meta["request"].get("body").is_none());
         assert_eq!(
@@ -384,7 +263,7 @@ mod tests {
 
     #[test]
     fn truncation_and_binary() {
-        let m = RegexMasker::new();
+        let m = PiiMasker::new();
         let mut r = raw();
         r.response_body = "äöü".repeat(100).into();
         let p = build_payload(&r, PayloadMode::Full, 7, &m).unwrap();

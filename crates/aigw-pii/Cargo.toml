@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "aigw-pii"
+description = "PII-Erkennung von ai-gw (E-Mail, Telefon, IBAN, Kreditkarte, Steuer-ID, SVNR, Ausweis/Pass, IP, URL-Zugangsdaten, API-Keys) – ohne Abhängigkeiten, für Guardrails und Log-Maskierung"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+divan.workspace = true
+
+[[bench]]
+name = "scan"
+harness = false
+
+[lints]
+workspace = true

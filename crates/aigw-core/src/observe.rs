@@ -11,7 +11,7 @@
 
 use std::fmt;
 use std::net::IpAddr;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
@@ -137,6 +137,67 @@ pub struct Attempt {
     pub duration: Duration,
 }
 
+/// Erkennungen eines Guardrail-Plugins (AIGW-37/38) – nur Zähler, **nie** Inhalte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuardrailHit {
+    /// Plugin (`pii`, `prompt-filter`, `content-safety`).
+    pub plugin: &'static str,
+    /// Kategorie (z. B. `email`, `injection`, `hate`).
+    pub category: String,
+    /// Ausgeführte Aktion (`mask`, `redact`, `reject`, `pseudonymize`, `log-only`, `flag`).
+    pub action: &'static str,
+    /// Anzahl der Erkennungen.
+    pub count: u32,
+}
+
+/// Sammelstelle für Guardrail-Erkennungen einer Anfrage; Plugins (auch im Stream) und
+/// Recorder teilen sich einen Klon. Wird nur angelegt, wenn die Anfrage Plugins hat.
+#[derive(Debug, Clone, Default)]
+pub struct GuardrailHits(Arc<Mutex<Vec<GuardrailHit>>>);
+
+impl GuardrailHits {
+    /// Zählt `count` Erkennungen (gleiche Plugin/Kategorie/Aktion werden zusammengefasst).
+    pub fn add(&self, plugin: &'static str, category: &str, action: &'static str, count: u32) {
+        if count == 0 {
+            return;
+        }
+        let mut v = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match v
+            .iter_mut()
+            .find(|h| h.plugin == plugin && h.action == action && h.category == category)
+        {
+            Some(h) => h.count = h.count.saturating_add(count),
+            None => v.push(GuardrailHit {
+                plugin,
+                category: category.to_owned(),
+                action,
+                count,
+            }),
+        }
+    }
+
+    /// Bisherige Erkennungen (Kopie).
+    pub fn snapshot(&self) -> Vec<GuardrailHit> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Entnimmt alle Erkennungen.
+    pub fn take(&self) -> Vec<GuardrailHit> {
+        std::mem::take(
+            &mut *self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+}
+
 /// Kennzahlen einer abgeschlossenen Anfrage (ein Eintrag im Request-Log).
 ///
 /// Feldnamen abgestimmt mit dem Proxy-Hook (AIGW-14/15). Optionale Felder sind `None`, wenn
@@ -196,6 +257,8 @@ pub struct RequestRecord {
     /// Alle Versuche in Reihenfolge (leer, wenn kein Deployment angefragt wurde). Der letzte
     /// Versuch ist der, dessen Ergebnis der Client erhielt.
     pub attempts: Vec<Attempt>,
+    /// Erkennungen der Guardrail-Plugins (Zähler je Plugin/Kategorie/Aktion, ohne Inhalte).
+    pub guardrails: Vec<GuardrailHit>,
 }
 
 impl RequestRecord {
@@ -227,6 +290,7 @@ impl RequestRecord {
             client_request_id: None,
             payload: None,
             attempts: Vec::new(),
+            guardrails: Vec::new(),
         }
     }
 

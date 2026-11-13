@@ -189,7 +189,10 @@ async fn jsonl_export_without_store() {
     let mut r = rec();
     r.payload = Some(Box::new(RawPayload {
         request_headers: vec![("authorization".into(), "Bearer sk-geheim".into())],
-        request_body: "an carol@example.net".into(),
+        // Log-Maskierung über die PII-Engine (AIGW-37): alle Kategorien, nicht nur E-Mail.
+        request_body:
+            "an carol@example.net, Tel 0171 1234567, Key sk-proj-AbCdEf0123456789GhIjKl0123456789"
+                .into(),
         response_body: "ok".into(),
     }));
     let id = r.request_id.clone();
@@ -205,9 +208,12 @@ async fn jsonl_export_without_store() {
     assert_eq!(lines[0]["id"], serde_json::json!(id));
     assert_eq!(lines[0]["endpoint"], "openai-chat");
     assert_eq!(lines[0]["inputTokens"], 10);
-    assert_eq!(lines[0]["payload"]["request"]["body"], "an [EMAIL]");
+    assert_eq!(
+        lines[0]["payload"]["request"]["body"],
+        "an [EMAIL], Tel [PHONE], Key [API_KEY]"
+    );
     assert!(lines[1].get("payload").is_none());
-    assert!(!text.contains("geheim") && !text.contains("carol"));
+    assert!(!text.contains("geheim") && !text.contains("carol") && !text.contains("1234567"));
     std::fs::remove_dir_all(&dir).ok();
 }
 

@@ -52,7 +52,9 @@ use http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::plugin::{CallInfo, Flow, Hook, Phases, Plugin, PluginError, ReqCtx, RespCtx};
+use crate::plugin::{
+    CallInfo, Flow, Hook, Meta, MetaExt as _, Phases, Plugin, PluginError, ReqCtx, RespCtx,
+};
 use crate::registry::PluginFactory;
 
 /// Standard-Zeitlimit eines Webhook-Aufrufs.
@@ -270,6 +272,7 @@ impl Webhook {
         phase: &str,
         info: &CallInfo,
         headers: Option<&HeaderMap>,
+        meta: &Meta,
     ) -> Map<String, Value> {
         let key = info.key.as_deref();
         let mut m = Map::new();
@@ -296,6 +299,12 @@ impl Webhook {
             key.and_then(|k| k.organization.as_deref())
                 .map_or(Value::Null, object_ref),
         );
+        // Meta früherer Plugins – nur die externe Sicht: interne Schlüssel (`aigw.*`, z. B. die
+        // Pseudonym-Zuordnung des `pii`-Plugins mit Originalwerten) gehen nie hinaus.
+        let meta = meta.external_view();
+        if !meta.is_empty() {
+            m.insert("meta".into(), Value::Object(meta));
+        }
         if let Some(h) = headers
             && !self.include.is_empty()
         {
@@ -448,7 +457,8 @@ impl Plugin for Webhook {
 
     fn on_request<'a>(&'a self, ctx: &'a mut ReqCtx<'_>) -> Hook<'a, Flow> {
         Hook::future(async move {
-            let mut payload = self.context("request", ctx.info, Some(ctx.client_headers));
+            let mut payload =
+                self.context("request", ctx.info, Some(ctx.client_headers), &ctx.meta);
             let mut req =
                 serde_json::to_value(&ctx.request).map_err(|e| err(format!("Payload: {e}")))?;
             // Upstream-Header früherer Plugins können Zugangsdaten tragen.
@@ -484,7 +494,7 @@ impl Plugin for Webhook {
 
     fn on_response<'a>(&'a self, ctx: &'a mut RespCtx<'_>) -> Hook<'a, Flow> {
         Hook::future(async move {
-            let mut payload = self.context("response", ctx.info, None);
+            let mut payload = self.context("response", ctx.info, None, ctx.meta);
             payload.insert(
                 "response".into(),
                 serde_json::to_value(&ctx.response).map_err(|e| err(format!("Payload: {e}")))?,

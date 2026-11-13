@@ -11,12 +11,15 @@
 //! - [`PluginIndex`]/[`PluginChains`]: Ketten je (Org, Team, Key, Modellgruppe), beim
 //!   Snapshot-Aufbau vorberechnet, Hot Reload über [`PluginChains::spawn`].
 //! - [`Registry`]/[`PluginFactory`]: Plugin-Name → validierte Instanz; eingebaut sind
-//!   [`builtin::header`] und [`builtin::request_transform`].
+//!   [`builtin::header`], [`builtin::request_transform`] sowie die Guardrails
+//!   [`builtin::pii`], [`builtin::prompt_filter`] und [`builtin::content_safety`]
+//!   (AIGW-37/38, `docs/konzept/13-guardrails.md`); externe Dienste über [`PluginHost`].
 
 pub mod binding;
 pub mod builtin;
 mod chain;
 pub mod headers;
+mod host;
 mod index;
 mod plugin;
 mod registry;
@@ -24,10 +27,11 @@ mod stream;
 
 pub use binding::{Control, FailMode, Inherit};
 pub use chain::{Chain, ChunkMode, ChunkRunner, Entry};
+pub use host::{HttpCall, HttpReply, NoHost, PluginHost};
 pub use index::{ChainsTask, IndexOptions, PluginChains, PluginIndex};
 pub use plugin::{
-    BoxFuture, CallInfo, ChunkCtx, ChunkFlow, Flow, Hook, Meta, Phases, Plugin, PluginError,
-    ReqCtx, RespCtx, ResponseHeaders,
+    BoxFuture, CallInfo, ChunkCtx, ChunkFlow, Flow, Hook, INTERNAL_META_PREFIX, Meta, MetaExt,
+    Phases, Plugin, PluginError, ReqCtx, RespCtx, ResponseHeaders,
 };
 pub use registry::{DEFAULT_TIMEOUT, PluginFactory, Registry};
 pub use stream::{PluginStream, TextWindow, response_events};

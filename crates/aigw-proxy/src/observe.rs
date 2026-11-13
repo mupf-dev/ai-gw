@@ -23,7 +23,9 @@ use std::time::Instant;
 use aigw_core::ir::{
     ChatRequest, ChatResponse, Content, PartKind, StreamEvent, UpstreamError, Usage,
 };
-use aigw_core::observe::{RawPayload, RequestObserver, RequestRecord, error_type, gen_ai_system};
+use aigw_core::observe::{
+    GuardrailHits, RawPayload, RequestObserver, RequestRecord, error_type, gen_ai_system,
+};
 use aigw_core::wire::WireFormat;
 use axum::http::HeaderMap;
 use bytes::Bytes;
@@ -92,6 +94,8 @@ pub(crate) struct Recorder {
     admission: Option<crate::limits::Admission>,
     /// Antwort aus dem Cache (AIGW-39/40): Usage bleibt 0, Usage-Ereignisse zählen nicht.
     cache_hit: bool,
+    /// Erkennungen der Guardrail-Plugins (AIGW-37/38), geteilt mit der Plugin-Kette.
+    guardrails: Option<GuardrailHits>,
 }
 
 impl Recorder {
@@ -119,6 +123,7 @@ impl Recorder {
             span: Span::none(),
             admission: None,
             cache_hit: false,
+            guardrails: None,
         }
     }
 
@@ -166,6 +171,11 @@ impl Recorder {
             r.team_id = auth.team_id();
             r.organization_id = auth.organization_id();
         }
+    }
+
+    /// Sammelstelle der Guardrail-Erkennungen (nur bei Anfragen mit Plugins).
+    pub(crate) fn set_guardrails(&mut self, hits: GuardrailHits) {
+        self.guardrails = Some(hits);
     }
 
     /// Zulassung durch die Limits; wird in [`Recorder::finish`] abgeschlossen.
@@ -387,6 +397,13 @@ impl Recorder {
         r.usage_estimated = estimated;
         if let Some(a) = self.admission.take() {
             a.complete(&mut r);
+        }
+        if let Some(h) = self.guardrails.take() {
+            r.guardrails = h.take();
+            if !r.guardrails.is_empty() && !self.span.is_disabled() {
+                let n: u32 = r.guardrails.iter().map(|h| h.count).sum();
+                self.span.record("aigw.guardrail_hits", n);
+            }
         }
         if !self.span.is_disabled() {
             let s = &self.span;

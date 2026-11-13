@@ -154,9 +154,19 @@ fn serve(
         );
         let routes_task = routes.spawn(runtime_state.snapshot.clone());
         // Plugin-Ketten je (Org, Team, Key, Modellgruppe), Neuaufbau je config_version (AIGW-36).
+        // Guardrails mit externen Diensten (AIGW-38): Zugangsdaten aus dem Snapshot, SSRF-Regeln
+        // wie für Deployments, Prüfmodelle über das eigene Routing.
+        let guard_host = aigw_proxy::GatewayHost::with_defaults(
+            routes.clone(),
+            std::sync::Arc::clone(&runtime_state.counters),
+            Some(runtime_state.snapshot.clone()),
+            aigw_admin::UpstreamPolicy::from_config(&config.admin)?,
+        )
+        .map_err(|e| format!("Plugin-Host: {e}"))?;
+        let mut registry =
+            aigw_plugins::Registry::with_builtin_host(std::sync::Arc::new(guard_host));
         // Plugin `webhook` (AIGW-61) mit SSRF-Regeln aus `admin.*` und Credential-Referenzen
         // über den Snapshot.
-        let mut registry = aigw_plugins::Registry::with_builtin();
         registry.register(std::sync::Arc::new(
             aigw_plugins::builtin::webhook::Factory::new(
                 runtime_state.webhooks.clone(),

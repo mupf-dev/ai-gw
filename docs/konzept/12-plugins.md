@@ -235,8 +235,14 @@ spec:
  "key": {"id": "…", "name": "ci-key"}, "team": {"id": "…", "name": "research"},
  "organization": {"id": "…", "name": "acme"},
  "headers": {"x-client-app": "…"},
+ "meta": {"…": "…"},
  "request": { …IR-Anfrage (03-ir-und-formate.md)… }}
 ```
+
+`meta` (nur wenn nicht leer) ist die **externe Sicht** auf `Meta` früherer Plugins
+(`MetaExt::external_view`): Schlüssel mit Präfix `aigw.` (interne Daten eingebauter Plugins,
+z. B. `aigw.pii` mit der Pseudonym-Zuordnung samt Originalwerten, AIGW-37) werden zentral
+entfernt und verlassen das Gateway nie.
 
 In der Antwort-Phase steht statt `request` die IR-Antwort unter `response`. Nie enthalten:
 Gateway-Keys und andere Zugangsdaten-Header, Upstream-Header früherer Plugins
@@ -325,9 +331,9 @@ Plugins im Sub-µs-Bereich.
 ## 8. Andocken weiterer Plugins
 
 - **Limits/Budgets (AIGW-30/31):** eigener Schritt 4 vor `run_pre_plugins` (kein Plugin).
-- **PII/Guardrails (AIGW-37):** `on_request` (maskieren/ablehnen), `on_response` + `on_chunk`
-  mit `TextWindow`/Zurückhalten (Rückübersetzung über `Meta`), optional
-  `needs_buffered_output`.
+- **PII/Guardrails (AIGW-37/38):** umgesetzt als `pii`, `prompt-filter`, `content-safety`,
+  siehe [13-guardrails.md](13-guardrails.md); externe Dienste über `PluginHost`
+  (`Registry::with_builtin_host`).
 - **Cache (AIGW-39/40):** umgesetzt als eigener Pipeline-Schritt nach allen Pre-Plugins
   (nicht als `Respond`); das Plugin `cache` ohne Haken trägt nur die Richtlinie und nutzt die
   Vererbung der Bindungen. Begründung und Details: [14-cache.md](14-cache.md).

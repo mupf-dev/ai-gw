@@ -486,6 +486,9 @@ async fn responses_inner(
         WireFormat::OpenAiResponses,
         req_stream,
     );
+    if let Some(hits) = plugins.guardrail_hits() {
+        p.rec.set_guardrails(hits);
+    }
     let span = crate::trace::plugins_span("request", plugins.hooks(PluginPhase::Request));
     let pre = plugins
         .run_pre_plugins(req, headers, &mut p.info_mut().plugin_headers)

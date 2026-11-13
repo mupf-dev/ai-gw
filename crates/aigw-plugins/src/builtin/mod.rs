@@ -4,7 +4,11 @@
 //! Eingebaute Plugins.
 
 pub mod cache;
+pub mod content_safety;
+mod guard;
 pub mod header;
+pub mod pii;
+pub mod prompt_filter;
 pub mod request_transform;
 pub mod webhook;
 
