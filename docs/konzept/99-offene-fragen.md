@@ -317,3 +317,10 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 179. [x] OTLP-Retry darf Writer verzögern, Entkopplung später → Empfehlung übernommen
 180. [x] Collector-Test UID 10001 erst bei CI angehen → Empfehlung übernommen
 - F177: upstream.ca_dir – settings.caFile nur innerhalb (Pfad-Normalisierung, keine Symlinks nach außen)
+
+## AIGW-69 – Empfehlungen übernommen (2026-11-13)
+181. [x] Usage nach Live-Stream-Abbruch per Tokenizer (F46) → Empfehlung übernommen
+182. [x] Kein Header im Live-Stream, nur finish_reason/stop_reason → Empfehlung übernommen
+183. [x] Plugin-Bindungen je Scope (Org/Team-Admins, locked respektiert) → Folgeticket (Umsetzung nötig)
+184. [x] Reine Stream-Plugins im gepufferten Modus nach Antwort-Haken → Empfehlung übernommen
+- F183: Plugin-Bindungen mit RBAC-Ziel je Scope-Ebene (org-admin/team-admin), locked von oben respektiert
