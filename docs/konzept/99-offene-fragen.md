@@ -351,3 +351,9 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 196. [x] Team-/Org-Änderungen < 10 ms erst bei Bedarf → Empfehlung übernommen
 197. [x] degraded nur bei fehlschlagendem Abgleich, nicht bloßes Alter → Empfehlung übernommen
 198. [x] Postgres-Kaltstarttest (gestoppter Container) → in Phase 7 (AIGW-57) nachholen
+
+## AIGW-74 – Empfehlungen übernommen (2026-11-13)
+199. [x] cascade=remove → 409, wenn Freigabeliste leer würde → Empfehlung übernommen
+200. [x] Einladungen nicht per GitOps → Empfehlung übernommen
+201. [x] Höchstlaufzeit für bestehende Admin-Keys nur warnen (Log/UI) → Empfehlung übernommen (Umsetzung: UI-Hinweis in AIGW-77)
+202. [x] max_admin_key_lifetime als Dauer-Text → Empfehlung übernommen
