@@ -29,7 +29,7 @@ pub const SECRET_LEN: usize = 43;
 const BASE62: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 /// Ein frisch erzeugter Key.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GeneratedKey {
     /// Klartext (nur einmal herausgeben).
     pub secret: String,
@@ -37,6 +37,17 @@ pub struct GeneratedKey {
     pub prefix: String,
     /// SHA-256 des Klartexts.
     pub hash: KeyHash,
+}
+
+// AIGW-58: `Debug` ohne Klartext (Schutz vor versehentlichem Loggen).
+impl std::fmt::Debug for GeneratedKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GeneratedKey")
+            .field("prefix", &self.prefix)
+            .field("hash", &self.hash)
+            .field("secret", &"***")
+            .finish()
+    }
 }
 
 /// Erzeugt einen neuen API-Key.

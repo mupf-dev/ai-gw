@@ -1030,6 +1030,10 @@ impl StreamDecoder for OpenAiSseDecoder {
     fn is_done(&self) -> bool {
         self.done
     }
+
+    fn pending_bytes(&self) -> usize {
+        self.sse.pending_bytes()
+    }
 }
 
 #[cfg(test)]

@@ -245,7 +245,34 @@ impl fmt::Debug for AdminState {
 
 /// Router für alles unter `/admin` ohne Ressourcen-API (nur Version, OpenAPI, UI).
 pub fn router() -> Router {
-    Router::new().merge(api::router()).merge(ui::router())
+    Router::new()
+        .merge(api::router())
+        .merge(ui::router())
+        .layer(axum::middleware::map_response(security_headers))
+}
+
+/// AIGW-58: Sicherheits-Header für alle Antworten unter `/admin` (die UI setzt eigene CSP
+/// und Cache-Regeln; hier nur, was fehlt): kein Einbetten in Frames, kein MIME-Sniffing,
+/// kein Referrer, API-Antworten (JSON/Problem) nicht cachen und ohne aktive Inhalte.
+async fn security_headers(mut res: axum::response::Response) -> axum::response::Response {
+    use axum::http::{HeaderValue, header};
+    let h = res.headers_mut();
+    let defaults = [
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        (header::X_FRAME_OPTIONS, "DENY"),
+        (header::REFERRER_POLICY, "no-referrer"),
+        (header::CACHE_CONTROL, "no-store"),
+        (
+            header::CONTENT_SECURITY_POLICY,
+            "default-src 'none'; frame-ancestors 'none'",
+        ),
+    ];
+    for (name, value) in defaults {
+        if !h.contains_key(&name) {
+            h.insert(name, HeaderValue::from_static(value));
+        }
+    }
+    res
 }
 
 /// Router für alles unter `/admin` einschließlich der Ressourcen-API.
@@ -264,7 +291,10 @@ pub fn router_with(state: AdminState) -> Router {
             Arc::clone(&state.auth),
             auth::require_principal,
         ));
-    let api = protected.merge(session::public_router()).with_state(state);
+    let api = protected
+        .merge(session::public_router())
+        .with_state(state)
+        .layer(axum::middleware::map_response(security_headers));
     router().merge(api)
 }
 
@@ -272,4 +302,41 @@ pub fn router_with(state: AdminState) -> Router {
 pub fn openapi_json() -> Result<String, serde_json::Error> {
     use utoipa::OpenApi as _;
     serde_json::to_string_pretty(&ApiDoc::openapi())
+}
+
+#[cfg(test)]
+mod security_header_tests {
+    #![allow(clippy::unwrap_used)]
+
+    use axum::body::Body;
+    use axum::http::{Request, header};
+    use tower::ServiceExt as _;
+
+    /// AIGW-58: Sicherheits-Header auf API-Antworten; die UI behält ihre eigene CSP.
+    #[tokio::test]
+    async fn admin_responses_carry_security_headers() {
+        let get = |uri: &'static str| async move {
+            super::router()
+                .oneshot(Request::get(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+        };
+        let api = get("/admin/api/v1/version").await;
+        let h = api.headers();
+        assert_eq!(h[header::X_FRAME_OPTIONS], "DENY");
+        assert_eq!(h[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+        assert_eq!(h[header::CACHE_CONTROL], "no-store");
+        assert!(
+            h[header::CONTENT_SECURITY_POLICY]
+                .to_str()
+                .unwrap()
+                .contains("frame-ancestors 'none'")
+        );
+        let ui = get("/admin/").await;
+        let csp = ui.headers()[header::CONTENT_SECURITY_POLICY]
+            .to_str()
+            .unwrap();
+        assert!(csp.contains("script-src 'self'"), "{csp}");
+        assert_eq!(ui.headers()[header::X_FRAME_OPTIONS], "DENY");
+    }
 }

@@ -490,8 +490,11 @@ eingeschränkt. Jede Operation fordert `Permission::Read`/`Write` auf einem `Tar
 | `team-admin` (Team T) | T, Keys in T, Katalog; O nur, wenn die Zuweisung `organization` nennt | Keys und Plugin-Bindungen in T |
 | `viewer` | im Bereich (global: alles), Katalog | – |
 | `auditor` | wie `viewer`; dazu das Audit-Log (§5.10) und gespeicherte Payloads (§5.11) | – |
-| `gitops` (nur global, F55) | nur `config:export` | nur `config:apply` (auch Trockenlauf) – für Admin-API-Keys der CI; sonst keine Rechte, Listen bleiben leer |
+| `gitops` (nur global, F55) | nur `config:export` | nur `config:apply` (auch Trockenlauf) – für Admin-API-Keys der CI; sonst keine Rechte, Listen bleiben leer. **Achtung (AIGW-58):** `config:apply` schreibt auch `User` samt Rollen und OIDC-Verknüpfung – ein gitops-Key ist damit **admin-gleichwertig** und wie ein Admin-Key zu schützen |
 
+- **Geheimnis-Verweise in Plugin-Bindungen (AIGW-58):** Bindungen, deren `config` `secret`
+  oder `credential` enthält, schreibt nur ein globaler `admin` (`403` für eingeschränkte
+  Rollen) – Secrets/Zugangsdaten sind global und dürften sonst per eigenem `endpoint` abfließen.
 - **Plugin-Bindungen (F183):** Schreiben je Ebene – `global`/`model-group`: globaler `admin`;
   `organization` O: `InOrganization(O)`; `team` T: `InTeam(O, T)`; `api-key`: wie der Key (Team
   bzw. Organisation). Lesen weiterhin jede wirksame Rolle. Eingeschränkte Rollen dürfen eine

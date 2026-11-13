@@ -547,12 +547,22 @@ fn not_found(name: &str) -> StoreError {
 }
 
 /// Ergebnis des Anlegens: Datensatz und Klartext (nur einmal).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CreatedAdminApiKey {
     /// Gespeicherter Key.
     pub key: AdminApiKeyRecord,
     /// Klartext `sk-aigw-admin-…`.
     pub secret: String,
+}
+
+// AIGW-58: `Debug` ohne Klartext (Schutz vor versehentlichem Loggen).
+impl std::fmt::Debug for CreatedAdminApiKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CreatedAdminApiKey")
+            .field("key", &self.key)
+            .field("secret", &"***")
+            .finish()
+    }
 }
 
 impl Store {

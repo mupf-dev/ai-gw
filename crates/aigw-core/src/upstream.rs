@@ -265,7 +265,13 @@ impl UpstreamPolicy {
         if always_forbidden(ip) {
             return false;
         }
-        if let Some(name) = normalize_name(host)
+        // Namensregeln nie auf IP-Literale anwenden (`*.0.1` darf `10.0.0.1` nicht freigeben).
+        if host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<IpAddr>()
+            .is_err()
+            && let Some(name) = normalize_name(host)
             && self
                 .private
                 .iter()
@@ -323,9 +329,18 @@ fn canonical(ip: IpAddr) -> IpAddr {
                 return IpAddr::V4(v4);
             }
             let s = v6.segments();
-            if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
-                let [.., a, b, c, d] = v6.octets();
+            let o = v6.octets();
+            // NAT64 (RFC 6052) und – AIGW-58 – veraltetes IPv4-compatible `::a.b.c.d`
+            // (ohne `::` und `::1`, die als IPv6 geprüft werden).
+            if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0]
+                || (s[..6] == [0; 6] && !v6.is_unspecified() && !v6.is_loopback())
+            {
+                let [.., a, b, c, d] = o;
                 return IpAddr::V4(Ipv4Addr::new(a, b, c, d));
+            }
+            // 6to4 (`2002:AABB:CCDD::/48`, RFC 3056): eingebettete IPv4 prüfen (AIGW-58).
+            if s[0] == 0x2002 {
+                return IpAddr::V4(Ipv4Addr::new(o[2], o[3], o[4], o[5]));
             }
             IpAddr::V6(v6)
         }
@@ -378,6 +393,9 @@ fn is_private_ip(ip: IpAddr) -> bool {
         (Ipv6Addr::new(0xfec0, 0, 0, 0, 0, 0, 0, 0), 10), // Site-Local (veraltet)
         (Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0), 8), // Multicast
         (Ipv6Addr::new(0x0100, 0, 0, 0, 0, 0, 0, 0), 64), // Discard
+        // AIGW-58: Übergangsformate, deren Ziel-IPv4 sich nicht sicher prüfen lässt
+        (Ipv6Addr::new(0x64, 0xff9b, 1, 0, 0, 0, 0, 0), 48), // lokales NAT64 (RFC 8215)
+        (Ipv6Addr::new(0x2001, 0, 0, 0, 0, 0, 0, 0), 32),    // Teredo
     ];
     match canonical(ip) {
         ip @ IpAddr::V4(_) => V4.iter().any(|(n, l)| in_net(ip, IpAddr::V4(*n), *l)),
@@ -455,6 +473,13 @@ mod tests {
             "https://[::ffff:127.0.0.1]",
             "https://[::ffff:a9fe:a9fe]",
             "https://[64:ff9b::a00:1]",
+            // AIGW-58: IPv6-Übergangsformate
+            "https://[::7f00:1]",
+            "https://[::a9fe:a9fe]",
+            "https://[64:ff9b:1::a9fe:a9fe]",
+            "https://[2002:a9fe:a9fe::1]",
+            "https://[2002:7f00:1::]",
+            "https://[2001:0:4136:e378:8000:63bf:3fff:fdd2]",
             "https://2130706433",
             "https://0x7f.0.0.1",
             "https://127.1",
@@ -524,6 +549,24 @@ mod tests {
         assert!(!named.resolved_ip_allowed("evil.example", "10.1.2.3".parse().unwrap()));
         assert!(named.resolved_ip_allowed("evil.example", "1.1.1.1".parse().unwrap()));
         assert!(!named.resolved_ip_allowed("mcp.internal", "0.0.0.0".parse().unwrap()));
+        // AIGW-58: Übergangsformate nach der Auflösung
+        for bad in [
+            "::7f00:1",
+            "::a9fe:a9fe",
+            "64:ff9b:1::a9fe:a9fe",
+            "2002:a9fe:a9fe::",
+            "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+        ] {
+            assert!(!p.ip_allowed(bad.parse().unwrap()), "{bad}");
+        }
+        assert!(p.ip_allowed("2002:0808:0808::1".parse().unwrap())); // 6to4 mit 8.8.8.8
+        // Namensregeln greifen nie für IP-Literale.
+        let suffix = UpstreamPolicy::from_config(&AdminConfig {
+            allow_private_upstreams: vec!["*.0.1".into()],
+            ..AdminConfig::default()
+        })
+        .unwrap();
+        assert!(!suffix.resolved_ip_allowed("10.0.0.1", "10.0.0.1".parse().unwrap()));
     }
 
     #[test]

@@ -34,7 +34,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use aigw_core::ir::{ApiError, StreamEvent};
+use aigw_core::ir::{ApiError, Content, PartKind, StreamEvent};
 use aigw_pii::{Category, CategorySet, Engine, EngineConfig, EntropyConfig, Finding};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -564,6 +564,14 @@ impl Pii {
     }
 }
 
+/// AIGW-58: Lesbares Reasoning entfernen (nicht schwärzbar, siehe `on_chunk`).
+/// Verschlüsseltes Reasoning (`RedactedReasoning`) bleibt – der Client kann es nicht lesen.
+fn strip_reasoning(c: &mut Content) {
+    if let Content::Parts(parts) = c {
+        parts.retain(|p| !matches!(p.kind, PartKind::Reasoning { .. }));
+    }
+}
+
 impl Plugin for Pii {
     fn name(&self) -> &'static str {
         NAME
@@ -605,6 +613,9 @@ impl Plugin for Pii {
         let info = ctx.info;
         let mut st = Pseudo::load(ctx.meta);
         for choice in &mut ctx.response.choices {
+            if self.detects_output() {
+                strip_reasoning(&mut choice.message.content);
+            }
             let r = visit_mut(&mut choice.message.content, &mut |text: &mut String| {
                 if let Some(new) = self.process_output(text, &mut st, info)? {
                     *text = new;
@@ -639,8 +650,12 @@ impl Plugin for Pii {
             StreamEvent::ToolCallDelta { index, arguments } => {
                 self.on_delta(st, info, Block::Tool(*index), arguments)
             }
-            // Reasoning bleibt unverändert (Signaturen); alles andere beendet den Block.
+            // AIGW-58: Reasoning lässt sich nicht schwärzen (Signaturen der Anbieter) – bei
+            // Ausgabeprüfung wird es deshalb verworfen, sonst gingen PII ungeprüft hinaus.
             StreamEvent::ReasoningDelta { .. } | StreamEvent::ReasoningSignature { .. } => {
+                if self.detects_output() {
+                    return Ok(ChunkFlow::Drop);
+                }
                 (None, Ok(ChunkFlow::Continue))
             }
             _ => match self.flush(st, info) {

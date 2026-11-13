@@ -35,11 +35,35 @@ pub const SENSITIVE_HEADERS: &[&str] = &[
     "set-cookie",
 ];
 
-/// `true`, wenn der Header nie geloggt werden darf.
+/// Namensbestandteile, die auf Zugangsdaten hindeuten (AIGW-58: z. B. `x-goog-api-key`,
+/// `x-amz-security-token`, `x-csrf-token`, `x-aigw-signature`). Vergleich klein geschrieben.
+const SENSITIVE_HEADER_PARTS: &[&str] = &[
+    "auth",
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "api-key",
+    "apikey",
+    "api_key",
+    "signature",
+    "credential",
+    "session",
+    "cookie",
+    "subscription-key",
+];
+
+/// `true`, wenn der Header nie geloggt werden darf: feste Liste [`SENSITIVE_HEADERS`] plus
+/// Namen, die einen Bestandteil aus `SENSITIVE_HEADER_PARTS` enthalten.
 pub fn is_sensitive_header(name: &str) -> bool {
-    SENSITIVE_HEADERS
+    if SENSITIVE_HEADERS
         .iter()
         .any(|h| h.eq_ignore_ascii_case(name))
+    {
+        return true;
+    }
+    let lower = name.to_ascii_lowercase();
+    SENSITIVE_HEADER_PARTS.iter().any(|p| lower.contains(p))
 }
 
 /// Umfang des Payload-Loggings.
@@ -505,6 +529,19 @@ mod tests {
         assert!(is_sensitive_header("X-API-KEY"));
         assert!(is_sensitive_header("api-key"));
         assert!(!is_sensitive_header("content-type"));
+        // AIGW-58: Zugangsdaten anderer SDKs
+        for h in [
+            "x-goog-api-key",
+            "X-Amz-Security-Token",
+            "x-csrf-token",
+            "x-aigw-signature",
+            "x-collector-token",
+            "Ocp-Apim-Subscription-Key",
+        ] {
+            assert!(is_sensitive_header(h), "{h}");
+        }
+        assert!(!is_sensitive_header("x-request-id"));
+        assert!(!is_sensitive_header("user-agent"));
     }
 
     #[test]

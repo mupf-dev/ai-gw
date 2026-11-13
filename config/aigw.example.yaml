@@ -47,6 +47,8 @@ snapshot:
   # Datenbankausfall (F14); ohne Angabe aus
   # cache_file: "/var/lib/aigw/snapshot.cache"
   cache_write_interval_secs: 10
+  # Höchstalter des Caches für den Kaltstart (Sekunden, 0 = unbegrenzt; AIGW-58)
+  cache_max_age_secs: 86400
 
 counters:
   # local | postgres-sync | redis

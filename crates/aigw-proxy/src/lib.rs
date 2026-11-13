@@ -177,6 +177,7 @@ impl ProxyState {
 /// Router der Datenebene (`/v1/*`, `/healthz`).
 pub fn router(state: ProxyState) -> Router {
     let max_body = state.config.max_body_bytes;
+    let auth = Arc::clone(&state.auth);
     let state = Arc::new(state);
     Router::new()
         .route(
@@ -218,8 +219,35 @@ pub fn router(state: ProxyState) -> Router {
         .route("/v1/{*rest}", any(handlers::not_found))
         .route("/healthz", get(healthz))
         .layer(DefaultBodyLimit::max(max_body))
+        .layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&auth),
+            auth_gate,
+        ))
         .layer(axum::middleware::from_fn(request_id::middleware))
         .with_state(state)
+}
+
+/// AIGW-58: Schlüsselprüfung **vor** dem Einlesen des Bodys. Ohne gültigen Schlüssel wird der
+/// Body verworfen (nicht gelesen) – der Handler meldet dann wie gewohnt `401` im
+/// Eingangsformat. So können Anfragen ohne Schlüssel keinen Speicher bis `max_body_bytes`
+/// belegen. Der Handler prüft den Schlüssel erneut (eine Hash-Abfrage im Snapshot).
+pub(crate) async fn auth_gate(
+    axum::extract::State(auth): axum::extract::State<Arc<dyn Authenticator>>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    if auth
+        .authenticate(extract_api_key(req.headers()).as_ref())
+        .is_ok()
+    {
+        return next.run(req).await;
+    }
+    let (parts, _body) = req.into_parts();
+    next.run(axum::extract::Request::from_parts(
+        parts,
+        axum::body::Body::empty(),
+    ))
+    .await
 }
 
 /// Liveness: antwortet ohne Abhängigkeiten mit `200 ok`.

@@ -416,11 +416,27 @@ pub(crate) async fn audio_speech(
         Ok(speech) => p.stream(|rec| {
             let SpeechStream { content_type, body } = speech;
             ok_with(
-                &content_type,
+                speech_content_type(&content_type),
                 Body::from_stream(ObservedBytes::new(body, rec)),
             )
         }),
         Err(e) => p.fail(e),
+    }
+}
+
+/// AIGW-58: Content-Type des Anbieters nur übernehmen, wenn es Audio ist – sonst könnte ein
+/// Upstream z. B. `text/html` auf den (ggf. mit der Admin-UI geteilten) Ursprung bringen.
+fn speech_content_type(upstream: &str) -> &str {
+    let essence = upstream
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if essence.starts_with("audio/") || essence == "application/octet-stream" {
+        upstream
+    } else {
+        "application/octet-stream"
     }
 }
 
@@ -619,4 +635,17 @@ fn encode(
     let out = encode_responses_response(resp, echo, &mut losses)?;
     losses_log(&losses);
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::speech_content_type;
+
+    #[test]
+    fn speech_content_type_is_audio_only() {
+        assert_eq!(speech_content_type("audio/mpeg"), "audio/mpeg");
+        assert_eq!(speech_content_type("Audio/Wav; x=1"), "Audio/Wav; x=1");
+        assert_eq!(speech_content_type("text/html"), "application/octet-stream");
+        assert_eq!(speech_content_type(""), "application/octet-stream");
+    }
 }

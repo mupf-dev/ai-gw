@@ -56,12 +56,15 @@ impl SseParser {
     /// unvollständiger Rest wird zwischengespeichert.
     pub fn push_into(&mut self, chunk: &[u8], events: &mut Vec<SseEvent>) {
         if self.buf.is_empty() {
-            let used = self.lines(chunk, events);
+            let used = self.lines(chunk, events, 0);
             self.buf.extend_from_slice(&chunk[used..]);
         } else {
             let mut buf = std::mem::take(&mut self.buf);
+            // Der alte Rest enthält keinen Zeilenumbruch: erst ab den neuen Bytes suchen
+            // (AIGW-58: sonst quadratischer Aufwand bei langen Zeilen in kleinen Stücken).
+            let scanned = buf.len();
             buf.extend_from_slice(chunk);
-            let used = self.lines(&buf, events);
+            let used = self.lines(&buf, events, scanned);
             buf.drain(..used);
             self.buf = buf;
         }
@@ -72,16 +75,26 @@ impl SseParser {
         self.buf.len()
     }
 
+    /// Zwischengespeicherte Bytes insgesamt: unvollständige Zeile plus `data` eines noch
+    /// nicht abgeschlossenen Ereignisses (AIGW-58: Grenze gegen Speicher-DoS durch einen
+    /// Upstream, der nie eine Leerzeile bzw. einen Zeilenumbruch schickt).
+    pub fn pending_bytes(&self) -> usize {
+        self.buf.len() + self.data.as_ref().map_or(0, String::len)
+    }
+
     /// Verarbeitet alle vollständigen Zeilen in `data`; liefert die Anzahl verbrauchter Bytes.
-    fn lines(&mut self, data: &[u8], events: &mut Vec<SseEvent>) -> usize {
+    /// `from`: Ab hier nach dem ersten Zeilenumbruch suchen (davor gibt es keinen).
+    fn lines(&mut self, data: &[u8], events: &mut Vec<SseEvent>, from: usize) -> usize {
         let mut start = 0;
-        while let Some(rel) = data[start..].iter().position(|&b| b == b'\n') {
-            let end = start + rel;
+        let mut search = from;
+        while let Some(rel) = data[search..].iter().position(|&b| b == b'\n') {
+            let end = search + rel;
             let mut line = &data[start..end];
             if line.last() == Some(&b'\r') {
                 line = &line[..line.len() - 1];
             }
             start = end + 1;
+            search = start;
             match std::str::from_utf8(line) {
                 Ok(s) => self.line(s, events),
                 Err(_) => self.line(&String::from_utf8_lossy(line), events),
@@ -125,6 +138,15 @@ impl SseParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_bytes_counts_line_and_open_event() {
+        let mut p = SseParser::new();
+        assert!(p.push(b"data: abc\ndata: de").is_empty());
+        assert_eq!(p.pending_bytes(), 3 + 8);
+        assert_eq!(p.push(b"f\n\n").len(), 1);
+        assert_eq!(p.pending_bytes(), 0);
+    }
 
     #[test]
     fn parses_split_frames() {

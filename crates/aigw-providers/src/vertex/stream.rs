@@ -239,4 +239,8 @@ impl StreamDecoder for GeminiStreamDecoder {
     fn is_done(&self) -> bool {
         self.done
     }
+
+    fn pending_bytes(&self) -> usize {
+        self.sse.pending_bytes()
+    }
 }

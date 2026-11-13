@@ -360,5 +360,9 @@ pub(crate) fn ok_with(content_type: &str, body: Body) -> Response {
     if let Ok(v) = HeaderValue::from_str(content_type) {
         res.headers_mut().insert(header::CONTENT_TYPE, v);
     }
+    res.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
     res
 }

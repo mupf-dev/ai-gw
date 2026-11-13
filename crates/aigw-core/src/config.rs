@@ -325,6 +325,10 @@ pub struct SnapshotConfig {
     pub cache_file: Option<PathBuf>,
     /// Mindestabstand (Sekunden) zwischen zwei Schreibvorgängen des Caches.
     pub cache_write_interval_secs: u64,
+    /// Höchstalter (Sekunden) des Caches für den Kaltstart (AIGW-58): ältere Caches werden
+    /// verworfen, damit inzwischen gesperrte oder widerrufene Keys nicht wieder gelten.
+    /// `0` = unbegrenzt.
+    pub cache_max_age_secs: u64,
 }
 
 impl Default for SnapshotConfig {
@@ -336,6 +340,7 @@ impl Default for SnapshotConfig {
             stale_after_secs: 300,
             cache_file: None,
             cache_write_interval_secs: 10,
+            cache_max_age_secs: 86_400,
         }
     }
 }

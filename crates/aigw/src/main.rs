@@ -412,11 +412,16 @@ async fn bootstrap_token(
         }
         _ => {
             let (token, secret) = aigw_admin::BootstrapToken::generate()?;
+            // AIGW-58: Das Token nicht über `tracing` ausgeben – Logs landen oft in zentralen
+            // Systemen (OTLP, Log-Aggregation). Nur einmal direkt auf stderr.
             tracing::warn!(
-                token = %secret,
-                "Admin-API: Bootstrap-Token erzeugt (gilt nur für diesen Prozess; \
-                 fest vorgeben über {BOOTSTRAP_TOKEN_ENV})"
+                "Admin-API: Bootstrap-Token erzeugt und einmalig auf stderr ausgegeben (gilt nur \
+                 für diesen Prozess; fest vorgeben über {BOOTSTRAP_TOKEN_ENV})"
             );
+            #[allow(clippy::print_stderr)]
+            {
+                eprintln!("aigw: Bootstrap-Token (Admin-API, nur dieser Prozess): {secret}");
+            }
             Ok(Some(token))
         }
     }

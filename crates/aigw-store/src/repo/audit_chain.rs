@@ -332,6 +332,25 @@ impl Store {
         let unchained = Q::new("SELECT COUNT(*) FROM audit_log WHERE seq IS NULL")
             .fetch_i64(&self.pool)
             .await?;
+        // AIGW-58: Seit der Hash-Kette schreibt jeder Weg über `append`. Unverkettete Einträge
+        // nach dem ersten verketteten sind deshalb eingeschoben (direkter DB-Zugriff).
+        let late = Q::new(
+            "SELECT COUNT(*) FROM audit_log WHERE seq IS NULL
+             AND at >= (SELECT MIN(at) FROM audit_log WHERE seq IS NOT NULL)",
+        )
+        .fetch_i64(&self.pool)
+        .await?;
+        if late > 0 {
+            push(
+                &mut issues,
+                0,
+                None,
+                format!(
+                    "{late} Einträge ohne Kettenfelder nach Beginn der Hash-Kette \
+                     (am Gateway vorbei eingefügt?)"
+                ),
+            );
+        }
         Ok(AuditChainReport {
             ok: issues.is_empty(),
             checked,

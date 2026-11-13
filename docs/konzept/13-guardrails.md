@@ -127,7 +127,9 @@ Kategorienamen: `email`, `phone`, `iban`, `creditCard`, `taxIdDe`, `socialSecuri
 - **Richtung:** je Plugin und je Kategorie überschreibbar. `pseudonymize` braucht `input`
   (sonst Konfigurationsfehler); in der Ausgabe bedeutet es Rückübersetzung.
 - **Geprüfte Stellen:** alle Nachrichten (auch System), Text, Ablehnungen, Tool-Argumente,
-  Tool-Ergebnisse. **Reasoning bleibt unberührt** (Signaturen der Anbieter würden ungültig).
+  Tool-Ergebnisse. **Reasoning bleibt unberührt** (Signaturen der Anbieter würden ungültig);
+  AIGW-58: Ist die Ausgabeprüfung aktiv, wird lesbares Reasoning deshalb **verworfen**
+  (Stream) bzw. aus der Antwort entfernt – sonst gingen PII darin ungeprüft hinaus.
 - **Zuordnung** Platzhalter → Original liegt nur im Speicher der Anfrage (`Meta`, Schlüssel
   `aigw.pii`) und wird nie geloggt. Schlüssel mit Präfix `aigw.` filtert
   `MetaExt::external_view` zentral heraus – sie gehen nie an externe Plugins (Webhook-Payload
@@ -229,8 +231,10 @@ config:
 
 - **Prompt-Vorlage** (`promptTemplate`): Platzhalter `{{role}}` (`User` bzw. `Agent`) und
   `{{conversation}}` (Pflicht). Standard: Llama-Guard-3-Kategorien S1–S14.
-- **Geprüfter Text:** Eingabe = Texte der Rollen `roles`, verbunden, die letzten
-  `maxChars` Bytes; Ausgabe = Antworttext, ebenso begrenzt.
+- **Geprüfter Text:** Eingabe = Texte der Rollen `roles`, verbunden; Ausgabe = Antworttext.
+  Geprüft wird der **ganze** Text in Fenstern zu `maxChars` Bytes (10 % Überlappung,
+  parallel, höchstens 16 Fenster; länger → Plugin-Fehler, wirkt nach `failMode`).
+  AIGW-58: früher nur die letzten `maxChars` Bytes – umgehbar durch Auffüllen.
 - **Zugangsdaten:** nie in der Plugin-Konfiguration (`deny_unknown_fields` weist z. B.
   `apiKey` ab), nur der Name einer `ProviderCredential`. Aufgelöst wird **zur Laufzeit** aus
   dem aktuellen Snapshot (`Snapshot::credential_data`), Rotation wirkt sofort.

@@ -16,6 +16,12 @@ const FORBIDDEN_UPSTREAM: &[&str] = &[
     "x-api-key",
     "x-goog-api-key",
     "cookie",
+    // AIGW-58: Herkunftsangaben nicht fälschbar
+    "forwarded",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-real-ip",
     "host",
     "content-length",
     "content-type",
@@ -44,7 +50,17 @@ const PROTECTED_RESPONSE: &[&str] = &[
     "transfer-encoding",
     "connection",
     "x-aigw-request-id",
+    // AIGW-58: Sicherheits- und Limit-Header des Gateways nicht fälschbar
+    "set-cookie",
+    "strict-transport-security",
+    "content-security-policy",
+    "x-frame-options",
+    "x-content-type-options",
+    "retry-after",
 ];
+
+/// Präfixe geschützter Antwort-Header (CORS, Limit-Angaben des Gateways; AIGW-58).
+const PROTECTED_RESPONSE_PREFIX: &[&str] = &["access-control-", "x-ratelimit-", "ratelimit"];
 
 /// Darf ein Plugin den Header **nicht** an den Upstream senden?
 pub fn is_forbidden_upstream(name: &HeaderName) -> bool {
@@ -54,7 +70,8 @@ pub fn is_forbidden_upstream(name: &HeaderName) -> bool {
 
 /// Ist der Antwort-Header vor Plugins geschützt?
 pub fn is_protected_response(name: &HeaderName) -> bool {
-    PROTECTED_RESPONSE.contains(&name.as_str())
+    let n = name.as_str();
+    PROTECTED_RESPONSE.contains(&n) || PROTECTED_RESPONSE_PREFIX.iter().any(|p| n.starts_with(p))
 }
 
 #[cfg(test)]
@@ -83,5 +100,18 @@ mod tests {
         assert!(!is_protected_response(&HeaderName::from_static(
             "x-aigw-deployment"
         )));
+        // AIGW-58
+        for h in [
+            "set-cookie",
+            "access-control-allow-origin",
+            "x-ratelimit-remaining-requests",
+            "retry-after",
+            "strict-transport-security",
+        ] {
+            assert!(is_protected_response(&HeaderName::from_static(h)), "{h}");
+        }
+        for h in ["forwarded", "x-forwarded-for", "x-real-ip"] {
+            assert!(is_forbidden_upstream(&HeaderName::from_static(h)), "{h}");
+        }
     }
 }

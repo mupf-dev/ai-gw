@@ -127,6 +127,8 @@ pub fn default_propagation(kind: ProviderKind) -> bool {
 const MAX_ERROR_BODY: usize = 64 * 1024;
 /// Größte nicht gestreamte Antwort.
 const MAX_RESPONSE_BODY: usize = 64 * 1024 * 1024;
+/// Höchstgröße eines einzelnen, noch unvollständigen Stream-Ereignisses (AIGW-58).
+const MAX_STREAM_EVENT: usize = 16 * 1024 * 1024;
 
 /// Ein Deployment: Adapter + Client + Zeitlimits.
 #[derive(Clone)]
@@ -767,6 +769,19 @@ impl Stream for UpstreamEvents {
                     if let Ok(data) = frame.into_data() {
                         this.decoder.push(&data, &mut this.scratch);
                         this.flush_scratch();
+                        if this.decoder.pending_bytes() > MAX_STREAM_EVENT {
+                            this.fail(
+                                ApiError::new(
+                                    ErrorKind::BadGateway,
+                                    format!(
+                                        "Anbieter-Stream: Ereignis größer als \
+                                         {MAX_STREAM_EVENT} Bytes"
+                                    ),
+                                )
+                                .with_code("upstream_stream_too_large"),
+                            );
+                            continue;
+                        }
                     }
                     let next = this.total.min(Instant::now() + this.idle);
                     this.timer.as_mut().reset(next);

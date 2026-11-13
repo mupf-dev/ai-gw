@@ -252,13 +252,23 @@ pub struct ApiKey {
 }
 
 /// Ergebnis der Key-Erzeugung: der Klartext wird **nur hier** einmalig herausgegeben.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+#[derive(Clone, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedApiKey {
     /// Gespeicherter Key.
     pub key: ApiKey,
     /// Klartext `sk-aigw-…` (nicht wiederherstellbar).
     pub secret: String,
+}
+
+// AIGW-58: `Debug` ohne Klartext (Schutz vor versehentlichem Loggen).
+impl fmt::Debug for CreatedApiKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CreatedApiKey")
+            .field("key", &self.key)
+            .field("secret", &"***")
+            .finish()
+    }
 }
 
 #[cfg(test)]

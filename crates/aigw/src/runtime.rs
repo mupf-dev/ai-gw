@@ -249,6 +249,15 @@ async fn cold_start_from_cache(
     let age = std::time::SystemTime::now()
         .duration_since(cached.saved_at)
         .unwrap_or_default();
+    if cache_too_old(age, config.snapshot.cache_max_age_secs) {
+        return Err(format!(
+            "Datenbank nicht erreichbar und Snapshot-Cache zu alt ({} s > \
+             snapshot.cache_max_age_secs {}): {db_error}",
+            age.as_secs(),
+            config.snapshot.cache_max_age_secs
+        )
+        .into());
+    }
     tracing::warn!(
         error = %db_error,
         config_version = cached.snapshot.version,
@@ -260,6 +269,12 @@ async fn cold_start_from_cache(
     let store = Store::connect_lazy_with(&config.store).await?;
     let reloader = Reloader::from_cache(store.clone(), Arc::clone(keyring), cached, opts);
     Ok((store, reloader))
+}
+
+/// AIGW-58: Ein Cache älter als `max_age_secs` (`0` = unbegrenzt) taugt nicht für den
+/// Kaltstart – sonst gälten inzwischen gesperrte/widerrufene Keys wieder.
+fn cache_too_old(age: Duration, max_age_secs: u64) -> bool {
+    max_age_secs != 0 && age > Duration::from_secs(max_age_secs)
 }
 
 /// F29: Sekundenlimits mit `counters.backend: postgres-sync` sind im Cluster unscharf –
@@ -351,6 +366,14 @@ mod tests {
     use super::*;
     use aigw_core::snapshot::{Snapshot, SnapshotSource};
     use aigw_store::MasterKey;
+
+    #[test]
+    fn cache_max_age() {
+        let h = Duration::from_secs(3600);
+        assert!(!cache_too_old(h, 0));
+        assert!(!cache_too_old(h, 3600));
+        assert!(cache_too_old(h + Duration::from_secs(1), 3600));
+    }
 
     /// Konfiguration mit Datenbank in einem (noch) fehlenden Verzeichnis und Snapshot-Cache.
     fn config(dir: &std::path::Path) -> (Config, std::path::PathBuf, Arc<Keyring>) {

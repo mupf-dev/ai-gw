@@ -242,6 +242,11 @@ pub trait StreamDecoder: Send {
     fn finish(&mut self, out: &mut Vec<StreamEvent>);
     /// `true`, sobald der Stream regulär abgeschlossen oder mit Fehler beendet ist.
     fn is_done(&self) -> bool;
+    /// Zwischengespeicherte, noch nicht dekodierte Bytes (AIGW-58: Obergrenze im
+    /// Upstream-Stream gegen Speicher-DoS). Standard `0`.
+    fn pending_bytes(&self) -> usize {
+        0
+    }
 }
 
 /// Anbieter-Adapter für ein Deployment (Architektur §5).

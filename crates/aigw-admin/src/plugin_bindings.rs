@@ -19,6 +19,8 @@
 //! - **`locked` von oben:** Eingeschränkte Rollen dürfen eine von außen gesperrte Bindung
 //!   (`locked: true` auf einer äußeren Ebene desselben Plugins) weder mit `inherit: override`
 //!   noch `disable` aushebeln (`403`); sie wäre ohnehin wirkungslos.
+//! - **Geheimnis-Verweise (AIGW-58):** `config.secret`/`config.credential` verweisen auf
+//!   globale Secrets/Zugangsdaten; solche Bindungen schreibt nur ein globaler `admin` (`403`).
 
 // `#[utoipa::path(params(…))]` erzeugt für IntoParams-Typen qualifizierte Pfade.
 #![allow(unused_qualifications)]
@@ -191,6 +193,7 @@ impl AdminResource for PluginBindingSpec {
                 "force/cascade gibt es bei Plugin-Bindungen nicht",
             ));
         }
+        respect_secret_refs(p, spec)?;
         respect_locked(st, p, spec).await?;
         Ok(WriteExtras::default())
     }
@@ -203,6 +206,31 @@ impl AdminResource for PluginBindingSpec {
     ) -> Result<(), Problem> {
         check(&st.upstreams, spec).map_err(Problem::invalid)
     }
+}
+
+/// Konfigurationsschlüssel, mit denen ein Plugin globale Geheimnisse referenziert
+/// (`content-safety`: `secret`/`credential`; `webhook`: `secret` mit `secret`/`credential`/
+/// `env`/`file`).
+const SECRET_REF_KEYS: [&str; 2] = ["secret", "credential"];
+
+/// AIGW-58 (Sicherheitsreview): Secrets und Provider-Credentials sind global (ohne
+/// Org/Team-Bereich). Eingeschränkte Rollen (org-/team-admin) dürfen sie deshalb in
+/// Bindungen nicht referenzieren – sonst könnten sie einen globalen Schlüssel per eigenem
+/// `endpoint` an einen beliebigen Server schicken lassen (`403`).
+fn respect_secret_refs(p: &Principal, spec: &PluginBindingSpec) -> Result<(), Problem> {
+    if p.can(Permission::Write, &Target::Catalog) {
+        return Ok(());
+    }
+    if let Some(k) = SECRET_REF_KEYS
+        .iter()
+        .find(|k| spec.config.get(**k).is_some_and(|v| !v.is_null()))
+    {
+        return Err(Problem::forbidden(format!(
+            "config.{k}: Secrets und Zugangsdaten sind global; Bindungen mit Verweis darauf \
+             darf nur ein globaler admin schreiben"
+        )));
+    }
+    Ok(())
 }
 
 /// RBAC-Ziel einer Bindung je Ebene (F183). Unbekanntes Ziel → `422`.

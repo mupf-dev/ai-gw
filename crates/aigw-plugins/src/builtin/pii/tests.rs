@@ -413,3 +413,27 @@ fn stream_tool_call_arguments_are_restored() {
         .collect();
     assert_eq!(args, "{\"to\":\"bob@example.com\"}");
 }
+
+/// AIGW-58: Reasoning ist nicht schwärzbar – bei Ausgabeprüfung wird es entfernt
+/// (Antwort) bzw. verworfen (Stream); verschlüsseltes Reasoning bleibt.
+#[test]
+fn reasoning_is_removed_when_output_is_checked() {
+    let mut c = Content::Parts(vec![
+        Part::new(PartKind::Reasoning {
+            text: "Mail an max@example.com".into(),
+            signature: Some("sig".into()),
+        }),
+        Part::new(PartKind::RedactedReasoning { data: "xyz".into() }),
+        Part::new(PartKind::Text { text: "ok".into() }),
+    ]);
+    strip_reasoning(&mut c);
+    let Content::Parts(parts) = &c else {
+        panic!("Parts erwartet")
+    };
+    assert_eq!(parts.len(), 2);
+    assert!(
+        parts
+            .iter()
+            .all(|p| !matches!(p.kind, PartKind::Reasoning { .. }))
+    );
+}

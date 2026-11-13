@@ -70,6 +70,7 @@ type St = State<Arc<McpState>>;
 /// Router für `/mcp` und `/mcp/{server}` (Anmeldung, Limits und Beobachtung aus `state`).
 pub fn router(state: ProxyState, gateway: Arc<McpGateway>) -> Router {
     let max_body = state.config.max_body_bytes;
+    let auth = Arc::clone(&state.auth);
     let st = Arc::new(McpState {
         proxy: state,
         gateway,
@@ -88,6 +89,7 @@ pub fn router(state: ProxyState, gateway: Arc<McpGateway>) -> Router {
                 .delete(delete_one),
         )
         .layer(DefaultBodyLimit::max(max_body))
+        .layer(axum::middleware::from_fn_with_state(auth, crate::auth_gate))
         .layer(axum::middleware::from_fn(crate::request_id::middleware))
         .with_state(st)
 }

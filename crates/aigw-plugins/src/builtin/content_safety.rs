@@ -17,7 +17,7 @@
 //!   outputMode: buffered            # buffered | sentence (Stream satzweise)
 //!   action: reject                  # reject (400 content_filtered) | flag
 //!   roles: [user]                   # geprüfte Eingabe-Nachrichten
-//!   maxChars: 10000                 # geprüft wird das Ende der Eingabe/Ausgabe
+//!   maxChars: 10000                 # Fenstergröße; Eingabe/Ausgabe vollständig in Fenstern (max. 16)
 //!   sentenceTimeoutMs: 2000         # Satzmodus: Zeitlimit je Prüfung
 //!   sentenceOnError: block          # Satzmodus: block | allow bei Dienstfehlern
 //!   timeoutMs: 1500                 # Zeitlimit (Kettensteuerung), failMode: open|closed
@@ -373,6 +373,37 @@ impl Inner {
         Ok(Verdict { flagged })
     }
 
+    /// Prüft `text` vollständig (AIGW-58): in Fenstern zu `max_chars` Bytes mit 10 %
+    /// Überlappung, parallel; die Kategorien aller Fenster werden vereinigt. Früher wurde nur
+    /// das Ende geprüft – schädlicher Inhalt am Anfang plus genügend harmloser Text dahinter
+    /// blieb unentdeckt. Mehr als [`MAX_WINDOWS`] Fenster → Fehler (wirkt nach `failMode`).
+    async fn analyze_all(&self, text: String, output: bool) -> Result<Verdict, PluginError> {
+        let parts = windows(&text, self.max_chars);
+        if parts.len() > MAX_WINDOWS {
+            return Err(PluginError::new(format!(
+                "Text zu lang für die Inhaltsprüfung ({} Bytes, höchstens {} Fenster zu \
+                 maxChars {})",
+                text.len(),
+                MAX_WINDOWS,
+                self.max_chars
+            )));
+        }
+        if parts.len() == 1 {
+            return self.analyze(text, output).await;
+        }
+        let checks = parts
+            .into_iter()
+            .map(|p| self.analyze(p.to_owned(), output));
+        let mut flagged: Vec<String> = futures_util::future::try_join_all(checks)
+            .await?
+            .into_iter()
+            .flat_map(|v| v.flagged)
+            .collect();
+        flagged.sort();
+        flagged.dedup();
+        Ok(Verdict { flagged })
+    }
+
     /// Ende von `text` (höchstens `max_chars` Bytes, auf Zeichengrenze).
     fn tail(&self, text: &str) -> String {
         let start = text.len().saturating_sub(self.max_chars);
@@ -382,6 +413,34 @@ impl Inner {
         }
         text[s..].to_owned()
     }
+}
+
+/// Höchstzahl der Prüffenster je Anfrage/Antwort (AIGW-58).
+const MAX_WINDOWS: usize = 16;
+
+/// Zerlegt `text` in Fenster zu höchstens `max` Bytes (auf Zeichengrenzen) mit etwa 10 %
+/// Überlappung, damit Treffer an Fenstergrenzen nicht verloren gehen.
+fn windows(text: &str, max: usize) -> Vec<&str> {
+    if text.len() <= max {
+        return vec![text];
+    }
+    let step = (max - max / 10).max(1);
+    let mut out = Vec::new();
+    let mut start = 0;
+    loop {
+        let end = floor_boundary(text, start + max);
+        out.push(&text[start..end]);
+        if end >= text.len() {
+            break;
+        }
+        let mut next = floor_boundary(text, start + step);
+        if next <= start {
+            // Zeichen länger als der Schritt (nur bei winzigem `max`): weiter am Fensterende.
+            next = end;
+        }
+        start = next;
+    }
+    out
 }
 
 /// Plugin `content-safety`.
@@ -534,7 +593,7 @@ impl ContentSafety {
                 s.push_str(t);
             });
         }
-        self.inner.tail(&s)
+        s
     }
 
     fn output_text(resp: &ChatResponse) -> String {
@@ -690,7 +749,7 @@ impl Plugin for ContentSafety {
         }
         let info = ctx.info;
         Hook::future(async move {
-            let v = self.inner.analyze(text, false).await?;
+            let v = self.inner.analyze_all(text, false).await?;
             Ok(match self.judge(info, &v, false) {
                 Some(e) => Flow::Block(e),
                 None => Flow::Continue,
@@ -703,10 +762,9 @@ impl Plugin for ContentSafety {
         if text.trim().is_empty() {
             return Hook::ok(Flow::Continue);
         }
-        let text = self.inner.tail(&text);
         let info = ctx.info;
         Hook::future(async move {
-            let v = self.inner.analyze(text, true).await?;
+            let v = self.inner.analyze_all(text, true).await?;
             Ok(match self.judge(info, &v, true) {
                 Some(e) => Flow::Block(e),
                 None => Flow::Continue,
@@ -823,6 +881,26 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+
+    /// AIGW-58: Der ganze Text wird geprüft, nicht nur das Ende.
+    #[test]
+    fn windows_cover_whole_text() {
+        assert_eq!(windows("kurz", 100), vec!["kurz"]);
+        let text = format!("BÖSE{}", "ä".repeat(500)); // 1004 Bytes, Mehrbyte-Zeichen
+        let w = windows(&text, 100);
+        assert!(w[0].starts_with("BÖSE"));
+        assert!(w.iter().all(|p| p.len() <= 100 && !p.is_empty()));
+        assert!(text.ends_with(w.last().unwrap()));
+        // Lückenlos: jedes Fenster beginnt vor dem Ende des vorigen.
+        let mut covered = 0;
+        for p in &w {
+            let start = p.as_ptr() as usize - text.as_ptr() as usize;
+            assert!(start <= covered, "Lücke bei {start}");
+            covered = start + p.len();
+        }
+        assert_eq!(covered, text.len());
+        assert!(w.len() <= 14, "{}", w.len());
+    }
 
     #[test]
     fn category_names() {

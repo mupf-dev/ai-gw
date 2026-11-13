@@ -397,6 +397,28 @@ async fn run(store: Store, raw: Raw) {
     let before = store.verify_audit_chain().await.unwrap();
     assert!(before.ok);
     assert_eq!(before.unchained, 1);
+    // AIGW-58: unverketteter Eintrag NACH Kettenbeginn = am Gateway vorbei eingeschoben.
+    let late_at = match &raw {
+        Raw::Sqlite(_) => "99999999999999".to_owned(),
+        Raw::Pg(_) => "TIMESTAMPTZ '2999-01-01 00:00:00+00'".to_owned(),
+    };
+    let forged = new_id();
+    raw.exec(&format!(
+        "INSERT INTO audit_log (id, at, actor, action, kind, config_version)
+         VALUES ('{forged}', {late_at}, 'mallory', 'delete', 'Team', 1)"
+    ))
+    .await;
+    let forged_report = store.verify_audit_chain().await.unwrap();
+    assert!(!forged_report.ok);
+    assert!(
+        forged_report
+            .issues
+            .iter()
+            .any(|i| i.problem.contains("ohne Kettenfelder")),
+        "{forged_report:?}"
+    );
+    raw.exec(&format!("DELETE FROM audit_log WHERE id = '{forged}'"))
+        .await;
     let deleted = store
         .prune_audit_log(time::OffsetDateTime::now_utc() + time::Duration::minutes(1))
         .await

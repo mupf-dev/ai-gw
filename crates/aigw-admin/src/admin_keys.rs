@@ -126,13 +126,23 @@ pub struct AdminApiKeyUpdate {
 }
 
 /// Angelegter Admin-API-Key mit Klartext (nur in dieser Antwort).
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedAdminApiKey {
     /// Key.
     pub key: AdminApiKey,
     /// Klartext `sk-aigw-admin-…` (nur einmal sichtbar).
     pub secret: String,
+}
+
+// AIGW-58: `Debug` ohne Klartext (Schutz vor versehentlichem Loggen).
+impl std::fmt::Debug for CreatedAdminApiKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CreatedAdminApiKey")
+            .field("key", &self.key)
+            .field("secret", &"***")
+            .finish()
+    }
 }
 
 /// Liste der Admin-API-Keys.

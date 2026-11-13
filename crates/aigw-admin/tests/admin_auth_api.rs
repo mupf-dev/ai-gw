@@ -503,6 +503,37 @@ async fn scenario(store: Store) {
     )
     .await
     .expect(created);
+    // AIGW-58: Verweise auf globale Secrets/Zugangsdaten nur durch globale admins –
+    // sonst ließe sich ein globaler Schlüssel per eigenem endpoint abziehen.
+    for cfg in [
+        json!({"provider": "openai", "credential": "oai", "endpoint": "https://attacker.example"}),
+        json!({"provider": "openai", "secret": "oai"}),
+    ] {
+        let r = env
+            .call(
+                &acme_admin,
+                Method::POST,
+                "/plugin-bindings",
+                Some(json!({"metadata": {"name": "cs-acme"},
+                            "spec": {"scope": {"level": "organization", "target": "acme"},
+                                     "plugin": "content-safety", "order": 5, "config": cfg}})),
+            )
+            .await
+            .expect(StatusCode::FORBIDDEN);
+        assert!(r.body.contains("global"), "{}", r.body);
+    }
+    env.call(
+        &plat_admin,
+        Method::POST,
+        "/plugin-bindings",
+        Some(json!({"metadata": {"name": "wh-plat"},
+                    "spec": {"scope": {"level": "team", "target": "platform"},
+                             "plugin": "webhook", "order": 5,
+                             "config": {"url": "https://hooks.example.com/x",
+                                        "secret": {"env": "PATH"}}}})),
+    )
+    .await
+    .expect(StatusCode::FORBIDDEN);
     env.call(
         &plat_admin,
         Method::DELETE,
