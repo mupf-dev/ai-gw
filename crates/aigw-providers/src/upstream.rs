@@ -158,6 +158,16 @@ impl Upstream {
         self.timeouts
     }
 
+    /// Asynchrone Vorbereitung des Adapters (z. B. OAuth-Token), begrenzt durch `deadline`.
+    async fn prepare(&self, deadline: Instant) -> Result<(), UpstreamError> {
+        let Some(fut) = self.provider.prepare() else {
+            return Ok(());
+        };
+        tokio::time::timeout_at(deadline, fut)
+            .await
+            .unwrap_or_else(|_| Err(timeout_error("Anmeldung beim Anbieter")))
+    }
+
     fn build(&self, req: ChatRequest) -> Result<crate::UpstreamRequest, UpstreamError> {
         let mut losses = Losses::new();
         let http_req = self
@@ -226,6 +236,7 @@ impl Upstream {
     /// Nicht gestreamte Anfrage.
     pub async fn chat(&self, req: ChatRequest) -> Result<ChatResponse, UpstreamError> {
         let deadline = Instant::now() + self.timeouts.total;
+        self.prepare(deadline).await?;
         let http_req = self.build(req)?;
         let resp = self.send(http_req, deadline).await?;
         let body = read_limited(
@@ -245,6 +256,10 @@ impl Upstream {
             )
         })?;
         self.provider.parse_response(&body).map_err(|e| {
+            // Inhaltsfilter in einer 200-Antwort (z. B. Gemini `promptFeedback.blockReason`).
+            if e.code.as_deref() == Some("content_filter") {
+                return UpstreamError::new(ErrorClass::ContentFilter, e);
+            }
             UpstreamError::new(
                 ErrorClass::Protocol,
                 ApiError::new(
@@ -262,6 +277,7 @@ impl Upstream {
         let start = Instant::now();
         let total = start + self.timeouts.total;
         let first_byte = total.min(start + self.timeouts.first_byte);
+        self.prepare(first_byte).await?;
         let http_req = self.build(req)?;
         let resp = self.send(http_req, first_byte).await?;
         Ok(Box::pin(UpstreamEvents::new(

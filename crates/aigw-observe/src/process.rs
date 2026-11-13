@@ -58,6 +58,8 @@ pub fn endpoint_name(f: WireFormat) -> &'static str {
     match f {
         WireFormat::OpenAiChat => "openai-chat",
         WireFormat::AnthropicMessages => "anthropic-messages",
+        WireFormat::BedrockConverse => "bedrock-converse",
+        WireFormat::Gemini => "gemini",
     }
 }
 

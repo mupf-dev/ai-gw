@@ -16,19 +16,27 @@
 //!
 //! Adapter: [`openai::OpenAiAdapter`] für OpenAI, Azure OpenAI, generisch OpenAI-kompatible
 //! Endpunkte und die Profile Ollama, vLLM ([`local`]) und Mistral ([`mistral`]);
-//! [`anthropic::AnthropicAdapter`] für die Anthropic Messages API. Bedrock und Vertex folgen.
+//! [`anthropic::AnthropicAdapter`] für die Anthropic Messages API;
+//! [`bedrock::BedrockAdapter`] für AWS Bedrock (Converse, SigV4) und
+//! [`vertex::VertexAdapter`] für Google Gemini (Gemini API und Vertex AI).
 
 pub mod anthropic;
 pub mod auth;
+pub mod bedrock;
 mod client;
+mod codec;
+mod errmap;
 pub mod local;
 pub mod mistral;
 pub mod openai;
 mod settings;
 mod upstream;
+pub mod vertex;
 
 use std::collections::HashMap;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use aigw_core::ir::{ApiError, ChatRequest, ChatResponse, StreamEvent, UpstreamError};
@@ -44,6 +52,10 @@ pub use upstream::{EventStream, Timeouts, Upstream, UpstreamInfo};
 
 /// Fertig gebaute Upstream-Anfrage (Body vollständig im Speicher).
 pub type UpstreamRequest = http::Request<Bytes>;
+
+/// Asynchrone Vorbereitung eines Adapters vor [`Provider::build_request`] (siehe
+/// [`Provider::prepare`]).
+pub type PrepareFuture<'a> = Pin<Box<dyn Future<Output = Result<(), UpstreamError>> + Send + 'a>>;
 
 /// Welches Feld die Obergrenze der Ausgabe-Tokens trägt (OpenAI-Familie).
 ///
@@ -121,6 +133,13 @@ pub trait Provider: Send + Sync + fmt::Debug {
     /// Klassifiziert eine Fehlerantwort (Status ≥ 400) des Anbieters.
     fn classify_error(&self, status: StatusCode, headers: &HeaderMap, body: &[u8])
     -> UpstreamError;
+    /// Optionale asynchrone Vorbereitung vor `build_request`, z. B. ein OAuth-Token holen,
+    /// wenn (noch) keines im Cache liegt (Vertex). `None` = nichts zu tun (Standard, kein
+    /// Overhead im Hot Path). Erneuerungen vor Ablauf laufen im Hintergrund; nur ohne gültiges
+    /// Token wartet die Anfrage (innerhalb ihres Zeitlimits).
+    fn prepare(&self) -> Option<PrepareFuture<'_>> {
+        None
+    }
 }
 
 /// Fehler beim Aufbau eines Adapters aus der Konfiguration.
@@ -179,7 +198,7 @@ impl Registry {
     }
 
     /// Verzeichnis mit allen eingebauten Adaptern (`openai`, `azure-openai`,
-    /// `openai-compatible`, `ollama`, `vllm`, `mistral`, `anthropic`).
+    /// `openai-compatible`, `ollama`, `vllm`, `mistral`, `anthropic`, `bedrock`, `vertex`).
     pub fn with_builtin() -> Self {
         let mut r = Self::empty();
         r.register(ProviderKind::OpenAi, openai::OpenAiAdapter::factory);
@@ -195,6 +214,8 @@ impl Registry {
             ProviderKind::Anthropic,
             anthropic::AnthropicAdapter::factory,
         );
+        r.register(ProviderKind::Bedrock, bedrock::BedrockAdapter::factory);
+        r.register(ProviderKind::Vertex, vertex::VertexAdapter::factory);
         r
     }
 
@@ -238,5 +259,7 @@ mod tests {
             assert!(r.supports(k), "{k:?}");
         }
         assert!(format!("{r:?}").contains("azure-openai"));
+        assert!(r.supports(ProviderKind::Bedrock));
+        assert!(r.supports(ProviderKind::Vertex));
     }
 }

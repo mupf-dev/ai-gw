@@ -118,6 +118,7 @@ name = "aigw-providers"
 version = "0.1.0"
 dependencies = [
  "aigw-core",
+ "aws-lc-rs",
  "axum",
  "bytes",
  "futures-util",

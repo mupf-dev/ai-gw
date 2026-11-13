@@ -26,6 +26,10 @@ pub enum WireFormat {
     OpenAiChat,
     /// Anthropic Messages.
     AnthropicMessages,
+    /// AWS Bedrock Converse (nur Zielformat von Anbieter-Adaptern).
+    BedrockConverse,
+    /// Google Gemini `generateContent` (Gemini API und Vertex AI; nur Zielformat).
+    Gemini,
 }
 
 /// Deserialisiert ein JSON-Objekt (bereits als Map gelesen) in einen Wire-Typ.

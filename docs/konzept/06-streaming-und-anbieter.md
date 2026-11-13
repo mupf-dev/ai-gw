@@ -1,6 +1,6 @@
-# ai-gw – Streaming-Pipeline und Anbieter-Adapter (AIGW-14, AIGW-15, AIGW-16, AIGW-17, AIGW-20)
+# ai-gw – Streaming-Pipeline und Anbieter-Adapter (AIGW-14, AIGW-15, AIGW-16, AIGW-17, AIGW-18, AIGW-19, AIGW-20)
 
-Stand: 2026-11-13 · Status: umgesetzt (OpenAI-Familie, Anthropic, Ollama, vLLM, Mistral), Grundlage: [01-architektur.md](01-architektur.md) §5–§7,
+Stand: 2026-11-13 · Status: umgesetzt (OpenAI-Familie, Anthropic, Ollama, vLLM, Mistral, Bedrock, Vertex/Gemini), Grundlage: [01-architektur.md](01-architektur.md) §5–§7,
 [03-ir-und-formate.md](03-ir-und-formate.md)
 
 ## 1. Überblick
@@ -16,7 +16,7 @@ Client ─► Handler (aigw-proxy) ─► ModelRoutes ─► ChatProvider ──
 
 | Crate / Modul | Inhalt |
 |---|---|
-| `aigw_providers` | `Provider`-Trait, `Capabilities`, `StreamDecoder`, `Registry` (Fabrik je `ProviderKind`), `UpstreamClient`, `Upstream` (Deployment = Adapter + Client + `Timeouts`), Adapter `openai::OpenAiAdapter` (mit Profilen `local` für Ollama/vLLM und `mistral`), `anthropic::AnthropicAdapter`, `with_group_defaults`, Erweiterungspunkt `auth::TokenSource` |
+| `aigw_providers` | `Provider`-Trait, `Capabilities`, `StreamDecoder`, `Registry` (Fabrik je `ProviderKind`), `UpstreamClient`, `Upstream` (Deployment = Adapter + Client + `Timeouts`), Adapter `openai::OpenAiAdapter` (mit Profilen `local` für Ollama/vLLM und `mistral`), `anthropic::AnthropicAdapter`, `bedrock::BedrockAdapter`, `vertex::VertexAdapter`, `with_group_defaults`, Erweiterungspunkte `auth::TokenSource`, `bedrock::AwsCredentialsProvider` |
 | `aigw_core::ir` | `ErrorClass`, `UpstreamError` (Ergebnis von `classify_error`) |
 | `aigw_core::observe` | `RequestRecord`, `RequestObserver` (aus AIGW-43; der Proxy füllt ihn) |
 | `aigw_proxy` | `ChatProvider` (ausführbares Deployment), `ModelRoutes`/`StaticRoutes`, Handler, `Recorder`/`ObservedStream`, SSE-Antwort |
@@ -33,6 +33,7 @@ pub trait Provider: Send + Sync + Debug {
     fn parse_response(&self, body: &[u8]) -> Result<ChatResponse, ApiError>;
     fn stream_decoder(&self) -> Box<dyn StreamDecoder>;          // Bytes → IR-Ereignisse
     fn classify_error(&self, status: StatusCode, headers: &HeaderMap, body: &[u8]) -> UpstreamError;
+    fn prepare(&self) -> Option<PrepareFuture<'_>> { None }      // async Vorbereitung (OAuth), AIGW-19
 }
 ```
 
@@ -44,6 +45,10 @@ Abweichungen von der Skizze in §5, mit Begründung:
 - **`build_request` übernimmt die Anfrage** (keine Kopie großer Bodies mit Base64-Bildern);
   Retries (AIGW-25) klonen vorher bewusst.
 - **`classify_error` bekommt die Header** (`Retry-After`, `retry-after-ms`).
+- **`prepare`** (AIGW-19): optionale asynchrone Vorbereitung vor `build_request`, z. B. ein
+  OAuth-Token holen, wenn keines im Cache liegt. Standard `None` – im Hot Path kostet das nur
+  einen virtuellen Aufruf. `Upstream` wartet darauf innerhalb des Zeitlimits (erstes Byte bzw.
+  Gesamtzeit). `build_request` bleibt synchron.
 - Der Anthropic-Adapter (AIGW-16, §3a) passt ohne Änderung: `native_format = AnthropicMessages`,
   eigener `StreamDecoder` auf Basis von `wire::anthropic::StreamDecoder`, Header `x-api-key`.
 
@@ -159,6 +164,152 @@ verdoppeln – das Profil (`aigw_providers::mistral`) behandelt nur die Abweichu
 | `safe_prompt` | – | `settings.safePrompt`; OpenAI-Clients können es als unbekanntes Feld selbst senden |
 | Endgrund | – | `model_length` → `max_tokens` |
 | Fehler | `{"error":{…}}` | `{"object":"error","message":…}` bzw. `{"detail":[…]}` (422) werden normalisiert und wie OpenAI klassifiziert |
+## 3d. AWS Bedrock (`bedrock`, AIGW-18)
+
+Eigene Implementierung ohne AWS-SDK; Kryptografie (SHA-256, HMAC) über aws-lc-rs.
+
+| | |
+|---|---|
+| URL | `POST {endpoint}/model/{modelId}/converse` bzw. `/converse-stream`; Standard-Endpunkt `https://bedrock-runtime.{region}.amazonaws.com`. Die Modell-ID (auch Inference-Profile-ID oder ARN) ist **ein** Pfadsegment (`:` → `%3A`, `/` → `%2F`). |
+| Auth | **SigV4** (Dienst `bedrock`, Region aus `settings.region`): Zugangsdaten `accessKeyId`, `secretAccessKey`, optional `sessionToken` (→ `x-amz-security-token`). Alternativ Bedrock-API-Key `apiKey` (`Authorization: Bearer`). |
+| Einstellungen | `region` (Pflicht), `additionalModelRequestFields` (Objekt, wird mit den abgeleiteten Feldern zusammengeführt), `guardrailConfig` (Objekt, unverändert), `timeouts` |
+| Format | `WireFormat::BedrockConverse` (nur Zielformat; `extra` der Clients wird verworfen und als Verlust gemeldet) |
+
+**SigV4** (`bedrock::sigv4`): kanonische Anfrage (Methode, Pfad – jedes Segment wie auf der
+Leitung *nochmals* prozentkodiert, also `%3A` → `%253A`, wie für alle Dienste außer S3 –,
+sortierte Query, Header klein/getrimmt/sortiert, signierte Header, SHA-256 des Bodys),
+String to sign, Schlüsselableitung `AWS4+secret → Datum → Region → Dienst → aws4_request`,
+`Authorization`-Header (als *sensitive* markiert). Signiert werden `host` und alle gesetzten
+Header außer `user-agent`, `content-length` u. ä. (werden unterwegs verändert). Tests: acht
+Fälle der offiziellen AWS-SigV4-Testsuite (`aws-c-auth/tests/aws-signing-test-suite/v4`, u. a.
+`get-vanilla`, `post-x-www-form-urlencoded`, `get-utf8`, `post-sts-header-before`) und das
+Ableitungsbeispiel der AWS-Doku; der Fake-Upstream prüft die Signatur serverseitig nach.
+
+**Zugangsdaten** über den Erweiterungspunkt `AwsCredentialsProvider` (synchron wie
+`TokenSource`; eingebaut `StaticCredentials`). IMDSv2, ECS-Container-Credentials und
+`AssumeRoleWithWebIdentity` lassen sich als Implementierung mit Hintergrund-Erneuerung ergänzen
+(`BedrockAdapter::with_credentials_provider`).
+
+**Abbildung IR → Converse:**
+
+| IR | Converse |
+|---|---|
+| System/Developer (alle) | `system: [{text}]` (spätere: Verlust-Hinweis „verschoben“) |
+| User/Tool, Assistant | `messages[].role` `user`/`assistant`; aufeinanderfolgende gleiche Rollen werden zusammengefasst (OpenAI-`tool`-Nachrichten + Nutzertext) |
+| Text, Bild (Base64, `s3://`), Datei | `{text}`, `{image:{format,source:{bytes}}}`, `{document:{format,name,source}}`; Bild-URLs (http) werden mit 400 abgelehnt |
+| `ToolCall` / `ToolResult` | `toolUse{toolUseId,name,input}` / `toolResult{toolUseId,content,status:error}` |
+| Reasoning / redacted | `reasoningContent.reasoningText{text,signature}` / `reasoningContent.redactedContent` |
+| `cache_control` an Teil/Tool | folgender Block `{cachePoint:{type:default}}` |
+| `max_tokens`, `temperature`, `top_p`, `stop` | `inferenceConfig.{maxTokens,temperature,topP,stopSequences}` |
+| `top_k`, Anthropic-`thinking` | `additionalModelRequestFields.{top_k,thinking}` (nur `anthropic.*`-Modelle) |
+| Tools, `tool_choice` | `toolConfig.tools[].toolSpec{name,description,inputSchema.json}`; `auto` → weglassen, `required` → `{any:{}}`, Tool → `{tool:{name}}`, `none` → Tools weglassen (mit Tool-Verlauf: Verlust-Hinweis) |
+| Verluste | `frequency_penalty`, `presence_penalty`, `seed`, `response_format`, `metadata`/`user`, `parallel_tool_calls: false`, `reasoning_effort`, Audio, Bild-`detail` |
+
+Antwort: `output.message.content` → Teile, `stopReason` (`guardrail_intervened`/
+`content_filtered` → `content_filter`), Usage `input = inputTokens + cacheRead + cacheWrite`
+(wie bei Anthropic). `metrics`/`trace`/`additionalModelResponseFields` landen in `extra`.
+Bedrock liefert keine Antwort-ID im Body; erzeugt wird `msg_bdrk_<zufall>`.
+
+**ConverseStream / Eventstream** (`bedrock::eventstream`): eigenes Binärformat
+`application/vnd.amazon.eventstream` – Prelude (Gesamtlänge, Header-Länge, **CRC32** der
+Prelude), Header (Name, Typ 0–9, Wert), Payload, **CRC32** der Nachricht; inkrementeller
+Decoder (nur der Rest einer unvollständigen Nachricht wird gepuffert, Grenze 16 MiB). Falsche
+Prüfsummen/Längen → `upstream_protocol_error`. Ereignisse: `messageStart` → `Start`,
+`contentBlockStart.toolUse` → `ToolCallStart`, `contentBlockDelta` (`text`, `toolUse.input`,
+`reasoningContent.{text,signature,redactedContent}`) → Deltas, `messageStop` → `Stop`,
+`metadata` → `Usage`. Ausnahmen (`:message-type: exception`) → `StreamEvent::Error` mit dem
+Ausnahmetyp als Code.
+
+**Fehlerklassen:**
+
+| Bedrock (`x-amzn-ErrorType` bzw. `__type`) | `ErrorClass` |
+|---|---|
+| `ThrottlingException` | `rate_limit` (retrybar); mit „per day“/„daily“ in der Meldung `quota` |
+| `ServiceQuotaExceededException` | `quota` |
+| `ValidationException` mit „Input is too long“, „too many input tokens“, „context window“ … | `context_length` |
+| `ValidationException` sonst | `invalid_request` |
+| `AccessDenied`, `UnrecognizedClient`, `InvalidSignature`, `ExpiredToken` | `auth` (502, ohne Anbietermeldung) |
+| `ResourceNotFoundException` | `not_found` |
+| `ModelTimeoutException` | `timeout` |
+| `ModelNotReady`, `ServiceUnavailable` | `overloaded` |
+| `InternalServer`, `ModelError`, `ModelStreamError` | `server_error` |
+
+## 3e. Google Gemini / Vertex AI (`vertex`, AIGW-19)
+
+Eine Anbieterart `vertex`, zwei APIs (gleiches Format `generateContent`), ohne Google-SDK:
+
+| | Gemini API (`settings.api: gemini`) | Vertex AI (`settings.api: vertex`) |
+|---|---|---|
+| Basis-URL | `https://generativelanguage.googleapis.com/v1beta` | `https://{location}-aiplatform.googleapis.com/v1`, bei `location: global` `https://aiplatform.googleapis.com/v1` |
+| Pfad | `/models/{model}:generateContent` | `/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent` (`providerModel` mit `publishers/…` oder `projects/…` wird übernommen) |
+| Stream | `:streamGenerateContent?alt=sse` | dto. |
+| Auth | `x-goog-api-key` (Zugangsdaten `apiKey`) | OAuth-Bearer aus Service-Account (`serviceAccountJson` = Schlüsseldatei, oder `clientEmail` + `privateKey` [+ `privateKeyId`]); alternativ festes `accessToken` |
+| Einstellungen | – | `project` (Standard `project_id` der Schlüsseldatei), `location` (Standard `global`), `tokenUrl` (Standard `token_uri` der Schlüsseldatei bzw. `https://oauth2.googleapis.com/token`) |
+
+`api` ist optional: nur `apiKey` → Gemini API, sonst Vertex. Gemeinsam: `safetySettings`
+(Liste, unverändert übernommen), `timeouts`; `spec.endpoint` ersetzt die Basis-URL (Tests,
+Proxys, Private Service Connect).
+
+**Service-Account-Token** (`vertex::oauth`): JWT `{"alg":"RS256","typ":"JWT","kid"}` mit
+`iss`=`client_email`, `scope`=`cloud-platform`, `aud`=Token-URL, `iat`, `exp`=+1 h, signiert mit
+RSASSA-PKCS1-v1_5/SHA-256 (aws-lc-rs, PKCS#8 aus dem PEM); Austausch per
+`grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`. **Cache:** gültig bis
+`expires_in` − 30 s (bei sehr kurzen Laufzeiten höchstens die Hälfte); ab 5 min vor Ablauf
+erneuert ein Hintergrund-Task (die Anfrage nutzt das noch gültige Token), ohne gültiges Token
+wartet die Anfrage über `Provider::prepare` – parallele Anfragen teilen sich einen Abruf.
+Fehler des Token-Endpunkts: 4xx → `auth` (502 `upstream_authentication_error`, Grund nur im
+Log), 5xx/429 → `server_error`, nicht erreichbar → `connect`. Der Token-Abruf nutzt einen
+eigenen, lazily gebauten `UpstreamClient` (die Fabrik kennt den gemeinsamen Client nicht).
+
+**Abbildung IR → Gemini:**
+
+| IR | Gemini |
+|---|---|
+| System/Developer | `systemInstruction.parts[].text` |
+| User/Tool, Assistant | `contents[].role` `user`/`model` (gleiche Rollen zusammengefasst) |
+| Text, Bild/Datei/Audio Base64, URL | `{text}`, `{inlineData:{mimeType,data}}`, `{fileData:{mimeType,fileUri}}` (MIME aus der Endung) |
+| `ToolCall` | `{functionCall:{name,args}}` (+ `thoughtSignature`, siehe unten) |
+| `ToolResult` | `{functionResponse:{name,response}}` – Name aus dem zugehörigen Aufruf im Verlauf (fehlt er: 400); JSON-Objekt direkt, sonst `{"result": …}` bzw. `{"error": …}` |
+| Reasoning (Text) | `{text, thought: true, thoughtSignature}` |
+| Sampling, `max_tokens`, `stop`, `seed`, Penalties | `generationConfig.{temperature,topP,topK,maxOutputTokens,stopSequences,seed,presencePenalty,frequencyPenalty}` |
+| `response_format` | `responseMimeType: application/json` (+ `responseJsonSchema`) |
+| `reasoning_effort` | Gemini 2.x: `thinkingConfig.thinkingBudget` (minimal 0, low 1024, medium 8192, high 24576); sonst (Gemini 3): `thinkingLevel` |
+| Anthropic-`thinking` | `thinkingBudget` (`disabled` → 0) und `includeThoughts: true` (außer `display: omitted`) |
+| Tools, `tool_choice` | `tools[{functionDeclarations[{name,description,parametersJsonSchema}]}]`; `functionCallingConfig.mode` `AUTO`/`NONE`/`ANY` (+ `allowedFunctionNames`) |
+| Verluste | `cache_control`, `metadata`/`user`, `parallel_tool_calls`, redacted Reasoning, Dateinamen, Schema-Name/`strict` |
+
+**`thoughtSignature` bei Tool-Aufrufen:** Gemini 2.5/3 verlangt, dass die Signatur eines
+`functionCall` im nächsten Zug zurückkommt; OpenAI-/Anthropic-Clients kennen das Feld nicht,
+geben aber die Tool-Call-ID zurück. Der Adapter hängt die Signatur daher Base64url-kodiert an
+die ID (`call_<zufall>__ts_<signatur>`, nur `[A-Za-z0-9_-]`) und stellt sie beim nächsten
+Request wieder her. IDs werden nicht an Gemini gesendet (Zuordnung über Name und Reihenfolge).
+
+Antwort: Kandidaten → `choices`, `finishReason` `STOP` → `end_turn` (bzw. `tool_use`, wenn
+Funktionsaufrufe enthalten sind), `MAX_TOKENS`, Sicherheits-/Rezitations-Gründe →
+`content_filter`. Usage: `input = promptTokenCount + toolUsePromptTokenCount`,
+`output = candidatesTokenCount + thoughtsTokenCount`, `cache_read = cachedContentTokenCount`,
+`reasoning = thoughtsTokenCount`. Stream: je SSE-Ereignis die neuen Teile; aufeinanderfolgende
+Text- bzw. Gedanken-Teile bilden einen Block, `functionCall` kommt vollständig
+(`ToolCallStart` + ein `ToolCallDelta`), `finishReason` → `Stop` + `Usage`.
+
+**Safety-Blockaden:** `promptFeedback.blockReason` bzw. ein blockierender Endgrund ohne jeden
+Inhalt → Fehler `content_filter` (Klasse `content_filter`, 400; auch bei HTTP 200 – `Upstream`
+übernimmt dafür den Code `content_filter` aus `parse_response`); mitten im Stream nach Inhalt →
+`Stop{content_filter}`.
+
+**Fehlerklassen** (`{"error":{code,message,status,details}}`): `RESOURCE_EXHAUSTED`/429 →
+`rate_limit` mit `retry_after` aus `google.rpc.RetryInfo.retryDelay`, bei `QuotaFailure` mit
+`…PerDay…` → `quota`; `UNAUTHENTICATED`, `PERMISSION_DENIED`, `API_KEY_INVALID` → `auth`;
+`NOT_FOUND`; `UNAVAILABLE` → `overloaded`; `DEADLINE_EXCEEDED` → `timeout`; `INTERNAL` →
+`server_error`; 400 mit „input token count … exceeds the maximum number of tokens“ →
+`context_length`.
+
+**Tests:** `crates/aigw-providers/tests/bedrock_vertex.rs` gegen lokale Fakes – Bedrock
+(SigV4 serverseitig geprüft, Eventstream in 7/11-Byte-Stücken, Throttling, Kontextlänge,
+Ausnahme mitten im Stream, falsche Signatur → `auth`) und Google (Fake-Token-Endpunkt prüft
+JWT-Signatur und Claims, Token-Cache, parallele Anfragen = ein Abruf, Erneuerung im Vorlauf,
+abgelaufenes Token, Token-Ablehnung, Gemini-API-Key, SSE, Safety-Block, `RESOURCE_EXHAUSTED`
+mit `retryDelay`). Der RSA-Schlüssel wird je Lauf erzeugt; keine echten Zugangsdaten.
 
 ## 4. Upstream-Client und Timeouts
 
@@ -295,3 +446,7 @@ HTTP plus Übersetzung). Optimierungen (Profiling, Allokationen im Encoder, `Byt
   `reasoning_content` kompatibler Anbieter erhalten.
 - Mistral-Reasoning-Modelle (Magistral) liefern `content` als Liste von Blöcken
   (`thinking`/`text`); das wird noch nicht gelesen.
+- Bedrock: IMDSv2/ECS/Web-Identity-`AwsCredentialsProvider`, strukturierte Ausgabe
+  (`response_format`), Application-Inference-Profiles/Prompt-Router nur als Modell-ID getestet.
+- Vertex: Workload Identity/Metadaten-Server als `TokenSource`, Vertex-Express-Modus (API-Key auf
+  aiplatform), `cachedContents`, Bild-Ausgabe (`inlineData` in Antworten → `Opaque`).

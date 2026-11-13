@@ -123,6 +123,11 @@ impl<'a> Settings<'a> {
         }
     }
 
+    /// Rohwert (für Listen und frei übernommene Strukturen).
+    pub(crate) fn value(&self, key: &str) -> Option<&'a Value> {
+        self.map.get(key)
+    }
+
     pub(crate) fn object(&self, key: &str) -> Result<Option<&'a JsonObject>, ConfigError> {
         match self.map.get(key) {
             None | Some(Value::Null) => Ok(None),
