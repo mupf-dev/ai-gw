@@ -331,3 +331,11 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 187. [x] connectMs je Deployment wirksam machen (eigene Pool-Variante in aigw-outbound) → Folgeticket (Umsetzung nötig)
 188. [x] n in Responses API als ai-gw-Erweiterung → bestätigt (entspricht F12)
 - F185/F187: ApiKeySpec.exposeReasoning (mit F30), aigw-outbound Pool-Variante je connectMs; UI-Kennzeichnung mock (F85)
+
+## AIGW-71 – Empfehlungen übernommen (2026-11-13)
+189. [x] Budget-Überschreitung ohne Redis bis 2× budget_sync_ms, dokumentieren; exakt nur mit redis → Empfehlung übernommen
+190. [x] strict als Standard (Reservierung 4096 Ausgabe-Tokens ohne max_tokens) – Changelog-Hinweis → Empfehlung übernommen
+191. [x] parent_request_id-Spalte + Filter cache=cache-embedding → Empfehlung übernommen (Umsetzung nötig, nach AIGW-73)
+192. [x] Folgearbeiten: Tokenizer für Embedding/Bild/Audio-Schätzung, abgebrochene Cache-Embeddings erfassen, settings.tokenizer in Admin/GitOps validieren → Folgeticket
+- F191/F192: request_log.parent_request_id; Log-Explorer/Analytics-Filter cache-embedding; TokenizerSetting::parse in GroupPolicy-Validierung; Tokenizer für weitere Endpunkte
+- Hinweis Lizenz: tiktoken-Rang-Tabellen als MIT (tiktoken) ausgewiesen; Dateien selbst ohne eigene Lizenzangabe – vor öffentlichem Release juristisch bestätigen
