@@ -1,4 +1,4 @@
-# ai-gw – GitOps: YAML-Export, Diff und Apply (AIGW-33, AIGW-74)
+# ai-gw – GitOps: YAML-Export, Diff und Apply (AIGW-33, AIGW-74, AIGW-55)
 
 Stand: 2026-11-13 · Status: umgesetzt (Entwurf zur Durchsicht)
 Grundlage: [01-architektur.md](01-architektur.md) §14 · [02-datenmodell.md](02-datenmodell.md) §3.1 (Manifest-Format `aigw/v1alpha1`) · [08-admin-api.md](08-admin-api.md)
@@ -82,6 +82,13 @@ erscheinen nie, nur `secret: true`.
   `valueFrom`, Verweise originalgetreu (`secret.refs`), sonst Platzhalter.
 - **API-Keys** nur mit `--api-keys include` (bzw. `?apiKeys=include`), dann ohne Klartext (der
   ist nach der Erzeugung nicht mehr bekannt). Standard (`ignore`, F4): sie fehlen ganz.
+- **Teil-Export (AIGW-55, Admin-API):** `kinds=ModelGroup,Deployment` (auch kebab-case),
+  `name=<name>` (genau eine Ressource je Art), `organization=<org>` (die Organisation, ihre Teams
+  und API-Keys sowie Plugin-Bindungen und MCP-Freigaben auf Ebene der Organisation, ihrer Teams
+  und Keys) bzw. `team=<team>` (das Team, seine Keys, deren Bindungen/Freigaben). Katalog-
+  Ressourcen (Modellgruppen, Deployments, Zugangsdaten, Preise …) und Nutzer gehören zu keiner
+  Organisation. Der Kopfkommentar markiert den Teil-Export: **nur ohne `--prune` anwenden**, sonst
+  würde alles außerhalb der Auswahl gelöscht. Unbekannte Art → `400`.
 
 ## 4. Diff und Apply
 
@@ -173,8 +180,22 @@ und Widerrufen sind Betriebsaktionen der Admin-API.
 
 | Route | Berechtigung | Inhalt |
 |---|---|---|
-| `GET /admin/api/v1/config:export?apiKeys=ignore\|include` | `Read` auf `GitOps`: globale `admin`, `viewer`, `auditor`, `gitops` | `200 application/yaml` (`Cache-Control: no-store`); Standard `apiKeys=ignore` (F4) |
-| `POST /admin/api/v1/config:apply?dryRun=&prune=&apiKeys=` | `Write` auf `GitOps`: globaler `admin`, `gitops` (auch Trockenlauf: er löst Server-Geheimnisse auf und vergleicht sie) | Körper YAML; `200` mit `{plan, applied, configVersion}`; `422` mit allen Fehlern im `detail`; `409` bei zwischenzeitlicher Änderung; Standard `apiKeys=ignore` |
+| `GET /admin/api/v1/config:export?apiKeys=ignore\|include&kinds=&name=&organization=&team=` | `Read` auf `GitOps`: globale `admin`, `viewer`, `auditor`, `gitops` | `200 application/yaml` (`Cache-Control: no-store`); Standard `apiKeys=ignore` (F4); Teil-Export §3 |
+| `POST /admin/api/v1/config:apply?dryRun=&prune=&apiKeys=` | `Write` auf `GitOps`: globaler `admin`, `gitops` (auch Trockenlauf: er löst Server-Geheimnisse auf und vergleicht sie) | Körper YAML; `200` mit `{plan, applied, configVersion}`; `422` mit allen Fehlern im `detail` und einzeln in `issues` (`document`, `kind`, `name`, `line`, `column`, `message`, AIGW-55); `409` bei zwischenzeitlicher Änderung; Standard `apiKeys=ignore` |
+
+**Zeilenbezug (AIGW-55):** YAML-Syntaxfehler tragen Zeile und Spalte des Parsers
+(`serde-saphyr`), alle übrigen Fehler (unbekannte Felder, Regeln der Spezifikation, Dubletten,
+Verweise, Geheimnisse) die erste Inhaltszeile ihres Dokuments (`aigw_store::gitops::locate`,
+Dokumente getrennt durch `---`). Die Admin-UI markiert diese Zeilen im Editor und springt per
+Klick dorthin.
+
+**Admin-UI (AIGW-55):** Seite „YAML-Import/-Export“ (`/config`): Export gesamt bzw. nach Art,
+Organisation, Team oder einzelner Ressource mit Vorschau und Download (Detailseiten von Key, Team,
+Organisation, Modellgruppe und Deployment verlinken mit „YAML“ auf den passenden Teil-Export);
+Import mit Editor (Zeilennummern), Datei laden, Prune/API-Keys, Trockenlauf mit Diff
+(`PlanView`), Fehlerliste mit Zeilenbezug und Anwenden erst nach Bestätigung (mit Löschungen nur
+nach Eingabe von „ANWENDEN“). Export sehen globale Leserollen und `gitops`, Import globale
+`admin` und `gitops` – auch im Modus „nur YAML“. Geheimwerte erscheinen nie im Klartext.
 
 Konventionen wie in [08-admin-api.md](08-admin-api.md) (Problem Details, unbekannte
 Parameter → `400`, Bearer-Anmeldung). `config:apply` braucht kein `If-Match` (F38): die
@@ -224,7 +245,10 @@ den Modus über `GET /admin/api/v1/auth/info` (`readOnly`, F56) und blendet Schr
   Variable, Geheimnis aus Datei, eingeschränkte Herkunft, alle Key-Fälle, leeres Manifest +
   Prune löscht alles.
 - `crates/aigw-admin/tests/gitops_api.rs`: Export/Apply über HTTP, `422`, Geheimnis-Policy,
-  Nur-YAML-Modus (auch `auth/info.readOnly`).
+  Nur-YAML-Modus (auch `auth/info.readOnly`), Teil-Export (Art, Name, Organisation, Team) und
+  `issues` mit Zeile (Feldfehler, Verweisfehler, YAML-Syntax).
+- `ui/e2e/tests/aigw54.spec.js`: Export-Vorschau ohne Geheimwerte, Download, Teil-Export von der
+  Team-Detailseite, Fehler mit Zeilenbezug im Editor, Trockenlauf, Anwenden mit Bestätigung.
 - `crates/aigw-admin/tests/admin_auth_api.rs` (SQLite und Postgres): Rolle `gitops`, `viewer`
   nur Export, `gitops.secret_dir` (innerhalb, `..`, außerhalb, Symlink), API-Keys standardmäßig
   `skip`, Kompatibilitätsliste der Zugangsdaten.

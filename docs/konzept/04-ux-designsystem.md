@@ -362,6 +362,23 @@ Bereich des Teams), entscheidend bleibt der Server.
 |---|---|---|
 | ![](ux/echt-guardrails-pii-hell-desktop.png) | ![](ux/echt-plugin-kette-hell-desktop.png) | ![](ux/echt-mcp-freigaben-hell-desktop.png) |
 
+**Playground (AIGW-54).** `/playground`: Key wählen (aktive Keys mit Schreibrecht), Modellgruppen
+aus `GET /playground/models`, bis zu drei Spalten mit eigenem Verlauf, gemeinsamer Eingabe (Strg+Enter) und
+Parametern. Antworten laufen über `POST /admin/api/v1/playground/chat` (fetch-Stream, SSE selbst geparst) und
+werden mit einem eigenen kleinen Markdown-Parser (`routes/playground/markdown.ts`) als Svelte-Elemente
+dargestellt – **kein `{@html}`**, Text bleibt Text, Links nur `http(s)`/`mailto` mit `rel="noopener noreferrer"`
+(XSS- und CSP-sicher). Kennzahlen sofort aus Antwort/Headern (TTFT und Latenz im Browser, Tokens, Deployment,
+Cache), danach aus dem Request-Log (Kosten, Guardrail-Treffer); die Request-ID verlinkt auf
+`/logs?requestId=…`. Code-Beispiele mit Platzhaltern `$AIGW_URL`/`$AIGW_API_KEY` (der Key-Klartext ist der UI
+nie bekannt). Im Mock-Modus antwortet ein Mock-Chat (Markdown-Beispiel).
+
+**YAML-Import/-Export (AIGW-55).** `/config` ersetzt die GitOps-Karte der Einstellungen (dort nur noch ein
+Verweis). Details in [09-gitops.md](09-gitops.md) §5.
+
+| Playground | YAML-Import (angewendet, Diff) |
+|---|---|
+| ![](ux/echt-playground-hell-desktop.png) | ![](ux/echt-yaml-import-hell-desktop.png) |
+
 **Diagramme (F18).** LayerChart 2.9 nur per dynamic import auf Übersicht und Nutzung (`lib/charts/CostTreemap.svelte`
 mit `layerchart/hierarchy` + `d3-hierarchy`, `lib/charts/StackedArea.svelte`); Rechtecke/Flächen als SVG mit
 Token-Klassen, Achsen über die `lc-*`-Klassen in `app.css` (die Tailwind-Klassen von `@layerstack` sind bewusst nicht
@@ -376,7 +393,7 @@ eingebunden). uPlot bleibt für einfache Zeitreihen.
 | Seite | Pfad | Inhalt | Stand |
 |---|---|---|---|
 | Übersicht | `/` | Kennzahlen, Zeitreihen, Kosten-Treemap, Top-Modelle, Anbieter, Fehler nach Klasse, letzte Fehler, Gateway-Info | **echt** (AIGW-77) |
-| Playground | `/playground` | Chat gegen Modellgruppen/Routen, Vergleich mehrerer Modelle nebeneinander, Parameter, Kosten/Latenz je Antwort, Code-Snippets (OpenAI/Anthropic-SDK, curl) | geplant |
+| Playground | `/playground` | Chat im Namen eines Keys gegen Modellgruppen (SSE-Streaming oder JSON), Systemprompt, Parameter (temperature, max_tokens, n), Vergleich bis zu drei Modelle nebeneinander, Reasoning (falls `exposeReasoning`), Kennzahlen je Antwort (TTFT, Latenz, Tokens, Kosten, Deployment, Cache, Guardrails, Request-ID → Log), Code-Beispiele (curl, OpenAI-/Anthropic-SDK) | **echt** (AIGW-54) |
 | Modelle & Routen | `/models`, `/models/{name}`, `/deployments/{name}` | Modellgruppen (Liste) → Detail mit Deployments, Fallbacks, strukturierten Einstellungen, Nutzung, Plugins, Audit | **echt** (AIGW-49/77) |
 | Secrets | `/secrets` | Geheimnisse für Webhooks/content-safety/MCP (Werte nur schreibbar) | **echt** (AIGW-77) |
 | Anbieter | `/providers` | Anbieter-Zugangsdaten (nie Klartext), Verwendung; später Health-Checks, Circuit-Breaker-Zustand | **echt** (Zugangsdaten) |
@@ -390,7 +407,8 @@ eingebunden). uPlot bleibt für einfache Zeitreihen.
 | MCP-Server | `/mcp` | MCP-Server registrieren/bearbeiten (Anmeldung per Secret-Verweis), Verbindungszustand, Freigaben je Team/Key mit Tool-Mustern | **echt** (AIGW-52) |
 | Logs | `/logs` | Request-Explorer mit Filtern, Detail-Sheet (Versuche, Guardrails, Trace-Link, Payload) | **echt** (AIGW-77) |
 | Audit | `/audit` | Änderungsprotokoll mit Diff, Filter, NDJSON-Export, Kettenprüfung | **echt** (AIGW-77) |
-| Einstellungen | `/settings` | Anmeldung/Rollen, Nur-YAML-Hinweis, GitOps Export/Apply, Datenquelle, Darstellung, Über | **echt** |
+| YAML-Import/-Export | `/config` | Export gesamt/je Art/Organisation/Team/Ressource mit Vorschau und Download, Import mit Editor, Trockenlauf (Diff), Fehlern mit Zeilenbezug und Bestätigung; „YAML“-Link auf Detailseiten | **echt** (AIGW-55) |
+| Einstellungen | `/settings` | Anmeldung/Rollen, Nur-YAML-Hinweis, Verweis auf YAML-Import/-Export, Datenquelle, Darstellung, Über | **echt** |
 | Design-System | `/design` | Komponentenübersicht (Entwicklerseite, nicht in der Navigation, über Befehlspalette) | Muster |
 
 Detailseiten (`/keys/{name}` usw., §5.6) folgen dem Muster Kopf mit Status + Aktionen, Tabs (Übersicht, Nutzung,

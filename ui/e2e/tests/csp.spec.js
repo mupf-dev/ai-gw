@@ -116,7 +116,7 @@ test('Teams, Anbieter, Preise, Admin-Keys, Einstellungen (Mock)', async ({ page 
   await expect(page.getByTestId('prices-table')).toContainText('gültig');
   await goto(page, '/admin-keys');
   await expect(page.getByTestId('admin-keys-table')).toContainText('gitops-ci');
-  await goto(page, '/settings');
+  await goto(page, '/config');
   await page.getByTestId('gitops-yaml').fill('apiVersion: aigw/v1alpha1\nkind: ModelGroup\nmetadata: {name: x}\nspec: {}\n');
   await page.getByTestId('gitops-plan').click();
   await expect(page.getByTestId('apply-plan')).toBeVisible();

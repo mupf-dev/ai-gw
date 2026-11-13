@@ -38,6 +38,7 @@ pub mod gitops;
 pub mod mcp;
 pub mod mcp_status;
 pub mod oidc;
+pub mod playground;
 pub mod plugin_bindings;
 pub mod plugins;
 pub mod prices;

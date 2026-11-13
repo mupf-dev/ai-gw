@@ -35,7 +35,7 @@ pub use apply::{ApplyReport, apply, plan};
 pub use document::{Document, parse_documents, secret_env_name};
 pub use plan::{Change, ChangeAction, FieldChange, Plan, Summary};
 pub use secrets::{ProcessSecrets, SecretPolicy, SecretSource};
-pub use state::export_yaml;
+pub use state::{ExportFilter, export_yaml, export_yaml_filtered};
 
 /// Akteur im Audit-Log für Änderungen per GitOps (CLI).
 pub const GITOPS_ACTOR: &str = "gitops";
@@ -122,6 +122,13 @@ pub struct Issue {
     pub name: Option<String>,
     /// Meldung.
     pub message: String,
+    /// Zeile in der Datei (ab 1): Fundstelle eines YAML-Fehlers bzw. erste Inhaltszeile des
+    /// Dokuments ([`locate`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+    /// Spalte (ab 1), nur bei YAML-Fehlern mit genauer Fundstelle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<usize>,
 }
 
 impl Issue {
@@ -131,6 +138,8 @@ impl Issue {
             kind: None,
             name: None,
             message: message.into(),
+            line: None,
+            column: None,
         }
     }
 
@@ -145,14 +154,77 @@ impl Issue {
             kind: Some(kind),
             name: Some(name.to_owned()),
             message: message.into(),
+            line: None,
+            column: None,
+        }
+    }
+}
+
+/// Erste Inhaltszeile (ab 1) jedes Dokuments einer Mehrfachdokument-Datei, in derselben
+/// Zählung wie [`Document::index`] (Index 0 = Dokument 1). Dokumente beginnen nach einem
+/// Trenner `---`; Inhalt vor dem ersten Trenner ist Dokument 1. Ein leeres Dokument zeigt auf
+/// seinen Trenner.
+pub fn document_lines(text: &str) -> Vec<usize> {
+    let mut out = Vec::new();
+    // (Zeile des Trenners bzw. None für den Vorspann, erste Inhaltszeile)
+    let mut current: Option<(Option<usize>, Option<usize>)> = Some((None, None));
+    for (i, l) in text.lines().enumerate() {
+        let n = i + 1;
+        let t = l.trim_end();
+        let is_sep = t == "---" || t.starts_with("--- ") || t.starts_with("---\t");
+        if is_sep {
+            if let Some((sep, first)) = current.take() {
+                match (sep, first) {
+                    (_, Some(f)) => out.push(f),
+                    (Some(s), None) => out.push(s),
+                    (None, None) => {}
+                }
+            }
+            // Inhalt hinter dem Trenner in derselben Zeile (`--- {a: 1}`).
+            let rest = t.trim_start_matches('-').trim();
+            let first = (!rest.is_empty() && !rest.starts_with('#')).then_some(n);
+            current = Some((Some(n), first));
+            continue;
+        }
+        let c = l.trim();
+        if let Some((_, first @ None)) = current.as_mut()
+            && !c.is_empty()
+            && !c.starts_with('#')
+            && c != "..."
+        {
+            *first = Some(n);
+        }
+    }
+    if let Some((sep, first)) = current {
+        match (sep, first) {
+            (_, Some(f)) => out.push(f),
+            (Some(s), None) => out.push(s),
+            (None, None) => {}
+        }
+    }
+    out
+}
+
+/// Ergänzt die Zeile ([`Issue::line`]) von Meldungen mit Dokumentnummer aus dem Text der Datei.
+pub fn locate(text: &str, issues: &mut [Issue]) {
+    let lines = document_lines(text);
+    for i in issues {
+        if i.line.is_none()
+            && let Some(d) = i.document
+            && let Some(l) = d.checked_sub(1).and_then(|d| lines.get(d))
+        {
+            i.line = Some(*l);
         }
     }
 }
 
 impl fmt::Display for Issue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(d) = self.document {
-            write!(f, "Dokument {d}: ")?;
+        match (self.document, self.line) {
+            (Some(d), Some(l)) => write!(f, "Dokument {d} (Zeile {l}): ")?,
+            (Some(d), None) => write!(f, "Dokument {d}: ")?,
+            (None, Some(l)) => write!(f, "Zeile {l}: ")?,
+            (None, None) => {}
         }
         match (&self.kind, &self.name) {
             (Some(k), Some(n)) => write!(f, "{k} {n:?}: ")?,

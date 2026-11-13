@@ -23,6 +23,7 @@ export type PageId =
   | 'logs'
   | 'audit'
   | 'settings'
+  | 'config'
   | 'design';
 
 export interface Page {
@@ -55,7 +56,7 @@ const p = (id: PageId, path: string, label: string, icon: IconName, description:
 
 export const PAGES: Record<PageId, Page> = {
   overview: { ...p('overview', '/', 'Übersicht', 'home', 'Kennzahlen des Gateways: Requests, Tokens, Kosten, Latenz, Fehler und Cache-Treffer im Zeitverlauf.', true, 'dashboard start kpi'), needsAuth: true },
-  playground: p('playground', '/playground', 'Playground', 'play', 'Modelle und Routen direkt ausprobieren: Chat, Vergleich mehrerer Modelle nebeneinander, Code-Snippets für OpenAI/Anthropic-SDKs.', false, 'chat test ausprobieren'),
+  playground: { ...p('playground', '/playground', 'Playground', 'play', 'Modellgruppen im Namen eines Keys ausprobieren: Chat mit Streaming, Parameter, Vergleich bis zu drei Modelle nebeneinander, Kennzahlen je Antwort und Code-Beispiele.', true, 'chat test ausprobieren prompt'), needsAuth: true },
   models: { ...p('models', '/models', 'Modelle & Routen', 'route', 'Modellgruppen mit Aliassen, Routing-Strategie, Fallback-Kette und Einstellungen; Deployments je Gruppe mit Priorität, Gewicht und Kapazität.', true, 'routing deployment fallback alias'), needsAuth: true },
   providers: { ...p('providers', '/providers', 'Anbieter', 'plug', 'Anbieter-Zugangsdaten (OpenAI, Azure, Anthropic, Bedrock, Vertex, Ollama, vLLM …): Werte nur schreibbar, nie lesbar; Verwendung durch Deployments.', true, 'provider upstream credentials zugangsdaten secret'), needsAuth: true },
   secrets: { ...p('secrets', '/secrets', 'Secrets', 'lock', 'Geheimnisse für Webhooks, content-safety und MCP-Server: verschlüsselt, Werte nur schreibbar.', true, 'secret geheimnis hmac token webhook'), needsAuth: true },
@@ -69,7 +70,8 @@ export const PAGES: Record<PageId, Page> = {
   mcp: { ...p('mcp', '/mcp', 'MCP-Server', 'network', 'Angebundene MCP-Server mit Verbindungszustand (verbunden, gestört, unbenutzt, deaktiviert), Fehlern und Fehlversuchen.', true, 'tools model context protocol status'), needsAuth: true },
   logs: { ...p('logs', '/logs', 'Logs', 'list', 'Request-Explorer: Filter nach Status, Modell, Key, Team und Zeitraum; Detailansicht mit Request, Response, Fallback-Versuchen und Zeitleiste.', true, 'requests traces explorer'), needsAuth: true },
   audit: { ...p('audit', '/audit', 'Audit', 'clipboard', 'Änderungsprotokoll der Steuerungsebene: wer hat wann was geändert (Vorher/Nachher), Filter, Export als JSON Lines.', true, 'änderungen protokoll compliance siem'), needsAuth: true },
-  settings: p('settings', '/settings', 'Einstellungen', 'settings', 'Anmeldung und Rollen, Darstellung, Datenquelle (Mock-Modus), GitOps-Export und -Apply (Trockenlauf mit Diff).', true, 'theme darstellung mock config gitops yaml export apply'),
+  settings: p('settings', '/settings', 'Einstellungen', 'settings', 'Anmeldung und Rollen, Darstellung, Datenquelle (Mock-Modus), Hinweis auf GitOps (YAML-Import/-Export).', true, 'theme darstellung mock'),
+  config: { ...p('config', '/config', 'YAML-Import/-Export', 'file-text', 'Ressourcen als YAML-Manifeste exportieren (gesamt, je Art, Organisation, Team oder Ressource) und mit Trockenlauf, Diff und Bestätigung importieren.', true, 'gitops yaml export import apply diff manifest'), needsAuth: true },
   design: p('design', '/design', 'Design-System', 'sparkles', 'Komponentenübersicht des Design-Systems (Entwicklerseite).', true, 'komponenten tokens ui kit'),
 };
 
@@ -80,7 +82,7 @@ export const NAV: NavGroup[] = [
   { label: 'Beobachten', items: [PAGES.logs, PAGES.audit] },
 ];
 
-export const NAV_FOOTER: Page[] = [PAGES.settings];
+export const NAV_FOOTER: Page[] = [PAGES.config, PAGES.settings];
 
 /**
  * Detailseiten (D8/F136): Pfad → Bereichsseite (Navigation, Titel, Anmeldung) und Art des Objekts.

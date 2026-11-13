@@ -34,9 +34,10 @@ pub struct Problem {
     /// Beschreibung dieses Falls.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
-    /// Betroffener Pfad.
+    /// Betroffener Pfad (`Box<str>`, damit `Result<_, Problem>` klein bleibt).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub instance: Option<String>,
+    #[schema(value_type = Option<String>)]
+    pub instance: Option<Box<str>>,
     /// Maschinenlesbarer Code (`not-found`, `conflict`, `precondition-failed` …).
     pub code: &'static str,
     /// Einzelne Grenzverstöße (AIGW-67: `422` beim Objekt selbst, `409` bei betroffenen
@@ -44,6 +45,11 @@ pub struct Problem {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<Vec<Violation>>)]
     pub violations: Option<Box<Vec<Violation>>>,
+    /// Einzelne Fehler eines GitOps-Manifests mit Dokument, Ressource und Zeile (AIGW-55;
+    /// `422` von `config:apply`); fehlt sonst.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Vec<aigw_store::gitops::Issue>>)]
+    pub issues: Option<Box<Vec<aigw_store::gitops::Issue>>>,
 }
 
 impl Problem {
@@ -62,6 +68,7 @@ impl Problem {
             instance: None,
             code,
             violations: None,
+            issues: None,
         }
     }
 
@@ -146,7 +153,14 @@ impl Problem {
         )
     }
 
-    /// Setzt die einzelnen Grenzverstöße.
+    /// Einzelne Manifest-Fehler anhängen (GitOps, AIGW-55).
+    #[must_use]
+    pub fn with_issues(mut self, issues: Vec<aigw_store::gitops::Issue>) -> Self {
+        self.issues = (!issues.is_empty()).then(|| Box::new(issues));
+        self
+    }
+
+    /// Einzelne Grenzverstöße anhängen (AIGW-67).
     #[must_use]
     pub fn with_violations(mut self, violations: Vec<Violation>) -> Self {
         self.violations = (!violations.is_empty()).then(|| Box::new(violations));
@@ -156,7 +170,7 @@ impl Problem {
     /// Setzt `instance`.
     #[must_use]
     pub fn at(mut self, path: impl Into<String>) -> Self {
-        self.instance = Some(path.into());
+        self.instance = Some(path.into().into_boxed_str());
         self
     }
 }

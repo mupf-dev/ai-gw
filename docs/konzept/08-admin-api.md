@@ -815,6 +815,33 @@ Instanzen gleichen nur im Abstand `counters.sync_interval_ms` ab). Nur Objekte m
 mit `local`/`redis` leer. Dieselbe Prüfung loggt das Gateway beim Start als Warnung. Grundlage
 für den UI-Hinweis am Limit-Editor.
 
+### 5.13 Playground (AIGW-54)
+
+| Route | Inhalt |
+|---|---|
+| `GET /admin/api/v1/playground/models?key=` | Modellgruppen, die der Key nutzen darf (`name`, `aliases`, `exposeReasoning` = Gruppe **und** Key/Team/Organisation, `deployments`, `capabilities`), dazu Organisation/Team des Keys und `configVersion` |
+| `POST /admin/api/v1/playground/chat?key=` | Körper wie `POST /v1/chat/completions` (OpenAI-Format, `stream: true` → SSE); Antwort wie auf der Datenebene mit `x-aigw-request-id`, `x-aigw-deployment`, `x-aigw-model`, `x-aigw-cache`, `x-aigw-attempts`/`-fallback` |
+
+**Keine Umgehung der Datenebene:** Die Admin-Anmeldung allein erlaubt keinen Modellzugriff. Jede
+Anfrage läuft im Namen eines **bestehenden, aktiven virtuellen Keys** (aus dem aktuellen
+Snapshot, Ablauf geprüft) durch dieselbe Pipeline wie `/v1/chat/completions`
+(`aigw_proxy::playground`; nur die Prüfung des Key-Headers entfällt): Modellfreigaben, Limits,
+Budgets, Plugins/Guardrails, Cache, Routing, Kosten und Request-Log gelten für diesen Key
+(Client-Request-ID `playground`). Den Klartext des Keys braucht die UI nicht.
+
+**Berechtigung:** Schreibrecht auf den Key (`InTeam` bzw. `InOrganization`: globaler `admin`,
+`org-admin`, `team-admin`) – wer den Key verwalten und rotieren darf, darf ihn auch hier nutzen.
+Ohne Leserecht auf den Key bzw. bei unbekanntem, gesperrtem oder abgelaufenem Key `404`, mit
+Leserecht aber ohne Schreibrecht `403`. Fehler der Datenebene (z. B. `403 model_not_allowed`,
+`429`, Guardrail-Ablehnung) kommen im OpenAI-Format (`{error: …}`), Fehler der Admin-API als
+Problem Details. Die Körpergrenze ist `server.data.max_body_bytes`. Im Modus „nur YAML“ bleibt
+der Chat erlaubt (keine Konfigurationsänderung).
+
+**Audit:** Vor jeder Ausführung ein Eintrag (Art `playground`, Aktion `chat`, Akteur, Objekt =
+Key, Geltungsbereich Organisation/Team des Keys, `after = {requestId, model, stream}` – keine
+Inhalte). Schlägt das Schreiben fehl, wird die Anfrage nicht ausgeführt. Der Eintrag erhöht
+keine Konfigurationsversion und gehört nicht zum Snapshot-Journal.
+
 ## 6. Datenebene: Schlüsselprüfung und Modellfreigaben
 
 `aigw_proxy::SnapshotAuthenticator` (Architektur §3, Schritte 2–3):

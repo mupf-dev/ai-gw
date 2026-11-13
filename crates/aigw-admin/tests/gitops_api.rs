@@ -236,6 +236,120 @@ async fn read_only_mode_blocks_admin_writes_but_not_gitops() {
     assert_eq!(json(&b)["bootstrap"], false);
 }
 
+/// AIGW-55: Teil-Export (Arten, Name, Organisation/Team) und Validierungsfehler mit Zeile.
+#[tokio::test]
+async fn partial_export_and_issue_lines() {
+    let (app, _store) = app(false).await;
+    let more = format!(
+        "{MANIFEST}---\napiVersion: aigw/v1alpha1\nkind: Organization\nmetadata: {{name: other}}\n---\n\
+         apiVersion: aigw/v1alpha1\nkind: Team\nmetadata: {{name: ops}}\nspec: {{organization: other}}\n---\n\
+         apiVersion: aigw/v1alpha1\nkind: ModelGroup\nmetadata: {{name: echo}}\nspec: {{routing: weighted}}\n"
+    );
+    let (s, _, b) = call(
+        &app,
+        Method::POST,
+        "/admin/api/v1/config:apply",
+        Some(("application/yaml", more)),
+        true,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+
+    let export = |q: &'static str| {
+        let app = app.clone();
+        async move {
+            let (s, _, b) = call(
+                &app,
+                Method::GET,
+                &format!("/admin/api/v1/config:export?{q}"),
+                None,
+                true,
+            )
+            .await;
+            assert_eq!(s, StatusCode::OK, "{q}: {b}");
+            b
+        }
+    };
+    let b = export("organization=acme").await;
+    assert!(
+        b.contains("name: acme") && b.contains("name: platform"),
+        "{b}"
+    );
+    assert!(
+        !b.contains("name: other") && !b.contains("name: ops"),
+        "{b}"
+    );
+    assert!(!b.contains("kind: ModelGroup"), "{b}");
+    assert!(b.contains("Teil-Export"), "{b}");
+
+    let b = export("team=ops").await;
+    assert!(
+        b.contains("name: ops") && !b.contains("kind: Organization"),
+        "{b}"
+    );
+
+    let b = export("kinds=model-group").await;
+    assert!(b.contains("name: echo") && !b.contains("kind: Team"), "{b}");
+
+    let b = export("kinds=Team&name=platform").await;
+    assert!(
+        b.contains("name: platform") && !b.contains("name: ops"),
+        "{b}"
+    );
+
+    let (s, _, _) = call(
+        &app,
+        Method::GET,
+        "/admin/api/v1/config:export?kinds=Bogus",
+        None,
+        true,
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    // Ungültiges Dokument 2 (ab Zeile 6): Fehler mit Dokument und Zeile.
+    let bad = "# Kopf\napiVersion: aigw/v1alpha1\nkind: Organization\nmetadata: {name: acme}\n---\n\
+               apiVersion: aigw/v1alpha1\nkind: Team\nmetadata: {name: t2}\nspec: {organization: acme, bogus: 1}\n";
+    let (s, _, b) = call(
+        &app,
+        Method::POST,
+        "/admin/api/v1/config:apply?dryRun=true",
+        Some(("application/yaml", bad.to_owned())),
+        true,
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
+    let p = json(&b);
+    assert_eq!(p["issues"][0]["document"], 2, "{p}");
+    assert_eq!(p["issues"][0]["line"], 6, "{p}");
+    assert_eq!(p["issues"][0]["kind"], "Team", "{p}");
+
+    // Verweisfehler (erst bei der Planung erkannt) ebenfalls mit Zeile.
+    let dangling = "apiVersion: aigw/v1alpha1\nkind: Team\nmetadata: {name: t3}\nspec: {organization: nirgends}\n";
+    let (s, _, b) = call(
+        &app,
+        Method::POST,
+        "/admin/api/v1/config:apply?dryRun=true",
+        Some(("application/yaml", dangling.to_owned())),
+        true,
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
+    assert_eq!(json(&b)["issues"][0]["line"], 1, "{b}");
+
+    // YAML-Syntaxfehler mit Zeile.
+    let (s, _, b) = call(
+        &app,
+        Method::POST,
+        "/admin/api/v1/config:apply?dryRun=true",
+        Some(("application/yaml", "kind: [offen\nmetadata: x\n".to_owned())),
+        true,
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
+    assert!(json(&b)["issues"][0]["line"].as_u64().is_some(), "{b}");
+}
+
 /// F38: `If-Match` ist Pflicht – Anfragen ohne eigenen ETag schreiben hier mit `If-Match: *`
 /// (eigene Tests prüfen 428/412 ausdrücklich).
 fn with_if_match(req: axum::http::request::Builder) -> axum::http::request::Builder {

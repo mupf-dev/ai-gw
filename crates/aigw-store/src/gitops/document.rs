@@ -70,8 +70,15 @@ pub fn parse_documents(text: &str) -> Result<Vec<Document>, GitopsError> {
     if is_blank(text) {
         return Ok(Vec::new());
     }
-    let raws: Vec<Option<RawDoc>> = serde_saphyr::from_multiple(text)
-        .map_err(|e| GitopsError::Invalid(vec![Issue::new(format!("YAML ungültig: {e}"))]))?;
+    let raws: Vec<Option<RawDoc>> = serde_saphyr::from_multiple(text).map_err(|e| {
+        let mut issue = Issue::new(format!("YAML ungültig: {e}"));
+        // Fundstelle für die Anzeige mit Zeilenbezug (Admin-UI, AIGW-55).
+        if let Some(loc) = e.location() {
+            issue.line = usize::try_from(loc.line()).ok().filter(|l| *l > 0);
+            issue.column = usize::try_from(loc.column()).ok().filter(|c| *c > 0);
+        }
+        GitopsError::Invalid(vec![issue])
+    })?;
 
     let mut docs = Vec::with_capacity(raws.len());
     let mut issues = Vec::new();
@@ -148,6 +155,7 @@ pub fn parse_documents(text: &str) -> Result<Vec<Document>, GitopsError> {
     if issues.is_empty() {
         Ok(docs)
     } else {
+        super::locate(text, &mut issues);
         Err(GitopsError::Invalid(issues))
     }
 }
@@ -285,5 +293,30 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn issues_carry_lines() {
+        // Dokument 2 (Zeile 6) ist ungültig: unbekanntes Feld.
+        let text = "# Kopf\n---\napiVersion: aigw/v1alpha1\nkind: Organization\nmetadata: {name: o}\n---\n\napiVersion: aigw/v1alpha1\nkind: Team\nmetadata: {name: t}\nspec: {organization: o, bogus: 1}\n";
+        assert_eq!(super::super::document_lines(text), vec![3, 8]);
+        let err = parse_documents(text).unwrap_err();
+        let issues = err.issues();
+        assert_eq!(issues.len(), 1, "{err}");
+        assert_eq!(issues[0].document, Some(2));
+        assert_eq!(issues[0].line, Some(8));
+
+        // YAML-Syntaxfehler mit Fundstelle.
+        let err = parse_documents("apiVersion: aigw/v1alpha1\nkind: [unterminated\n").unwrap_err();
+        assert!(err.issues()[0].line.is_some(), "{err}");
+    }
+
+    #[test]
+    fn document_lines_cover_edge_cases() {
+        use super::super::document_lines;
+        assert_eq!(document_lines("a: 1\n---\nb: 2\n"), vec![1, 3]);
+        assert_eq!(document_lines("---\n---\nb: 2\n---\n"), vec![1, 3, 4]);
+        assert_eq!(document_lines("--- {a: 1}\n"), vec![1]);
+        assert!(document_lines("# nur\n").is_empty());
     }
 }

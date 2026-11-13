@@ -46,6 +46,7 @@ pub mod mcp;
 pub mod mock;
 mod observe;
 mod pipeline;
+pub mod playground;
 mod plugins;
 pub mod provider;
 mod request_id;

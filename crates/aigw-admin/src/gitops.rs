@@ -4,10 +4,11 @@
 //! GitOps über die Admin-API (AIGW-33, `docs/konzept/09-gitops.md`).
 //!
 //! - `GET /admin/api/v1/config:export` – alle Ressourcen als YAML (`application/yaml`),
-//!   Berechtigung `Read`.
+//!   Berechtigung `Read`; Teil-Export über `kinds`, `name`, `organization`, `team` (AIGW-55).
 //! - `POST /admin/api/v1/config:apply?dryRun=&prune=&apiKeys=` – Körper: YAML-Manifeste;
 //!   Antwort: Plan bzw. Ergebnis (`ApplyReport`), Berechtigung `Write` (auch für den
-//!   Trockenlauf, weil er Geheimnisse des Servers auflöst und vergleicht).
+//!   Trockenlauf, weil er Geheimnisse des Servers auflöst und vergleicht). Ungültige
+//!   Manifeste: `422` mit `issues` (Dokument, Art, Name, Zeile, Meldung).
 //!
 //! Über die API dürfen Manifeste nur Umgebungsvariablen mit Präfix `AIGW_SECRET_` verwenden
 //! und Dateien nur innerhalb von `gitops.secret_dir` (F52; [`SecretPolicy::restricted`],
@@ -23,9 +24,10 @@
 use std::fmt;
 use std::sync::Arc;
 
+use aigw_core::resource::ResourceKind;
 use aigw_store::gitops::{
-    self, ApiKeyMode, ApplyOptions, ApplyReport, GitopsError, ProcessSecrets, SECRET_ENV_PREFIX,
-    SecretPolicy,
+    self, ApiKeyMode, ApplyOptions, ApplyReport, ExportFilter, GitopsError, ProcessSecrets,
+    SECRET_ENV_PREFIX, SecretPolicy,
 };
 use aigw_store::{Keyring, Store};
 use axum::extract::rejection::QueryRejection;
@@ -81,6 +83,52 @@ pub(crate) struct ExportQuery {
     /// `ignore` (Standard, F4): API-Keys weglassen; `include`: ohne Klartext exportieren.
     #[serde(default)]
     api_keys: ApiKeyMode,
+    /// Teil-Export (AIGW-55): nur diese Arten, kommagetrennt (`ModelGroup,Deployment` bzw.
+    /// `model-group,deployment`); leer = alle.
+    #[serde(default)]
+    kinds: Option<String>,
+    /// Teil-Export: nur Ressourcen mit genau diesem Namen.
+    #[serde(default)]
+    name: Option<String>,
+    /// Teil-Export: Organisation samt Teams, API-Keys, Plugin-Bindungen und MCP-Freigaben
+    /// (ohne Katalog-Ressourcen).
+    #[serde(default)]
+    organization: Option<String>,
+    /// Teil-Export: Team samt API-Keys, Plugin-Bindungen und MCP-Freigaben.
+    #[serde(default)]
+    team: Option<String>,
+}
+
+impl ExportQuery {
+    fn filter(&self) -> Result<ExportFilter, Problem> {
+        let nonempty = |v: &Option<String>| {
+            v.as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        };
+        let mut kinds = Vec::new();
+        for k in self
+            .kinds
+            .as_deref()
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+        {
+            let kind = ResourceKind::parse_any(k)
+                .ok_or_else(|| Problem::bad_request(format!("kinds: unbekannte Art {k:?}")))?;
+            if !kinds.contains(&kind) {
+                kinds.push(kind);
+            }
+        }
+        Ok(ExportFilter {
+            kinds,
+            name: nonempty(&self.name),
+            organization: nonempty(&self.organization),
+            team: nonempty(&self.team),
+        })
+    }
 }
 
 /// Parameter von Apply.
@@ -100,14 +148,25 @@ pub(crate) struct ApplyQuery {
 }
 
 fn problem(e: GitopsError) -> Problem {
+    problem_in(e, None)
+}
+
+/// Wie [`problem`]; mit dem Manifest-Text erhalten Meldungen ihre Zeile (AIGW-55).
+fn problem_in(e: GitopsError, text: Option<&str>) -> Problem {
     match e {
-        GitopsError::Invalid(issues) => Problem::invalid(
-            issues
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("\n"),
-        ),
+        GitopsError::Invalid(mut issues) => {
+            if let Some(t) = text {
+                gitops::locate(t, &mut issues);
+            }
+            Problem::invalid(
+                issues
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+            .with_issues(issues)
+        }
         e @ GitopsError::Concurrent { .. } => Problem::conflict(e.to_string()),
         GitopsError::Store(s) => s.into(),
         other => {
@@ -135,7 +194,8 @@ pub(crate) async fn export_config(
 ) -> Result<Response, Problem> {
     p.require_on(Permission::Read, &Target::GitOps)?;
     let Query(q) = q?;
-    let yaml = gitops::export_yaml(&st.store, q.api_keys)
+    let filter = q.filter()?;
+    let yaml = gitops::export_yaml_filtered(&st.store, q.api_keys, &filter)
         .await
         .map_err(problem)?;
     let mut res = yaml.into_response();
@@ -170,7 +230,7 @@ pub(crate) async fn apply_config(
     let Query(q) = q?;
     let text =
         std::str::from_utf8(&body).map_err(|_| Problem::bad_request("Körper ist kein UTF-8"))?;
-    let docs = gitops::parse_documents(text).map_err(problem)?;
+    let docs = gitops::parse_documents(text).map_err(|e| problem_in(e, Some(text)))?;
     let opts = ApplyOptions {
         dry_run: q.dry_run,
         prune: q.prune,
@@ -183,7 +243,7 @@ pub(crate) async fn apply_config(
     };
     let report = gitops::apply(&st.store, &st.keyring, &docs, &opts, &ProcessSecrets)
         .await
-        .map_err(problem)?;
+        .map_err(|e| problem_in(e, Some(text)))?;
     Ok(Json(report).into_response())
 }
 

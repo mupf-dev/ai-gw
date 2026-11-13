@@ -36,6 +36,7 @@
 <AsyncState loader={data}>
   {#snippet children(d)}
     <DetailLayout
+      yaml="kinds=Deployment&name={encodeURIComponent(d.metadata.name)}"
       back={detailPath('model-group', d.spec.modelGroup)}
       backLabel="Modellgruppe {d.spec.modelGroup}"
       title={d.metadata.name}

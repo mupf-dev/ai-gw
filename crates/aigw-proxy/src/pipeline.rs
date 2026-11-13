@@ -57,6 +57,9 @@ pub(crate) struct Pipeline<'a> {
     format: ErrorFormat,
     /// Eingangsformat (für Plugins).
     ingress: WireFormat,
+    /// Vorab geprüfter Key (Playground der Admin-UI, AIGW-54): ersetzt die Prüfung des
+    /// Headers, alle übrigen Schritte (Freigaben, Limits, Budgets, Plugins) bleiben gleich.
+    preset: Option<AuthContext>,
 }
 
 impl<'a> Pipeline<'a> {
@@ -83,7 +86,15 @@ impl<'a> Pipeline<'a> {
             auth: None,
             format: ErrorFormat::OpenAi,
             ingress,
+            preset: None,
         }
+    }
+
+    /// Key-Kontext vorgeben statt ihn aus den Headern zu prüfen (AIGW-54).
+    #[must_use]
+    pub(crate) fn with_auth(mut self, auth: Option<AuthContext>) -> Self {
+        self.preset = auth;
+        self
     }
 
     /// Fehler und Rate-Limit-Header in diesem Format (Standard OpenAI).
@@ -113,7 +124,9 @@ impl<'a> Pipeline<'a> {
         &mut self,
         headers: &HeaderMap,
     ) -> Result<AuthContext, UpstreamError> {
-        let auth = {
+        let auth = if let Some(auth) = self.preset.take() {
+            auth
+        } else {
             let span = crate::trace::auth_span();
             let _g = span.enter();
             self.st

@@ -88,6 +88,7 @@
   {#snippet children({ group, deps, groups })}
     {@const tiers = tiersOf(deps)}
     <DetailLayout
+      yaml="kinds=ModelGroup&name={encodeURIComponent(group.metadata.name)}"
       back="/models"
       backLabel="Alle Modellgruppen"
       title={group.metadata.name}

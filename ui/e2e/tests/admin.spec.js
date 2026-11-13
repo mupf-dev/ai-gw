@@ -155,6 +155,10 @@ test('Rollen: Viewer-Admin-API-Key sieht keine Schreibaktionen', async ({ page, 
   await expect(page.getByTestId('create-credential')).toHaveCount(0);
   await gotoReal(page, '/settings');
   await expect(page.getByTestId('session-roles')).toContainText('Betrachter (global)');
+  // YAML-Import/-Export (AIGW-55): Betrachter dürfen exportieren, aber nicht anwenden.
+  await gotoReal(page, '/config');
+  await expect(page.getByTestId('gitops-export')).toBeVisible();
   await expect(page.getByTestId('gitops-apply')).toHaveCount(0);
+  await expect(page.getByTestId('gitops-import-card')).toContainText('vorbehalten');
   clean(page);
 });

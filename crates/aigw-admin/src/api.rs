@@ -62,6 +62,7 @@ use crate::{admin_keys as ak, session as s};
         crate::analytics::timeseries, crate::analytics::summary, crate::analytics::top,
         crate::analytics::list_request_logs, crate::analytics::get_request_log,
         crate::analytics::get_request_payload,
+        crate::playground::models, crate::playground::chat,
     ),
     components(schemas(VersionInfo, SnapshotInfo, Problem, crate::bounds::Cascade)),
     modifiers(&SecuritySchemes),
@@ -86,6 +87,7 @@ use crate::{admin_keys as ak, session as s};
         (name = "audit-log", description = "Audit-Log: Änderungen und Anmeldeereignisse, Export als JSON Lines"),
         (name = "analytics", description = "Dashboards: Zeitreihen, KPIs, Ranglisten aus den Rollups"),
         (name = "request-logs", description = "Log-Explorer: einzelne Anfragen, Versuche, Payloads"),
+        (name = "playground", description = "Playground der Admin-UI: Chat im Namen eines virtuellen Keys über die Pipeline der Datenebene (auditiert)"),
     )
 )]
 pub struct ApiDoc;
@@ -260,6 +262,8 @@ mod tests {
             "/admin/api/v1/mcp-servers/{name}",
             "/admin/api/v1/mcp-grants",
             "/admin/api/v1/plugin-bindings/{name}",
+            "/admin/api/v1/playground/chat",
+            "/admin/api/v1/playground/models",
         ] {
             assert!(json["paths"][p].is_object(), "Pfad {p} fehlt");
         }

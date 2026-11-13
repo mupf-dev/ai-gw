@@ -54,6 +54,7 @@
   {#snippet children(k)}
     {@const st = keyStatus(k)}
     <DetailLayout
+      yaml="kinds=ApiKey&name={encodeURIComponent(k.metadata.name)}"
       back="/keys"
       backLabel="Alle Keys"
       title={k.metadata.name}

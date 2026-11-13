@@ -94,7 +94,16 @@ pub(crate) async fn chat_completions(
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
-    chat(&st, &rid, started, &headers, body, ErrorFormat::OpenAi).await
+    chat(
+        &st,
+        &rid,
+        started,
+        &headers,
+        body,
+        ErrorFormat::OpenAi,
+        None,
+    )
+    .await
 }
 
 /// `POST /v1/messages`.
@@ -105,7 +114,16 @@ pub(crate) async fn messages(
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
-    chat(&st, &rid, started, &headers, body, ErrorFormat::Anthropic).await
+    chat(
+        &st,
+        &rid,
+        started,
+        &headers,
+        body,
+        ErrorFormat::Anthropic,
+        None,
+    )
+    .await
 }
 
 fn ingress(format: ErrorFormat) -> WireFormat {
@@ -273,17 +291,19 @@ pub(crate) async fn apply_response_model(
 }
 
 /// Chat/Messages über die gemeinsame [`Pipeline`] (AIGW-78): Fehler und Rate-Limit-Header im
-/// Eingangsformat.
-async fn chat(
+/// Eingangsformat. `preset`: vorab geprüfter Key (Playground, AIGW-54), sonst aus den Headern.
+pub(crate) async fn chat(
     st: &ProxyState,
     rid: &RequestId,
     started: RequestStart,
     headers: &HeaderMap,
     body: Result<Bytes, BytesRejection>,
     format: ErrorFormat,
+    preset: Option<crate::auth::AuthContext>,
 ) -> Response {
-    let mut p =
-        Pipeline::new(st, rid, started, ingress(format), headers, "chat").with_error_format(format);
+    let mut p = Pipeline::new(st, rid, started, ingress(format), headers, "chat")
+        .with_error_format(format)
+        .with_auth(preset);
     let span = p.span.clone();
     match chat_inner(&mut p, headers, body, format)
         .instrument(span)

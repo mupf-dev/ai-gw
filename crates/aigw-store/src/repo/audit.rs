@@ -425,6 +425,29 @@ impl Store {
         Ok(())
     }
 
+    /// Wie [`Store::record_audit_event`], aber mit Geltungsbereich (Organisation, Team), damit
+    /// eingeschränkte Rollen den Eintrag lesen (z. B. Playground-Anfragen mit einem Key ihres
+    /// Teams, AIGW-54).
+    pub async fn record_audit_event_scoped(
+        &self,
+        ev: &AuditEvent,
+        organization: Option<&str>,
+        team: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let version = self.config_version().await?;
+        let mut tx = self.pool.begin().await?;
+        let mut row =
+            super::audit_chain::NewAuditRow::new(&ev.actor, &ev.action, &ev.kind, version);
+        row.object_id = ev.object_id;
+        row.object_name = ev.object_name.clone();
+        row.after = ev.details.clone();
+        row.organization = organization.map(str::to_owned);
+        row.team = team.map(str::to_owned);
+        super::audit_chain::append(&mut tx, &row).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Letzte Einträge des Audit-Logs (neueste zuerst, ohne Filter).
     pub async fn audit_log(&self, limit: i64) -> Result<Vec<AuditEntry>, StoreError> {
         let limit = u32::try_from(limit.max(1)).unwrap_or(u32::MAX);

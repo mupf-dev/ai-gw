@@ -479,6 +479,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/playground/chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Chat im Namen des Keys (Pipeline der Datenebene, OpenAI-Format). */
+        post: operations["chat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/playground/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Modellgruppen, die der Key nutzen darf. */
+        get: operations["models"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/plugin-bindings": {
         parameters: {
             query?: never;
@@ -1569,6 +1603,23 @@ export interface components {
             /** @description Nutzer (Name). */
             user: string;
         };
+        /** @description Ein Validierungsfehler, möglichst mit Dokument und Ressource. */
+        Issue: {
+            /** @description Spalte (ab 1), nur bei YAML-Fehlern mit genauer Fundstelle. */
+            column?: number | null;
+            /** @description Nummer des Dokuments in der Datei (ab 1). */
+            document?: number | null;
+            kind?: components["schemas"]["ResourceKind"] | null;
+            /**
+             * @description Zeile in der Datei (ab 1): Fundstelle eines YAML-Fehlers bzw. erste Inhaltszeile des
+             *     Dokuments ([`locate`]).
+             */
+            line?: number | null;
+            /** @description Meldung. */
+            message: string;
+            /** @description Name der Ressource. */
+            name?: string | null;
+        };
         /** @description Eine KPI mit Vergleich. */
         Kpi: {
             amount?: components["schemas"]["Amount"] | null;
@@ -1902,6 +1953,35 @@ export interface components {
             /** @description Warnungen (z. B. übersprungene Keys). */
             warnings: string[];
         };
+        /** @description Eine für den Key freigegebene Modellgruppe. */
+        PlaygroundModel: {
+            /** @description Aliasse. */
+            aliases: string[];
+            /** @description Fähigkeiten der Gruppe (leer = nicht eingeschränkt). */
+            capabilities: string[];
+            /** @description Zahl der aktiven Deployments. */
+            deployments: number;
+            /** @description Reasoning wird ausgegeben (`settings.exposeReasoning` der Gruppe und Key/Team/Org). */
+            exposeReasoning: boolean;
+            /** @description Kanonischer Name. */
+            name: string;
+        };
+        /** @description Kontext des Playgrounds für einen Key. */
+        PlaygroundModels: {
+            /**
+             * Format: int64
+             * @description Konfigurationsversion des Snapshots.
+             */
+            configVersion: number;
+            /** @description Key. */
+            key: string;
+            /** @description Freigegebene Modellgruppen (nach Name). */
+            models: components["schemas"]["PlaygroundModel"][];
+            /** @description Organisation des Keys. */
+            organization: string;
+            /** @description Team des Keys. */
+            team?: string | null;
+        };
         PluginBinding: {
             effective?: components["schemas"]["EffectivePluginControl"] | null;
             /**
@@ -2101,8 +2181,13 @@ export interface components {
             code: string;
             /** @description Beschreibung dieses Falls. */
             detail?: string | null;
-            /** @description Betroffener Pfad. */
+            /** @description Betroffener Pfad (`Box<str>`, damit `Result<_, Problem>` klein bleibt). */
             instance?: string | null;
+            /**
+             * @description Einzelne Fehler eines GitOps-Manifests mit Dokument, Ressource und Zeile (AIGW-55;
+             *     `422` von `config:apply`); fehlt sonst.
+             */
+            issues?: components["schemas"]["Issue"][] | null;
             /**
              * Format: int32
              * @description HTTP-Status.
@@ -4207,6 +4292,20 @@ export interface operations {
             query?: {
                 /** @description `ignore` (Standard, F4): API-Keys weglassen; `include`: ohne Klartext exportieren. */
                 apiKeys?: components["schemas"]["ApiKeyMode"];
+                /**
+                 * @description Teil-Export (AIGW-55): nur diese Arten, kommagetrennt (`ModelGroup,Deployment` bzw.
+                 *     `model-group,deployment`); leer = alle.
+                 */
+                kinds?: string;
+                /** @description Teil-Export: nur Ressourcen mit genau diesem Namen. */
+                name?: string;
+                /**
+                 * @description Teil-Export: Organisation samt Teams, API-Keys, Plugin-Bindungen und MCP-Freigaben
+                 *     (ohne Katalog-Ressourcen).
+                 */
+                organization?: string;
+                /** @description Teil-Export: Team samt API-Keys, Plugin-Bindungen und MCP-Freigaben. */
+                team?: string;
             };
             header?: never;
             path?: never;
@@ -6123,6 +6222,120 @@ export interface operations {
             };
             /** @description If-Match fehlt (F38) */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    chat: {
+        parameters: {
+            query: {
+                /** @description Name eines aktiven virtuellen Keys. */
+                key: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Chat-Request im OpenAI-Format (wie `POST /v1/chat/completions`) */
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Antwort im OpenAI-Format (JSON) bzw. SSE-Strom bei `stream: true`; Header `x-aigw-request-id`, `x-aigw-deployment`, `x-aigw-model`, `x-aigw-cache` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Key unbekannt, inaktiv oder nicht sichtbar */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Fehler der Datenebene (Format wie `/v1/chat/completions`: `{error: …}`), z. B. Modell nicht freigegeben, Limit, Budget, Guardrail */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    models: {
+        parameters: {
+            query: {
+                /** @description Name eines aktiven virtuellen Keys. */
+                key: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Freigegebene Modellgruppen */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundModels"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Key unbekannt, inaktiv oder nicht sichtbar */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

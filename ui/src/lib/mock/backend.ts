@@ -619,6 +619,45 @@ function extra(method: string, parts: string[], q: URLSearchParams): Response | 
   return null;
 }
 
+// ------------------------------------------------------------------ Playground (AIGW-54)
+
+function playground(sub: string | undefined, text: string, q: URLSearchParams): Response {
+  const key = q.get('key') ?? '';
+  if (!all('api-keys').some((k) => k.metadata.name === key)) throw notFound('Key', key);
+  if (sub === 'models') {
+    const models = all('model-groups').map((g) => ({
+      name: g.metadata.name,
+      aliases: g.spec.aliases ?? [],
+      exposeReasoning: true,
+      deployments: all('deployments').filter((d) => d.spec.modelGroup === g.metadata.name).length,
+      capabilities: g.spec.capabilities ?? [],
+    }));
+    return json(200, { key, organization: 'acme', team: null, configVersion: 42, models });
+  }
+  const body = JSON.parse(text || '{}') as { model?: string; stream?: boolean; messages?: { role: string; content: string }[] };
+  const last = body.messages?.filter((m) => m.role === 'user').at(-1)?.content ?? '';
+  const answer = `**Mock-Antwort** von \`${body.model}\`:\n\n> ${last}\n\n- Markdown wird sicher dargestellt\n- [Link](https://example.org)\n\n\`\`\`json\n{"ok": true}\n\`\`\``;
+  const id = `0190${Math.random().toString(16).slice(2, 10)}-mock-${Date.now().toString(16)}`;
+  const headers = { 'x-aigw-request-id': id, 'x-aigw-deployment': `${body.model}-mock`, 'x-aigw-model': 'mock', 'x-aigw-cache': 'miss' };
+  const usage = { prompt_tokens: 12, completion_tokens: 34, total_tokens: 46 };
+  if (!body.stream) {
+    return json(200, { id: 'chatcmpl-mock', object: 'chat.completion', model: body.model, choices: [{ index: 0, message: { role: 'assistant', content: answer }, finish_reason: 'stop' }], usage }, headers);
+  }
+  const parts = answer.match(/.{1,12}/gs) ?? [];
+  const enc = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(c) {
+      for (const p of parts) {
+        c.enqueue(enc.encode(`data: ${JSON.stringify({ object: 'chat.completion.chunk', model: body.model, choices: [{ index: 0, delta: { content: p }, finish_reason: null }] })}\n\n`));
+        await new Promise((r) => setTimeout(r, 15));
+      }
+      c.enqueue(enc.encode(`data: ${JSON.stringify({ object: 'chat.completion.chunk', model: body.model, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage })}\n\ndata: [DONE]\n\n`));
+      c.close();
+    },
+  });
+  return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream', ...headers } });
+}
+
 // ------------------------------------------------------------------ Einstieg
 
 function json(status: number, body: unknown, extra: Record<string, string> = {}): Response {
@@ -637,6 +676,7 @@ export async function mockFetch(req: Request): Promise<Response> {
     }
     if (parts[0] === 'config:apply') return json(200, applyPlan(text, url.searchParams));
     store();
+    if (parts[0] === 'playground') return playground(parts[1], text, url.searchParams);
     const x = extra(req.method, parts, url.searchParams);
     if (x) return x;
     const body: Obj = text && parts[0] !== 'config:apply' ? JSON.parse(text) : {};

@@ -334,6 +334,15 @@ fn serve(
                 gateway: gateway.clone(),
             },
         ))
+        // Playground der Admin-UI (AIGW-54): Chat im Namen eines Keys über die Pipeline.
+        .merge(aigw_admin::playground::router(
+            aigw_admin::playground::PlaygroundState {
+                store: runtime_state.store.clone(),
+                auth: std::sync::Arc::clone(&auth),
+                snapshot: runtime_state.snapshot.clone(),
+                proxy: std::sync::Arc::new(aigw_proxy::playground::state_for(&state)),
+            },
+        ))
         .merge(observe::metrics_router(observe::MetricsSources {
             cache: Some(std::sync::Arc::clone(&cache_rt.cache)),
             plugins: Some(plugin_metrics),

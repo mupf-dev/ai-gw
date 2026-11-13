@@ -38,6 +38,8 @@
     audit: () => import('./routes/Audit.svelte'),
     limits: () => import('./routes/Limits.svelte'),
     settings: () => import('./routes/Settings.svelte'),
+    playground: () => import('./routes/Playground.svelte'),
+    config: () => import('./routes/Config.svelte'),
     design: () => import('./routes/DesignSystem.svelte'),
   };
   // Detailseiten (D8/F136) je Objektart.

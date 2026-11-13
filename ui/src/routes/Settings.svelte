@@ -1,8 +1,8 @@
 <!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
-  // Einstellungen: Anmeldung (Principal, Verfahren, Rollen, Abmelden), Nur-YAML-Modus, GitOps (Export, Apply mit
-  // Trockenlauf), Datenquelle (Mock-Modus), Darstellung (Schema), Über.
+  // Einstellungen: Anmeldung (Principal, Verfahren, Rollen, Abmelden), Nur-YAML-Modus, Verweis auf GitOps
+  // (YAML-Import/-Export, /config), Datenquelle (Mock-Modus), Darstellung (Schema), Über.
   import { RadioGroup, Switch } from 'bits-ui';
   import { isMock, mockAvailable } from '../lib/mode.svelte';
   import { prefs, setMockMode, setTheme, THEMES, type Theme } from '../lib/prefs.svelte';
@@ -15,7 +15,7 @@
   import { switchRoot, switchThumb } from '../lib/ui/styles';
   import PageHeader from '../lib/ui/PageHeader.svelte';
   import { gateway, loadVersion } from '../lib/version.svelte';
-  import GitOpsCard from './settings/GitOpsCard.svelte';
+  import { href } from '../lib/router.svelte';
 
   loadVersion();
   const THEME_ICON: Record<Theme, IconName> = { system: 'monitor', light: 'sun', dark: 'moon' };
@@ -75,7 +75,12 @@
     </div>
   </Card>
 
-  <GitOpsCard />
+  <Card title="GitOps" description="Konfiguration als YAML-Manifeste (aigw/v1alpha1) exportieren, prüfen und anwenden." testid="gitops-card">
+    <div class="flex flex-wrap items-center gap-3">
+      <p class="min-w-0 flex-1 text-sm text-fg-muted">Export gesamt oder je Art, Organisation, Team und Ressource; Import mit Trockenlauf, Diff, Fehlern mit Zeilenbezug und Bestätigung.</p>
+      <Button href={href('/config')} icon="file-text" data-testid="gitops-open">YAML-Import/-Export öffnen</Button>
+    </div>
+  </Card>
 
   {#if mockAvailable()}
   <Card title="Datenquelle">

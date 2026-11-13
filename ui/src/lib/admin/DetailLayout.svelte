@@ -5,9 +5,10 @@
   // (Übersicht, Nutzung, Audit …). Der aktive Tab steht in der URL (?tab=), damit Links und Neuladen ihn behalten.
   import { Tabs } from 'bits-ui';
   import type { Snippet } from 'svelte';
+  import { canReadGlobal } from '../rbac.svelte';
   import { href, navigate, route } from '../router.svelte';
   import Icon from '../ui/Icon.svelte';
-  import { cx, tabsList, tabsTrigger } from '../ui/styles';
+  import { btn, cx, tabsList, tabsTrigger } from '../ui/styles';
 
   let {
     back,
@@ -20,7 +21,10 @@
     tab = $bindable(''),
     children,
     testid = 'detail',
+    yaml,
   }: {
+    /** Auswahl für den YAML-Export dieses Objekts (Query für /config, AIGW-55), z. B. `kinds=Team&name=x`. */
+    yaml?: string;
     back: string;
     backLabel: string;
     title: string;
@@ -56,7 +60,14 @@
       </div>
       {#if subtitle}<p class="mt-1 text-base text-fg-muted">{subtitle}</p>{/if}
     </div>
-    {#if actions}<div class="flex flex-wrap items-center gap-2">{@render actions()}</div>{/if}
+    {#if actions || (yaml && canReadGlobal())}
+      <div class="flex flex-wrap items-center gap-2">
+        {#if yaml && canReadGlobal()}
+          <a href={href(`/config?${yaml}`)} class={btn('ghost', 'sm')} data-testid="detail-yaml"><Icon name="file-text" size={14} />YAML</a>
+        {/if}
+        {@render actions?.()}
+      </div>
+    {/if}
   </header>
   <Tabs.Root value={tab} onValueChange={change}>
     <Tabs.List class={cx(tabsList, 'scrollbar-thin mb-4 overflow-x-auto')}>

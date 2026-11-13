@@ -2369,6 +2369,42 @@
             "schema": {
               "$ref": "#/components/schemas/ApiKeyMode"
             }
+          },
+          {
+            "name": "kinds",
+            "in": "query",
+            "description": "Teil-Export (AIGW-55): nur diese Arten, kommagetrennt (`ModelGroup,Deployment` bzw.\n`model-group,deployment`); leer = alle.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "description": "Teil-Export: nur Ressourcen mit genau diesem Namen.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "description": "Teil-Export: Organisation samt Teams, API-Keys, Plugin-Bindungen und MCP-Freigaben\n(ohne Katalog-Ressourcen).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "query",
+            "description": "Teil-Export: Team samt API-Keys, Plugin-Bindungen und MCP-Freigaben.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5212,6 +5248,167 @@
           },
           "428": {
             "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/playground/chat": {
+      "post": {
+        "tags": [
+          "playground"
+        ],
+        "summary": "Chat im Namen des Keys (Pipeline der Datenebene, OpenAI-Format).",
+        "operationId": "chat",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "query",
+            "description": "Name eines aktiven virtuellen Keys.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Chat-Request im OpenAI-Format (wie `POST /v1/chat/completions`)",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Antwort im OpenAI-Format (JSON) bzw. SSE-Strom bei `stream: true`; Header `x-aigw-request-id`, `x-aigw-deployment`, `x-aigw-model`, `x-aigw-cache`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Key unbekannt, inaktiv oder nicht sichtbar",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Fehler der Datenebene (Format wie `/v1/chat/completions`: `{error: …}`), z. B. Modell nicht freigegeben, Limit, Budget, Guardrail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/playground/models": {
+      "get": {
+        "tags": [
+          "playground"
+        ],
+        "summary": "Modellgruppen, die der Key nutzen darf.",
+        "operationId": "models",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "query",
+            "description": "Name eines aktiven virtuellen Keys.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Freigegebene Modellgruppen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaygroundModels"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Key unbekannt, inaktiv oder nicht sichtbar",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11268,6 +11465,61 @@
           }
         }
       },
+      "Issue": {
+        "type": "object",
+        "description": "Ein Validierungsfehler, möglichst mit Dokument und Ressource.",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "column": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Spalte (ab 1), nur bei YAML-Fehlern mit genauer Fundstelle.",
+            "minimum": 0
+          },
+          "document": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Nummer des Dokuments in der Datei (ab 1).",
+            "minimum": 0
+          },
+          "kind": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResourceKind",
+                "description": "Art der Ressource."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Zeile in der Datei (ab 1): Fundstelle eines YAML-Fehlers bzw. erste Inhaltszeile des\nDokuments ([`locate`]).",
+            "minimum": 0
+          },
+          "message": {
+            "type": "string",
+            "description": "Meldung."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name der Ressource."
+          }
+        }
+      },
       "Kpi": {
         "type": "object",
         "description": "Eine KPI mit Vergleich.",
@@ -12098,6 +12350,85 @@
           }
         }
       },
+      "PlaygroundModel": {
+        "type": "object",
+        "description": "Eine für den Key freigegebene Modellgruppe.",
+        "required": [
+          "name",
+          "aliases",
+          "exposeReasoning",
+          "deployments",
+          "capabilities"
+        ],
+        "properties": {
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Aliasse."
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Fähigkeiten der Gruppe (leer = nicht eingeschränkt)."
+          },
+          "deployments": {
+            "type": "integer",
+            "description": "Zahl der aktiven Deployments.",
+            "minimum": 0
+          },
+          "exposeReasoning": {
+            "type": "boolean",
+            "description": "Reasoning wird ausgegeben (`settings.exposeReasoning` der Gruppe und Key/Team/Org)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Kanonischer Name."
+          }
+        }
+      },
+      "PlaygroundModels": {
+        "type": "object",
+        "description": "Kontext des Playgrounds für einen Key.",
+        "required": [
+          "key",
+          "organization",
+          "configVersion",
+          "models"
+        ],
+        "properties": {
+          "configVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Konfigurationsversion des Snapshots."
+          },
+          "key": {
+            "type": "string",
+            "description": "Key."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlaygroundModel"
+            },
+            "description": "Freigegebene Modellgruppen (nach Name)."
+          },
+          "organization": {
+            "type": "string",
+            "description": "Organisation des Keys."
+          },
+          "team": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Team des Keys."
+          }
+        }
+      },
       "PluginBinding": {
         "type": "object",
         "required": [
@@ -12641,7 +12972,17 @@
               "string",
               "null"
             ],
-            "description": "Betroffener Pfad."
+            "description": "Betroffener Pfad (`Box<str>`, damit `Result<_, Problem>` klein bleibt)."
+          },
+          "issues": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Issue"
+            },
+            "description": "Einzelne Fehler eines GitOps-Manifests mit Dokument, Ressource und Zeile (AIGW-55;\n`422` von `config:apply`); fehlt sonst."
           },
           "status": {
             "type": "integer",
@@ -14426,6 +14767,10 @@
     {
       "name": "request-logs",
       "description": "Log-Explorer: einzelne Anfragen, Versuche, Payloads"
+    },
+    {
+      "name": "playground",
+      "description": "Playground der Admin-UI: Chat im Namen eines virtuellen Keys über die Pipeline der Datenebene (auditiert)"
     }
   ]
 }

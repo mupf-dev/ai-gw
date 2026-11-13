@@ -36,6 +36,7 @@
 <AsyncState loader={data}>
   {#snippet children({ org, teams: ts })}
     <DetailLayout
+      yaml="organization={encodeURIComponent(org.metadata.name)}"
       back="/teams?tab=org"
       backLabel="Alle Organisationen"
       title={org.metadata.name}

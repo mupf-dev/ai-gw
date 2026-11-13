@@ -28,12 +28,15 @@ export class ApiError extends Error {
   readonly code: string;
   readonly title: string;
   readonly detail: string | null;
-  constructor(status: number, code: string, title: string, detail: string | null = null) {
+  /** Vollständige Problem Details (z. B. `issues` von GitOps mit Zeilenbezug), falls geliefert. */
+  readonly problem: Partial<Problem> | null;
+  constructor(status: number, code: string, title: string, detail: string | null = null, problem: Partial<Problem> | null = null) {
     super(detail ? `${title}: ${detail}` : title);
     this.status = status;
     this.code = code;
     this.title = title;
     this.detail = detail;
+    this.problem = problem;
   }
 }
 
@@ -97,7 +100,7 @@ type FetchResult = { data?: unknown; error?: unknown; response: Response };
 function toError(error: unknown, response: Response): ApiError {
   const p = (error ?? {}) as Partial<Problem>;
   if (typeof p === 'object' && typeof p.code === 'string') {
-    return new ApiError(response.status, p.code, p.title ?? `HTTP ${response.status}`, p.detail ?? null);
+    return new ApiError(response.status, p.code, p.title ?? `HTTP ${response.status}`, p.detail ?? null, p);
   }
   return new ApiError(response.status, `http-${response.status}`, `HTTP ${response.status}`, typeof error === 'string' && error ? error.slice(0, 300) : null);
 }
@@ -138,7 +141,8 @@ type Init = {
   params?: { path?: Record<string, string>; query?: Record<string, unknown>; header?: Record<string, string> };
   body?: unknown;
   headers?: Record<string, string>;
-  parseAs?: 'json' | 'text';
+  parseAs?: 'json' | 'text' | 'stream';
+  signal?: AbortSignal;
   bodySerializer?: (b: unknown) => BodyInit;
 };
 type Method = (path: string, init?: Init) => Promise<FetchResult>;
@@ -237,9 +241,19 @@ export async function patch<T>(segment: string, name: string, body: unknown, eta
   );
 }
 
-/** GitOps-Export als YAML-Text. */
-export function exportConfig(apiKeys: Schemas['ApiKeyMode']): Promise<string> {
-  return unwrap<string>(loose.GET('/admin/api/v1/config:export', { params: { query: { apiKeys } }, parseAs: 'text' }));
+/** Auswahl für einen Teil-Export (AIGW-55); leer = alles. */
+export interface ExportSelection {
+  /** Arten (YAML-Schreibweise, z. B. `ModelGroup`). */
+  kinds?: string[];
+  name?: string;
+  organization?: string;
+  team?: string;
+}
+
+/** GitOps-Export als YAML-Text (gesamt oder Auswahl). */
+export function exportConfig(apiKeys: Schemas['ApiKeyMode'], sel: ExportSelection = {}): Promise<string> {
+  const query = cleanQuery({ apiKeys, kinds: sel.kinds?.join(','), name: sel.name, organization: sel.organization, team: sel.team });
+  return unwrap<string>(loose.GET('/admin/api/v1/config:export', { params: { query }, parseAs: 'text' }));
 }
 
 /** GitOps-Apply bzw. Trockenlauf (`dryRun`). */
@@ -252,4 +266,31 @@ export function applyConfig(yaml: string, opts: { dryRun: boolean; prune: boolea
       headers: { 'Content-Type': 'application/yaml' },
     }),
   );
+}
+
+// ------------------------------------------------------------------ Playground (AIGW-54)
+
+/** Modellgruppen, die der Key im Playground nutzen darf. */
+export function playgroundModels(key: string): Promise<Schemas['PlaygroundModels']> {
+  return unwrap<Schemas['PlaygroundModels']>(loose.GET('/admin/api/v1/playground/models', { params: { query: { key } } }));
+}
+
+/** Antwort des Playground-Chats: Strom (Erfolg) bzw. Fehlerobjekt der Datenebene. */
+export interface PlaygroundReply {
+  response: Response;
+  /** Körper bei Erfolg (JSON oder SSE). */
+  body: ReadableStream<Uint8Array> | null;
+  /** Fehlerkörper der Datenebene (`{error: {message, type, code}}`), falls nicht ok. */
+  error: unknown;
+}
+
+/**
+ * Chat im Namen des Keys (Pipeline der Datenebene). Fehler der Admin-API selbst (Problem Details: 401/403/404)
+ * werfen `ApiError`; Fehler der Datenebene (Modell nicht freigegeben, Limit, Budget, Guardrail …) stehen in `error`.
+ */
+export async function playgroundChat(key: string, body: unknown, signal?: AbortSignal): Promise<PlaygroundReply> {
+  const r = await settle(loose.POST('/admin/api/v1/playground/chat', { params: { query: { key } }, body, parseAs: 'stream', signal }));
+  const e = r.error as Partial<Problem> | undefined;
+  if (!r.response.ok && e && typeof e === 'object' && typeof e.code === 'string' && typeof e.status === 'number') throw toError(e, r.response);
+  return { response: r.response, body: r.response.ok ? (r.data as ReadableStream<Uint8Array>) : null, error: r.error };
 }

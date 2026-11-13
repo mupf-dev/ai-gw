@@ -111,8 +111,8 @@ const SCENES = [
   },
   {
     name: 'gitops-trockenlauf',
-    path: '/settings',
-    ready: 'session-card',
+    path: '/config',
+    ready: 'gitops-import-card',
     act: async (page) => {
       const yaml = [
         'apiVersion: aigw/v1alpha1',
