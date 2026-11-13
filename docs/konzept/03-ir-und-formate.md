@@ -25,7 +25,7 @@ ChatRequest
 ├─ max_tokens, stop: Vec<String>, response_format: Text|JsonObject|JsonSchema{name, description, schema, strict}
 ├─ reasoning { effort, thinking{mode, budget_tokens, display, extra} }
 ├─ user, metadata, stream, stream_options{include_usage, extra}
-├─ hints { legacy_max_tokens, stop_as_string }   ← nur für die verlustfreie Rückgabe
+├─ hints { legacy_max_tokens, stop_as_string, anthropic_beta }   ← Rückgabe ins Ursprungsformat bzw. Client-Header
 ├─ extra                                         ← unbekannte Felder der obersten Ebene
 └─ source: Option<WireFormat>                    ← steuert die Ausgabe aller `extra`
 

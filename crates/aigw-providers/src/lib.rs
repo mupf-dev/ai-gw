@@ -14,11 +14,15 @@
 //! - [`Upstream`] – Deployment = Adapter + Client + [`Timeouts`]; führt Anfragen aus und
 //!   liefert IR-Antworten bzw. einen IR-Ereignisstrom mit Backpressure.
 //!
-//! Adapter: [`openai::OpenAiAdapter`] für OpenAI, Azure OpenAI und generisch
-//! OpenAI-kompatible Endpunkte. Anthropic (AIGW-16), Bedrock und Vertex folgen.
+//! Adapter: [`openai::OpenAiAdapter`] für OpenAI, Azure OpenAI, generisch OpenAI-kompatible
+//! Endpunkte und die Profile Ollama, vLLM ([`local`]) und Mistral ([`mistral`]);
+//! [`anthropic::AnthropicAdapter`] für die Anthropic Messages API. Bedrock und Vertex folgen.
 
+pub mod anthropic;
 pub mod auth;
 mod client;
+pub mod local;
+pub mod mistral;
 pub mod openai;
 mod settings;
 mod upstream;
@@ -35,6 +39,7 @@ use bytes::Bytes;
 use http::{HeaderMap, StatusCode};
 
 pub use client::{ClientConfig, UpstreamClient};
+pub use settings::{GROUP_INHERITED_SETTINGS, with_group_defaults};
 pub use upstream::{EventStream, Timeouts, Upstream, UpstreamInfo};
 
 /// Fertig gebaute Upstream-Anfrage (Body vollständig im Speicher).
@@ -174,7 +179,7 @@ impl Registry {
     }
 
     /// Verzeichnis mit allen eingebauten Adaptern (`openai`, `azure-openai`,
-    /// `openai-compatible`).
+    /// `openai-compatible`, `ollama`, `vllm`, `mistral`, `anthropic`).
     pub fn with_builtin() -> Self {
         let mut r = Self::empty();
         r.register(ProviderKind::OpenAi, openai::OpenAiAdapter::factory);
@@ -182,6 +187,13 @@ impl Registry {
         r.register(
             ProviderKind::OpenAiCompatible,
             openai::OpenAiAdapter::factory,
+        );
+        r.register(ProviderKind::Ollama, openai::OpenAiAdapter::factory);
+        r.register(ProviderKind::Vllm, openai::OpenAiAdapter::factory);
+        r.register(ProviderKind::Mistral, openai::OpenAiAdapter::factory);
+        r.register(
+            ProviderKind::Anthropic,
+            anthropic::AnthropicAdapter::factory,
         );
         r
     }
@@ -217,7 +229,14 @@ mod tests {
         assert!(r.supports(ProviderKind::OpenAi));
         assert!(r.supports(ProviderKind::AzureOpenAi));
         assert!(r.supports(ProviderKind::OpenAiCompatible));
-        assert!(!r.supports(ProviderKind::Anthropic));
+        for k in [
+            ProviderKind::Anthropic,
+            ProviderKind::Ollama,
+            ProviderKind::Vllm,
+            ProviderKind::Mistral,
+        ] {
+            assert!(r.supports(k), "{k:?}");
+        }
         assert!(format!("{r:?}").contains("azure-openai"));
     }
 }

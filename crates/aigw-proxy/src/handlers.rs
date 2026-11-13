@@ -146,10 +146,22 @@ async fn chat_inner(
     rec.set_key(&auth);
     let body = body.map_err(|r| body_error(&r, st.config.max_body_bytes))?;
     rec.set_request_payload(headers, &body);
-    let req = match format {
+    let mut req = match format {
         ErrorFormat::OpenAi => openai::decode_request(&body)?,
         ErrorFormat::Anthropic => anthropic::decode_request(&body)?,
     };
+    if format == ErrorFormat::Anthropic {
+        // Beta-Kennungen für Anthropic-Ziele (AIGW-16); andere Ziele ignorieren sie.
+        req.hints.anthropic_beta = headers
+            .get_all("anthropic-beta")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|v| v.split(','))
+            .map(str::trim)
+            .filter(|b| !b.is_empty())
+            .map(str::to_owned)
+            .collect();
+    }
     drop(body);
     validate(&req)?;
     // Modellfreigabe (Architektur §3, Schritt 3); die Gruppe nutzt später das Routing.

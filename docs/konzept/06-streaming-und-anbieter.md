@@ -1,6 +1,6 @@
-# ai-gw – Streaming-Pipeline und Anbieter-Adapter (AIGW-14, AIGW-15)
+# ai-gw – Streaming-Pipeline und Anbieter-Adapter (AIGW-14, AIGW-15, AIGW-16, AIGW-17, AIGW-20)
 
-Stand: 2026-11-13 · Status: umgesetzt (OpenAI-Familie), Grundlage: [01-architektur.md](01-architektur.md) §5–§7,
+Stand: 2026-11-13 · Status: umgesetzt (OpenAI-Familie, Anthropic, Ollama, vLLM, Mistral), Grundlage: [01-architektur.md](01-architektur.md) §5–§7,
 [03-ir-und-formate.md](03-ir-und-formate.md)
 
 ## 1. Überblick
@@ -16,7 +16,7 @@ Client ─► Handler (aigw-proxy) ─► ModelRoutes ─► ChatProvider ──
 
 | Crate / Modul | Inhalt |
 |---|---|
-| `aigw_providers` | `Provider`-Trait, `Capabilities`, `StreamDecoder`, `Registry` (Fabrik je `ProviderKind`), `UpstreamClient`, `Upstream` (Deployment = Adapter + Client + `Timeouts`), Adapter `openai::OpenAiAdapter`, Erweiterungspunkt `auth::TokenSource` |
+| `aigw_providers` | `Provider`-Trait, `Capabilities`, `StreamDecoder`, `Registry` (Fabrik je `ProviderKind`), `UpstreamClient`, `Upstream` (Deployment = Adapter + Client + `Timeouts`), Adapter `openai::OpenAiAdapter` (mit Profilen `local` für Ollama/vLLM und `mistral`), `anthropic::AnthropicAdapter`, `with_group_defaults`, Erweiterungspunkt `auth::TokenSource` |
 | `aigw_core::ir` | `ErrorClass`, `UpstreamError` (Ergebnis von `classify_error`) |
 | `aigw_core::observe` | `RequestRecord`, `RequestObserver` (aus AIGW-43; der Proxy füllt ihn) |
 | `aigw_proxy` | `ChatProvider` (ausführbares Deployment), `ModelRoutes`/`StaticRoutes`, Handler, `Recorder`/`ObservedStream`, SSE-Antwort |
@@ -44,7 +44,7 @@ Abweichungen von der Skizze in §5, mit Begründung:
 - **`build_request` übernimmt die Anfrage** (keine Kopie großer Bodies mit Base64-Bildern);
   Retries (AIGW-25) klonen vorher bewusst.
 - **`classify_error` bekommt die Header** (`Retry-After`, `retry-after-ms`).
-- Der Anthropic-Adapter (AIGW-16) passt ohne Änderung: `native_format = AnthropicMessages`,
+- Der Anthropic-Adapter (AIGW-16, §3a) passt ohne Änderung: `native_format = AnthropicMessages`,
   eigener `StreamDecoder` auf Basis von `wire::anthropic::StreamDecoder`, Header `x-api-key`.
 
 `Capabilities`: `chat`, `streaming`, `tools`, `vision`, `json_schema`, `reasoning`, `embeddings`,
@@ -72,6 +72,93 @@ entfernt (OpenAI lehnt es sonst ab). Azure-Deployment-Namen werden auf `[A-Za-z0
 Token im RAM und erneuern es im Hintergrund (kein Netzwerkzugriff je Anfrage). Eingebaut ist nur
 `StaticToken`; `settings.auth: entraId` wird bis zur Implementierung mit einer klaren
 Fehlermeldung abgelehnt (`OpenAiAdapter::azure_with_token_source` für programmatische Nutzung).
+
+## 3a. Anthropic (`anthropic`, AIGW-16)
+
+`aigw_providers::anthropic::AnthropicAdapter`, Zielformat Anthropic Messages. Die Übersetzung
+IR → Anthropic-Anfrage bzw. Antwort/SSE → IR stammt aus `aigw_core::wire::anthropic` (AIGW-13);
+der Adapter ergänzt Pflichtfelder, Header und die Abbildung von OpenAI-Reasoning.
+
+| | |
+|---|---|
+| URL | `{endpoint}/v1/messages`, Standard `https://api.anthropic.com`; endet `endpoint` auf `/v1`, wird nur `/messages` angehängt |
+| Auth | `x-api-key` aus Zugangsdaten `apiKey` (Pflicht, als *sensitive* markiert) |
+| `anthropic-version` | `settings.anthropicVersion`, Standard `2023-06-01` |
+| `anthropic-beta` | `settings.anthropicBeta` (String mit Kommas oder Liste) + Betas aus dem `anthropic-beta`-Header von Anthropic-Clients (`settings.forwardClientBeta`, Standard `true`), ohne Duplikate; nur Zeichen `[A-Za-z0-9._-]` |
+| `max_tokens` (Pflicht) | aus der Anfrage, sonst `settings.defaultMaxTokens` des Deployments, sonst der Modellgruppe (geerbt über `aigw_providers::with_group_defaults`), sonst 4096 |
+| Tools | `tools` (`input_schema`, `strict`, `cache_control`), `tool_choice` `auto`/`none`/`any` (OpenAI `required`)/`tool`, `parallel_tool_calls: false` → `disable_parallel_tool_use` |
+| Vision/Dokumente | Bilder Base64 (OpenAI Data-URL) und URL, Dokumente (`document`), `cache_control` je Block, Tool und (Anthropic-Clients) oben |
+| Stream | alle Ereignisse inkl. `ping` (ignoriert) und `error` (→ Fehlerereignis, `api_error` → 502); Ende ohne `message_stop`/Endgrund → `upstream_stream_truncated` |
+| Usage | `input_tokens` + `cache_creation_input_tokens` + `cache_read_input_tokens` = IR `input_tokens`; `cache_write_tokens`/`cache_read_tokens` getrennt; Usage aus `message_start` und kumulativ aus `message_delta` |
+
+**Reasoning von OpenAI-Clients** (`reasoning_effort`; nur wenn die Anfrage nicht aus dem
+Anthropic-Format stammt und keine eigene `thinking`-Konfiguration hat) nach
+`settings.reasoningMode`:
+
+| `reasoningMode` | Anfrage an Anthropic | geeignet für |
+|---|---|---|
+| `adaptive` (Standard) | `thinking: {type: adaptive}` + `output_config.effort` | Claude 4.6 und neuer |
+| `effort` | nur `output_config.effort` | Modelle mit Thinking ohne Schalter (z. B. Opus 5.5) |
+| `budget` | `thinking: {type: enabled, budget_tokens}` nach Tabelle, kein `effort` | ältere Modelle (Sonnet 4.5, Haiku 4.5 …) |
+| `off` | Reasoning verworfen | Modelle ohne Thinking |
+
+| `reasoning_effort` | `budget_tokens` (`budget`) | `effort` (`adaptive`/`effort`) |
+|---|---|---|
+| `none` | – (kein Thinking) | – |
+| `minimal` | 1 024 | `low` |
+| `low` | 2 048 | `low` |
+| `medium` | 8 192 | `medium` |
+| `high` | 16 384 | `high` |
+| `xhigh` | 24 576 | `xhigh` |
+| `max` | 32 768 | `max` |
+
+Im Modus `budget` muss `budget_tokens < max_tokens` sein: Ist `max_tokens` ≤ Budget, wird
+`max_tokens` um das Budget erhöht (die Antwort behält ihre Grenze). Schaltet der Adapter Thinking
+ein, verwirft er `temperature`/`top_p`/`top_k` (die API akzeptiert mit Thinking nur
+Standardwerte). Ab `anthropicVersion` ≥ `2026-10-21` werden diese drei Felder immer verworfen
+(`settings.dropSampling` übersteuert). Alle Eingriffe landen in `Losses` (Debug-Log).
+
+`RequestOptions::to_wire` ist öffentlich, damit Anthropic-Modelle auf Bedrock/Vertex dieselbe
+Vorbereitung nutzen können.
+
+## 3b. Ollama und vLLM (`ollama`, `vllm`, AIGW-17)
+
+Profile des Adapters der OpenAI-Familie (gleicher Code, gleiches Wire-Format, gleicher
+Stream-Decoder) über die OpenAI-kompatiblen Endpunkte.
+
+| | Ollama | vLLM |
+|---|---|---|
+| Endpunkt | Standard `http://localhost:11434/v1` | Pflicht (z. B. `http://vllm:8000/v1`) |
+| Auth | `Authorization: Bearer`, nur mit `apiKey` | ebenso (`--api-key`) |
+| Ausgabegrenze | `max_tokens` | `max_tokens` |
+| Usage im Stream | `stream_options.include_usage` wird gesendet; ältere Versionen ignorieren es und schicken die Usage im letzten Chunk mit Endgrund – der Decoder liest Usage aus **jedem** Chunk; fehlt sie ganz, wird geschätzt | `stream_options.include_usage` |
+| Reasoning | `reasoning` (Delta/Nachricht) → IR-Reasoning | `reasoning_content` (neuer auch `reasoning`) → IR-Reasoning |
+| `top_k` | verworfen | als Zusatzparameter `top_k` |
+| Capabilities | `reasoning: true`, `stream_usage: true` | ebenso |
+
+Reasoning-Text wird im Stream zu `ReasoningDelta` (Anthropic-Clients sehen einen
+`thinking`-Block ohne Signatur), in nicht gestreamten Antworten zu einem `Reasoning`-Teil; für
+OpenAI-Clients bleibt `reasoning_content` in nicht gestreamten Antworten unverändert erhalten.
+`settings.streamUsage: false` und `settings.maxTokensField` gelten wie beim kompatiblen Adapter.
+
+## 3c. Mistral (`mistral`, AIGW-20)
+
+**Profil statt eigener Adapter:** Mistral spricht Chat Completions mit SSE und `[DONE]`;
+Antwort-Parser, Stream-Decoder und Fehlerpfad sind identisch. Ein eigener Adapter würde diese
+verdoppeln – das Profil (`aigw_providers::mistral`) behandelt nur die Abweichungen:
+
+| | OpenAI | Mistral |
+|---|---|---|
+| Endpunkt/Auth | – | Standard `https://api.mistral.ai/v1`, `Authorization: Bearer` (Pflicht) |
+| Seed | `seed` | `random_seed` |
+| „mindestens ein Tool“ | `tool_choice: required` | `any` |
+| Tool-Aufruf-IDs | beliebig | genau 9 Zeichen `[A-Za-z0-9]`; fremde IDs (z. B. `toolu_…` aus Anthropic-Verläufen) werden deterministisch (FNV-1a, Base62) umgeschrieben, Aufruf und Ergebnis passen weiter zusammen |
+| Ausgabegrenze | `max_completion_tokens` | `max_tokens` |
+| Usage im Stream | `stream_options` | kommt immer im letzten Chunk; `stream_options` wird nie gesendet (`stream_usage: false`) |
+| nicht unterstützt | – | `user`, `metadata`, `reasoning_effort` werden verworfen (Mistral lehnt unbekannte Felder mit 422 ab) |
+| `safe_prompt` | – | `settings.safePrompt`; OpenAI-Clients können es als unbekanntes Feld selbst senden |
+| Endgrund | – | `model_length` → `max_tokens` |
+| Fehler | `{"error":{…}}` | `{"object":"error","message":…}` bzw. `{"detail":[…]}` (422) werden normalisiert und wie OpenAI klassifiziert |
 
 ## 4. Upstream-Client und Timeouts
 
@@ -126,6 +213,23 @@ Fehlermeldung abgelehnt (`OpenAiAdapter::azure_with_token_source` für programma
 | 503, 529 | `overloaded` | ja | 503 |
 | sonstige 4xx | `invalid_request` | nein | Status und Meldung des Anbieters |
 | Antwort nicht lesbar | `protocol` | nein | 502 `upstream_protocol_error` |
+
+**Anthropic** (`classify_anthropic_error`, nach `error.type`, sonst Status):
+
+| Upstream | `ErrorClass` | retrybar | an den Client |
+|---|---|---|---|
+| `overloaded_error` / 529, 503 | `overloaded` | ja | OpenAI 503, Anthropic 529 `overloaded_error` |
+| `rate_limit_error` / 429 | `rate_limit` | ja, `retry-after` | 429 + `Retry-After` |
+| `billing_error` / 402 | `quota` | nein (Fallback sinnvoll) | 429 `insufficient_quota` |
+| `invalid_request_error` „prompt is too long“ / „context limit“ | `context_length` | nein | 400 `context_length_exceeded` |
+| `authentication_error`, `permission_error` / 401, 403 | `auth` | nein | 502 `upstream_authentication_error` |
+| `not_found_error` / 404 | `not_found` | nein | 502 `upstream_not_found` |
+| `request_too_large` / 413 | `invalid_request` | nein | 413 |
+| `api_error` / 500 | `server_error` | ja | 502 |
+| `timeout_error` / 504 | `timeout` | ja | 504 |
+
+Mistral-Fehler werden in OpenAI-Form gebracht und wie oben klassifiziert; Ollamas
+`{"error":"…"}` (String) versteht der OpenAI-Pfad direkt.
 
 Meldungen des Anbieters werden auf 1000 Zeichen gekürzt. Retries/Fallbacks selbst kommen mit
 AIGW-25; `UpstreamError` trägt dafür `class`, `retryable`, `retry_after` und `upstream_status`.
@@ -187,5 +291,11 @@ HTTP plus Übersetzung). Optimierungen (Profiling, Allokationen im Encoder, `Byt
 
 - Die Fehlerklasse (`ErrorClass`) steht nicht im `RequestRecord` (dort `ErrorKind`).
 - `client_ip` füllt der Proxy noch nicht (braucht `ConnectInfo` im Listener).
-- Entra-ID-`TokenSource`, Anthropic-Adapter (AIGW-16), Retries/Fallbacks (AIGW-25), Routing
-  über den Snapshot (AIGW-24).
+- Entra-ID-`TokenSource`, Retries/Fallbacks (AIGW-25), Routing über den Snapshot (AIGW-24).
+- Routing (AIGW-24) muss Deployments vor dem Bau mit `with_group_defaults(&group.spec.settings,
+  dep)` versehen, damit `defaultMaxTokens` der Modellgruppe greift (heute nur in Tests).
+- OpenAI-Clients bekommen gestreamtes Reasoning (vLLM/Ollama/Anthropic) nicht zu sehen
+  (`ReasoningDelta` wird im OpenAI-Encoder verworfen, siehe 03); nicht gestreamt bleibt
+  `reasoning_content` kompatibler Anbieter erhalten.
+- Mistral-Reasoning-Modelle (Magistral) liefern `content` als Liste von Blöcken
+  (`thinking`/`text`); das wird noch nicht gelesen.

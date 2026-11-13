@@ -121,6 +121,10 @@ pub struct RequestHints {
     /// OpenAI: `stop` war ein einzelner String statt einer Liste.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stop_as_string: bool,
+    /// Anthropic: Beta-Kennungen aus dem Header `anthropic-beta` des Clients (Anthropic-Ziele
+    /// reichen sie weiter, siehe `settings.forwardClientBeta`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anthropic_beta: Vec<String>,
 }
 
 /// Rolle einer Nachricht.

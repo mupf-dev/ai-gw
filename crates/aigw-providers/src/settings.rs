@@ -12,6 +12,39 @@ use serde_json::Value;
 use crate::ConfigError;
 use crate::upstream::Timeouts;
 
+/// Einstellungen, die ein Deployment von seiner Modellgruppe erbt, wenn es sie nicht selbst
+/// setzt (`ModelGroup.spec.settings`).
+pub const GROUP_INHERITED_SETTINGS: &[&str] = &["defaultMaxTokens"];
+
+/// Deployment mit den von der Modellgruppe geerbten Einstellungen
+/// ([`GROUP_INHERITED_SETTINGS`]); unverändert (ohne Kopie), wenn nichts zu erben ist.
+///
+/// Aufruf beim Aufbau der Routen (vor [`Registry::build`](crate::Registry::build) bzw.
+/// [`Upstream::from_deployment`](crate::Upstream::from_deployment)).
+pub fn with_group_defaults<'a>(
+    group_settings: &JsonObject,
+    dep: &'a DeploymentCtx,
+) -> std::borrow::Cow<'a, DeploymentCtx> {
+    let own = &dep.deployment.spec.settings;
+    let missing: Vec<&&str> = GROUP_INHERITED_SETTINGS
+        .iter()
+        .filter(|k| !own.contains_key(**k) && group_settings.contains_key(**k))
+        .collect();
+    if missing.is_empty() {
+        return std::borrow::Cow::Borrowed(dep);
+    }
+    let mut d = dep.clone();
+    for k in missing {
+        if let Some(v) = group_settings.get(*k) {
+            d.deployment
+                .spec
+                .settings
+                .insert((*k).to_owned(), v.clone());
+        }
+    }
+    std::borrow::Cow::Owned(d)
+}
+
 /// Zugriff auf `spec.settings` mit Fehlermeldungen, die das Deployment nennen.
 pub(crate) struct Settings<'a> {
     pub(crate) deployment: &'a str,
@@ -53,6 +86,40 @@ impl<'a> Settings<'a> {
             None | Some(Value::Null) => Ok(None),
             Some(Value::Bool(b)) => Ok(Some(*b)),
             Some(_) => Err(self.invalid(format!("settings.{key} muss true/false sein"))),
+        }
+    }
+
+    /// Positive Ganzzahl.
+    pub(crate) fn positive_u64(&self, key: &str) -> Result<Option<u64>, ConfigError> {
+        match self.map.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => v
+                .as_u64()
+                .filter(|n| *n > 0)
+                .map(Some)
+                .ok_or_else(|| self.invalid(format!("settings.{key} muss eine Zahl > 0 sein"))),
+        }
+    }
+
+    /// String oder Liste von Strings (z. B. `anthropicBeta`).
+    pub(crate) fn str_list(&self, key: &str) -> Result<Vec<&'a str>, ConfigError> {
+        let err = || {
+            self.invalid(format!(
+                "settings.{key} muss ein String oder eine Liste sein"
+            ))
+        };
+        match self.map.get(key) {
+            None | Some(Value::Null) => Ok(Vec::new()),
+            Some(Value::String(s)) => Ok(s
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect()),
+            Some(Value::Array(a)) => a
+                .iter()
+                .map(|v| v.as_str().map(str::trim).ok_or_else(err))
+                .collect(),
+            Some(_) => Err(err()),
         }
     }
 

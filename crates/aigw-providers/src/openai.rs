@@ -10,9 +10,13 @@
 //! | Auth | `Authorization: Bearer` (`apiKey`) | `api-key` (`apiKey`); Entra-ID über [`TokenSource`] | `Authorization: Bearer`, optional |
 //! | Ausgabegrenze | `max_completion_tokens` | ab `api-version` 2024-09-01 bzw. `v1`: `max_completion_tokens`, sonst `max_tokens` | `max_tokens` |
 //!
+//! Profile derselben Implementierung: Ollama, vLLM ([`crate::local`]) und Mistral
+//! ([`crate::mistral`]).
+//!
 //! Einstellungen (`spec.settings`): `organization`, `project` (OpenAI), `apiVersion`,
 //! `apiStyle` (`deployment`/`v1`), `auth` (`apiKey`/`entraId`) (Azure), `maxTokensField`
-//! (`max_tokens`/`max_completion_tokens`), `streamUsage` (bool), `timeouts`.
+//! (`max_tokens`/`max_completion_tokens`), `streamUsage` (bool), `defaultMaxTokens`,
+//! `safePrompt` (Mistral), `timeouts`.
 
 use std::sync::Arc;
 
@@ -63,6 +67,10 @@ pub struct OpenAiAdapter {
     auth: Auth,
     headers: Vec<(HeaderName, HeaderValue)>,
     caps: Capabilities,
+    /// `settings.defaultMaxTokens` (gesetzt, wenn die Anfrage keine Grenze nennt).
+    default_max_tokens: Option<u64>,
+    /// Mistral: `settings.safePrompt`.
+    safe_prompt: Option<bool>,
 }
 
 fn caps(max_tokens_field: MaxTokensField, reasoning: bool) -> Capabilities {
@@ -79,17 +87,17 @@ fn caps(max_tokens_field: MaxTokensField, reasoning: bool) -> Capabilities {
     }
 }
 
-fn sensitive(value: &str) -> Option<HeaderValue> {
+pub(crate) fn sensitive(value: &str) -> Option<HeaderValue> {
     let mut v = HeaderValue::from_str(value).ok()?;
     v.set_sensitive(true);
     Some(v)
 }
 
-fn bearer(token: &str) -> Option<HeaderValue> {
+pub(crate) fn bearer(token: &str) -> Option<HeaderValue> {
     sensitive(&format!("Bearer {token}"))
 }
 
-fn parse_uri(s: &Settings<'_>, url: &str) -> Result<Uri, ConfigError> {
+pub(crate) fn parse_uri(s: &Settings<'_>, url: &str) -> Result<Uri, ConfigError> {
     let uri: Uri = url
         .parse()
         .map_err(|e| s.invalid(format!("ungültige URL {url:?}: {e}")))?;
@@ -99,7 +107,7 @@ fn parse_uri(s: &Settings<'_>, url: &str) -> Result<Uri, ConfigError> {
     }
 }
 
-fn join(base: &str, path: &str) -> String {
+pub(crate) fn join(base: &str, path: &str) -> String {
     format!("{}{path}", base.trim_end_matches('/'))
 }
 
@@ -127,83 +135,111 @@ impl OpenAiAdapter {
             .map(SecretString::expose);
         let header_err = || s.invalid("Zugangsdaten enthalten unzulässige Zeichen");
 
-        let mut adapter =
-            match spec.provider {
-                ProviderKind::OpenAi => {
-                    let base = spec.endpoint.as_deref().unwrap_or(OPENAI_DEFAULT_ENDPOINT);
-                    let key = api_key.ok_or_else(|| s.missing("Zugangsdaten (apiKey)"))?;
-                    let mut headers = Vec::new();
-                    for (setting, header) in [
-                        ("organization", "openai-organization"),
-                        ("project", "openai-project"),
-                    ] {
-                        if let Some(v) = s.str(setting)? {
-                            let v = HeaderValue::from_str(v)
-                                .map_err(|_| s.invalid(format!("settings.{setting} ungültig")))?;
-                            headers.push((HeaderName::from_static(header), v));
-                        }
-                    }
-                    Self {
-                        kind: ProviderKind::OpenAi,
-                        uri: parse_uri(&s, &join(base, "/chat/completions"))?,
-                        provider_model: spec.provider_model.clone(),
-                        auth: Auth::Header(AUTHORIZATION, bearer(key).ok_or_else(header_err)?),
-                        headers,
-                        caps: caps(MaxTokensField::MaxCompletionTokens, true),
+        let mut adapter = match spec.provider {
+            ProviderKind::OpenAi => {
+                let base = spec.endpoint.as_deref().unwrap_or(OPENAI_DEFAULT_ENDPOINT);
+                let key = api_key.ok_or_else(|| s.missing("Zugangsdaten (apiKey)"))?;
+                let mut headers = Vec::new();
+                for (setting, header) in [
+                    ("organization", "openai-organization"),
+                    ("project", "openai-project"),
+                ] {
+                    if let Some(v) = s.str(setting)? {
+                        let v = HeaderValue::from_str(v)
+                            .map_err(|_| s.invalid(format!("settings.{setting} ungültig")))?;
+                        headers.push((HeaderName::from_static(header), v));
                     }
                 }
-                ProviderKind::AzureOpenAi => {
-                    let endpoint = spec.endpoint.as_deref().ok_or_else(|| {
-                        s.missing("endpoint (https://<ressource>.openai.azure.com)")
-                    })?;
-                    let auth = match s.str("auth")?.unwrap_or("apiKey") {
-                        "apiKey" => {
-                            let key = api_key.ok_or_else(|| s.missing("Zugangsdaten (apiKey)"))?;
-                            Auth::Header(
-                                HeaderName::from_static("api-key"),
-                                sensitive(key).ok_or_else(header_err)?,
-                            )
-                        }
-                        "entraId" => {
-                            return Err(s.invalid(
+                Self {
+                    kind: ProviderKind::OpenAi,
+                    uri: parse_uri(&s, &join(base, "/chat/completions"))?,
+                    provider_model: spec.provider_model.clone(),
+                    auth: Auth::Header(AUTHORIZATION, bearer(key).ok_or_else(header_err)?),
+                    headers,
+                    caps: caps(MaxTokensField::MaxCompletionTokens, true),
+                    default_max_tokens: None,
+                    safe_prompt: None,
+                }
+            }
+            ProviderKind::AzureOpenAi => {
+                let endpoint = spec
+                    .endpoint
+                    .as_deref()
+                    .ok_or_else(|| s.missing("endpoint (https://<ressource>.openai.azure.com)"))?;
+                let auth = match s.str("auth")?.unwrap_or("apiKey") {
+                    "apiKey" => {
+                        let key = api_key.ok_or_else(|| s.missing("Zugangsdaten (apiKey)"))?;
+                        Auth::Header(
+                            HeaderName::from_static("api-key"),
+                            sensitive(key).ok_or_else(header_err)?,
+                        )
+                    }
+                    "entraId" => {
+                        return Err(s.invalid(
                             "settings.auth = entraId ist noch nicht umgesetzt (TokenSource fehlt)",
                         ));
-                        }
-                        other => {
-                            return Err(s.invalid(format!(
-                                "settings.auth = {other:?} unbekannt (erlaubt: apiKey, entraId)"
-                            )));
-                        }
-                    };
-                    let (url, field) = azure_url(&s, endpoint, &spec.provider_model)?;
-                    Self {
-                        kind: ProviderKind::AzureOpenAi,
-                        uri: parse_uri(&s, &url)?,
-                        provider_model: spec.provider_model.clone(),
-                        auth,
-                        headers: Vec::new(),
-                        caps: caps(field, true),
                     }
-                }
-                other => {
-                    // Generisch OpenAI-kompatibel (auch vLLM/Ollama, falls so registriert).
-                    let base = spec.endpoint.as_deref().ok_or_else(|| {
-                        s.missing("endpoint (Basis-URL, z. B. http://host:8000/v1)")
-                    })?;
-                    let auth = match api_key {
-                        Some(k) => Auth::Header(AUTHORIZATION, bearer(k).ok_or_else(header_err)?),
-                        None => Auth::None,
-                    };
-                    Self {
-                        kind: other,
-                        uri: parse_uri(&s, &join(base, "/chat/completions"))?,
-                        provider_model: spec.provider_model.clone(),
-                        auth,
-                        headers: Vec::new(),
-                        caps: caps(MaxTokensField::MaxTokens, false),
+                    other => {
+                        return Err(s.invalid(format!(
+                            "settings.auth = {other:?} unbekannt (erlaubt: apiKey, entraId)"
+                        )));
                     }
+                };
+                let (url, field) = azure_url(&s, endpoint, &spec.provider_model)?;
+                Self {
+                    kind: ProviderKind::AzureOpenAi,
+                    uri: parse_uri(&s, &url)?,
+                    provider_model: spec.provider_model.clone(),
+                    auth,
+                    headers: Vec::new(),
+                    caps: caps(field, true),
+                    default_max_tokens: None,
+                    safe_prompt: None,
                 }
-            };
+            }
+            other => {
+                // OpenAI-kompatibel: generisch, Ollama, vLLM (Profile in `local`) und
+                // Mistral (Profil in `mistral`).
+                let default_endpoint = match other {
+                    ProviderKind::Ollama => Some(crate::local::OLLAMA_DEFAULT_ENDPOINT),
+                    ProviderKind::Mistral => Some(crate::mistral::MISTRAL_DEFAULT_ENDPOINT),
+                    _ => None,
+                };
+                let base = spec
+                    .endpoint
+                    .as_deref()
+                    .or(default_endpoint)
+                    .ok_or_else(|| s.missing("endpoint (Basis-URL, z. B. http://host:8000/v1)"))?;
+                if other == ProviderKind::Mistral && api_key.is_none() {
+                    return Err(s.missing("Zugangsdaten (apiKey)"));
+                }
+                let auth = match api_key {
+                    Some(k) => Auth::Header(AUTHORIZATION, bearer(k).ok_or_else(header_err)?),
+                    None => Auth::None,
+                };
+                let mut c = caps(MaxTokensField::MaxTokens, false);
+                match other {
+                    // Reasoning-Modelle (Qwen3, DeepSeek-R1, gpt-oss …) liefern
+                    // `reasoning`/`reasoning_content`; `reasoning_effort` kennen neuere
+                    // Versionen.
+                    ProviderKind::Ollama | ProviderKind::Vllm => c.reasoning = true,
+                    // Mistral schickt die Usage immer im letzten Chunk und lehnt
+                    // `stream_options` ab.
+                    ProviderKind::Mistral => c.stream_usage = false,
+                    _ => {}
+                }
+                Self {
+                    kind: other,
+                    uri: parse_uri(&s, &join(base, "/chat/completions"))?,
+                    provider_model: spec.provider_model.clone(),
+                    auth,
+                    headers: Vec::new(),
+                    caps: c,
+                    default_max_tokens: None,
+                    safe_prompt: None,
+                }
+            }
+        };
 
         if let Some(f) = s.str("maxTokensField")? {
             adapter.caps.max_tokens_field = match f {
@@ -218,6 +254,10 @@ impl OpenAiAdapter {
         }
         if let Some(b) = s.bool("streamUsage")? {
             adapter.caps.stream_usage = b;
+        }
+        adapter.default_max_tokens = s.positive_u64("defaultMaxTokens")?;
+        if adapter.kind == ProviderKind::Mistral {
+            adapter.safe_prompt = s.bool("safePrompt")?;
         }
         Ok(adapter)
     }
@@ -241,6 +281,8 @@ impl OpenAiAdapter {
             auth: Auth::Token(tokens),
             headers: Vec::new(),
             caps: caps(field, true),
+            default_max_tokens: Settings::of(dep).positive_u64("defaultMaxTokens")?,
+            safe_prompt: None,
         })
     }
 
@@ -302,11 +344,11 @@ fn azure_url(
     }
 }
 
-fn internal(e: impl std::fmt::Display) -> ApiError {
+pub(crate) fn internal(e: impl std::fmt::Display) -> ApiError {
     ApiError::new(ErrorKind::Internal, e.to_string())
 }
 
-const USER_AGENT_VALUE: &str = concat!("ai-gw/", env!("CARGO_PKG_VERSION"));
+pub(crate) const USER_AGENT_VALUE: &str = concat!("ai-gw/", env!("CARGO_PKG_VERSION"));
 
 impl Provider for OpenAiAdapter {
     fn kind(&self) -> ProviderKind {
@@ -344,11 +386,29 @@ impl Provider for OpenAiAdapter {
             // OpenAI lehnt `stream_options` ohne `stream: true` ab.
             req.stream_options = None;
         }
+        if req.max_tokens.is_none() {
+            req.max_tokens = self.default_max_tokens;
+        }
+        // Profilspezifische Felder vor der Übersetzung herausnehmen (sonst als Verlust notiert).
+        let top_k = match self.kind {
+            ProviderKind::Vllm => req.sampling.top_k.take(),
+            _ => None,
+        };
+        let seed = match self.kind {
+            ProviderKind::Mistral => req.sampling.seed.take(),
+            _ => None,
+        };
         let mut wire = openai::request_to_wire(req, losses)?;
         let max = wire.max_completion_tokens.take().or(wire.max_tokens.take());
         match self.caps.max_tokens_field {
             MaxTokensField::MaxCompletionTokens => wire.max_completion_tokens = max,
             MaxTokensField::MaxTokens => wire.max_tokens = max,
+        }
+        if let Some(k) = top_k {
+            wire.extra.insert("top_k".into(), Value::from(k));
+        }
+        if self.kind == ProviderKind::Mistral {
+            crate::mistral::adjust_request(&mut wire, seed, self.safe_prompt, losses);
         }
         let body = serde_json::to_vec(&wire).map_err(internal)?;
 
@@ -382,11 +442,19 @@ impl Provider for OpenAiAdapter {
     }
 
     fn parse_response(&self, body: &[u8]) -> Result<ChatResponse, ApiError> {
-        openai::decode_response(body)
+        let mut resp = openai::decode_response(body)?;
+        match self.kind {
+            ProviderKind::Ollama | ProviderKind::Vllm => crate::local::lift_reasoning(&mut resp),
+            ProviderKind::Mistral => crate::mistral::adjust_response(&mut resp),
+            _ => {}
+        }
+        Ok(resp)
     }
 
     fn stream_decoder(&self) -> Box<dyn StreamDecoder> {
-        Box::new(OpenAiSseDecoder::new())
+        let mut d = OpenAiSseDecoder::new();
+        d.mistral = self.kind == ProviderKind::Mistral;
+        Box::new(d)
     }
 
     fn classify_error(
@@ -395,7 +463,10 @@ impl Provider for OpenAiAdapter {
         headers: &HeaderMap,
         body: &[u8],
     ) -> UpstreamError {
-        classify_openai_error(status, headers, body)
+        match self.kind {
+            ProviderKind::Mistral => crate::mistral::classify_mistral_error(status, headers, body),
+            _ => classify_openai_error(status, headers, body),
+        }
     }
 }
 
@@ -421,7 +492,7 @@ fn str_or_num(v: Option<&Value>) -> Option<String> {
     }
 }
 
-fn truncate(mut s: String) -> String {
+pub(crate) fn truncate(mut s: String) -> String {
     if s.chars().count() > MAX_ERROR_MESSAGE {
         s = s.chars().take(MAX_ERROR_MESSAGE).collect();
         s.push('…');
@@ -453,7 +524,7 @@ fn parse_wire_error(body: &[u8]) -> Option<WireError> {
 }
 
 /// `Retry-After` (Sekunden) bzw. `retry-after-ms`.
-fn retry_after(headers: &HeaderMap) -> Option<std::time::Duration> {
+pub(crate) fn retry_after(headers: &HeaderMap) -> Option<std::time::Duration> {
     let num = |name: &str| {
         headers
             .get(name)?
@@ -576,6 +647,8 @@ pub struct OpenAiSseDecoder {
     events: Vec<SseEvent>,
     stopped: bool,
     done: bool,
+    /// Mistral-Endgründe (`model_length`) abbilden.
+    mistral: bool,
 }
 
 impl OpenAiSseDecoder {
@@ -601,9 +674,12 @@ impl OpenAiSseDecoder {
         }
         match self.inner.decode(data) {
             Ok(events) => {
-                for ev in events {
-                    if matches!(ev, StreamEvent::Stop { .. }) {
+                for mut ev in events {
+                    if let StreamEvent::Stop { reason, .. } = &mut ev {
                         self.stopped = true;
+                        if self.mistral {
+                            crate::mistral::map_stop(reason);
+                        }
                     }
                     out.push(ev);
                 }
@@ -924,6 +1000,129 @@ mod tests {
             ))
             .is_err()
         );
+    }
+
+    #[test]
+    fn ollama_vllm_and_mistral_profiles() {
+        // Ollama: Standard-Endpunkt, ohne Schlüssel, Reasoning-Fähigkeit.
+        let a = OpenAiAdapter::from_deployment(&dep(
+            ProviderKind::Ollama,
+            None,
+            "qwen3",
+            None,
+            json!({"defaultMaxTokens": 256}),
+        ))
+        .unwrap();
+        assert_eq!(a.uri(), "http://localhost:11434/v1/chat/completions");
+        assert!(a.capabilities().reasoning && a.capabilities().stream_usage);
+        let mut req = request(true);
+        req.max_tokens = None;
+        req.sampling.top_k = Some(5);
+        let b = body_json(&a.build_request(req, &mut Losses::new()).unwrap());
+        assert_eq!(b["max_tokens"], 256);
+        assert!(b.get("top_k").is_none());
+        assert_eq!(b["stream_options"]["include_usage"], true);
+
+        // vLLM: Endpunkt Pflicht, top_k wird weitergegeben.
+        assert!(
+            OpenAiAdapter::from_deployment(&dep(ProviderKind::Vllm, None, "m", None, json!({})))
+                .is_err()
+        );
+        let a = OpenAiAdapter::from_deployment(&dep(
+            ProviderKind::Vllm,
+            Some("http://vllm:8000/v1"),
+            "m",
+            None,
+            json!({}),
+        ))
+        .unwrap();
+        let mut req = request(false);
+        req.sampling.top_k = Some(5);
+        let mut losses = Losses::new();
+        let b = body_json(&a.build_request(req, &mut losses).unwrap());
+        assert_eq!(b["top_k"], 5);
+        assert_eq!(b["max_tokens"], 42);
+        assert!(losses.is_empty(), "{losses:?}");
+
+        // Mistral: Schlüssel Pflicht, random_seed, any, keine stream_options, Tool-IDs.
+        assert!(
+            OpenAiAdapter::from_deployment(&dep(ProviderKind::Mistral, None, "m", None, json!({})))
+                .is_err()
+        );
+        let a = OpenAiAdapter::from_deployment(&dep(
+            ProviderKind::Mistral,
+            None,
+            "mistral-large-latest",
+            Some("mk"),
+            json!({"safePrompt": true}),
+        ))
+        .unwrap();
+        assert_eq!(a.uri(), "https://api.mistral.ai/v1/chat/completions");
+        let mut req = request(true);
+        req.sampling.seed = Some(7);
+        req.user = Some("u1".into());
+        req.tool_choice = Some(aigw_core::ir::ToolChoice::Required);
+        req.messages.push(Message {
+            role: Role::Assistant,
+            content: aigw_core::ir::Content::Parts(vec![aigw_core::ir::Part::new(
+                aigw_core::ir::PartKind::ToolCall {
+                    id: "toolu_01XYZ".into(),
+                    name: "f".into(),
+                    arguments: "{}".into(),
+                },
+            )]),
+            name: None,
+            extra: Default::default(),
+        });
+        req.messages.push(Message {
+            role: Role::Tool,
+            content: aigw_core::ir::Content::Parts(vec![aigw_core::ir::Part::new(
+                aigw_core::ir::PartKind::ToolResult {
+                    tool_call_id: "toolu_01XYZ".into(),
+                    content: aigw_core::ir::Content::Text("ok".into()),
+                    is_error: None,
+                },
+            )]),
+            name: None,
+            extra: Default::default(),
+        });
+        let r = a.build_request(req, &mut Losses::new()).unwrap();
+        assert_eq!(r.headers()["authorization"], "Bearer mk");
+        let b = body_json(&r);
+        assert_eq!(b["random_seed"], 7);
+        assert!(b.get("seed").is_none() && b.get("user").is_none());
+        assert!(b.get("stream_options").is_none());
+        assert_eq!(b["tool_choice"], "any");
+        assert_eq!(b["safe_prompt"], true);
+        assert_eq!(b["max_tokens"], 42);
+        let id = b["messages"][1]["tool_calls"][0]["id"].as_str().unwrap();
+        assert_eq!(id.len(), 9);
+        assert_eq!(b["messages"][2]["tool_call_id"], id);
+
+        // Endgrund model_length → max_tokens (Antwort und Stream).
+        let resp = a
+            .parse_response(
+                json!({"id": "x", "object": "chat.completion", "created": 1, "model": "m",
+                       "choices": [{"index": 0, "message": {"role": "assistant", "content": "a"},
+                                    "finish_reason": "model_length"}]})
+                .to_string()
+                .as_bytes(),
+            )
+            .unwrap();
+        assert_eq!(resp.choices[0].stop_reason, Some(StopReason::MaxTokens));
+        let mut d = a.stream_decoder();
+        let mut out = Vec::new();
+        d.push(
+            b"data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"model_length\"}]}\n\n",
+            &mut out,
+        );
+        assert!(out.iter().any(|e| matches!(
+            e,
+            StreamEvent::Stop {
+                reason: StopReason::MaxTokens,
+                ..
+            }
+        )));
     }
 
     fn classify(status: u16, headers: &[(&str, &str)], body: Value) -> UpstreamError {
