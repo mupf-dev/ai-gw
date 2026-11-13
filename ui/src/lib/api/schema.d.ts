@@ -95,6 +95,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/config:apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Wendet Manifeste an (oder plant nur, `dryRun=true`): vollständige Validierung vorab, dann
+         *     **eine** Transaktion mit genau einer neuen `config_version`; alles oder nichts.
+         */
+        post: operations["apply_config"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/config:export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Exportiert alle Ressourcen als YAML-Mehrfachdokument (ohne Geheimnisse und Server-Felder). */
+        get: operations["export_config"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/model-groups": {
         parameters: {
             query?: never;
@@ -279,6 +316,11 @@ export interface components {
             /** @description Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite. */
             nextCursor?: string | null;
         };
+        /**
+         * @description Umgang mit `ApiKey`-Manifesten.
+         * @enum {string}
+         */
+        ApiKeyMode: "include" | "ignore";
         /** @description Virtueller API-Key (Spezifikation; Präfix/Hash/Zustand siehe [`ApiKeyStatus`]). */
         ApiKeySpec: {
             /** @description Erlaubte Modellgruppen (Name oder Alias); leer = alle, die das Team erlaubt. */
@@ -315,6 +357,18 @@ export interface components {
             /** @description Zustand. */
             state: components["schemas"]["ApiKeyState"];
         };
+        /** @description Ergebnis von [`apply`]. */
+        ApplyReport: {
+            /** @description Wurde geschrieben? (`false` bei Trockenlauf oder ohne Änderungen) */
+            applied: boolean;
+            /**
+             * Format: int64
+             * @description `config_version` danach.
+             */
+            configVersion: number;
+            /** @description Plan (bei `applied` genau das, was geschrieben wurde). */
+            plan: components["schemas"]["Plan"];
+        };
         BTreeMap: {
             [key: string]: string;
         };
@@ -334,6 +388,24 @@ export interface components {
          * @enum {string}
          */
         BudgetPeriod: "day" | "week" | "month" | "total";
+        /** @description Eine Ressource im Plan. */
+        Change: {
+            /** @description Aktion. */
+            action: components["schemas"]["ChangeAction"];
+            /** @description Geänderte Felder (bei `update`). */
+            fields?: components["schemas"]["FieldChange"][];
+            /** @description Art. */
+            kind: components["schemas"]["ResourceKind"];
+            /** @description Name. */
+            name: string;
+            /** @description Hinweis (z. B. Grund für `skip`). */
+            note?: string | null;
+        };
+        /**
+         * @description Art einer geplanten Änderung.
+         * @enum {string}
+         */
+        ChangeAction: "create" | "update" | "delete" | "unchanged" | "retain" | "skip";
         /** @description Ergebnis der Key-Erzeugung: der Klartext wird **nur hier** einmalig herausgegeben. */
         CreatedApiKey: {
             /** @description Gespeicherter Key. */
@@ -353,6 +425,17 @@ export interface components {
          * @enum {string}
          */
         FallbackTrigger: "any" | "rate-limit" | "context-length" | "content-filter" | "unavailable";
+        /** @description Geändertes Feld (Pfad in Punktnotation, z. B. `spec.budget.amount`). */
+        FieldChange: {
+            /** @description Wert nachher (fehlt bei entferntem Feld oder Geheimnis). */
+            after?: Record<string, never> | null;
+            /** @description Wert vorher (fehlt bei neuem Feld oder Geheimnis). */
+            before?: Record<string, never> | null;
+            /** @description Pfad. */
+            path: string;
+            /** @description Geheimer Wert: nur „geändert“, nie der Inhalt. */
+            secret?: boolean;
+        };
         /**
          * @description Gemessene Größe eines Limits.
          * @enum {string}
@@ -461,6 +544,24 @@ export interface components {
             /** @description Freie Metadaten. */
             metadata?: components["schemas"]["BTreeMap"];
         };
+        /** @description Ergebnis des Soll/Ist-Vergleichs. */
+        Plan: {
+            /** @description Umgang mit API-Keys. */
+            apiKeys: components["schemas"]["ApiKeyMode"];
+            /**
+             * Format: int64
+             * @description `config_version`, gegen die geplant wurde.
+             */
+            baseVersion: number;
+            /** @description Alle Ressourcen (Abhängigkeitsreihenfolge, je Art nach Name). */
+            changes: components["schemas"]["Change"][];
+            /** @description Mit `prune` geplant. */
+            prune: boolean;
+            /** @description Anzahl je Aktion. */
+            summary: components["schemas"]["Summary"];
+            /** @description Warnungen (z. B. übersprungene Keys). */
+            warnings: string[];
+        };
         /** @description Problem Details (RFC 9457). */
         Problem: {
             /** @description Maschinenlesbarer Code (`not-found`, `conflict`, `precondition-failed` …). */
@@ -479,6 +580,11 @@ export interface components {
             /** @description Problemtyp (`urn:aigw:problem:<code>`). */
             type: string;
         };
+        /**
+         * @description Art einer Ressource (`kind` in YAML).
+         * @enum {string}
+         */
+        ResourceKind: "Organization" | "Team" | "User" | "ApiKey" | "ProviderCredential" | "ModelGroup" | "Deployment" | "Price" | "PluginBinding" | "McpServer" | "McpGrant";
         /**
          * @description Rolle eines Nutzers (§15).
          * @enum {string}
@@ -515,6 +621,21 @@ export interface components {
          * @enum {string}
          */
         RoutingStrategy: "weighted" | "least-latency" | "least-busy" | "cost";
+        /** @description Anzahl je Aktion. */
+        Summary: {
+            /** @description Anzulegen. */
+            create: number;
+            /** @description Zu löschen. */
+            delete: number;
+            /** @description Nicht im Manifest, bleiben. */
+            retain: number;
+            /** @description Übersprungen. */
+            skip: number;
+            /** @description Unverändert. */
+            unchanged: number;
+            /** @description Zu ändern. */
+            update: number;
+        };
         Team: {
             /**
              * Format: uuid
@@ -1147,6 +1268,133 @@ export interface operations {
             };
             /** @description ETag passt nicht */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    apply_config: {
+        parameters: {
+            query?: {
+                /** @description Nur planen, nichts schreiben. */
+                dryRun?: boolean;
+                /** @description Ressourcen löschen, die nicht im Manifest stehen. */
+                prune?: boolean;
+                /** @description Umgang mit API-Keys (`include` | `ignore`). */
+                apiKeys?: components["schemas"]["ApiKeyMode"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Manifeste (aigw/v1alpha1, Mehrfachdokument) */
+        requestBody: {
+            content: {
+                "application/yaml": string;
+            };
+        };
+        responses: {
+            /** @description Plan bzw. Ergebnis */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplyReport"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Konfiguration zwischenzeitlich geändert oder DB-Konflikt */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Manifest ungültig (alle Fehler, nichts angewendet) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    export_config: {
+        parameters: {
+            query?: {
+                /** @description `include` (Standard): API-Keys ohne Klartext exportieren; `ignore`: weglassen. */
+                apiKeys?: components["schemas"]["ApiKeyMode"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Manifeste (aigw/v1alpha1) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/yaml": string;
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

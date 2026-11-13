@@ -11,6 +11,7 @@
 //! Details: `docs/konzept/02-datenmodell.md`.
 
 pub mod crypto;
+pub mod gitops;
 pub mod keys;
 pub mod observe;
 pub mod reload;

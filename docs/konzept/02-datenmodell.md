@@ -165,7 +165,7 @@ spec:
 
 `Manifest::parse_yaml` liest Mehrfachdokumente und prüft `apiVersion`, `kind`, unbekannte Felder,
 Namen und die Geheimnisregel; `Manifest::to_yaml` schreibt sie (Rundreise getestet). Die Anwendung
-(`aigw config apply`, Diff/`--prune`) ist nicht Teil von AIGW-9. `ResourceKind::ALL` liefert die
+(`aigw config apply`, Diff/`--prune`) beschreibt [09-gitops.md](09-gitops.md) (AIGW-33). `ResourceKind::ALL` liefert die
 Abhängigkeitsreihenfolge für Import/Export.
 
 ## 4. Datenbankschema

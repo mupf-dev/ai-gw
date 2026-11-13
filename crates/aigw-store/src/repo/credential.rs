@@ -40,7 +40,7 @@ fn info_from_row(row: &AnyRow) -> Result<(ProviderCredential, Sealed), StoreErro
 }
 
 /// Löst die Werte auf (Klartext oder `valueFrom`) und verschlüsselt sie, gebunden an `id`.
-fn seal_spec(
+pub(crate) fn seal_spec(
     keyring: &Keyring,
     id: Id,
     spec: &ProviderCredentialSpec,
@@ -57,7 +57,7 @@ fn seal_spec(
     Ok((plain.into_keys().collect(), sealed))
 }
 
-fn sealed_cols(
+pub(crate) fn sealed_cols(
     spec: &ProviderCredentialSpec,
     fields: &[String],
     sealed: Sealed,

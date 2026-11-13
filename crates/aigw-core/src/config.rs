@@ -40,6 +40,8 @@ pub struct Config {
     pub log: LogConfig,
     /// Request-Log, Rollups, Payload-Logging, Aufbewahrung, Export (AIGW-43).
     pub observe: ObserveConfig,
+    /// GitOps (AIGW-33).
+    pub gitops: GitopsConfig,
 }
 
 impl Config {
@@ -313,6 +315,15 @@ pub enum LogFormat {
     Text,
     /// JSON-Zeilen.
     Json,
+}
+
+/// GitOps (AIGW-33, `docs/konzept/09-gitops.md`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct GitopsConfig {
+    /// Modus „nur YAML“: Schreibrouten der Admin-API antworten mit `403 read-only`;
+    /// Änderungen nur per `aigw config apply` bzw. `POST /admin/api/v1/config:apply`.
+    pub read_only_admin: bool,
 }
 
 /// Logging.

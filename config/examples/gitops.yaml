@@ -1,0 +1,159 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Beispiel-Manifest für GitOps (docs/konzept/09-gitops.md):
+#
+#   aigw config validate config/examples/gitops.yaml          # offline prüfen
+#   aigw config diff  -c config/aigw.example.yaml config/examples/gitops.yaml
+#   aigw config apply -c config/aigw.example.yaml config/examples/gitops.yaml [--dry-run] [--prune]
+#
+# Geheimnisse stehen nur als Verweis im YAML (valueFrom: env|file) und werden zur Apply-Zeit
+# aufgelöst. Für dieses Beispiel nötig:
+#   AIGW_SECRET_OPENAI_PROD_API_KEY, AIGW_SECRET_ANTHROPIC_PROD_API_KEY, AIGW_SECRET_CI_KEY
+#   (Letzterer im Key-Format sk-aigw-<12 Zeichen>-<43 Zeichen>, z. B. aus einem früheren Export
+#   bzw. einer Rotation).
+---
+apiVersion: aigw/v1alpha1
+kind: Organization
+metadata:
+  name: acme
+spec:
+  displayName: ACME GmbH
+  budget: {amount: "5000", period: month, warnAtPercent: [80, 100]}
+---
+apiVersion: aigw/v1alpha1
+kind: Team
+metadata:
+  name: platform
+  labels: {env: prod}
+spec:
+  organization: acme
+  displayName: Plattform-Team
+  allowedModels: [gpt-4o, claude-sonnet]
+  limits:
+    - {metric: tokens, limit: 100000, window: minute}
+    - {metric: requests, limit: 50, window: second, modelGroup: gpt-4o}
+  budget: {amount: "500", period: month, warnAtPercent: [80, 100]}
+---
+apiVersion: aigw/v1alpha1
+kind: User
+metadata:
+  name: alice
+spec:
+  oidcIssuer: https://login.example.com
+  oidcSubject: "4711"
+  email: alice@example.com
+  roles:
+    - {role: team-admin, team: platform}
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata:
+  name: openai-prod
+spec:
+  provider: openai
+  data:
+    apiKey:
+      valueFrom: {env: AIGW_SECRET_OPENAI_PROD_API_KEY}
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata:
+  name: anthropic-prod
+spec:
+  provider: anthropic
+  data:
+    apiKey:
+      valueFrom: {env: AIGW_SECRET_ANTHROPIC_PROD_API_KEY}
+      # alternativ aus einer Datei (z. B. Kubernetes-/Docker-Secret):
+      # valueFrom: {file: /run/secrets/anthropic-api-key}
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata:
+  name: claude-sonnet
+spec:
+  aliases: [claude-sonnet-latest]
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata:
+  name: gpt-4o
+  labels: {tier: premium}
+spec:
+  aliases: [gpt-4o-latest]
+  routing: least-latency
+  fallbacks:
+    - modelGroup: claude-sonnet
+      on: [rate-limit, unavailable]
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata:
+  name: claude-sonnet-anthropic
+spec:
+  modelGroup: claude-sonnet
+  provider: anthropic
+  providerModel: claude-sonnet-4-5
+  credential: anthropic-prod
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata:
+  name: gpt-4o-openai
+spec:
+  modelGroup: gpt-4o
+  provider: openai
+  providerModel: gpt-4o-2024-08-06
+  credential: openai-prod
+  weight: 3
+  capacity: {rpm: 500, tpm: 300000}
+---
+apiVersion: aigw/v1alpha1
+kind: Price
+metadata:
+  name: gpt-4o-2024-08
+spec:
+  provider: openai
+  model: gpt-4o-2024-08-06
+  validFrom: 2024-08-06T00:00:00Z
+  perMillionTokens: {input: "2.50", cachedInput: "1.25", output: "10"}
+---
+apiVersion: aigw/v1alpha1
+kind: ApiKey
+metadata:
+  name: ci
+  labels: {owner: platform}
+spec:
+  team: platform
+  allowedModels: [gpt-4o]
+  # Optional (GitOps): vorgegebener Klartext. Ohne `secret` behalten bestehende Keys ihr
+  # Geheimnis; neue Keys ohne `secret` werden übersprungen (Warnung).
+  secret:
+    valueFrom: {env: AIGW_SECRET_CI_KEY}
+---
+apiVersion: aigw/v1alpha1
+kind: McpServer
+metadata:
+  name: tickets
+spec:
+  url: https://mcp.example.com/tickets
+---
+apiVersion: aigw/v1alpha1
+kind: McpGrant
+metadata:
+  name: tickets-platform
+spec:
+  server: tickets
+  subject: {level: team, target: platform}
+  tools: [search, create]
+---
+apiVersion: aigw/v1alpha1
+kind: PluginBinding
+metadata:
+  name: pii-platform
+spec:
+  scope: {level: team, target: platform}
+  plugin: pii
+  order: 10
+  config: {mode: mask}

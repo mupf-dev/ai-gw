@@ -13,7 +13,7 @@
 #![allow(private_interfaces)]
 
 mod api_key;
-mod credential;
+pub(crate) mod credential;
 mod kinds;
 
 pub(crate) use api_key::api_key_from_row;

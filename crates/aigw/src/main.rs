@@ -7,7 +7,9 @@
 //!   sowie Admin-API und Admin-UI (`server.control.listen`, Standard `:4001`); bei gleicher
 //!   Adresse auf einem gemeinsamen Port.
 //! - `aigw openapi` gibt die OpenAPI-Spezifikation der Admin-API aus (für `ui/` → TS-Typen).
+//! - `aigw config export|diff|apply|validate` – GitOps (siehe [`cli_config`]).
 
+mod cli_config;
 mod observe;
 mod runtime;
 mod server;
@@ -40,6 +42,9 @@ enum Command {
     },
     /// Gibt die OpenAPI-Spezifikation der Admin-API auf stdout aus.
     Openapi,
+    /// GitOps: Ressourcen als YAML exportieren, vergleichen, anwenden, prüfen.
+    #[command(subcommand)]
+    Config(cli_config::ConfigCommand),
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -80,6 +85,10 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::Config(cmd) => {
+            init_tracing(cli.log_format);
+            cli_config::run(cmd)
+        }
         Command::Serve { config } => {
             init_tracing(cli.log_format);
             match serve(config) {
@@ -131,14 +140,25 @@ fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
             observer: runtime_state.observer.clone(),
             ..aigw_proxy::ProxyState::mock()
         };
-        // Steuerebene: Admin-API/-UI (mit Anmeldung, AIGW-28) und /metrics (AIGW-43).
+        // Steuerebene: Admin-API/-UI (mit Anmeldung, AIGW-28), GitOps (AIGW-33) und
+        // /metrics (AIGW-43); Modus „nur YAML“ sperrt die Schreibrouten.
+        let auth: std::sync::Arc<dyn aigw_admin::AdminAuthenticator> =
+            std::sync::Arc::new(bootstrap_token()?);
         let control = aigw_admin::router_with(aigw_admin::AdminState::new(
             runtime_state.store.clone(),
-            std::sync::Arc::new(bootstrap_token()?),
+            std::sync::Arc::clone(&auth),
+        ))
+        .merge(aigw_admin::gitops::router(
+            aigw_admin::gitops::GitopsState {
+                store: runtime_state.store.clone(),
+                keyring: std::sync::Arc::clone(&runtime_state.keyring),
+                auth,
+            },
         ))
         .merge(observe::metrics_router(
             runtime_state.observe_metrics.clone(),
         ));
+        let control = aigw_admin::read_only::apply(control, config.gitops.read_only_admin);
         server::run(listeners, state, control, shutdown_signal()).await?;
         runtime_state.shutdown().await;
         tracing::info!("ai-gw beendet");

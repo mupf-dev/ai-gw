@@ -845,6 +845,189 @@
         ]
       }
     },
+    "/admin/api/v1/config:apply": {
+      "post": {
+        "tags": [
+          "gitops"
+        ],
+        "summary": "Wendet Manifeste an (oder plant nur, `dryRun=true`): vollständige Validierung vorab, dann\n**eine** Transaktion mit genau einer neuen `config_version`; alles oder nichts.",
+        "operationId": "apply_config",
+        "parameters": [
+          {
+            "name": "dryRun",
+            "in": "query",
+            "description": "Nur planen, nichts schreiben.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "prune",
+            "in": "query",
+            "description": "Ressourcen löschen, die nicht im Manifest stehen.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "apiKeys",
+            "in": "query",
+            "description": "Umgang mit API-Keys (`include` | `ignore`).",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ApiKeyMode"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Manifeste (aigw/v1alpha1, Mehrfachdokument)",
+          "content": {
+            "application/yaml": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Plan bzw. Ergebnis",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konfiguration zwischenzeitlich geändert oder DB-Konflikt",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Manifest ungültig (alle Fehler, nichts angewendet)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/config:export": {
+      "get": {
+        "tags": [
+          "gitops"
+        ],
+        "summary": "Exportiert alle Ressourcen als YAML-Mehrfachdokument (ohne Geheimnisse und Server-Felder).",
+        "operationId": "export_config",
+        "parameters": [
+          {
+            "name": "apiKeys",
+            "in": "query",
+            "description": "`include` (Standard): API-Keys ohne Klartext exportieren; `ignore`: weglassen.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ApiKeyMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Manifeste (aigw/v1alpha1)",
+            "content": {
+              "application/yaml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/model-groups": {
       "get": {
         "tags": [
@@ -2571,6 +2754,14 @@
           }
         }
       },
+      "ApiKeyMode": {
+        "type": "string",
+        "description": "Umgang mit `ApiKey`-Manifesten.",
+        "enum": [
+          "include",
+          "ignore"
+        ]
+      },
       "ApiKeySpec": {
         "type": "object",
         "description": "Virtueller API-Key (Spezifikation; Präfix/Hash/Zustand siehe [`ApiKeyStatus`]).",
@@ -2663,6 +2854,30 @@
           }
         }
       },
+      "ApplyReport": {
+        "type": "object",
+        "description": "Ergebnis von [`apply`].",
+        "required": [
+          "plan",
+          "applied",
+          "configVersion"
+        ],
+        "properties": {
+          "applied": {
+            "type": "boolean",
+            "description": "Wurde geschrieben? (`false` bei Trockenlauf oder ohne Änderungen)"
+          },
+          "configVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "`config_version` danach."
+          },
+          "plan": {
+            "$ref": "#/components/schemas/Plan",
+            "description": "Plan (bei `applied` genau das, was geschrieben wurde)."
+          }
+        }
+      },
       "BTreeMap": {
         "type": "object",
         "additionalProperties": {
@@ -2714,6 +2929,55 @@
           "total"
         ]
       },
+      "Change": {
+        "type": "object",
+        "description": "Eine Ressource im Plan.",
+        "required": [
+          "kind",
+          "name",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ChangeAction",
+            "description": "Aktion."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FieldChange"
+            },
+            "description": "Geänderte Felder (bei `update`)."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ResourceKind",
+            "description": "Art."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Hinweis (z. B. Grund für `skip`)."
+          }
+        }
+      },
+      "ChangeAction": {
+        "type": "string",
+        "description": "Art einer geplanten Änderung.",
+        "enum": [
+          "create",
+          "update",
+          "delete",
+          "unchanged",
+          "retain",
+          "skip"
+        ]
+      },
       "CreatedApiKey": {
         "type": "object",
         "description": "Ergebnis der Key-Erzeugung: der Klartext wird **nur hier** einmalig herausgegeben.",
@@ -2763,6 +3027,37 @@
           "content-filter",
           "unavailable"
         ]
+      },
+      "FieldChange": {
+        "type": "object",
+        "description": "Geändertes Feld (Pfad in Punktnotation, z. B. `spec.budget.amount`).",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "after": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Wert nachher (fehlt bei entferntem Feld oder Geheimnis)."
+          },
+          "before": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Wert vorher (fehlt bei neuem Feld oder Geheimnis)."
+          },
+          "path": {
+            "type": "string",
+            "description": "Pfad."
+          },
+          "secret": {
+            "type": "boolean",
+            "description": "Geheimer Wert: nur „geändert“, nie der Inhalt."
+          }
+        }
       },
       "LimitMetric": {
         "type": "string",
@@ -3039,6 +3334,51 @@
         },
         "additionalProperties": false
       },
+      "Plan": {
+        "type": "object",
+        "description": "Ergebnis des Soll/Ist-Vergleichs.",
+        "required": [
+          "baseVersion",
+          "prune",
+          "apiKeys",
+          "changes",
+          "summary",
+          "warnings"
+        ],
+        "properties": {
+          "apiKeys": {
+            "$ref": "#/components/schemas/ApiKeyMode",
+            "description": "Umgang mit API-Keys."
+          },
+          "baseVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "`config_version`, gegen die geplant wurde."
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Change"
+            },
+            "description": "Alle Ressourcen (Abhängigkeitsreihenfolge, je Art nach Name)."
+          },
+          "prune": {
+            "type": "boolean",
+            "description": "Mit `prune` geplant."
+          },
+          "summary": {
+            "$ref": "#/components/schemas/Summary",
+            "description": "Anzahl je Aktion."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Warnungen (z. B. übersprungene Keys)."
+          }
+        }
+      },
       "Problem": {
         "type": "object",
         "description": "Problem Details (RFC 9457).",
@@ -3082,6 +3422,23 @@
             "description": "Problemtyp (`urn:aigw:problem:<code>`)."
           }
         }
+      },
+      "ResourceKind": {
+        "type": "string",
+        "description": "Art einer Ressource (`kind` in YAML).",
+        "enum": [
+          "Organization",
+          "Team",
+          "User",
+          "ApiKey",
+          "ProviderCredential",
+          "ModelGroup",
+          "Deployment",
+          "Price",
+          "PluginBinding",
+          "McpServer",
+          "McpGrant"
+        ]
       },
       "Role": {
         "type": "string",
@@ -3172,6 +3529,50 @@
           "least-busy",
           "cost"
         ]
+      },
+      "Summary": {
+        "type": "object",
+        "description": "Anzahl je Aktion.",
+        "required": [
+          "create",
+          "update",
+          "delete",
+          "unchanged",
+          "retain",
+          "skip"
+        ],
+        "properties": {
+          "create": {
+            "type": "integer",
+            "description": "Anzulegen.",
+            "minimum": 0
+          },
+          "delete": {
+            "type": "integer",
+            "description": "Zu löschen.",
+            "minimum": 0
+          },
+          "retain": {
+            "type": "integer",
+            "description": "Nicht im Manifest, bleiben.",
+            "minimum": 0
+          },
+          "skip": {
+            "type": "integer",
+            "description": "Übersprungen.",
+            "minimum": 0
+          },
+          "unchanged": {
+            "type": "integer",
+            "description": "Unverändert.",
+            "minimum": 0
+          },
+          "update": {
+            "type": "integer",
+            "description": "Zu ändern.",
+            "minimum": 0
+          }
+        }
       },
       "Team": {
         "type": "object",
@@ -3447,6 +3848,10 @@
     {
       "name": "model-groups",
       "description": "Modellgruppen (lesend, für Freigaben)"
+    },
+    {
+      "name": "gitops",
+      "description": "YAML-Export und -Apply aller Ressourcen (aigw/v1alpha1)"
     }
   ]
 }

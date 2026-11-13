@@ -70,3 +70,9 @@ observe:
     enabled: false
     path: aigw-requests.jsonl
     include_payload: false
+
+# GitOps (docs/konzept/09-gitops.md): `aigw config export|diff|apply|validate`.
+gitops:
+  # Modus „nur YAML“: Schreibrouten der Admin-API (und damit der UI) antworten mit 403;
+  # Änderungen nur per `aigw config apply` bzw. POST /admin/api/v1/config:apply.
+  read_only_admin: false

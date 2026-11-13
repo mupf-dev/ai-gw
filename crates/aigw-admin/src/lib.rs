@@ -7,13 +7,17 @@
 //! - `GET /admin/api/openapi.json` – OpenAPI-Spezifikation (Quelle der TS-Typen der UI, E3)
 //! - `/admin/api/v1/{organizations,teams,users,api-keys,model-groups}` – Ressourcen
 //!   (siehe [`resources`]), nur mit Anmeldung ([`auth`])
+//! - `/admin/api/v1/config:{export,apply}` – GitOps (siehe [`gitops`]), Modus „nur YAML“
+//!   siehe [`read_only`]
 //! - `GET /admin/…` – eingebettete Svelte-SPA (siehe [`ui`])
 //!
 //! Fehler kommen einheitlich als Problem Details (RFC 9457, [`problem::Problem`]).
 
 pub mod api;
 pub mod auth;
+pub mod gitops;
 pub mod problem;
+pub mod read_only;
 pub mod resources;
 pub mod ui;
 

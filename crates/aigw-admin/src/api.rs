@@ -26,6 +26,7 @@ use crate::resources as r;
         r::list_api_keys, r::create_api_key, r::get_api_key, r::put_api_key,
         r::delete_api_key, r::revoke_api_key, r::reactivate_api_key, r::rotate_api_key,
         r::list_model_groups, r::get_model_group,
+        crate::gitops::export_config, crate::gitops::apply_config,
     ),
     components(schemas(VersionInfo, Problem)),
     modifiers(&BearerAuth),
@@ -36,6 +37,7 @@ use crate::resources as r;
         (name = "users", description = "Nutzer (Login per OIDC folgt mit AIGW-32)"),
         (name = "api-keys", description = "Virtuelle API-Keys der Datenebene"),
         (name = "model-groups", description = "Modellgruppen (lesend, für Freigaben)"),
+        (name = "gitops", description = "YAML-Export und -Apply aller Ressourcen (aigw/v1alpha1)"),
     )
 )]
 pub struct ApiDoc;
@@ -119,6 +121,8 @@ mod tests {
             "/admin/api/v1/users",
             "/admin/api/v1/api-keys/{name}/rotate",
             "/admin/api/v1/model-groups",
+            "/admin/api/v1/config:export",
+            "/admin/api/v1/config:apply",
         ] {
             assert!(json["paths"][p].is_object(), "Pfad {p} fehlt");
         }
