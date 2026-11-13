@@ -69,95 +69,95 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 50. [x] p50: A Optimierung in AIGW-57 nach Feature-Vollständigkeit
 
 ## AIGW-33 GitOps
-51. [ ] ApiKeys Standard include vs ignore bei apply/prune (Empf. include)
-52. [ ] Admin-API valueFrom nur AIGW_SECRET_* env (Empf. ja)
-53. [ ] Nur-YAML-Modus 403, config:apply erlaubt (Empf. ja)
-54. [ ] valueFrom-Verweise speichern für originalgetreuen Export (Empf. später)
-55. [ ] Eigene Permission gitops (Empf. ja)
-56. [ ] readOnly-Flag für UI (Empf. ja)
+51. [x] (= F4, ignore)
+52. [x] GitOps-Secrets Admin-API: A nur AIGW_SECRET_* + optional gitops.secret_dir für file: (Umsetzung nötig)
+53. [x] Nur-YAML: A 403 read-only, config:apply erlaubt
+54. [x] valueFrom-Verweise mitspeichern (unverschlüsselt) für originalgetreuen Export: A (Umsetzung nötig, mit F7)
+55. [x] Rolle gitops: A nur config:export/apply (+dry-run) (Umsetzung nötig)
+56. [x] auth/info + readOnly + bootstrap, UI blendet aus + Bootstrap-Warnbanner: A (Umsetzung nötig)
 
 ## AIGW-16/17/20 Anthropic/Ollama/Mistral
-57. [ ] Anthropic 429 = RateLimit, Quota nur billing (Empf. ja)
-58. [ ] reasoningMode Standard adaptive (Empf.)
-59. [ ] Budget-Tabelle + max_tokens anheben (Empf. ja)
-60. [ ] anthropic-beta von Clients durchreichen (Empf. ja, Allowlist später)
-61. [ ] Mistral reasoning_effort/Magistral als Folgepunkt (Empf.)
+57. [x] Anthropic 429: A RateLimit, Quota nur billing_error
+58. [x] reasoningMode: A Standard adaptive
+59. [x] Thinking-Budget: C je Deployment wählbar (raise-max-tokens Std. | cap-budget) (Umsetzung nötig)
+60. [x] anthropic-beta: B settings.clientBetas allow-all|allowlist|deny (Std. allow-all) (Umsetzung nötig)
+61. [x] Mistral/Magistral: A Folgepunkt – Denkblöcke → IR-Reasoning, reasoning_effort abbilden (Umsetzung nötig)
 
 ## AIGW-65 Admin-API Modelle
-62. [ ] valueFrom über Admin-API verboten (Empf. ja)
-63. [ ] SSRF nach DNS-Auflösung im HTTP-Client (ip_allowed) (Empf. ja)
-64. [ ] Azure apiVersion Pflicht (Empf. ja)
-65. [ ] Credentials nur gleicher Anbieter (Empf. ja)
-66. [ ] Löschen von Modellgruppen mit Freigaben blockieren (409) (Empf. ja)
-67. [ ] Rückwirkende Preise nur mit backfill-Flag (Empf. optional)
-68. [ ] Fehlerhafte Preisversion nur per neuer Version korrigieren (Empf. ja)
-69. [ ] Fallback-Zyklen ablehnen + Tiefenlimit (Empf. ja)
-70. [ ] Prune darf gültige Preisversionen löschen (Empf. ja)
-71. [ ] Ollama ohne Endpoint braucht localhost-Freischaltung (Empf. ja)
+62. [x] (= F52; REST-CRUD ohne valueFrom)
+63. [x] SSRF nach DNS: A auch Anbieter-Client, gemeinsamer Outbound-Baustein für alle ausgehenden Verbindungen (Umsetzung nötig)
+64. [x] (= F45)
+65. [x] Credentials: B Kompatibilitätsliste (openai → openai-compatible/vllm/ollama) (Umsetzung nötig)
+66. [x] Löschen von Modellgruppen mit Freigaben blockieren (409) (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+67. [x] Rückwirkende Preise nur mit backfill-Flag (Empf. optional)  → Empfehlung übernommen (2026-11-13)
+68. [x] Fehlerhafte Preisversion nur per neuer Version korrigieren (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+69. [x] Fallback-Zyklen ablehnen + Tiefenlimit (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+70. [x] Prune darf gültige Preisversionen löschen (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+71. [x] Ollama ohne Endpoint braucht localhost-Freischaltung (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 
 ## AIGW-18/19 Bedrock/Vertex
-72. [ ] Neue WireFormat-Varianten (Empf. ja)
-73. [ ] Provider::prepare-Hook (Empf. ja)
-74. [ ] thoughtSignature in Tool-Call-ID (Empf. ja)
-75. [ ] Vertex-Location Standard global (Empf.)
-76. [ ] Volles JSON-Schema für Gemini (Empf. ja)
-77. [ ] Eine Anbieterart vertex für beide Google-APIs (Empf. ja)
-78. [ ] Gemeinsamer HTTP-Client für Token-Abrufe (Empf. ja)
-79. [ ] Bedrock http(s)-Bild-URLs ablehnen (Empf. ja)
+72. [x] Neue WireFormat-Varianten (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+73. [x] Provider::prepare-Hook (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+74. [x] thoughtSignature in Tool-Call-ID (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+75. [x] Vertex-Location Standard global (Empf.)  → Empfehlung übernommen (2026-11-13)
+76. [x] Volles JSON-Schema für Gemini (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+77. [x] Eine Anbieterart vertex für beide Google-APIs (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+78. [x] Gemeinsamer HTTP-Client für Token-Abrufe (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+79. [x] Bedrock http(s)-Bild-URLs ablehnen (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 
 ## AIGW-24–26 Routing
 80. [ ] Fallback auf nicht freigegebene Gruppe erlaubt (Empf. ja)
-81. [ ] Nur Kette der Ursprungsgruppe (Empf. ja)
-82. [ ] Stream-Header erst nach erstem Event (Empf. ja)
-83. [ ] Alle gesperrt wegen Retry-After/Kapazität → 429 statt 503 (Empf. ja)
-84. [ ] Breaker-Standardwerte (Empf. ja)
-85. [ ] mock im Produktivbetrieb erlaubt, sperrbar (Empf.)
-86. [ ] attempts im request_log + Metriken (Empf. Folgeticket)
+81. [x] Nur Kette der Ursprungsgruppe (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+82. [x] Stream-Header erst nach erstem Event (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+83. [x] Alle gesperrt wegen Retry-After/Kapazität → 429 statt 503 (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+84. [x] Breaker-Standardwerte (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+85. [x] mock im Produktivbetrieb erlaubt, sperrbar (Empf.)  → Empfehlung übernommen (2026-11-13)
+86. [x] attempts im request_log + Metriken (Empf. Folgeticket)  → Empfehlung übernommen (2026-11-13)
 
 ## AIGW-32 OIDC/Rollen
-87. [ ] Höchstlaufzeit Admin-Keys konfigurierbar (Empf.)
-88. [ ] Admin-Keys nur globale Admins (Empf. ja)
-89. [ ] org-admin darf eigene Org nicht ändern (Empf. ja)
+87. [x] Höchstlaufzeit Admin-Keys konfigurierbar (Empf.)  → Empfehlung übernommen (2026-11-13)
+88. [x] Admin-Keys nur globale Admins (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+89. [x] org-admin darf eigene Org nicht ändern (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 90. [ ] link_by_email + provision_users an (Empf. ja)
-91. [ ] Bootstrap aus erst bei globaler Admin-Rolle (Empf. ja)
-92. [ ] IdP-Gruppen erst beim nächsten Login (Empf. ja)
-93. [ ] Eingeschränkte Rollen sehen Credential-Metadaten (Empf. ja)
+91. [x] Bootstrap aus erst bei globaler Admin-Rolle (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+92. [x] IdP-Gruppen erst beim nächsten Login (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+93. [x] Eingeschränkte Rollen sehen Credential-Metadaten (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 
 ## AIGW-44/45 Beobachtung
-94. [ ] OTLP eigen statt opentelemetry-Crates (Empf. ja)
-95. [ ] nur HTTP/protobuf, gzip später (Empf. ja)
-96. [ ] sampling_ratio 1.0 wenn an (Empf.)
-97. [ ] parent_based true (Empf.)
+94. [x] OTLP eigen statt opentelemetry-Crates (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+95. [x] nur HTTP/protobuf, gzip später (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+96. [x] sampling_ratio 1.0 wenn an (Empf.)  → Empfehlung übernommen (2026-11-13)
+97. [x] parent_based true (Empf.)  → Empfehlung übernommen (2026-11-13)
 98. [ ] propagate an externe Anbieter (Empf. global true, je Deployment abschaltbar)
-99. [ ] deployment-Label als Name (Empf. ja)
-100. [ ] trace_id im Request-Log (Empf. ja)
-101. [ ] gen_ai.provider.name zusätzlich (Empf. ja)
-102. [ ] OTLP-Retry ja, App-Logs eigenes Ticket (Empf.)
+99. [x] deployment-Label als Name (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+100. [x] trace_id im Request-Log (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+101. [x] gen_ai.provider.name zusätzlich (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+102. [x] OTLP-Retry ja, App-Logs eigenes Ticket (Empf.)  → Empfehlung übernommen (2026-11-13)
 103. [ ] Gegentest mit offiziellem OTel-Collector (Docker) freigeben?
 
 ## AIGW-30/31 Limits/Budgets
-104. [ ] budget_exceeded 429 statt 402 (Empf. 429)
-105. [ ] Retry-After bis nächster Zeitraum (Empf. ja)
+104. [x] budget_exceeded 429 statt 402 (Empf. 429)  → Empfehlung übernommen (2026-11-13)
+105. [x] Retry-After bis nächster Zeitraum (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 106. [ ] Parallele Überschreitung von Budgets akzeptieren (Empf. ja)
-107. [ ] Zeitzone global (Empf. ja)
-108. [ ] Ersatzpreise cached→input, reasoning→output (Empf. ja)
-109. [ ] Deployment-TPM vorab reservieren (Empf. ja)
-110. [ ] Budget-Warnungen dedupliziert mit Webhook (in AIGW-61 beauftragt)
-111. [ ] Fallback verbraucht kein Kontingent der Zielgruppe (Empf. ja)
+107. [x] Zeitzone global (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+108. [x] Ersatzpreise cached→input, reasoning→output (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+109. [x] Deployment-TPM vorab reservieren (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+110. [x] Budget-Warnungen dedupliziert mit Webhook (in AIGW-61 beauftragt)  → Empfehlung übernommen (2026-11-13)
+111. [x] Fallback verbraucht kein Kontingent der Zielgruppe (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 
 ## AIGW-66 Audit
-112. [ ] Eingeschränkte admin/auditor sehen Bereich, viewer nichts (Empf. ja)
+112. [x] Eingeschränkte admin/auditor sehen Bereich, viewer nichts (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 113. [ ] Audit-Ausfall beim Login fail-open (Empf. ja)
-114. [ ] Fehlgeschlagene Bearer-Logins nur Metrik (Empf. ja)
-115. [ ] Arten-Schreibweise vereinheitlichen (Empf. ja)
-116. [ ] Aufbewahrung + Hash-Kette als nächstes Paket (Empf. ja)
+114. [x] Fehlgeschlagene Bearer-Logins nur Metrik (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+115. [x] Arten-Schreibweise vereinheitlichen (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+116. [x] Aufbewahrung + Hash-Kette als nächstes Paket (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 
 ## AIGW-36 Plugins
-117. [ ] Steuerfelder als eigene Spec-Felder (Empf. ja, Folgeticket)
-118. [ ] Bindungen beim Schreiben validieren (Empf. ja)
-119. [ ] order über alle Ebenen (Empf. ja)
-120. [ ] Modell-Umleitung gesperrt (Empf. ja)
-121. [ ] Plugin-Respond ohne Usage verbraucht keine Token-Limits (Empf. ja)
+117. [x] Steuerfelder als eigene Spec-Felder (Empf. ja, Folgeticket)  → Empfehlung übernommen (2026-11-13)
+118. [x] Bindungen beim Schreiben validieren (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+119. [x] order über alle Ebenen (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+120. [x] Modell-Umleitung gesperrt (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+121. [x] Plugin-Respond ohne Usage verbraucht keine Token-Limits (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 
 ## Umsetzungsänderungen aus Entscheidungen
 - F3: ApiKey.organization Pflicht (Validierung Admin+GitOps, Migration/Altbestand, UI-Formular)
@@ -190,69 +190,100 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 - AIGW-21-Folgen: Chat-Handler auf pipeline.rs umstellen; Plugin-Haken für Embeddings/Bilder/Audio; Kosten für Bilder/Audio (perImage, perAudioMinute); n>1 auch in Responses; gestreamte Transkription/Bilder, Image-Edits
 
 ## AIGW-21 Multimodal (angehängt)
-122. [ ] Ohne settings.capabilities nur Chat (Empf. ja)
-123. [ ] capabilities später typisiertes Feld (Empf. ja)
-124. [ ] Responses zustandslos, store fehlt = false, native optional (Empf. ja)
-125. [ ] Bild-URLs nie nachladen (Empf. ja)
-126. [ ] Audio-Limit 25 MiB (Empf. ja)
-127. [ ] Bedrock Titan 256 Eingaben, 8 parallel (Empf. ja)
+122. [x] Ohne settings.capabilities nur Chat (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+123. [x] capabilities später typisiertes Feld (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+124. [x] Responses zustandslos, store fehlt = false, native optional (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+125. [x] Bild-URLs nie nachladen (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+126. [x] Audio-Limit 25 MiB (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+127. [x] Bedrock Titan 256 Eingaben, 8 parallel (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 
 ## AIGW-67 Team-Grenzen (angehängt)
-128. [ ] force für globalen Admin (Empf. ja)
-129. [ ] kein force/cascade in GitOps (Empf. ja, später --allow-bound-violations)
-130. [ ] verschiedene Zeiträume nicht vergleichen, ggf. Warnung (Empf. ja)
-131. [ ] gesperrte/abgelaufene Keys zählen mit (Empf. ja)
-132. [ ] nur neue Verstöße blockieren (Empf. ja)
-133. [ ] Audit-Format force (Empf. so lassen)
-134. [ ] clamp ohne Modelle → 409 (Empf. ja)
+128. [x] force für globalen Admin (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+129. [x] kein force/cascade in GitOps (Empf. ja, später --allow-bound-violations)  → Empfehlung übernommen (2026-11-13)
+130. [x] verschiedene Zeiträume nicht vergleichen, ggf. Warnung (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+131. [x] gesperrte/abgelaufene Keys zählen mit (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+132. [x] nur neue Verstöße blockieren (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+133. [x] Audit-Format force (Empf. so lassen)  → Empfehlung übernommen (2026-11-13)
+134. [x] clamp ohne Modelle → 409 (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 
 ## AIGW-49 UI (angehängt)
-135. [ ] D7 Mock-Schalter per admin.ui.mock ausblendbar (Empf. ja)
-136. [ ] D8 Detailseiten statt Dialoge (Empf. ja, mit 46/66)
-137. [ ] D9 strukturierte Formulare für Routing-Settings (Empf. ja)
-138. [ ] D10 Routing-Regeln entfallen (Empf. ja)
-139. [ ] D11 serverseitige Pagination ab ~1000 (Empf. ja)
-140. [ ] D12 auth/info um bootstrap + readOnly erweitern (Empf. ja)
+135. [x] D7 Mock-Schalter per admin.ui.mock ausblendbar (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+136. [x] D8 Detailseiten statt Dialoge (Empf. ja, mit 46/66)  → Empfehlung übernommen (2026-11-13)
+137. [x] D9 strukturierte Formulare für Routing-Settings (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+138. [x] D10 Routing-Regeln entfallen (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+139. [x] D11 serverseitige Pagination ab ~1000 (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+140. [x] (= F56)
 - AIGW-46-Folge: Proxy füllt RequestRecord.client_request_id aus x-request-id/x-client-request-id (F11)
 
 ## AIGW-46 Analytics (angehängt)
-141. [ ] 24h/5m auf SQLite 380 ms – 5-Min-Rollups erst bei Bedarf / Auto-Step 15 min (Empf.)
-142. [ ] provider über aktuelle Deployment-Konfig, gelöschte = unknown (Empf. so lassen)
-143. [ ] step=1d nach billing.timezone (Empf. ja)
-144. [ ] deltaPoints für Quoten zusätzlich (Empf. ja)
-145. [ ] fremde Einzelanfrage 403 (Empf. 403)
-146. [ ] Anfragen ohne Team für Org-Rollen sichtbar – mit F3 (Org Pflicht) möglich (Empf. jetzt ja)
-147. [ ] clientIp nur admin/auditor (Empf. ja)
+141. [x] 24h/5m auf SQLite 380 ms – 5-Min-Rollups erst bei Bedarf / Auto-Step 15 min (Empf.)  → Empfehlung übernommen (2026-11-13)
+142. [x] provider über aktuelle Deployment-Konfig, gelöschte = unknown (Empf. so lassen)  → Empfehlung übernommen (2026-11-13)
+143. [x] step=1d nach billing.timezone (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+144. [x] deltaPoints für Quoten zusätzlich (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+145. [x] fremde Einzelanfrage 403 (Empf. 403)  → Empfehlung übernommen (2026-11-13)
+146. [x] Anfragen ohne Team für Org-Rollen sichtbar – mit F3 (Org Pflicht) möglich (Empf. jetzt ja)  → Empfehlung übernommen (2026-11-13)
+147. [x] clientIp nur admin/auditor (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 
 ## AIGW-61 Webhook (angehängt)
 148. [ ] Webhook failMode Standard closed + UI-Anzeige (Empf. ja)
-149. [ ] Eigene Ressource Secret/WebhookSecret statt ProviderCredential (Empf. ja)
-150. [ ] EventSubscription als Ressource zusätzlich zur Startkonfig (Empf. später)
-151. [ ] Dedup höchstens-einmal; Outbox später für kritische Ereignisse (Empf. ja)
-152. [ ] reject mit exaktem Status (ApiError optionaler Status) (Empf. ja)
-153. [ ] mTLS je Bindung nach MVP (Empf. ja)
-154. [ ] Budget-Ereignisse mit Namen anreichern (Empf. ja)
+149. [x] Eigene Ressource Secret/WebhookSecret statt ProviderCredential (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+150. [x] EventSubscription als Ressource zusätzlich zur Startkonfig (Empf. später)  → Empfehlung übernommen (2026-11-13)
+151. [x] Dedup höchstens-einmal; Outbox später für kritische Ereignisse (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+152. [x] reject mit exaktem Status (ApiError optionaler Status) (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+153. [x] mTLS je Bindung nach MVP (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+154. [x] Budget-Ereignisse mit Namen anreichern (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 - AIGW-41-Folgen (eigene Tickets): Plugin-Kette auf MCP-Tool-Args/Ergebnisse; Admin-Route MCP-Upstream-Status; OAuth für MCP-Upstreams; stdio-E2E + Interop mit offiziellen Clients
 
 ## AIGW-41 MCP (angehängt)
-155. [ ] Team-Freigabe Obergrenze, Key schränkt ein, Ausschluss gewinnt (Empf. ja)
-156. [ ] Ausschlüsse als !muster in tools (Empf. ja)
-157. [ ] MCP-Sessions: Sticky Sessions dokumentiert, geteilter Speicher später (Empf. ja)
-158. [ ] Upstream-Abbruch bei Client-Verbindungsabbruch (Empf. ja, Resume später)
-159. [ ] Rechte für Ressourcen/Prompts nur Server-Ebene oder feiner? (Empf. Server-Ebene)
+155. [x] Team-Freigabe Obergrenze, Key schränkt ein, Ausschluss gewinnt (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+156. [x] Ausschlüsse als !muster in tools (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+157. [x] MCP-Sessions: Sticky Sessions dokumentiert, geteilter Speicher später (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+158. [x] Upstream-Abbruch bei Client-Verbindungsabbruch (Empf. ja, Resume später)  → Empfehlung übernommen (2026-11-13)
+159. [x] Rechte für Ressourcen/Prompts nur Server-Ebene oder feiner? (Empf. Server-Ebene)  → Empfehlung übernommen (2026-11-13)
 - AIGW-37-Folgen: SICHERHEIT – Meta-Schlüssel aigw.* (Pseudonym-Map) nie an externe Plugins/Webhook senden; Registry::validate in Admin-API + config validate; guardrails-Spalte im request_log; runtime-smoke Guardrails
 
 ## AIGW-37/38 Guardrails (angehängt)
 160. [ ] Ausgabe-Ablehnung 400 statt 200+content_filter (Empf. 400, Option später)
-161. [ ] Guardrail-Zähler in request_log (JSON-Spalte) (Empf. ja, Folgeticket)
-162. [ ] aigw.*-Meta für externe Plugins ausblenden (Empf. ja – Sicherheit)
-163. [ ] Satzmodus sentenceOnError vorerst (Empf. ja)
-164. [ ] Entropie-Heuristik an, je Bindung abschaltbar (Empf. ja)
-165. [ ] Plugin-Bindungen beim Speichern validieren (Empf. ja) – vgl. 118
-166. [ ] content-safety 3 s + closed, UI-Anzeige (Empf. ja)
+161. [x] Guardrail-Zähler in request_log (JSON-Spalte) (Empf. ja, Folgeticket)  → Empfehlung übernommen (2026-11-13)
+162. [x] aigw.*-Meta für externe Plugins ausblenden (Empf. ja – Sicherheit)  → Empfehlung übernommen (2026-11-13)
+163. [x] Satzmodus sentenceOnError vorerst (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+164. [x] Entropie-Heuristik an, je Bindung abschaltbar (Empf. ja)  → Empfehlung übernommen (2026-11-13)
+165. [x] Plugin-Bindungen beim Speichern validieren (Empf. ja) – vgl. 118  → Empfehlung übernommen (2026-11-13)
+166. [x] content-safety 3 s + closed, UI-Anzeige (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 - F42: Admin-Listen mit SQL-Pagination (Keyset-Cursor, Filter in SQL) – im Store-Umbau F7
 - F44: settings.timeouts je Modellgruppe (connect/firstByte/idle/total) – prüfen, ob durch AIGW-24 bereits vorhanden
 - F46: Crate aigw-tokenizer: BPE (o200k/cl100k eingebettet), HF tokenizer.json (Llama/Mistral), Heuristik mit Sprachfaktor; genutzt für Abbruch-Usage + Limit-Reservierung (Prompt-Schätzung)
 - F47: RequestRecord/request_log.error_class (feine Klasse), Log-Explorer-Filter, analytics groupBy=error_class
 - F48: upstream.roots (webpki|system|both) + ca_file global/je Deployment (settings.caFile), einheitlich mit OIDC-Client
 - F49: settings.responseModel upstream|requested je Modellgruppe, Header x-aigw-model immer
+- F52: gitops.secret_dir – file:-Verweise über Admin-API nur innerhalb dieses Verzeichnisses (Pfad-Normalisierung, keine Symlinks nach außen)
+- F54: provider_credential speichert valueFrom-Verweise je Feld (env/file-Name), Export gibt sie originalgetreu aus
+- F55: Rolle gitops (RBAC), nur config:export/config:apply; Admin-Keys mit dieser Rolle für CI
+- F56: GET /auth/info liefert readOnly + bootstrap; UI: Schreibaktionen im Nur-YAML-Modus ausblenden, Warnbanner bei aktivem Bootstrap
+- F59: settings.thinkingBudgetPolicy raise-max-tokens (Std.) | cap-budget je Deployment
+- F60: settings.clientBetas (allow-all|allowlist|deny) + betaAllowlist je Modellgruppe
+- F61: Mistral-Adapter: Magistral-content-Blöcke (thinking) → IR-Reasoning, reasoning_effort/prompt_mode abbilden
+- F63: Gemeinsamer Outbound-Baustein (Resolver mit ip_allowed, keine Redirects, Größenlimits) für Provider/Webhook/MCP/OIDC/Content-Safety; Provider-Client umstellen
+- F65: Kompatibilitätsliste Credential-Typ ↔ Deployment-Anbieter in aigw_core::validate (Admin + GitOps)
+
+## Umsetzungspunkte aus übernommenen Empfehlungen (66–166)
+- F66: Modellgruppe/Alias löschen → 409 mit verweisenden Teams/Keys, ?cascade=remove (Audit)
+- F69: Fallback-Tiefenlimit (max. 8, bereits in AIGW-24) – prüfen
+- F83: alle Deployments nur wegen Retry-After/Kapazität gesperrt → 429 mit Retry-After statt 503
+- F85: mock-Anbieter per Konfig sperrbar (admin.allow_mock), UI-Kennzeichnung
+- F86: attempts-Metriken (Retries/Fallbacks/Breaker-Zustand) in /metrics
+- F87: admin.auth.max_admin_key_lifetime (optional)
+- F99: Prometheus-Label deployment = Name statt ID
+- F100: trace_id im request_log + Link Log↔Trace
+- F101: gen_ai.provider.name zusätzlich zu gen_ai.system
+- F102: OTLP-Export Retry mit Backoff bei 429/503
+- F108: Schema-Kommentar Preise: Ersatzpreise cached→input, reasoning→output
+- F115: Audit-Arten-Schreibweise vereinheitlichen (kebab-case)
+- F116: Paket Audit-Aufbewahrung + Hash-Kette
+- F117/F118/F165: Plugin-Steuerfelder als Spec-Felder; Registry::validate in Admin-API + GitOps
+- F123: ModelGroupSpec.capabilities typisiert (mit UI)
+- F135–F139: UI D7–D11 (admin.ui.mock, Detailseiten, strukturierte Routing-Formulare, serverseitige Pagination)
+- F141: Auto-Step bei 24h → 15 min
+- F143/F144/F146/F147: Analytics 1d nach billing.timezone, deltaPoints, Org-Rollen sehen teamlose Keys ihrer Org (F3), clientIp nur admin/auditor
+- F149/F152/F154: Ressource Secret (verschlüsselt, GitOps valueFrom); ApiError mit optionalem exaktem Status; Budget-Ereignisse mit Namen
+- F161/F162/F164: guardrails-Spalte request_log; aigw.*-Meta nie an externe Plugins (läuft in AIGW-37/38); entropy.enabled je Bindung
