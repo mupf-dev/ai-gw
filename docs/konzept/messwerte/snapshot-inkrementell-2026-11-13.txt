@@ -1,0 +1,27 @@
+Snapshot-Neubau inkrementell vs. vollständig (AIGW-75, F16) – 2026-11-13
+Buildbox (Hetzner x86, geteilt), Release-Build, SQLite im Speicher, 100 000 aktive Keys,
+20 Teams, 1 Organisation, 200 Modellgruppen.
+cargo test --release -p aigw-store --test snapshot_incremental -- --ignored --nocapture
+
+Lauf 1 (Box wenig belastet):
+Vollständig, 100000 Keys: min 786 ms, Median 821 ms, max 907 ms
+Inkrementell, 1 Änderung (key):         min 1.30 ms, Median 1.39 ms, max 2.21 ms
+Inkrementell, 1 Änderung (team):        min 31.3 ms, Median 35.2 ms, max 42.3 ms
+Inkrementell, 1 Änderung (model-group): min 1.58 ms, Median 1.77 ms, max 2.04 ms
+
+Lauf 2 (nach Rebase, Box parallel belastet):
+Vollständig, 100000 Keys: min 1.37 s, Median 1.67 s, max 1.77 s
+Inkrementell, 1 Änderung (key):          min 1.29 ms, Median 2.19 ms, max 4.44 ms
+Inkrementell, 1 Änderung (team):         min 29.1 ms, Median 31.6 ms, max 44.0 ms
+Inkrementell, 1 Änderung (organization): min 20.5 ms, Median 21.5 ms, max 64.7 ms
+Inkrementell, 1 Änderung (model-group):  min 1.42 ms, Median 1.66 ms, max 5.72 ms
+
+Davon reine Kopie der Indizes ohne Datenbank (leerer Patch): ≈ 1.0–1.3 ms.
+
+Einordnung:
+- Ziel < 10 ms bei 1 Änderung in 100 000 Keys: erfüllt für Keys, Modellgruppen, Deployments,
+  Preise, Plugin-Bindungen, MCP (≈ 1,5–2 ms, ~500× schneller als vollständig).
+- Team-/Organisationsänderung: alle Key-Kontexte des Teams bzw. der Organisation werden neu
+  gebunden (Durchlauf über alle Keys + Kopie der betroffenen ApiKeys) → 20–35 ms, weiterhin
+  ~40× schneller als vollständig. Verbesserbar mit einem Team/Org→Keys-Index (offen).
+- Ohne Key-ID-Index lag eine Key-Änderung bei ≈ 20 ms (Durchlauf über alle Keys).
