@@ -6,12 +6,12 @@ SPDX-PackageSupplier = "ai-gw contributors"
 SPDX-PackageDownloadLocation = "https://github.com/mupf-dev/ai-gw"
 
 # Quelldateien tragen eigene SPDX-Header ("closest" hat Vorrang).
-# Dokumentation (inkl. Konzept) steht ebenfalls unter AGPL-3.0-or-later.
+# Dokumentation (inkl. Konzept) steht unter CC-BY-4.0 (Entscheidung E9).
 [[annotations]]
 path = ["docs/**", "README.md"]
 precedence = "closest"
 SPDX-FileCopyrightText = "2026 ai-gw contributors"
-SPDX-License-Identifier = "AGPL-3.0-or-later"
+SPDX-License-Identifier = "CC-BY-4.0"
 
 # Generierte bzw. kommentarlose Dateien (Lockfiles, JSON, generierte Typen, Ignore-Listen)
 [[annotations]]

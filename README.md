@@ -86,4 +86,4 @@ Actions-Minuten kostet, läuft der Workflow **nur bei Pull Requests und manuell*
 
 ## Lizenz
 
-AGPL-3.0-or-later, siehe [LICENSE](LICENSE).
+Code: AGPL-3.0-or-later, siehe [LICENSE](LICENSE). Dokumentation (`docs/`, README): CC-BY-4.0, siehe [LICENSES/CC-BY-4.0.txt](LICENSES/CC-BY-4.0.txt).

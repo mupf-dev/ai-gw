@@ -15,6 +15,7 @@ mit Fokus auf Effizienz im Hot Path und einer modernen Web-Administration.
 | E6 | Lizenz | AGPL-3.0-or-later (wie cloud-project). |
 | E7 | Konfigurationsformat | YAML für Startkonfiguration und GitOps-Ressourcen (gepflegter reiner Rust-Parser, Auswahl in AIGW-9); alle Startwerte zusätzlich per Umgebungsvariable `AIGW_…`. Das TOML-Gerüst aus AIGW-8 wird umgestellt. |
 | E8 | RUSTSEC-2026-0459 (libsqlite3-sys über sqlx 0.9) | Ausnahme in `deny.toml` akzeptiert (nur lokal mit fremden DB/WAL-Dateien ausnutzbar); Prüftermin 2027-01-31, Entfernen sobald sqlx es zulässt. |
+| E9 | Lizenz der Dokumentation | CC-BY-4.0 für `docs/**` und README (wie cloud-project); Code bleibt AGPL-3.0-or-later. |
 
 ## MVP-Umfang (E5)
 
