@@ -329,7 +329,7 @@ async fn scenario(store: Store) {
         .admin(
             Method::POST,
             "/api-keys",
-            Some(json!({"metadata": {"name": "solo"}, "spec": {}})),
+            Some(json!({"metadata": {"name": "solo"}, "spec": {"organization": "o1"}})),
         )
         .await
         .expect(StatusCode::CREATED)
@@ -341,7 +341,7 @@ async fn scenario(store: Store) {
         .admin(
             Method::POST,
             "/api-keys",
-            Some(json!({"metadata": {"name": "member"}, "spec": {"team": "t1"}})),
+            Some(json!({"metadata": {"name": "member"}, "spec": {"organization": "o1", "team": "t1"}})),
         )
         .await
         .expect(StatusCode::CREATED)

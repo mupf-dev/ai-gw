@@ -1633,6 +1633,8 @@ pub(crate) async fn list_request_logs(
             error_codes: split(q.error_code.as_deref()),
             request_id: q.request_id,
             client_request_id: q.client_request_id,
+            // F191: Filter in der Admin-API folgt mit dem Ausfüllen der Spalte.
+            parent_request_id: None,
             stream: q.stream,
             cache,
             before,

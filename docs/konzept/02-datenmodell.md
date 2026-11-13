@@ -1,6 +1,6 @@
 # ai-gw – Datenmodell, Migrationen und Konfiguration (AIGW-9)
 
-Stand: 2026-11-13 · Status: umgesetzt (Entwurf zur Durchsicht)
+Stand: 2026-11-13 · Status: umgesetzt (Entwurf zur Durchsicht) · Store-Umbau AIGW-73 (F7, F42, F54, F3, F34)
 Grundlage: [00-entscheidungen.md](00-entscheidungen.md) (E4, E7), [01-architektur.md](01-architektur.md) §13–§14
 
 ## 1. Überblick
@@ -72,8 +72,8 @@ wieder Namen. Namen sind je Art global eindeutig (`a-z0-9-._`, max. 128 Zeichen)
 | `Organization` | displayName, limits, budget, metadata |
 | `Team` | organization, displayName, allowedModels, limits, budget, metadata |
 | `User` | oidcIssuer + oidcSubject, email, displayName, roles (Rolle, optional auf Org/Team) |
-| `ApiKey` | team?, user?, expiresAt?, allowedModels, limits, budget, metadata; Status (vom Server): prefix, state (`active`/`revoked`), lastUsedAt |
-| `ProviderCredential` | provider, data (Feld → `value` bzw. `valueFrom`); gelesen nur provider, Feldnamen, keyId |
+| `ApiKey` | organization (Pflicht, F3), team?, user?, expiresAt?, allowedModels, limits, budget, metadata; Status (vom Server): prefix, state (`active`/`revoked`), lastUsedAt |
+| `ProviderCredential` | provider, data (Feld → `value` bzw. `valueFrom`); gelesen nur provider, Feldnamen, keyId; `valueFrom`-Verweise werden je Feld mitgespeichert (F54) |
 | `ModelGroup` | aliases, routing (`weighted`/`least-latency`/`least-busy`/`cost`), fallbacks (modelGroup + Auslöser), limits, settings |
 | `Deployment` | modelGroup, provider, endpoint?, providerModel, credential?, weight, priority, capacity (rpm/tpm), enabled, settings |
 | `Price` | provider?, model, validFrom, perMillionTokens (input, output, cachedInput, cacheWrite, reasoning, audio-/imageInput, audioOutput), perRequest?, perImage? |
@@ -170,28 +170,53 @@ Abhängigkeitsreihenfolge für Import/Export.
 
 ## 4. Datenbankschema
 
-**Ein** Migrationssatz (`crates/aigw-store/migrations/`) für SQLite und Postgres. Portabilität durch
-Beschränkung auf `TEXT` und `BIGINT`:
+Seit AIGW-73 (Entscheidung F7) **zwei Migrationssätze** mit nativen Typen je Datenbank:
+`crates/aigw-store/migrations/sqlite/` und `crates/aigw-store/migrations/postgres/`, gleiche
+Versionsnummern, gleiche Tabellen und Spalten (`aigw_store::migrator(Backend)`, eingebettet, keine
+Compile-Zeit-Makros, kein DB-Zugriff beim Bauen).
 
-| Inhalt | Darstellung |
-|---|---|
-| IDs | UUIDv7 als `TEXT` |
-| Zeitpunkte | Unix-Millisekunden (UTC) als `BIGINT` |
-| Geld | Nano-Einheiten als `BIGINT` (bzw. Dezimaltext im JSON der Preise) |
-| Wahrheitswerte | `BIGINT` 0/1 |
-| Listen/Objekte (Limits, Budget, Settings, Labels …) | JSON als `TEXT` |
-| Chiffrat, Nonce | Hex als `TEXT` |
+| Inhalt | Postgres | SQLite |
+|---|---|---|
+| IDs | `UUID` (v7) | `TEXT` (Bindestrich-Form) |
+| Zeitpunkte | `TIMESTAMPTZ` (auf Millisekunden gekürzt geschrieben) | `INTEGER` Unix-Millisekunden (UTC) |
+| Listen/Objekte (Labels, Limits, Budget, Settings, Audit vorher/nachher, Payload …) | `JSONB` | JSON als `TEXT` |
+| Wahrheitswerte | `BOOLEAN` | `INTEGER` 0/1 |
+| Geld | `BIGINT` Nano-Einheiten | `INTEGER` Nano-Einheiten |
+| Chiffrat, Nonce | `BYTEA` | `BLOB` |
+| Ressourcennamen | `TEXT COLLATE "C"` (Bytefolge wie in Rust → stabile Keyset-Pagination) | `TEXT` (binär) |
+| Rollup-Schlüssel ohne Wert | Null-UUID bzw. `''` (Teil des Primärschlüssels) | `''` |
 
-Zugriff über den `Any`-Treiber von sqlx mit `$n`-Platzhaltern (beide Datenbanken verstehen sie) –
-damit gibt es genau einen Code-Pfad. Migrationen sind eingebettet (`aigw_store::migrator()`), keine
-Compile-Zeit-Makros, kein DB-Zugriff beim Bauen. Für spätere Postgres-Spezialitäten (LISTEN/NOTIFY,
-pgvector) wird zusätzlich ein typisierter `PgPool`/`PgListener` geöffnet.
+**Geld als `BIGINT` statt `NUMERIC`:** `Amount` ist i64 in Nano-Einheiten (exakt, ±9,2 Mrd.
+Währungseinheiten); Summen in Dashboards laufen über Millionen Rollup-Zeilen, `BIGINT`-Summen sind
+dort deutlich schneller als `NUMERIC`. Preise je 1 Mio. Tokens bleiben Dezimaltext in `JSONB`.
+
+**Frischer Schnitt (AIGW-73):** Die früheren portablen Migrationen 0001–0007 (ein Satz für beide
+Datenbanken über den `Any`-Treiber) sind in je eine `0001_init.sql` pro Dialekt zusammengefasst und
+um F3, F34 und F54 ergänzt. Es gab noch keine Produktivdaten; ältere Datenbanken werden **nicht**
+migriert: `Store::migrate` bricht mit `StoreError::IncompatibleSchema` und dem Hinweis ab, die
+Datenbank neu anzulegen und die Konfiguration per `aigw config export`/`apply` zu übertragen.
+Nächste freie Migrationsnummer: **0002** (in beiden Sätzen anlegen).
+
+**Zugriff (Enum-Dispatch):** Das interne Modul `aigw_store::db` kapselt `Pool`/`Tx`/`DbRow` als
+Enums über `SqlitePool`/`PgPool`. Eine Abfrage ist SQL-Text plus typisierte Werte (`Val`: `Uuid`,
+`Ms` (Zeitpunkt), `Json`, `Bool`, `Bytes`, `Dim`, `Int`, `Text`), gebunden erst beim Ausführen an
+den jeweiligen Treiber; Zeilen werden mit typisierten Zugriffen gelesen (`uuid`, `ms`, `json`,
+`bool` …). Begründung gegenüber einem Trait-Objekt bzw. Generics über `sqlx::Database`: genau zwei
+Backends (geschlossene Menge), `Store` bleibt ein konkreter Typ mit unveränderter Schnittstelle (die
+Aufrufer in Admin, GitOps, Analytics, Observe, Billing-Ledger, Events, Cache und Audit bleiben
+unverändert), keine Trait-Grenzen von sqlx in den Signaturen, kein `dyn`/`async-trait`. Das SQL ist
+überwiegend gemeinsam (`$n`-Platzhalter, `ON CONFLICT`, `RETURNING`, `TRUE/FALSE`); Abweichungen
+wählt der Code per `Backend` (Zeit-Buckets: Roh-Bucket + Zusammenfassen im Speicher vs. Ganzzahl-Division, Label-Filter `JSONB`
+vs. `json_each`, Teilstring `strpos` vs. `instr`, Platzhalter `?` bei SQLite-Massen-INSERTs).
+LISTEN/NOTIFY nutzt einen eigenen `PgListener` mit eigener Verbindung; `aigw-counters`
+(`postgres-sync`) und `aigw-cache` (`pgvector`) behalten ihren eigenen `PgPool`.
 
 ### 4.1 ER-Übersicht
 
 ```mermaid
 erDiagram
     organization ||--o{ team : hat
+    organization ||--o{ api_key : "besitzt (F3)"
     team ||--o{ api_key : besitzt
     app_user ||--o{ api_key : besitzt
     model_group ||--o{ deployment : routet
@@ -213,20 +238,23 @@ erDiagram
 | Tabelle | Zweck / Besonderheiten |
 |---|---|
 | `config_version` | genau eine Zeile; jede Admin-Transaktion erhöht `version` als **erste** Anweisung (bei SQLite sofort Schreibsperre, kein Lock-Upgrade) |
-| `audit_log` | wer, was (`create`/`update`/`delete`/`rotate`), Art, ID, Name, Version, vorher/nachher als JSON (ohne Geheimnisse) |
+| `audit_log` | wer, was (`create`/`update`/`delete`/`rotate` …), Art, ID, Name, Version, vorher/nachher als JSON (ohne Geheimnisse), Geltungsbereich (Organisation/Team vorher und nachher, AIGW-66) |
 | `organization`, `team`, `app_user` | Mandanten; `user` ist in Postgres reserviert, daher `app_user`; OIDC (Issuer, Subjekt) eindeutig |
-| `api_key` | `prefix` (eindeutig, sichtbar), `key_hash` (SHA-256 hex, eindeutig), `state`, `team_id`/`user_id` (FK), Ablauf, Limits, Budget, Modelle, Metadaten, `last_used_at` |
-| `provider_credential` | `provider`, `fields` (nur Namen), `key_id`, `nonce`, `ciphertext` |
+| `api_key` | `prefix` (eindeutig, sichtbar), `key_hash` (SHA-256 hex, eindeutig), `state`, `organization_id` (FK, **Pflicht**, F3), `team_id`/`user_id` (FK), Ablauf, Limits, Budget, Modelle, Metadaten, `last_used_at`. Zusammengesetzter FK `(team_id, organization_id) → team (id, organization_id) ON UPDATE CASCADE`: mit Team ist die Organisation die des Teams; zieht ein Team um, ziehen seine Keys mit |
+| `provider_credential` | `provider`, `fields` (nur Namen), `refs` (F54: `valueFrom` je Feld, nur Namen, unverschlüsselt), `key_id`, `nonce`, `ciphertext` |
 | `model_group`, `model_alias` | `model_alias` hält Name **und** Aliasse aller Gruppen in einem eindeutigen Namensraum |
 | `deployment` | FK auf Modellgruppe und Zugangsdaten; `weight`, `priority`, `rpm`, `tpm`, `enabled` |
 | `price` | eindeutig je (`provider`, `model`, `valid_from`); `provider = ''` = alle Anbieter; Token-Preise als JSON |
 | `plugin_binding` | polymorpher Verweis (`level`, `target_id`) ohne FK; Löschen des Ziels löscht Bindungen in derselben Transaktion |
 | `mcp_server`, `mcp_grant` | Freigabe je Team/Key (polymorph wie oben), `tools` als JSON-Liste |
-| `counter_state` | nur `postgres-sync`: (Schlüssel, Fensterbeginn, Instanz) → Wert |
+| `counter_state` | nur Postgres (`postgres-sync`): (Schlüssel, Fensterbeginn, Instanz) → Wert |
 | `budget_usage` | (Ebene, Ziel, Zeitraum, Beginn) → Betrag (Nano) |
 | `request_log` | ein Eintrag je Anfrage (ID = `x-aigw-request-id`), Tokens, Kosten, Latenz/TTFT, Cache, Abbruch; Indizes nach Zeit, Key, Team (Details [07-beobachtung.md](07-beobachtung.md)) |
 | `request_payload` | optionaler Payload (gefiltert/maskiert) je Anfrage, eigene Aufbewahrungsfrist (Migration 0002) |
-| `usage_rollup` | Minuten-Rollups je Key/Team/Org/Modellgruppe/Deployment (`''` statt NULL, da Teil des PK); Latenz-Histogramm als feste Spalten für additive UPSERTs (Migration 0002) |
+| `usage_rollup`, `usage_rollup_hour` | Minuten-/Stunden-Rollups je Key/Team/Org/Modellgruppe/Deployment (ohne Wert: `''` bzw. Null-UUID, da Teil des PK); Latenz-/TTFT-Histogramm als feste Spalten für additive UPSERTs |
+| `observe_batch` | F34: IDs angewendeter Writer-Batches (`batch_id` PK, `applied_at`); ein Batch wird nur angewendet, wenn seine ID neu ist – Wiederholungen nach unklarem Commit zählen Rollups nicht doppelt. Aufbewahrung 7 Tage (Retention) |
+| `admin_session`, `admin_login_state`, `admin_api_key`, `admin_auth_state` | Anmeldung an der Admin-API (AIGW-32) |
+| `event_dedup`, `cache_vector` | Ereignis-Deduplizierung (AIGW-61), Warmstart des semantischen Caches (AIGW-40) |
 
 Löschen: Fremdschlüssel verhindern das Löschen verwendeter Ressourcen (Fehler `Conflict`), z. B.
 eine Modellgruppe mit Deployments; Aliasse und Freigaben eines MCP-Servers fallen per Kaskade weg.
@@ -235,6 +263,17 @@ eine Modellgruppe mit Deployments; Aliasse und Freigaben eines MCP-Servers falle
 
 - `Store::create/update/get/get_by_id/list::<Spec>()` für alle Arten außer Keys und Zugangsdaten,
   `Store::delete(actor, kind, name)` für alle Arten.
+- **Listen mit SQL-Pagination (F42):** `Store::list_page::<Spec>(&ListQuery)`,
+  `list_api_keys_page`, `list_credentials_page`. Sortierung nach Name, Keyset-Cursor
+  (`name > $cursor`), Suche (`?q=`: Name plus Suchspalten der Art, Modellgruppen auch Aliasse),
+  Label-Selektor (`JSONB` bzw. `json_each`), ressourcenspezifische Filter (`ListFilter`) und der
+  lesbare Geltungsbereich des Aufrufers (`AuditScope`: Organisationen/Teams) laufen im `WHERE`;
+  gelesen werden höchstens `limit + 1` Zeilen. Die Admin-API übersetzt Rollen in den Bereich
+  (`resources::read_scope`, gleiche Semantik wie `Principal::can(Read, …)`).
+- **API-Keys (F3):** `organization` ist Pflicht (Schema, `aigw_core::validate::api_key_organization`,
+  Admin-API und GitOps); mit Team muss es die Organisation des Teams sein. Keys ohne Team erben im
+  Snapshot (`KeyCtx.organization`) Limits, Budgets und Plugins der Organisation; die Grenzen
+  (AIGW-67) prüfen sie direkt gegen die Organisation.
 - Jede Änderung: **eine** Transaktion → `config_version + 1` → Änderung → `audit_log` → Commit.
   Fehlgeschlagene Änderungen (Konflikt, ungültiger Verweis) hinterlassen weder Version noch Audit.
 - **API-Keys**: `create_api_key` erzeugt `sk-aigw-<12 Zeichen Präfix>-<43 Zeichen Base62 aus 32 Byte
@@ -248,12 +287,18 @@ eine Modellgruppe mit Deployments; Aliasse und Freigaben eines MCP-Servers falle
   SHA-256(`"aigw-master-key-id"` ‖ Key). **Rotation**: neuen Key als `master_key_file`, alten unter
   `previous_key_files`, dann `rotate_credentials` (verschlüsselt alle Datensätze mit fremder `key_id`
   neu, je Datensatz ein Audit-Eintrag `rotate`).
+- **`valueFrom`-Verweise (F54):** Kommt ein Feld aus `valueFrom` (`env`/`file`), speichert
+  `provider_credential.refs` den Verweis (nur den Namen) mit; `PATCH` mit Klartext entfernt den
+  Verweis des Felds. Der GitOps-Export gibt die Verweise originalgetreu aus (Felder ohne Verweis
+  weiter als Platzhalter `AIGW_SECRET_…`), der Plan zeigt geänderte Verweise als sichtbare Änderung
+  `spec.data.<feld>.valueFrom`.
 
 ## 6. Snapshot
 
 `load_snapshot(&Store, &Keyring) -> Snapshot` liest alle Ressourcen und baut:
 
-- `keys`: SHA-256 → `KeyCtx` (Key, Team, Organisation; nur `active`, Ablauf prüft der Hot Path),
+- `keys`: SHA-256 → `KeyCtx` (Key, Team, Organisation des Keys – F3, auch ohne Team; nur `active`,
+  Ablauf prüft der Hot Path),
 - `model_groups`: Name **und** Alias → `ModelGroupCtx` (aktive Deployments nach Priorität, mit
   entschlüsselten Zugangsdaten),
 - Preise je (Anbieter, Modell) nach `validFrom` (`Snapshot::price_at`), Plugin-Bindungen nach Ebene
@@ -267,7 +312,8 @@ Verteilen per `ArcSwap` und LISTEN/NOTIFY ist AIGW-10.
 - `aigw-core`: Konfiguration (Standardwerte, unbekannte Felder, ENV-Overrides inkl. Fehlerfälle,
   Beispiel-Configs), Manifeste (Mehrfachdokument, Rundreise, Geheimnisregel, Versionen), Beträge.
 - `aigw-store`: Krypto (Rundreise, AAD-Bindung, Manipulation, Rotation), Key-Format/Base62/SHA-256,
-  Integrationstest `tests/store.rs` (Migrationen, CRUD aller Arten, Konflikte, Rollback, Audit +
-  Version, Snapshot, Rotation, Löschregeln) gegen SQLite in-memory, SQLite-Datei und – mit
+  Integrationstests (`tests/store.rs`, `tests/backends.rs` u. a.: Migrationen, CRUD aller Arten,
+  Konflikte, Rollback, Audit + Version, Snapshot, Rotation, Löschregeln, SQL-Pagination, F3, F34,
+  F54, Typ-Rundreisen) laufen **gemeinsam** gegen SQLite in-memory, SQLite-Datei und – mit
   `AIGW_TEST_POSTGRES_URL` – Postgres (je Lauf eigene Wegwerf-Datenbank).
 - `scripts/check.sh`: `AIGW_TEST_POSTGRES=docker` startet dafür einen `postgres:17`-Container.

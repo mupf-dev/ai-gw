@@ -66,7 +66,7 @@ pub struct KeyCtx {
     pub key: ApiKey,
     /// Team, falls zugeordnet.
     pub team: Option<Arc<Team>>,
-    /// Organisation (über das Team).
+    /// Organisation des Keys (F3: Pflicht; mit Team die Organisation des Teams).
     pub organization: Option<Arc<Organization>>,
     /// Ablauf (Kopie aus `key.spec`, muss pro Anfrage geprüft werden, da Snapshots altern).
     pub expires_at: Option<OffsetDateTime>,

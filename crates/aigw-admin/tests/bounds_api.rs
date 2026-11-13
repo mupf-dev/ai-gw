@@ -208,6 +208,7 @@ fn team(name: &str, spec: Value) -> Value {
 fn key(name: &str, team: &str, spec: Value) -> Value {
     let mut spec = spec;
     spec["team"] = json!(team);
+    spec["organization"] = json!("acme"); // F3: Organisation des Teams
     json!({"metadata": {"name": name}, "spec": spec})
 }
 
@@ -343,14 +344,18 @@ async fn scenario(store: Store) {
     env.put("org", "/api-keys/k2", key("k2", "platform", bad.clone()))
         .await
         .problem(invalid, "validation-failed");
-    // Key ohne Team: keine Grenzen
-    env.post(
-        "admin",
-        "/api-keys",
-        json!({"metadata": {"name": "free"}, "spec": bad}),
-    )
-    .await
-    .ok(created);
+    // Key ohne Team (F3): direkt unter den Grenzen der Organisation
+    let mut free = json!({"metadata": {"name": "free"}, "spec": bad});
+    free["spec"]["organization"] = json!("acme");
+    let (detail, v) = env
+        .post("admin", "/api-keys", free.clone())
+        .await
+        .problem(invalid, "validation-failed");
+    assert_eq!(v, ["free/limits[1]"], "{detail}");
+    assert!(detail.contains("Organisation \"acme\" (1000)"), "{detail}");
+    env.post("admin", "/api-keys?force=true", free)
+        .await
+        .ok(created);
 
     // Key im Team „big“ per force über den Grenzen
     env.post(
@@ -482,7 +487,7 @@ async fn scenario(store: Store) {
         .into_iter()
         .map(|(n, _)| n)
         .collect();
-    for n in ["platform", "big", "k1", "kbig"] {
+    for n in ["platform", "big", "k1", "kbig", "free"] {
         assert!(clamped.contains(&n.to_owned()), "{n}: {clamped:?}");
     }
     // Danach ist alles konsistent: Änderungen ohne Optionen gehen wieder durch

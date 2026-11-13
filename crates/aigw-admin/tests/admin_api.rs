@@ -380,7 +380,7 @@ async fn scenario(store: Store) {
     // --- Key anlegen → wirkt sofort (Hot Reload) ---------------------------------------------
     let (ci, ci_key) = create_key(
         &env,
-        json!({"metadata": {"name": "ci"}, "spec": {"team": "platform", "user": "alice"}}),
+        json!({"metadata": {"name": "ci"}, "spec": {"organization": "acme", "team": "platform", "user": "alice"}}),
     )
     .await;
     assert_eq!(ci_key["status"]["state"], "active");
@@ -448,7 +448,7 @@ async fn scenario(store: Store) {
     // --- Modellfreigaben auf Key-Ebene ohne Team ---------------------------------------------
     let (restricted, _) = create_key(
         &env,
-        json!({"metadata": {"name": "restricted"}, "spec": {"allowedModels": ["claude"]}}),
+        json!({"metadata": {"name": "restricted"}, "spec": {"organization": "acme", "allowedModels": ["claude"]}}),
     )
     .await;
     env.wait_chat(&restricted, "claude", StatusCode::OK).await;
@@ -462,7 +462,11 @@ async fn scenario(store: Store) {
         .expect(StatusCode::NOT_FOUND);
     assert_eq!(r.json()["error"]["code"], "model_not_found");
     assert_eq!(env.models(&restricted).await, ["claude"]);
-    let (free, _) = create_key(&env, json!({"metadata": {"name": "free"}, "spec": {}})).await;
+    let (free, _) = create_key(
+        &env,
+        json!({"metadata": {"name": "free"}, "spec": {"organization": "acme"}}),
+    )
+    .await;
     env.wait_chat(&free, "claude", StatusCode::OK).await;
     let r = env.chat(&free, "nope").await.expect(StatusCode::NOT_FOUND);
     assert_eq!(r.json()["error"]["code"], "model_not_found");
@@ -470,7 +474,7 @@ async fn scenario(store: Store) {
     env.admin(
         Method::POST,
         "/api-keys",
-        Some(json!({"metadata": {"name": "bad"}, "spec": {"allowedModels": ["nope"]}})),
+        Some(json!({"metadata": {"name": "bad"}, "spec": {"organization": "acme", "allowedModels": ["nope"]}})),
     )
     .await
     .problem(StatusCode::UNPROCESSABLE_ENTITY, "validation-failed");
@@ -486,7 +490,7 @@ async fn scenario(store: Store) {
         "/api-keys/free",
         &[("if-match", &etag)],
         Some(json!({"metadata": {"name": "free"},
-                    "spec": {"expiresAt": "2020-01-01T00:00:00Z"}})),
+                    "spec": {"organization": "acme", "expiresAt": "2020-01-01T00:00:00Z"}})),
     )
     .await
     .expect(StatusCode::OK);
@@ -494,11 +498,15 @@ async fn scenario(store: Store) {
         .await;
     let (expired, _) = create_key(
         &env,
-        json!({"metadata": {"name": "expired"}, "spec": {"expiresAt": "2020-01-01T00:00:00Z"}}),
+        json!({"metadata": {"name": "expired"}, "spec": {"organization": "acme", "expiresAt": "2020-01-01T00:00:00Z"}}),
     )
     .await;
     // Nach dem Neubau ist der Key im Snapshot, aber abgelaufen.
-    let (probe, _) = create_key(&env, json!({"metadata": {"name": "probe"}, "spec": {}})).await;
+    let (probe, _) = create_key(
+        &env,
+        json!({"metadata": {"name": "probe"}, "spec": {"organization": "acme"}}),
+    )
+    .await;
     env.wait_chat(&probe, "claude", StatusCode::OK).await;
     env.chat(&expired, "claude")
         .await

@@ -23,8 +23,12 @@ use crate::{Resource, Store, StoreError};
 #[derive(Debug, Clone)]
 pub(crate) enum Extra {
     None,
-    /// Entschlüsselte Werte (nur mit Keyring geladen).
-    Credential(Option<BTreeMap<String, SecretString>>),
+    /// Entschlüsselte Werte (nur mit Keyring geladen) und gespeicherte `valueFrom`-Verweise
+    /// (F54).
+    Credential(
+        Option<BTreeMap<String, SecretString>>,
+        crate::repo::credential::CredentialRefs,
+    ),
     /// Hash und Status eines Keys.
     ApiKey {
         hash: KeyHash,
@@ -152,13 +156,25 @@ async fn load_once(store: &Store, keyring: Option<&Keyring>) -> Result<State, St
                     Some(k) => Some(store.decrypt_credentials(k).await?),
                     None => None,
                 };
+                let mut all_refs = store.credential_refs().await?;
                 for c in store.list_credentials().await? {
                     let name = c.metadata.name.clone();
+                    let refs = all_refs.remove(&name).unwrap_or_default();
+                    // F54: gespeicherter Verweis, sonst Platzhalter `AIGW_SECRET_…`.
                     let data = c
                         .spec
                         .fields
                         .iter()
-                        .map(|f| (f.clone(), SecretRef::env(secret_env_name(&name, f))))
+                        .map(|f| {
+                            let r = match refs.get(f) {
+                                Some(v) => SecretRef {
+                                    value: None,
+                                    value_from: Some(v.clone()),
+                                },
+                                None => SecretRef::env(secret_env_name(&name, f)),
+                            };
+                            (f.clone(), r)
+                        })
                         .collect();
                     let values = plain_values
                         .as_mut()
@@ -176,7 +192,7 @@ async fn load_once(store: &Store, keyring: Option<&Keyring>) -> Result<State, St
                                 }),
                             },
                             audit: serde_json::to_value(&c)?,
-                            extra: Extra::Credential(values),
+                            extra: Extra::Credential(values, refs),
                         },
                     );
                 }
@@ -201,7 +217,8 @@ pub(crate) async fn load(store: &Store, keyring: Option<&Keyring>) -> Result<Sta
 
 /// Exportiert alle Ressourcen als YAML (deterministisch: Abhängigkeitsreihenfolge, je Art
 /// nach Name; ohne IDs, Zeitstempel, Hashes und Key-Zustand). Zugangsdaten erscheinen mit
-/// Platzhaltern `valueFrom: {env: AIGW_SECRET_…}`, API-Keys ohne Geheimnis.
+/// ihren gespeicherten `valueFrom`-Verweisen (F54), Felder ohne Verweis mit Platzhaltern
+/// `valueFrom: {env: AIGW_SECRET_…}`; API-Keys ohne Geheimnis.
 pub async fn export_yaml(store: &Store, api_keys: ApiKeyMode) -> Result<String, GitopsError> {
     let state = load(store, None).await?;
     let mut docs = Vec::new();
@@ -214,7 +231,11 @@ pub async fn export_yaml(store: &Store, api_keys: ApiKeyMode) -> Result<String, 
         for (name, cur) in state.of(kind) {
             if let ResourceSpec::ProviderCredential(c) = &cur.manifest.spec {
                 for (field, r) in &c.data {
-                    if let Some(aigw_core::resource::ValueFrom::Env(env)) = &r.value_from {
+                    // Nur Platzhalter auflisten; gespeicherte Verweise (F54) stehen original im
+                    // Export.
+                    if let Some(aigw_core::resource::ValueFrom::Env(env)) = &r.value_from
+                        && *env == secret_env_name(name, field)
+                    {
                         placeholders.push(format!("  {env}  ({name}.{field})"));
                     }
                 }

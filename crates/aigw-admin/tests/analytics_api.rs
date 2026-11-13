@@ -303,9 +303,13 @@ async fn scenario(store: Store) {
         team_ids.insert(t, v["id"].as_str().unwrap().to_owned());
     }
     let key = |name: &str, team: Option<&str>| {
+        // F3: Organisation Pflicht (mit Team die des Teams).
         let body = match team {
-            Some(t) => json!({"metadata": {"name": name}, "spec": {"team": t}}),
-            None => json!({"metadata": {"name": name}, "spec": {}}),
+            Some(t) => {
+                let org = if t == "ops" { "beta" } else { "acme" };
+                json!({"metadata": {"name": name}, "spec": {"organization": org, "team": t}})
+            }
+            None => json!({"metadata": {"name": name}, "spec": {"organization": "acme"}}),
         };
         (name.to_owned(), body)
     };

@@ -153,7 +153,14 @@ pub(crate) async fn api_key(
 ) -> Result<WriteExtras, Problem> {
     let force = force_of(p, q.force)?;
     let Some(team_name) = &spec.team else {
-        return Ok(WriteExtras::default());
+        // F3: Keys ohne Team stehen direkt unter ihrer Organisation.
+        let Some(org) = org_of(store, &spec.organization).await? else {
+            return Ok(WriteExtras::default());
+        };
+        let parents = [Node::organization(&org.metadata.name, &org.spec)];
+        let models = model_names(store).await?;
+        let own = bounds::check(&Node::api_key(name, spec), &parents, &models);
+        return conclude(spec, own, vec![], vec![], force, WriteExtras::default());
     };
     // Unbekanntes Team wurde bereits bei der Rollenprüfung abgelehnt.
     let team: Object<TeamSpec> = store.get(team_name).await?;
@@ -309,15 +316,17 @@ pub(crate) async fn organization(
         effective.insert(tname, t.spec);
     }
     for key in store.list_api_keys().await? {
-        let Some(team) = key
+        // Keys der Teams dieser Organisation und (F3) Keys ohne Team in der Organisation.
+        let team = key
             .spec
             .team
             .as_deref()
-            .and_then(|t| effective.get_key_value(t))
-        else {
-            continue;
+            .and_then(|t| effective.get_key_value(t));
+        let parents: Vec<Node<'_>> = match team {
+            Some(team) => vec![Node::team(team.0, team.1), org_node],
+            None if key.spec.team.is_none() && key.spec.organization == name => vec![org_node],
+            None => continue,
         };
-        let parents = [Node::team(team.0, team.1), org_node];
         let node = Node::api_key(&key.metadata.name, &key.spec);
         let v = bounds::check(&node, &parents, &models);
         if v.is_empty() {
@@ -331,7 +340,8 @@ pub(crate) async fn organization(
             }
         } else {
             // Bisher: Team unverändert, alte Organisationsgrenzen.
-            let mut old_parents = vec![Node::team(team.0, team.1)];
+            let mut old_parents: Vec<Node<'_>> =
+                team.map(|t| Node::team(t.0, t.1)).into_iter().collect();
             old_parents.extend(old_org.iter().copied());
             below.extend(new_only(v, &bounds::check(&node, &old_parents, &models)));
         }

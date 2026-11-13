@@ -11,6 +11,7 @@
 
 use aigw_webhook::EventDedup;
 
+use crate::db::{Q, Val};
 use crate::{Store, StoreError};
 
 impl Store {
@@ -22,21 +23,21 @@ impl Store {
         now_ms: i64,
         expires_at_ms: i64,
     ) -> Result<bool, StoreError> {
-        sqlx::query("DELETE FROM event_dedup WHERE expires_at <= $1")
-            .bind(now_ms)
+        Q::new("DELETE FROM event_dedup WHERE expires_at <= $1")
+            .bind(Val::ms(now_ms))
             .execute(&self.pool)
             .await?;
-        let r = sqlx::query(
+        let n = Q::new(
             "INSERT INTO event_dedup (dedup_key, event_type, created_at, expires_at) \
              VALUES ($1, $2, $3, $4) ON CONFLICT (dedup_key) DO NOTHING",
         )
-        .bind(key)
-        .bind(event_type)
-        .bind(now_ms)
-        .bind(expires_at_ms)
+        .bind(Val::text(key))
+        .bind(Val::text(event_type))
+        .bind(Val::ms(now_ms))
+        .bind(Val::ms(expires_at_ms))
         .execute(&self.pool)
         .await?;
-        Ok(r.rows_affected() == 1)
+        Ok(n == 1)
     }
 }
 

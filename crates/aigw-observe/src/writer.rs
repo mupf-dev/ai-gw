@@ -137,12 +137,20 @@ impl Writer {
         };
         let attempts = if shutting_down { 1 } else { WRITE_ATTEMPTS };
         let mut delay = RETRY_BASE;
+        // F34: eine ID je Batch, gleich für alle Wiederholungen – war ein Commit trotz Fehler
+        // erfolgreich, wendet die Datenbank den Batch kein zweites Mal an.
+        let batch_id = aigw_core::resource::new_id();
         for attempt in 1..=attempts {
             match store
-                .write_request_batch(&logs, &payloads, &batch.rollups)
+                .write_request_batch_once(batch_id, &logs, &payloads, &batch.rollups)
                 .await
             {
-                Ok(()) => return true,
+                Ok(applied) => {
+                    if !applied {
+                        tracing::debug!(%batch_id, "Request-Log: Batch war bereits angewendet");
+                    }
+                    return true;
+                }
                 Err(err) if attempt < attempts => {
                     tracing::warn!(error = %err, attempt, "Request-Log: Schreiben fehlgeschlagen, wiederhole");
                     tokio::time::sleep(delay).await;

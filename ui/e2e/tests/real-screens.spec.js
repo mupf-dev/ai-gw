@@ -68,7 +68,10 @@ test.beforeAll(async ({ request }) => {
     ['notebook-anna', 'data-science', ['gpt-4o', 'claude-sonnet'], { amount: '50', period: 'week', hardLimit: true }, [], new Date(Date.now() + 7 * 86400000).toISOString()],
     ['research-batch', 'research', ['demo-mock'], null, [], null],
   ];
-  for (const [name, team, allowedModels, budget, limits, expiresAt] of keys) await ensure(request, 'api-keys', { metadata: { name }, spec: { team, allowedModels, budget, limits, expiresAt } });
+  // F3: Organisation Pflicht – die des Teams.
+  const orgOf = Object.fromEntries(teams.map(([t, o]) => [t, o]));
+  for (const [name, team, allowedModels, budget, limits, expiresAt] of keys)
+    await ensure(request, 'api-keys', { metadata: { name }, spec: { organization: orgOf[team], team, allowedModels, budget, limits, expiresAt } });
   const old = await api(request, 'GET', 'api-keys/research-batch');
   if (old.body?.status?.state === 'active') await api(request, 'POST', 'api-keys/research-batch/revoke', {}, undefined, { 'if-match': old.etag });
   const ak = await api(request, 'GET', 'admin-api-keys/grafana-readonly');

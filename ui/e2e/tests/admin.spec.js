@@ -32,6 +32,8 @@ test('Anmeldung per Token-Dialog: Mock aus (Standard), echte Daten, Rollen in de
 });
 
 test('Key anlegen: Klartext genau einmal, Liste zeigt das Präfix', async ({ page, request }) => {
+  // Keys brauchen eine Organisation (F3); ohne Team wählt das Formular die erste.
+  await ensure(request, 'organizations', { metadata: { name: 'e2e-org' }, spec: { displayName: 'E2E Org' } });
   await useToken(page);
   await gotoReal(page, '/keys');
   await page.getByTestId('create-key').click();
@@ -130,7 +132,7 @@ test('Rollen: Viewer-Admin-API-Key sieht keine Schreibaktionen', async ({ page, 
   // Daten, die der Viewer sehen soll
   await ensure(request, 'organizations', { metadata: { name: 'e2e-org' }, spec: {} });
   await ensure(request, 'teams', { metadata: { name: 'e2e-team' }, spec: { organization: 'e2e-org' } });
-  await ensure(request, 'api-keys', { metadata: { name: 'e2e-viewer-sees' }, spec: { team: 'e2e-team' } });
+  await ensure(request, 'api-keys', { metadata: { name: 'e2e-viewer-sees' }, spec: { organization: 'e2e-org', team: 'e2e-team' } });
 
   await useToken(page, created.body.secret);
   await gotoReal(page, '/keys');

@@ -268,12 +268,12 @@ mod tests {
 
     #[test]
     fn parses_api_key_secret_and_rejects_errors() {
-        let ok = "apiVersion: aigw/v1alpha1\nkind: ApiKey\nmetadata: {name: ci}\nspec:\n  team: t\n  secret:\n    valueFrom: {env: CI_KEY}\n---\n";
+        let ok = "apiVersion: aigw/v1alpha1\nkind: ApiKey\nmetadata: {name: ci}\nspec:\n  organization: o\n  team: t\n  secret:\n    valueFrom: {env: CI_KEY}\n---\n";
         let docs = parse_documents(ok).unwrap();
         assert_eq!(docs.len(), 1);
         assert_eq!(docs[0].api_key_secret, Some(SecretRef::env("CI_KEY")));
 
-        let plain = "apiVersion: aigw/v1alpha1\nkind: ApiKey\nmetadata: {name: ci}\nspec:\n  secret: {value: sk-aigw-x}\n";
+        let plain = "apiVersion: aigw/v1alpha1\nkind: ApiKey\nmetadata: {name: ci}\nspec:\n  organization: o\n  secret: {value: sk-aigw-x}\n";
         assert!(parse_documents(plain).is_err());
 
         let dup = "apiVersion: aigw/v1alpha1\nkind: Organization\nmetadata: {name: o}\n---\napiVersion: aigw/v1alpha1\nkind: Organization\nmetadata: {name: o}\n---\napiVersion: aigw/v1alpha1\nkind: Team\nmetadata: {name: t}\nspec: {organisation: o}\n";

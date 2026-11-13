@@ -104,9 +104,15 @@ echo "--- GET /healthz (Daten)";       curl -fsS "$BASE/healthz"; echo
 echo "--- GET /healthz (Steuerung)";    curl -fsS "$CBASE/healthz"; echo
 echo "--- Admin-API ohne Token → 401"
 test "$(curl -s -o /dev/null -w '%{http_code}' "$CBASE/admin/api/v1/api-keys")" = 401
+echo "--- POST /admin/api/v1/organizations (Keys brauchen eine Organisation, F3)"
+curl -fsS "$CBASE/admin/api/v1/organizations" -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{"metadata":{"name":"smoke-org"},"spec":{}}' >/dev/null
+echo "--- POST /admin/api/v1/api-keys ohne Organisation → 422"
+test "$(curl -s -o /dev/null -w '%{http_code}' "$CBASE/admin/api/v1/api-keys" -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{"metadata":{"name":"smoke-noorg"},"spec":{}}')" = 422
 echo "--- POST /admin/api/v1/api-keys"
 KEY=$(curl -fsS "$CBASE/admin/api/v1/api-keys" -H "authorization: Bearer $TOKEN" \
-  -H 'content-type: application/json' -d '{"metadata":{"name":"smoke"},"spec":{}}' |
+  -H 'content-type: application/json' -d '{"metadata":{"name":"smoke"},"spec":{"organization":"smoke-org"}}' |
   grep -o '"secret":"sk-aigw-[^"]*"' | cut -d'"' -f4)
 test -n "$KEY"
 echo "--- GET /v1/models ohne Key → 401"
@@ -236,7 +242,7 @@ expect 201
 echo "--- Key mit Freigabe nur für rest-model: Chat über Alias → 200, mock → 403"
 LIMITED=$(curl -fsS "$CBASE/admin/api/v1/api-keys" -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
-  -d '{"metadata":{"name":"smoke-limited"},"spec":{"allowedModels":["rest-model"]}}' |
+  -d '{"metadata":{"name":"smoke-limited"},"spec":{"organization":"smoke-org","allowedModels":["rest-model"]}}' |
   grep -o '"secret":"sk-aigw-[^"]*"' | cut -d'"' -f4)
 CODE=000
 for _ in $(seq 1 50); do
@@ -358,7 +364,7 @@ grep -q '^# TYPE aigw_plugin_failmode_triggered_total counter' "$TMP/metrics.txt
 echo "--- Limits (AIGW-30): Key mit 1 Anfrage/Minute → zweite Anfrage 429 mit Rate-Limit-Headern"
 RL=$(curl -fsS "$CBASE/admin/api/v1/api-keys" -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
-  -d '{"metadata":{"name":"smoke-rl"},"spec":{"limits":[{"metric":"requests","limit":1,"window":"minute"}],"budget":{"amount":"5","period":"month","warnAtPercent":[80]}}}' |
+  -d '{"metadata":{"name":"smoke-rl"},"spec":{"organization":"smoke-org","limits":[{"metric":"requests","limit":1,"window":"minute"}],"budget":{"amount":"5","period":"month","warnAtPercent":[80]}}}' |
   grep -o '"secret":"sk-aigw-[^"]*"' | cut -d'"' -f4)
 test -n "$RL"
 CODE=000

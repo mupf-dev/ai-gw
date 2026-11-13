@@ -67,7 +67,10 @@ erscheinen nie, nur `secret: true`.
 - **Ohne Server-Felder**: keine IDs, `createdAt`/`updatedAt`, Key-Präfix/-Hash, Key-Zustand,
   `lastUsedAt`, `keyId` der Zugangsdaten. Damit ist der Export bei unverändertem Bestand
   byte-identisch (getestet: export → apply → export).
-- **Zugangsdaten** nur als Platzhalter-Verweis
+- **Zugangsdaten** nur als Verweis: Kam ein Feld beim Schreiben aus `valueFrom` (GitOps oder
+  Admin-API), steht dieser Verweis **originalgetreu** im Export (F54, AIGW-73: gespeichert in
+  `provider_credential.refs`, nur Namen, unverschlüsselt). Felder ohne Verweis (Klartext über
+  die Admin-API, auch nach `PATCH` mit Klartext) erscheinen als Platzhalter
   `valueFrom: {env: AIGW_SECRET_<ZUGANG>_<FELD>}` (Großbuchstaben, camelCase → `SNAKE_CASE`,
   nie `__`, damit die Variable nicht als Konfig-Override `AIGW_<ABSCHNITT>__<FELD>` gilt).
   Der Kopfkommentar listet alle Platzhalter. Vor `apply` diese Variablen setzen oder die
@@ -115,7 +118,11 @@ MCP-Freigaben können auf API-Keys zeigen, deshalb kommen Keys **vor** MCP und B
 - Verglichen werden `metadata.labels` und `spec` (Server-Felder werden ignoriert). Zeitpunkte
   werden wie gespeichert normalisiert (UTC, Millisekunden).
 - Zugangsdaten: Anbieter und Labels wie oben, Werte über den Klartext (bestehend entschlüsselt
-  vs. aufgelöstes `valueFrom`); im Plan nur `spec.data.<feld>` mit `secret: true`.
+  vs. aufgelöstes `valueFrom`); im Plan nur `spec.data.<feld>` mit `secret: true`. Geänderte
+  Verweise selbst (F54) erscheinen sichtbar als `spec.data.<feld>.valueFrom` (vorher/nachher,
+  nur Namen) und werden beim `apply` gespeichert.
+- API-Keys: `spec.organization` ist Pflicht (F3); mit Team muss es die Organisation des Teams
+  sein, sonst ein Fehler am Dokument.
 - `apply` ersetzt die Spezifikation vollständig (wie `PUT`), Felder, die im Manifest fehlen,
   fallen auf ihre Standardwerte zurück.
 

@@ -515,13 +515,29 @@ fn diff(
     diff_json("spec", &sa, &sb, out);
 
     match (&cur.extra, res) {
-        (Extra::Credential(old), Resolved::Credential(new)) => {
+        (Extra::Credential(old, old_refs), Resolved::Credential(new)) => {
             let secret = |path: String| FieldChange {
                 path,
                 before: None,
                 after: None,
                 secret: true,
             };
+            // F54: geänderte Verweise (Namen, keine Werte) sind sichtbare Änderungen.
+            if let ResourceSpec::ProviderCredential(w) = &want.spec {
+                let new_refs = crate::repo::credential::refs_of(w);
+                let fields: BTreeSet<&String> = old_refs.keys().chain(new_refs.keys()).collect();
+                for f in fields {
+                    let (a, b) = (old_refs.get(f), new_refs.get(f));
+                    if a != b {
+                        out.push(FieldChange {
+                            path: format!("spec.data.{f}.valueFrom"),
+                            before: a.map(serde_json::to_value).transpose()?,
+                            after: b.map(serde_json::to_value).transpose()?,
+                            secret: false,
+                        });
+                    }
+                }
+            }
             match old {
                 Some(old) => {
                     let fields: BTreeSet<&String> = old.keys().chain(new.keys()).collect();
@@ -688,6 +704,11 @@ fn collect_refs(
             }
         }
         ResourceSpec::ApiKey(k) => {
+            refs.push(r(
+                "spec.organization",
+                ResourceKind::Organization,
+                &k.organization,
+            ));
             if let Some(t) = &k.team {
                 refs.push(r("spec.team", ResourceKind::Team, t));
             }
@@ -760,11 +781,22 @@ fn check_rules(
             _ => None,
         })
         .collect();
+    let team_orgs: BTreeMap<&str, &str> = of(ResourceKind::Team)
+        .filter_map(|(n, (_, m))| match &m.spec {
+            ResourceSpec::Team(t) => Some((n.as_str(), t.organization.as_str())),
+            _ => None,
+        })
+        .collect();
     for (kind, objs) in &fin.objects {
         for (name, (doc, m)) in objs {
             // Bestehende Objekte außerhalb des Manifests werden nicht nachträglich geprüft.
             let Some(doc) = doc else { continue };
             let res = match &m.spec {
+                // F3: Organisation Pflicht, mit Team die des Teams.
+                ResourceSpec::ApiKey(k) => validate::api_key_organization(
+                    k,
+                    k.team.as_deref().and_then(|t| team_orgs.get(t).copied()),
+                ),
                 ResourceSpec::ModelGroup(g) => validate::aliases(name, g)
                     .and_then(|()| validate::fallbacks(&groups, name, g))
                     .and_then(|()| opts.group_settings.map_or(Ok(()), |f| f(&g.settings))),
@@ -921,6 +953,34 @@ fn check_bounds(
     }
     for (&kname, &(kdoc, k)) in &keys {
         let Some(tname) = k.team.as_deref() else {
+            // F3: Keys ohne Team stehen direkt unter ihrer Organisation.
+            let org = orgs.get(k.organization.as_str()).copied();
+            let odoc = org.and_then(|(d, _)| d);
+            if kdoc.is_none() && odoc.is_none() {
+                continue;
+            }
+            let parents: Vec<Node<'_>> = org
+                .map(|(_, o)| Node::organization(&k.organization, o))
+                .into_iter()
+                .collect();
+            let node = Node::api_key(kname, k);
+            let v = bounds::check(&node, &parents, &models);
+            if v.is_empty() {
+                continue;
+            }
+            let old_parents: Vec<Node<'_>> = cur_org(&k.organization)
+                .map(|o| Node::organization(&k.organization, o))
+                .into_iter()
+                .collect();
+            let old = bounds::check(&node, &old_parents, &models);
+            report(
+                &[
+                    (ResourceKind::ApiKey, kname, kdoc),
+                    (ResourceKind::Organization, k.organization.as_str(), odoc),
+                ],
+                v,
+                old,
+            );
             continue;
         };
         let Some(&(tdoc, t)) = teams.get(tname) else {

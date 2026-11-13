@@ -13,6 +13,7 @@ use aigw_core::resource::{
 use aigw_core::snapshot::{DeploymentCtx, KeyCtx, McpServerCtx, ModelGroupCtx, Snapshot};
 
 use crate::crypto::Keyring;
+use crate::db::Val;
 use crate::repo::Resource as _;
 use crate::repo::api_key_from_row;
 use crate::{Store, StoreError};
@@ -77,7 +78,7 @@ async fn build(store: &Store, keyring: &Keyring, version: i64) -> Result<Snapsho
             ResourceKind::ApiKey,
             ApiKeySpec::REFS,
             "WHERE t.state = $1",
-            Some(ApiKeyState::Active.as_str().to_owned()),
+            Some(Val::text(ApiKeyState::Active.as_str())),
         )
         .await?;
     for row in &rows {
@@ -88,10 +89,9 @@ async fn build(store: &Store, keyring: &Keyring, version: i64) -> Result<Snapsho
             .as_ref()
             .and_then(|n| teams_by_name.get(n))
             .cloned();
-        let organization = team
-            .as_ref()
-            .and_then(|t| orgs_by_name.get(&t.spec.organization))
-            .cloned();
+        // F3: jeder Key hat eine Organisation (mit Team: die des Teams); Keys ohne Team erben
+        // damit Limits, Budgets und Plugins der Organisation.
+        let organization = orgs_by_name.get(&key.spec.organization).cloned();
         let expires_at = key.spec.expires_at;
         snap.keys.insert(
             hash,

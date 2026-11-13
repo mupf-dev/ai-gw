@@ -13,19 +13,18 @@
 //! **Geltungsbereich:** Jeder Eintrag trägt Organisation und Team (Namen) des betroffenen
 //! Objekts – nachher (`organization`, `team`) und vorher (`organization_before`,
 //! `team_before`) –, damit eingeschränkte Rollen nur ihren Bereich lesen. Bereich haben
-//! Organisationen (sich selbst), Teams (Organisation + Team) und API-Keys mit Team; alles
-//! andere (Nutzer, Katalog, Admin-API-Keys, Sessions …) ist global.
+//! Organisationen (sich selbst), Teams (Organisation + Team) und API-Keys (Organisation, F3,
+//! und ggf. Team); alles andere (Nutzer, Katalog, Admin-API-Keys, Sessions …) ist global.
 //!
 //! **Geheimnisse:** Vorher/Nachher sind die Darstellungen der Admin-API – ohne Werte von
 //! Zugangsdaten, ohne Key-Hashes und -Klartexte (`SecretString` serialisiert `<redacted>`).
 
 use aigw_core::resource::{Id, ResourceKind, new_id};
 use serde::Serialize;
-use sqlx::AssertSqlSafe;
-use sqlx::any::AnyRow;
 use time::OffsetDateTime;
 
-use super::{AdminTx, Row, Val, millis, now, parse_id};
+use super::{AdminTx, Row, Val, millis, now};
+use crate::db::{DbRow, Q};
 use crate::{Store, StoreError};
 
 /// Art im Audit-Log für Sessions der Admin-UI (Login, Logout, beendete Sessions).
@@ -87,19 +86,11 @@ impl AdminTx {
                 team: Some(name.to_owned()),
             });
         }
-        if kind == ResourceKind::ApiKey.as_str()
-            && let Some(team) = spec_str("team")
-        {
-            let organization: Option<String> = sqlx::query_scalar(
-                "SELECT o.name FROM team t JOIN organization o ON o.id = t.organization_id
-                 WHERE t.name = $1",
-            )
-            .bind(team.clone())
-            .fetch_optional(&mut *self.tx)
-            .await?;
+        if kind == ResourceKind::ApiKey.as_str() {
+            // F3: jeder Key hat eine Organisation (mit Team: die des Teams).
             return Ok(Scope {
-                organization,
-                team: Some(team),
+                organization: spec_str("organization"),
+                team: spec_str("team"),
             });
         }
         Ok(Scope::default())
@@ -113,15 +104,13 @@ impl AdminTx {
         user_name: &str,
         reason: &str,
     ) -> Result<u64, StoreError> {
-        let n = sqlx::query("DELETE FROM admin_session WHERE user_id = $1")
-            .bind(user_id.to_string())
-            .execute(&mut *self.tx)
-            .await?
-            .rows_affected();
+        let n = Q::new("DELETE FROM admin_session WHERE user_id = $1")
+            .bind(Val::uuid(user_id))
+            .execute(&mut self.tx)
+            .await?;
         if n > 0 {
             let details = serde_json::json!({"reason": reason, "sessions": n});
-            insert_event(
-                &mut self.tx,
+            event_query(
                 &AuditEvent {
                     actor: self.actor.clone(),
                     action: "revoke".into(),
@@ -130,8 +119,9 @@ impl AdminTx {
                     object_name: Some(user_name.to_owned()),
                     details: Some(details),
                 },
-                Some(self.version),
+                self.version,
             )
+            .execute(&mut self.tx)
             .await?;
         }
         Ok(n)
@@ -155,37 +145,22 @@ pub struct AuditEvent {
     pub details: Option<serde_json::Value>,
 }
 
-async fn insert_event(
-    conn: &mut sqlx::AnyConnection,
-    ev: &AuditEvent,
-    version: Option<i64>,
-) -> Result<(), StoreError> {
-    let version = match version {
-        Some(v) => v,
-        None => {
-            sqlx::query_scalar("SELECT version FROM config_version WHERE id = 1")
-                .fetch_one(&mut *conn)
-                .await?
-        }
-    };
-    let details = ev.details.as_ref().map(serde_json::to_string).transpose()?;
-    sqlx::query(
+/// `INSERT` eines Ereignisses mit der Konfigurationsversion `version`.
+fn event_query(ev: &AuditEvent, version: i64) -> Q {
+    Q::new(
         "INSERT INTO audit_log (id, at, actor, action, kind, object_id, object_name, config_version,
                                 before_json, after_json)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9)",
     )
-    .bind(new_id().to_string())
-    .bind(millis(now()))
-    .bind(ev.actor.clone())
-    .bind(ev.action.clone())
-    .bind(ev.kind.clone())
-    .bind(ev.object_id.map(|i| i.to_string()))
-    .bind(ev.object_name.clone())
-    .bind(version)
-    .bind(details)
-    .execute(&mut *conn)
-    .await?;
-    Ok(())
+    .bind(Val::uuid(new_id()))
+    .bind(Val::time(now()))
+    .bind(Val::text(ev.actor.clone()))
+    .bind(Val::text(ev.action.clone()))
+    .bind(Val::text(ev.kind.clone()))
+    .bind(Val::Uuid(ev.object_id))
+    .bind(Val::Text(ev.object_name.clone()))
+    .bind(Val::int(version))
+    .bind(Val::Json(ev.details.clone()))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -381,21 +356,16 @@ pub struct AuditPage {
 #[derive(Default)]
 struct Where {
     conds: Vec<String>,
-    args: Vec<Val>,
+    q: Q,
 }
 
 impl Where {
     fn arg(&mut self, v: Val) -> String {
-        self.args.push(v);
-        format!("${}", self.args.len())
+        self.q.arg(v)
     }
 
     fn text(&mut self, s: &str) -> String {
-        self.arg(Val::Text(Some(s.to_owned())))
-    }
-
-    fn int(&mut self, i: i64) -> String {
-        self.arg(Val::Int(Some(i)))
+        self.arg(Val::text(s))
     }
 
     fn any_of(&mut self, col: &str, values: &[String]) {
@@ -427,23 +397,23 @@ impl Where {
     }
 }
 
-fn entry_from_row(row: &AnyRow) -> Result<AuditEntry, StoreError> {
+fn entry_from_row(row: &DbRow) -> Result<AuditEntry, StoreError> {
     let r = Row(row);
     Ok(AuditEntry {
-        id: parse_id(&r.text("id")?)?,
+        id: r.id()?,
         at: r.time("at")?,
         actor: r.text("actor")?,
         action: r.text("action")?,
         kind: r.text("kind")?,
-        object_id: r.opt_text("object_id")?.map(|s| parse_id(&s)).transpose()?,
+        object_id: r.opt_uuid("object_id")?,
         object_name: r.opt_text("object_name")?,
         config_version: r.int("config_version")?,
         organization: r.opt_text("organization")?,
         team: r.opt_text("team")?,
         organization_before: r.opt_text("organization_before")?,
         team_before: r.opt_text("team_before")?,
-        before: r.opt_json("before_json")?,
-        after: r.opt_json("after_json")?,
+        before: row.opt_json_value("before_json")?,
+        after: row.opt_json_value("after_json")?,
     })
 }
 
@@ -451,8 +421,9 @@ impl Store {
     /// Schreibt ein Ereignis ohne Konfigurationsänderung (keine neue `config_version`,
     /// kein Snapshot-Neubau).
     pub async fn record_audit_event(&self, ev: &AuditEvent) -> Result<(), StoreError> {
-        let mut conn = self.pool.acquire().await?;
-        insert_event(&mut conn, ev, None).await
+        let version = self.config_version().await?;
+        event_query(ev, version).execute(&self.pool).await?;
+        Ok(())
     }
 
     /// Letzte Einträge des Audit-Logs (neueste zuerst, ohne Filter).
@@ -471,11 +442,11 @@ impl Store {
     pub async fn query_audit_log(&self, q: &AuditQuery) -> Result<AuditPage, StoreError> {
         let mut w = Where::default();
         if let Some(from) = q.from {
-            let p = w.int(millis(from));
+            let p = w.arg(Val::time(from));
             w.conds.push(format!("at >= {p}"));
         }
         if let Some(to) = q.to {
-            let p = w.int(millis(to));
+            let p = w.arg(Val::time(to));
             w.conds.push(format!("at < {p}"));
         }
         w.any_of("actor", &q.actors);
@@ -487,9 +458,14 @@ impl Store {
         w.any_of("action", &q.actions);
         if let Some(o) = &q.object {
             let a = w.text(o);
-            let b = w.text(o);
-            w.conds
-                .push(format!("(object_name = {a} OR object_id = {b})"));
+            match Id::parse_str(o) {
+                Ok(id) => {
+                    let b = w.arg(Val::uuid(id));
+                    w.conds
+                        .push(format!("(object_name = {a} OR object_id = {b})"));
+                }
+                Err(_) => w.conds.push(format!("object_name = {a}")),
+            }
         }
         if let AuditScope::Within(rules) = &q.scope {
             let parts: Vec<String> = rules.iter().map(|r| w.scope_rule(r)).collect();
@@ -505,14 +481,14 @@ impl Store {
             ("<", "DESC")
         };
         if let Some(c) = &q.cursor {
-            let a1 = w.int(c.at);
-            let a2 = w.int(c.at);
-            let id = w.text(&c.id.to_string());
+            let a1 = w.arg(Val::ms(c.at));
+            let a2 = w.arg(Val::ms(c.at));
+            let id = w.arg(Val::uuid(c.id));
             w.conds
                 .push(format!("(at {cmp} {a1} OR (at = {a2} AND id {cmp} {id}))"));
         }
         let limit = q.limit.max(1);
-        let lim = w.int(i64::from(limit) + 1);
+        let lim = w.arg(Val::int(i64::from(limit) + 1));
         let filter = if w.conds.is_empty() {
             String::new()
         } else {
@@ -523,13 +499,8 @@ impl Store {
                     organization, team, organization_before, team_before, before_json, after_json
              FROM audit_log {filter} ORDER BY at {dir}, id {dir} LIMIT {lim}"
         );
-        let mut query = sqlx::query(AssertSqlSafe(sql));
-        for v in w.args {
-            query = match v {
-                Val::Text(t) => query.bind(t),
-                Val::Int(i) => query.bind(i),
-            };
-        }
+        let mut query = w.q;
+        query.sql = sql;
         let rows = query.fetch_all(&self.pool).await?;
         let mut items = rows
             .iter()
@@ -633,6 +604,7 @@ mod tests {
                 "gitops",
                 ObjectMeta::named("k1"),
                 ApiKeySpec {
+                    organization: "acme".into(),
                     team: Some("platform".into()),
                     ..ApiKeySpec::default()
                 },
@@ -642,6 +614,7 @@ mod tests {
         // Key wandert ins Team einer anderen Organisation: bleibt für acme sichtbar.
         let mut spec = key.key.spec.clone();
         spec.team = Some("ops".into());
+        spec.organization = "other".into();
         s.update_api_key("bootstrap-admin", key.key.metadata.clone(), spec)
             .await
             .unwrap();

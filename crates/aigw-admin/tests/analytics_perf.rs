@@ -232,7 +232,8 @@ async fn run(label: &str, store: Store) {
         let at = start + (rng.next() % (7 * DAY as u64)) as i64;
         let err = rng.below(30) == 0;
         rows.push(RequestLogRow {
-            id: format!("{:016x}-{i:08}", at),
+            // UUID (Postgres: Spaltentyp UUID), zeitlich sortiert wie bisher.
+            id: aigw_core::resource::Id::from_u64_pair(at as u64, i as u64).to_string(),
             at,
             endpoint: "openai-chat".into(),
             api_key_id: Some(keys[k].clone()),

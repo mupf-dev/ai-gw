@@ -125,6 +125,7 @@ metadata:
   name: ci
   labels: {owner: platform}
 spec:
+  organization: acme
   team: platform
   allowedModels: [gpt-4o]
   # Optional (GitOps): vorgegebener Klartext. Ohne `secret` behalten bestehende Keys ihr

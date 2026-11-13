@@ -23,6 +23,7 @@ use std::sync::LazyLock;
 use aigw_core::resource::{Id, JsonObject, Object, ObjectMeta, PluginBindingSpec};
 use aigw_core::upstream::UpstreamPolicy;
 use aigw_proxy::PluginRegistry as Registry;
+use aigw_store::ListFilter;
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Extension, Path, Query, State};
@@ -158,14 +159,12 @@ impl AdminResource for PluginBindingSpec {
         }
     }
 
-    fn filter(o: &Object<Self>, q: &Self::Query) -> bool {
-        q.plugin.as_ref().is_none_or(|p| *p == o.spec.plugin)
-            && q.level
-                .as_deref()
-                .is_none_or(|l| l == o.spec.scope.level.as_str())
-            && q.target
-                .as_ref()
-                .is_none_or(|t| o.spec.scope.target.as_ref() == Some(t))
+    fn list_filters(q: &Self::Query) -> Result<Vec<ListFilter>, Problem> {
+        let mut f = Vec::new();
+        f.extend(q.plugin.iter().map(|p| ListFilter::Plugin(p.clone())));
+        f.extend(q.level.iter().map(|l| ListFilter::Level(l.clone())));
+        f.extend(q.target.iter().map(|t| ListFilter::Target(t.clone())));
+        Ok(f)
     }
 
     async fn check(

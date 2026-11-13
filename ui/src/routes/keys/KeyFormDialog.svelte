@@ -5,12 +5,13 @@
   // Bearbeiten lädt den Key samt ETag und schreibt mit If-Match (412 → Konflikt-Dialog „neu laden“).
   // Budget und RPM/TPM werden auf `spec.budget` bzw. `spec.limits` (requests/tokens je Minute) abgebildet;
   // andere Limits des Keys bleiben unverändert erhalten.
+  // Organisation ist Pflicht (F3): mit Team die des Teams, ohne Team frei wählbar (nur globale Rollen).
   import { Checkbox, RadioGroup } from 'bits-ui';
   import { untrack } from 'svelte';
   import { apiKeys, modelGroups, NAME_HINT, NAME_RE, type ApiKey, type S } from '../../lib/api/resources';
   import { fromLocalInput, handleError, toLocalInput } from '../../lib/admin/errors.svelte';
   import FormError from '../../lib/admin/FormError.svelte';
-  import { catalog, ctx, label } from '../../lib/context.svelte';
+  import { catalog, ctx, label, orgOfTeam } from '../../lib/context.svelte';
   import { isMock } from '../../lib/mode.svelte';
   import { canWrite, canWriteKey } from '../../lib/rbac.svelte';
   import Button from '../../lib/ui/Button.svelte';
@@ -38,6 +39,7 @@
   const blank = () => ({
     name: '',
     team: ctx.teamId || (canWrite({ kind: 'global' }) ? NO_TEAM : (writableTeams()[0]?.metadata.name ?? NO_TEAM)),
+    org: ctx.orgId || (catalog.orgs[0]?.metadata.name ?? ''),
     user: '',
     access: 'all' as 'all' | 'some',
     models: [] as string[],
@@ -94,6 +96,7 @@
       form = {
         name: k.metadata.name,
         team: k.spec.team ?? NO_TEAM,
+        org: k.spec.organization,
         user: k.spec.user ?? '',
         access: k.spec.allowedModels?.length ? 'some' : 'all',
         models: [...(k.spec.allowedModels ?? [])],
@@ -120,6 +123,7 @@
       if (!form.name.trim()) e.name = 'Bitte einen Namen angeben.';
       else if (!NAME_RE.test(form.name)) e.name = 'Ungültiger Name: a-z, 0-9, „-“, „.“, „_“, beginnt alphanumerisch.';
     }
+    if (form.team === NO_TEAM && !form.org) e.org = 'Bitte eine Organisation wählen.';
     if (form.access === 'some' && form.models.length === 0) e.models = 'Mindestens eine Modellgruppe wählen.';
     for (const [k, l] of [
       ['budget', 'Budget'],
@@ -135,7 +139,7 @@
   }
 
   function spec(): S['ApiKeySpec'] {
-    const base = loaded?.spec ?? {};
+    const base: Partial<S['ApiKeySpec']> = loaded?.spec ?? {};
     const keep = (base.limits ?? []).filter((l) => !(l.window === 'minute' && !l.modelGroup && (l.metric === 'requests' || l.metric === 'tokens')));
     const rpm = optNum(form.rpm);
     const tpm = optNum(form.tpm);
@@ -149,6 +153,7 @@
       form.expires === 'never' ? null : form.expires === 'custom' ? fromLocalInput(form.expiresAt) : new Date(Date.now() + Number(form.expires) * 86_400_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
     return {
       ...base,
+      organization: effectiveOrg(),
       team: form.team === NO_TEAM ? null : form.team,
       user: form.user.trim() || null,
       allowedModels: form.access === 'all' ? [] : form.models,
@@ -183,6 +188,12 @@
     }
   }
 
+  /** Organisation des Keys: mit Team die des Teams, sonst die gewählte. */
+  function effectiveOrg(): string {
+    return (form.team !== NO_TEAM ? orgOfTeam(form.team) : null) ?? form.org;
+  }
+  const orgItems = $derived(catalog.orgs.map((o) => ({ value: o.metadata.name, label: label(o) })));
+
   function toggleModel(m: string, on: boolean) {
     form.models = on ? [...form.models, m] : form.models.filter((x) => x !== m);
   }
@@ -215,6 +226,19 @@
           <Select {id} {describedby} bind:value={form.team} items={teamItems} />
         {/snippet}
       </Field>
+      {#if form.team === NO_TEAM}
+        <Field label="Organisation" required hint="Keys ohne Team erben Limits, Budget und Plugins der Organisation." error={errors.org}>
+          {#snippet children({ id, describedby })}
+            <Select {id} {describedby} bind:value={form.org} items={orgItems} />
+          {/snippet}
+        </Field>
+      {:else}
+        <Field label="Organisation" hint="Organisation des Teams.">
+          {#snippet children({ id, describedby })}
+            <Input {id} value={effectiveOrg()} aria-describedby={describedby} readonly />
+          {/snippet}
+        </Field>
+      {/if}
       <Field label="Ablauf" hint="Abgelaufene Keys werden abgewiesen (401).">
         {#snippet children({ id, describedby })}
           <Select

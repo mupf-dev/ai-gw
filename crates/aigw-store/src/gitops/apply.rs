@@ -22,8 +22,9 @@ use super::secrets::SecretSource;
 use super::state::{self, Current, Extra};
 use super::{ApplyOptions, GitopsError};
 use crate::crypto::Keyring;
+use crate::db::{Q, Val};
 use crate::keys::{hash_api_key, parse_prefix};
-use crate::repo::credential::{seal_spec, sealed_cols};
+use crate::repo::credential::{refs_of, seal_spec, sealed_cols};
 use crate::repo::{Action, AdminTx, Col};
 use crate::{PlainResource, Resource, Store, StoreError};
 
@@ -98,9 +99,9 @@ pub async fn apply(
             } => current.id,
             _ => continue,
         };
-        sqlx::query("DELETE FROM model_alias WHERE model_group_id = $1")
-            .bind(id.to_string())
-            .execute(&mut *tx.tx)
+        Q::new("DELETE FROM model_alias WHERE model_group_id = $1")
+            .bind(Val::uuid(id))
+            .execute(&mut tx.tx)
             .await
             .map_err(StoreError::from)?;
     }
@@ -184,7 +185,7 @@ async fn write_row(
     kind: ResourceKind,
     existing: Option<&Current>,
     meta: &ObjectMeta,
-    cols: Vec<(&'static str, crate::repo::Val)>,
+    cols: Vec<(&'static str, Val)>,
 ) -> Result<(aigw_core::resource::Id, Action), StoreError> {
     Ok(match existing {
         Some(c) => {
@@ -270,7 +271,8 @@ async fn upsert_credential(
     };
     let (fields, sealed) = seal_spec(keyring, id, &plain)?;
     let key_id = sealed.key_id.clone();
-    let cols = sealed_cols(plain.provider, &fields, sealed)?;
+    // F54: valueFrom-Verweise des Manifests mitspeichern (originalgetreuer Export).
+    let cols = sealed_cols(plain.provider, &fields, &refs_of(&spec), sealed)?;
     let action = match existing {
         Some(_) => {
             tx.update_row(kind, id, &meta, cols).await?;
@@ -302,6 +304,7 @@ async fn upsert_api_key(
     secret: Option<aigw_core::resource::SecretString>,
 ) -> Result<(), StoreError> {
     let kind = ResourceKind::ApiKey;
+    tx.check_key_scope(&spec).await?;
     let mut cols = spec.to_columns()?;
     let mut status = match existing.map(|c| &c.extra) {
         Some(Extra::ApiKey { status, .. }) => status.clone(),

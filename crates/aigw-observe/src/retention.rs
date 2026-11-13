@@ -13,6 +13,9 @@ use tokio::sync::watch;
 use crate::metrics::ObserveMetrics;
 
 const DAY_MS: i64 = 86_400_000;
+/// Aufbewahrung der IDs angewendeter Writer-Batches (F34, `observe_batch`). Wiederholungen
+/// eines Batches kommen nach Sekunden bis Minuten; 7 Tage lassen viel Reserve.
+const OBSERVE_BATCH_DAYS: u32 = 7;
 
 /// Ergebnis eines Löschlaufs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -49,6 +52,9 @@ pub async fn sweep(
     }
     if let Some(c) = cutoff(now_ms, cfg.rollup_days) {
         res.rollups = store.purge_rollups(c).await?;
+    }
+    if let Some(c) = cutoff(now_ms, OBSERVE_BATCH_DAYS) {
+        store.purge_observe_batches(c).await?;
     }
     Ok(res)
 }

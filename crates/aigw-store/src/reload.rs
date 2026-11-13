@@ -302,10 +302,17 @@ async fn maybe_sleep_until(at: Option<Instant>) {
 
 /// Lauscht auf `NOTIFY aigw_config` (eigene Verbindung, Reconnect mit Backoff).
 async fn listen(store: Store, wake: Arc<Notify>, metrics: Arc<ReloadMetrics>, opts: ReloadOptions) {
-    let url = store.pool.connect_options().database_url.clone();
+    let crate::db::Pool::Postgres(pool) = &store.pool else {
+        return;
+    };
+    // Eigener Pool mit einer Verbindung (gleiche Optionen), damit die dauerhaft belegte
+    // LISTEN-Verbindung dem Store-Pool keinen Platz wegnimmt.
+    let listen_pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect_lazy_with(pool.connect_options().as_ref().clone());
     let mut backoff = opts.backoff_min;
     loop {
-        match PgListener::connect(url.as_str()).await {
+        match PgListener::connect_with(&listen_pool).await {
             Ok(mut listener) => match listener.listen(NOTIFY_CHANNEL).await {
                 Ok(()) => {
                     tracing::debug!(

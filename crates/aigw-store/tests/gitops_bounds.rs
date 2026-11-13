@@ -85,6 +85,7 @@ apiVersion: aigw/v1alpha1
 kind: ApiKey
 metadata: {{name: {name}}}
 spec:
+  organization: acme
   team: platform
   allowedModels: {models}
   limits: [{{metric: tokens, limit: {tokens}, window: minute}}]
@@ -195,6 +196,7 @@ async fn run(store: Store) {
             "test",
             ObjectMeta::named("legacy"),
             ApiKeySpec {
+                organization: "acme".into(),
                 team: Some("platform".into()),
                 limits: vec![LimitSpec {
                     metric: LimitMetric::Tokens,
@@ -217,6 +219,7 @@ apiVersion: aigw/v1alpha1
 kind: ApiKey
 metadata: {name: legacy}
 spec:
+  organization: acme
   team: platform
   limits: [{metric: tokens, limit: 99999, window: minute}]
 ",

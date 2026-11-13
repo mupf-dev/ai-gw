@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use serde_json::Value;
 use time::OffsetDateTime;
 
-use crate::resource::{Amount, DeploymentSpec, JsonObject, ModelGroupSpec, PriceSpec};
+use crate::resource::{Amount, ApiKeySpec, DeploymentSpec, JsonObject, ModelGroupSpec, PriceSpec};
 use crate::types::ProviderKind;
 use crate::upstream::UpstreamPolicy;
 
@@ -35,6 +35,28 @@ pub const MAX_CREDENTIAL_VALUE_LEN: usize = 64 * 1024;
 pub const OLLAMA_DEFAULT_ENDPOINT: &str = "http://localhost:11434/v1";
 
 type Res = Result<(), String>;
+
+// ---------------------------------------------------------------------------------------------
+// API-Keys (F3)
+// ---------------------------------------------------------------------------------------------
+
+/// Organisation eines API-Keys: Pflicht; mit Team muss sie die Organisation des Teams sein.
+/// `team_org` ist die Organisation des angegebenen Teams (`None`: ohne Team oder Team
+/// unbekannt – unbekannte Verweise meldet der Aufrufer).
+pub fn api_key_organization(spec: &ApiKeySpec, team_org: Option<&str>) -> Res {
+    if spec.organization.trim().is_empty() {
+        return Err(
+            "spec.organization: Pflichtfeld (jeder Key gehört zu einer Organisation)".into(),
+        );
+    }
+    match (&spec.team, team_org) {
+        (Some(team), Some(org)) if org != spec.organization => Err(format!(
+            "spec.organization: Team {team:?} gehört zu Organisation {org:?}, nicht zu {:?}",
+            spec.organization
+        )),
+        _ => Ok(()),
+    }
+}
 
 // ---------------------------------------------------------------------------------------------
 // Modellgruppen

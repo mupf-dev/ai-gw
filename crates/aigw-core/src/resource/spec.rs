@@ -239,7 +239,10 @@ pub struct UserSpec {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApiKeySpec {
-    /// Team (Name).
+    /// Organisation (Name, Pflicht; F3). Mit Team muss es die Organisation des Teams sein.
+    /// Keys ohne Team erben Limits, Budgets und Plugins der Organisation.
+    pub organization: String,
+    /// Team (Name, optional).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub team: Option<String>,
     /// Besitzender Nutzer (Name).

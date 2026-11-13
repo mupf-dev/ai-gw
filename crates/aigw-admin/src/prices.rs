@@ -12,11 +12,10 @@
 // `#[utoipa::path(params(…))]` erzeugt für IntoParams-Typen qualifizierte Pfade.
 #![allow(unused_qualifications)]
 
-use std::collections::HashMap;
-
 use aigw_core::resource::{Id, Object, ObjectMeta, PriceSpec};
 use aigw_core::types::ProviderKind;
 use aigw_core::validate;
+use aigw_store::ListFilter;
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Extension, Path, Query, State};
@@ -89,48 +88,30 @@ impl AdminResource for PriceSpec {
         ListArgs {
             limit: q.limit,
             cursor: q.cursor.as_deref(),
-            q: None, // auch Modell, siehe `filter`
+            q: q.q.as_deref(), // auch Modell (Suchspalte im Store)
             label: q.label.as_deref(),
         }
     }
 
-    fn filter(o: &Object<Self>, q: &Self::Query) -> bool {
-        let provider = o.spec.provider.map_or("any", ProviderKind::as_str);
-        q.q.as_deref()
-            .is_none_or(|s| o.metadata.name.contains(s) || o.spec.model.contains(s))
-            && q.model.as_ref().is_none_or(|m| *m == o.spec.model)
-            && q.provider.as_deref().is_none_or(|p| p == provider)
-    }
-
-    fn post_filter(
-        items: Vec<Object<Self>>,
-        q: &Self::Query,
-    ) -> Result<Vec<Object<Self>>, Problem> {
-        if q.provider
-            .as_deref()
-            .is_some_and(|p| p != "any" && ProviderKind::parse(p).is_none())
-        {
-            return Err(Problem::bad_request(
-                "provider: unbekannter Anbieter (oder `any`)",
-            ));
+    fn list_filters(q: &Self::Query) -> Result<Vec<ListFilter>, Problem> {
+        let mut f = Vec::new();
+        match q.provider.as_deref() {
+            None => {}
+            // Preise ohne Anbieter stehen mit `''` in der Datenbank.
+            Some("any") => f.push(ListFilter::Provider(String::new())),
+            Some(p) => match ProviderKind::parse(p) {
+                Some(k) => f.push(ListFilter::Provider(k.as_str().to_owned())),
+                None => {
+                    return Err(Problem::bad_request(
+                        "provider: unbekannter Anbieter (oder `any`)",
+                    ));
+                }
+            },
         }
-        let Some(at) = q.effective_at else {
-            return Ok(items);
-        };
+        f.extend(q.model.iter().map(|m| ListFilter::Model(m.clone())));
         // Je (Anbieter, Modell) die jüngste Version mit validFrom ≤ at.
-        let mut best: HashMap<(Option<ProviderKind>, String), Object<Self>> = HashMap::new();
-        for o in items.into_iter().filter(|o| o.spec.valid_from <= at) {
-            let key = (o.spec.provider, o.spec.model.clone());
-            if best
-                .get(&key)
-                .is_none_or(|b| b.spec.valid_from < o.spec.valid_from)
-            {
-                best.insert(key, o);
-            }
-        }
-        let mut out: Vec<_> = best.into_values().collect();
-        out.sort_by(|a, b| a.metadata.name.cmp(&b.metadata.name));
-        Ok(out)
+        f.extend(q.effective_at.map(ListFilter::EffectiveAt));
+        Ok(f)
     }
 
     fn default_name(spec: &Self) -> Option<String> {

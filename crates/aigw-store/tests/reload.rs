@@ -392,6 +392,7 @@ async fn bench_load_and_rebuild() {
                 ACTOR,
                 ObjectMeta::named(format!("key-{k}")),
                 ApiKeySpec {
+                    organization: "acme".into(),
                     team: Some(format!("team-{}", k % 20)),
                     ..Default::default()
                 },

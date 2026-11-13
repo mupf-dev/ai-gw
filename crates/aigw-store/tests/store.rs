@@ -251,6 +251,7 @@ async fn run(store: Store) {
             ACTOR,
             meta("ci-key"),
             ApiKeySpec {
+                organization: "acme".into(),
                 team: Some("platform".into()),
                 user: Some("alice".into()),
                 metadata: BTreeMap::from([("cost-center".to_owned(), "4711".to_owned())]),
@@ -263,7 +264,14 @@ async fn run(store: Store) {
     assert_eq!(created.key.status.state, ApiKeyState::Active);
     assert!(created.secret.contains(&created.key.status.prefix));
     let other_key = store
-        .create_api_key(ACTOR, meta("revoked-key"), ApiKeySpec::default())
+        .create_api_key(
+            ACTOR,
+            meta("revoked-key"),
+            ApiKeySpec {
+                organization: "acme".into(),
+                ..ApiKeySpec::default()
+            },
+        )
         .await
         .unwrap();
     store.revoke_api_key(ACTOR, "revoked-key").await.unwrap();

@@ -450,7 +450,13 @@ struct Gw {
     addr: SocketAddr,
     bootstrap: String,
     store: Store,
-    db: sqlx::AnyPool,
+    db: TestDb,
+}
+
+/// Direkter Datenbankzugriff für Testmanipulationen (eigener Treiber je Backend, AIGW-73).
+enum TestDb {
+    Sqlite(sqlx::SqlitePool),
+    Postgres(sqlx::PgPool),
 }
 
 /// Angemeldete Browser-Session.
@@ -504,8 +510,11 @@ impl Gw {
         assert!(state.oidc_enabled());
         let app = aigw_admin::router_with(state);
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        sqlx::any::install_default_drivers();
-        let db = sqlx::AnyPool::connect(db_url).await.unwrap();
+        let db = if db_url.starts_with("sqlite:") {
+            TestDb::Sqlite(sqlx::SqlitePool::connect(db_url).await.unwrap())
+        } else {
+            TestDb::Postgres(sqlx::PgPool::connect(db_url).await.unwrap())
+        };
         Self {
             addr,
             bootstrap: secret,
@@ -634,11 +643,31 @@ impl Gw {
         Ok((s, loc))
     }
 
+    /// Führt `sql` aus; `{PAST}` steht für einen Zeitpunkt weit in der Vergangenheit.
     async fn sql(&self, sql: &str) {
-        sqlx::query(AssertSqlSafe(sql.to_owned()))
-            .execute(&self.db)
-            .await
-            .unwrap();
+        match &self.db {
+            TestDb::Sqlite(p) => {
+                let sql = sql.replace("{PAST}", "1000");
+                sqlx::query(AssertSqlSafe(sql)).execute(p).await.unwrap();
+            }
+            TestDb::Postgres(p) => {
+                let sql = sql.replace("{PAST}", "TIMESTAMPTZ '1970-01-01 00:00:01+00'");
+                sqlx::query(AssertSqlSafe(sql)).execute(p).await.unwrap();
+            }
+        }
+    }
+
+    async fn count(&self, sql: &str) -> i64 {
+        match &self.db {
+            TestDb::Sqlite(p) => sqlx::query_scalar(AssertSqlSafe(sql.to_owned()))
+                .fetch_one(p)
+                .await
+                .unwrap(),
+            TestDb::Postgres(p) => sqlx::query_scalar(AssertSqlSafe(sql.to_owned()))
+                .fetch_one(p)
+                .await
+                .unwrap(),
+        }
     }
 }
 
@@ -665,10 +694,14 @@ fn team(name: &str, org: &str) -> Value {
     json!({"metadata": {"name": name}, "spec": {"organization": org}})
 }
 
+/// Key (F3: Organisation Pflicht – die des Teams, ohne Team `acme`).
 fn key(name: &str, team: Option<&str>) -> Value {
     match team {
-        Some(t) => json!({"metadata": {"name": name}, "spec": {"team": t}}),
-        None => json!({"metadata": {"name": name}, "spec": {}}),
+        Some(t) => {
+            let org = if t == "ext" { "other" } else { "acme" };
+            json!({"metadata": {"name": name}, "spec": {"organization": org, "team": t}})
+        }
+        None => json!({"metadata": {"name": name}, "spec": {"organization": "acme"}}),
     }
 }
 
@@ -1214,7 +1247,7 @@ async fn scenario(store: Store, db_url: &str) {
     )
     .await
     .expect(StatusCode::FORBIDDEN);
-    gw.sql("UPDATE admin_api_key SET expires_at = 1000 WHERE name = 'ci-platform'")
+    gw.sql("UPDATE admin_api_key SET expires_at = {PAST} WHERE name = 'ci-platform'")
         .await;
     gw.bearer(&tk_secret, Method::GET, "/teams", None)
         .await
@@ -1256,23 +1289,22 @@ async fn scenario(store: Store, db_url: &str) {
     assert_eq!(first, ["admin-key:ci", "admin-key:ci-platform"]);
 
     // --- Ablauf und Leerlauf der Sessions -------------------------------------------------------
-    gw.sql("UPDATE admin_session SET last_seen_at = 1000 WHERE user_id = (SELECT id FROM app_user WHERE name = 'tina')")
+    gw.sql("UPDATE admin_session SET last_seen_at = {PAST} WHERE user_id = (SELECT id FROM app_user WHERE name = 'tina')")
         .await;
     gw.sess(&tina, Method::GET, "/teams", None, false)
         .await
         .expect(StatusCode::UNAUTHORIZED);
-    gw.sql("UPDATE admin_session SET expires_at = 1000 WHERE user_id = (SELECT id FROM app_user WHERE name = 'olga')")
+    gw.sql("UPDATE admin_session SET expires_at = {PAST} WHERE user_id = (SELECT id FROM app_user WHERE name = 'olga')")
         .await;
     gw.sess(&olga, Method::GET, "/teams", None, false)
         .await
         .expect(StatusCode::UNAUTHORIZED);
     // abgelaufene Sessions sind gelöscht
-    let n: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM admin_session s JOIN app_user u ON u.id = s.user_id WHERE u.name IN ('tina', 'olga')",
-    )
-    .fetch_one(&gw.db)
-    .await
-    .unwrap();
+    let n = gw
+        .count(
+            "SELECT COUNT(*) FROM admin_session s JOIN app_user u ON u.id = s.user_id WHERE u.name IN ('tina', 'olga')",
+        )
+        .await;
     assert_eq!(n, 0);
     // Nutzer löschen beendet seine Sessions
     gw.sess(&vera, Method::GET, "/session", None, false)

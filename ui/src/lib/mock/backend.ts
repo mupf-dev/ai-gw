@@ -151,6 +151,7 @@ function seed(): Record<Kind, Map<string, Entry>> {
       id: uuid(),
       metadata: { name: k.name, labels: {}, createdAt: new Date(k.createdAt).toISOString(), updatedAt: new Date(k.createdAt).toISOString() },
       spec: {
+        organization: store().teams.get(k.teamId)?.obj.spec.organization ?? all('organizations')[0]?.metadata.name ?? '',
         team: k.teamId,
         allowedModels: k.models === 'all' ? [] : k.models,
         budget: k.budgetLimit ? { amount: String(k.budgetLimit), period: 'month', hardLimit: true, warnAtPercent: [80] } : null,
@@ -208,7 +209,11 @@ function validate(kind: Kind, name: string, spec: Obj) {
       models(spec.allowedModels);
       break;
     case 'api-keys':
+      // F3: Organisation Pflicht, mit Team die des Teams.
+      if (!spec.organization || !has('organizations', spec.organization)) throw invalid(`unbekannte Organisation „${spec.organization ?? ''}“`);
       if (spec.team && !has('teams', spec.team)) throw invalid(`unbekanntes Team „${spec.team}“`);
+      if (spec.team && store().teams.get(spec.team)?.obj.spec.organization !== spec.organization)
+        throw invalid(`Team „${spec.team}“ gehört nicht zur Organisation „${spec.organization}“`);
       if (spec.user && !has('users', spec.user)) throw invalid(`unbekannter Nutzer „${spec.user}“`);
       models(spec.allowedModels);
       break;
@@ -290,8 +295,7 @@ function matches(kind: Kind, o: Obj, q: URLSearchParams): boolean {
     case 'users':
       return !q.has('email') || (o.spec.email ?? '').toLowerCase() === q.get('email')?.toLowerCase();
     case 'api-keys': {
-      const org = o.spec.team ? store().teams.get(o.spec.team)?.obj.spec.organization : null;
-      return eq('team', o.spec.team) && eq('user', o.spec.user) && eq('state', o.status.state) && eq('organization', org);
+      return eq('team', o.spec.team) && eq('user', o.spec.user) && eq('state', o.status.state) && eq('organization', o.spec.organization);
     }
     case 'deployments':
       return eq('modelGroup', o.spec.modelGroup) && eq('provider', o.spec.provider) && eq('credential', o.spec.credential) && eq('enabled', o.spec.enabled !== false);

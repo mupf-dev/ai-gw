@@ -136,6 +136,8 @@ impl Processor {
                     duration_ms: ms(a.duration),
                 })
                 .collect(),
+            // F191: RequestRecord trägt die auslösende Anfrage noch nicht.
+            parent_request_id: None,
         }
     }
 

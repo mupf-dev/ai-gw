@@ -8,9 +8,8 @@
 //! verschlüsselt (AES-256-GCM mit dem Master-Key, AAD = `id`); der Aufrufer liefert bzw.
 //! erhält das Chiffrat ([`crate::crypto::Sealed`]).
 
-use sqlx::Row as _;
-
 use crate::crypto::Sealed;
+use crate::db::{Q, Val};
 use crate::{Store, StoreError};
 
 /// Eine Zeile von `cache_vector`.
@@ -38,7 +37,8 @@ impl Store {
         }
         let mut tx = self.pool.begin().await?;
         for r in rows {
-            sqlx::query(
+            let (nonce, ciphertext) = r.sealed.to_bytes()?;
+            Q::new(
                 "INSERT INTO cache_vector \
                  (id, partition_key, dims, created_at, expires_at, key_id, nonce, ciphertext) \
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
@@ -47,15 +47,15 @@ impl Store {
                  expires_at = excluded.expires_at, key_id = excluded.key_id, \
                  nonce = excluded.nonce, ciphertext = excluded.ciphertext",
             )
-            .bind(&r.id)
-            .bind(&r.partition_key)
-            .bind(r.dims)
-            .bind(r.created_at)
-            .bind(r.expires_at)
-            .bind(&r.sealed.key_id)
-            .bind(&r.sealed.nonce)
-            .bind(&r.sealed.ciphertext)
-            .execute(&mut *tx)
+            .bind(Val::text(r.id.clone()))
+            .bind(Val::text(r.partition_key.clone()))
+            .bind(Val::int(r.dims))
+            .bind(Val::ms(r.created_at))
+            .bind(Val::ms(r.expires_at))
+            .bind(Val::text(r.sealed.key_id.clone()))
+            .bind(Val::Bytes(Some(nonce)))
+            .bind(Val::Bytes(Some(ciphertext)))
+            .execute(&mut tx)
             .await?;
         }
         tx.commit().await?;
@@ -69,9 +69,9 @@ impl Store {
         }
         let mut tx = self.pool.begin().await?;
         for id in ids {
-            sqlx::query("DELETE FROM cache_vector WHERE id = $1")
-                .bind(id)
-                .execute(&mut *tx)
+            Q::new("DELETE FROM cache_vector WHERE id = $1")
+                .bind(Val::text(id.clone()))
+                .execute(&mut tx)
                 .await?;
         }
         tx.commit().await?;
@@ -80,11 +80,10 @@ impl Store {
 
     /// Löscht abgelaufene Einträge; liefert die Anzahl.
     pub async fn cache_vectors_purge(&self, now_ms: i64) -> Result<u64, StoreError> {
-        let r = sqlx::query("DELETE FROM cache_vector WHERE expires_at <= $1")
-            .bind(now_ms)
+        Ok(Q::new("DELETE FROM cache_vector WHERE expires_at <= $1")
+            .bind(Val::ms(now_ms))
             .execute(&self.pool)
-            .await?;
-        Ok(r.rows_affected())
+            .await?)
     }
 
     /// Lädt nicht abgelaufene Einträge, jüngste zuerst, höchstens `limit`.
@@ -93,27 +92,27 @@ impl Store {
         now_ms: i64,
         limit: i64,
     ) -> Result<Vec<CacheVectorRow>, StoreError> {
-        let rows = sqlx::query(
+        let rows = Q::new(
             "SELECT id, partition_key, dims, created_at, expires_at, key_id, nonce, ciphertext \
              FROM cache_vector WHERE expires_at > $1 ORDER BY created_at DESC LIMIT $2",
         )
-        .bind(now_ms)
-        .bind(limit)
+        .bind(Val::ms(now_ms))
+        .bind(Val::int(limit))
         .fetch_all(&self.pool)
         .await?;
         rows.into_iter()
             .map(|row| {
                 Ok(CacheVectorRow {
-                    id: row.try_get("id")?,
-                    partition_key: row.try_get("partition_key")?,
-                    dims: row.try_get("dims")?,
-                    created_at: row.try_get("created_at")?,
-                    expires_at: row.try_get("expires_at")?,
-                    sealed: Sealed {
-                        key_id: row.try_get("key_id")?,
-                        nonce: row.try_get("nonce")?,
-                        ciphertext: row.try_get("ciphertext")?,
-                    },
+                    id: row.text("id")?,
+                    partition_key: row.text("partition_key")?,
+                    dims: row.i64("dims")?,
+                    created_at: row.ms("created_at")?,
+                    expires_at: row.ms("expires_at")?,
+                    sealed: Sealed::from_bytes(
+                        row.text("key_id")?,
+                        &row.bytes("nonce")?,
+                        &row.bytes("ciphertext")?,
+                    ),
                 })
             })
             .collect()

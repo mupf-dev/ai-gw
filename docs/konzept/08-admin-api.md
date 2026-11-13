@@ -71,8 +71,12 @@ Unbekanntem). `PUT` ersetzt Labels und `spec` vollständig; Umbenennen ist nicht
   Zeitstempel wird ersetzt). Antwort `201` mit `{"newKey": {key, secret}, "previousKey": {…}}`.
   Gesperrte Keys lassen sich nicht rotieren (`409`). Audit: `create` (neu) und `rotate` (alt);
   Sperren/Entsperren: `revoke`/`reactivate`.
-- **Team ist optional** (Stand AIGW-9). Keys ohne Team haben keine Organisation; ihre Freigaben
-  ergeben sich nur aus `spec.allowedModels`.
+- **Organisation ist Pflicht, Team optional** (F3, AIGW-73): `spec.organization` muss existieren
+  (`422`), mit Team muss es die Organisation des Teams sein (`422`). Keys ohne Team erben Limits,
+  Budgets und Plugins der Organisation und werden bei den Grenzen (AIGW-67) direkt gegen die
+  Organisation geprüft (auch `?cascade=clamp` beim Senken der Organisationsgrenzen). Zieht ein
+  Team in eine andere Organisation um, ziehen seine Keys mit (Fremdschlüssel `ON UPDATE
+  CASCADE`). Rollenprüfung unverändert: Keys ohne Team sind global (nur globale Rollen).
 
 ### 2.2 Modellgruppen (AIGW-65)
 
@@ -238,9 +242,9 @@ aufgelösten Adressen mit `UpstreamPolicy::resolved_ip_allowed` (siehe
 | Thema | Regel |
 |---|---|
 | Adressierung | über den Namen (je Art global eindeutig); IDs sind nur Information |
-| Paginierung | `?limit=` (1–500, Standard 50) und `?cursor=` (Wert aus `nextCursor` der vorigen Seite); Sortierung nach Name; `nextCursor` fehlt auf der letzten Seite |
+| Paginierung | `?limit=` (1–500, Standard 50) und `?cursor=` (Wert aus `nextCursor` der vorigen Seite = Name des letzten Eintrags); Sortierung nach Name; `nextCursor` fehlt auf der letzten Seite. Seit AIGW-73 (F42) echte SQL-Pagination: Keyset (`name > cursor`), Filter, Suche, Labels und der Geltungsbereich der Rolle stehen im `WHERE`, die Datenbank liefert höchstens `limit + 1` Zeilen (`Store::list_page`) |
 | Filter (alle) | `?q=` Teilstring im Namen (Keys: auch Präfix, Modellgruppen: auch Aliasse), `?label=k=v,k2` (alle müssen passen, ohne `=` genügt das Vorhandensein) |
-| Filter (je Art) | Teams `organization`; Nutzer `email` (ohne Groß-/Kleinschreibung); Keys `team`, `user`, `organization`, `state`; Deployments `modelGroup`, `provider`, `credential`, `enabled`; Zugangsdaten `provider`; Preise `model`, `provider`, `effectiveAt` |
+| Filter (je Art) | Teams `organization`; Nutzer `email` (ohne Groß-/Kleinschreibung); Keys `team`, `user`, `organization` (Organisation des Keys, F3), `state`; Deployments `modelGroup`, `provider`, `credential`, `enabled`; Zugangsdaten `provider`; Preise `model`, `provider`, `effectiveAt`; MCP-Server `transport`, `credential`, `enabled`; MCP-Freigaben `server`, `team`, `apiKey` |
 | Teiländerung | `PATCH` (JSON Merge Patch) nur bei Zugangsdaten (Werte bleiben erhalten); sonst `PUT` mit vollständiger `spec` |
 | Unbekannte Parameter | `400` (Tippfehler fallen auf) |
 | Optimistische Sperre | Einzelobjekte tragen einen starken `ETag` (SHA-256 über den Inhalt; bei Keys ohne `lastUsedAt`). `PUT`, `DELETE`, `revoke`, `reactivate`, `rotate` werten `If-Match` aus (`*` oder Liste erlaubt); passt er nicht: `412 precondition-failed`. Ohne `If-Match` wird ohne Prüfung geschrieben. |

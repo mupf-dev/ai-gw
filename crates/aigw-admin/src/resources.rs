@@ -10,13 +10,14 @@
 //!   in GitOps-YAML: `{metadata: {name, labels}, spec}`; gelesen zusätzlich `id`.
 //! - Listen: `?limit=` (1–500, Standard 50), `?cursor=` (aus `nextCursor`), `?q=`
 //!   (Teilstring im Namen), `?label=k=v,k2` und ressourcenspezifische Filter; sortiert nach Name.
+//!   Filter, Geltungsbereich und Keyset-Cursor laufen in SQL (F42, `Store::list_page`).
 //! - `ETag` bei Einzelobjekten, `If-Match` bei Änderungen (optimistische Sperre, `412`).
 //! - Fehler als Problem Details ([`Problem`]).
 
 // `#[utoipa::path(params(…))]` erzeugt für IntoParams-Typen qualifizierte Pfade.
 #![allow(unused_qualifications)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::future::Future;
 
@@ -25,7 +26,7 @@ use aigw_core::resource::{
     OrganizationSpec, TeamSpec, UserSpec,
 };
 use aigw_core::validate;
-use aigw_store::{PlainResource, Store, WriteExtras};
+use aigw_store::{AuditScope, ListFilter, ListQuery, Page, PlainResource, Store, WriteExtras};
 use aws_lc_rs::digest;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Extension, Path, Query, State};
@@ -155,42 +156,32 @@ fn parse_labels(sel: Option<&str>) -> Result<Vec<(String, Option<String>)>, Prob
         .collect()
 }
 
-/// Filtert nach `q`/`label` und schneidet die Seite nach `cursor`/`limit` aus.
-/// `items` muss nach Name sortiert sein (so liefert sie der Store).
-pub(crate) fn paginate<T>(
-    items: Vec<T>,
-    meta: impl Fn(&T) -> &ObjectMeta,
+/// Listenabfrage für den Store (F42): Seitengröße prüfen, Label-Selektor zerlegen; Filter
+/// und Bereich kommen vom Aufrufer.
+pub(crate) fn list_query(
     args: &ListArgs<'_>,
-) -> Result<(Vec<T>, Option<String>), Problem> {
+    filters: Vec<ListFilter>,
+    scope: AuditScope,
+) -> Result<ListQuery, Problem> {
     let limit = args.limit.unwrap_or(DEFAULT_LIMIT);
     if !(1..=MAX_LIMIT).contains(&limit) {
         return Err(Problem::bad_request(format!(
             "limit muss zwischen 1 und {MAX_LIMIT} liegen"
         )));
     }
-    let limit = usize::try_from(limit).unwrap_or(usize::MAX);
-    let labels = parse_labels(args.label)?;
-    let mut page: Vec<T> = items
-        .into_iter()
-        .filter(|i| {
-            let m = meta(i);
-            args.cursor.is_none_or(|c| m.name.as_str() > c)
-                && args.q.is_none_or(|q| m.name.contains(q))
-                && labels.iter().all(|(k, v)| match (m.labels.get(k), v) {
-                    (Some(have), Some(want)) => have == want,
-                    (Some(_), None) => true,
-                    (None, _) => false,
-                })
-        })
-        .take(limit + 1)
-        .collect();
-    let next = if page.len() > limit {
-        page.truncate(limit);
-        page.last().map(|i| meta(i).name.clone())
-    } else {
-        None
-    };
-    Ok((page, next))
+    Ok(ListQuery {
+        limit,
+        after: args.cursor.map(str::to_owned),
+        search: args.q.filter(|q| !q.is_empty()).map(str::to_owned),
+        labels: parse_labels(args.label)?,
+        filters,
+        scope,
+    })
+}
+
+/// Seite als `(Einträge, nextCursor)`.
+pub(crate) fn page_parts<T, U: From<T>>(page: Page<T>) -> (Vec<U>, Option<String>) {
+    (page.items.into_iter().map(U::from).collect(), page.next)
 }
 
 /// Prüft, dass alle Modellnamen (Name oder Alias einer Modellgruppe) existieren.
@@ -250,22 +241,14 @@ pub(crate) trait AdminResource: PlainResource {
     /// Gemeinsame Listenparameter.
     fn list_args(q: &Self::Query) -> ListArgs<'_>;
 
-    /// Ressourcenspezifischer Filter.
-    fn filter(_o: &Object<Self>, _q: &Self::Query) -> bool {
-        true
+    /// Ressourcenspezifische Filter (laufen in SQL, F42).
+    fn list_filters(_q: &Self::Query) -> Result<Vec<ListFilter>, Problem> {
+        Ok(Vec::new())
     }
 
     /// Modellfreigaben (werden beim Schreiben gegen die Modellgruppen geprüft).
     fn allowed_models(&self) -> &[String] {
         &[]
-    }
-
-    /// Filter über die ganze (nach Name sortierte) Liste, z. B. „nur gültige Preisversion“.
-    fn post_filter(
-        items: Vec<Object<Self>>,
-        _q: &Self::Query,
-    ) -> Result<Vec<Object<Self>>, Problem> {
-        Ok(items)
     }
 
     /// Name beim Anlegen ohne `metadata.name` (`None` = Name ist Pflicht).
@@ -316,23 +299,51 @@ pub(crate) trait AdminResource: PlainResource {
     }
 }
 
+/// Lesbarer Bereich eines Principals für Listen (wie `Principal::can(Read, …)`): global, wenn
+/// eine wirksame Zuweisung ohne Einschränkung besteht, sonst die eingeschränkten Zuweisungen.
+pub(crate) fn read_scope(p: &Principal) -> AuditScope {
+    let mut rules = Vec::new();
+    for b in p.roles.iter().filter(|b| crate::rbac::is_effective(b)) {
+        if b.organization.is_none() && b.team.is_none() {
+            return AuditScope::All;
+        }
+        let rule = aigw_store::ScopeRule {
+            organization: b.organization.clone(),
+            team: b.team.clone(),
+        };
+        if !rules.contains(&rule) {
+            rules.push(rule);
+        }
+    }
+    AuditScope::Within(rules)
+}
+
+/// Katalog-Arten (Leserecht für jede wirksame Rolle).
+fn is_catalog(kind: aigw_core::resource::ResourceKind) -> bool {
+    use aigw_core::resource::ResourceKind as K;
+    matches!(
+        kind,
+        K::ModelGroup
+            | K::Deployment
+            | K::Price
+            | K::McpServer
+            | K::ProviderCredential
+            | K::PluginBinding
+    )
+}
+
 pub(crate) async fn list_impl<R: AdminResource>(
     st: &AdminState,
     p: &Principal,
     q: &R::Query,
 ) -> Result<(Vec<R::Res>, Option<String>), Problem> {
-    // Nur Objekte, die der Principal lesen darf (eingeschränkte Rollen sehen ihren Bereich).
-    let items: Vec<Object<R>> = st
-        .store
-        .list::<R>()
-        .await?
-        .into_iter()
-        .filter(|o| R::filter(o, q))
-        .filter(|o| p.can(Permission::Read, &R::target(&o.metadata.name, &o.spec)))
-        .collect();
-    let items = R::post_filter(items, q)?;
-    let (page, next) = paginate(items, |o| &o.metadata, &R::list_args(q))?;
-    Ok((page.into_iter().map(R::Res::from).collect(), next))
+    // Nur Objekte, die der Principal lesen darf (eingeschränkte Rollen sehen ihren Bereich);
+    // der Bereich steht wie alle Filter im SQL (F42).
+    let lq = list_query(&R::list_args(q), R::list_filters(q)?, read_scope(p))?;
+    if is_catalog(R::KIND) && !p.can(Permission::Read, &Target::Catalog) {
+        return Ok((Vec::new(), None));
+    }
+    Ok(page_parts(st.store.list_page::<R>(&lq).await?))
 }
 
 pub(crate) async fn get_impl<R: AdminResource>(
@@ -733,10 +744,11 @@ impl AdminResource for TeamSpec {
         }
     }
 
-    fn filter(o: &Object<Self>, q: &Self::Query) -> bool {
-        q.organization
-            .as_ref()
-            .is_none_or(|org| *org == o.spec.organization)
+    fn list_filters(q: &Self::Query) -> Result<Vec<ListFilter>, Problem> {
+        Ok(q.organization
+            .iter()
+            .map(|o| ListFilter::Organization(o.clone()))
+            .collect())
     }
 
     fn allowed_models(&self) -> &[String] {
@@ -807,13 +819,11 @@ impl AdminResource for UserSpec {
         }
     }
 
-    fn filter(o: &Object<Self>, q: &Self::Query) -> bool {
-        q.email.as_ref().is_none_or(|want| {
-            o.spec
-                .email
-                .as_ref()
-                .is_some_and(|e| e.eq_ignore_ascii_case(want))
-        })
+    fn list_filters(q: &Self::Query) -> Result<Vec<ListFilter>, Problem> {
+        Ok(q.email
+            .iter()
+            .map(|e| ListFilter::Email(e.clone()))
+            .collect())
     }
 }
 
@@ -865,19 +875,13 @@ impl AdminResource for ModelGroupSpec {
     }
 
     fn list_args(q: &Self::Query) -> ListArgs<'_> {
-        // `q` sucht auch in Aliassen, daher in `filter` statt in `paginate`.
+        // `q` sucht auch in Aliassen (im Store über `model_alias`).
         ListArgs {
             limit: q.limit,
             cursor: q.cursor.as_deref(),
-            q: None,
+            q: q.q.as_deref(),
             label: q.label.as_deref(),
         }
-    }
-
-    fn filter(g: &Object<Self>, q: &Self::Query) -> bool {
-        q.q.as_deref().is_none_or(|s| {
-            g.metadata.name.contains(s) || g.spec.aliases.iter().any(|a| a.contains(s))
-        })
     }
 
     async fn check(
@@ -997,15 +1001,7 @@ pub struct RotatedApiKey {
 }
 
 /// Geltungsbereich eines Keys: Objekt im Team (Organisation über das Team); Keys ohne Team
-/// sind global (nur globale Rollen).
-fn key_target_of(team_orgs: &HashMap<String, String>, spec: &ApiKeySpec) -> Target {
-    match &spec.team {
-        Some(t) => Target::in_team(team_orgs.get(t).cloned().unwrap_or_default(), t.clone()),
-        None => Target::Global,
-    }
-}
-
-/// Wie [`key_target_of`], liest das Team aus dem Store (unbekanntes Team -> `422`).
+/// sind global (nur globale Rollen). Unbekanntes Team -> `422`.
 async fn key_target(store: &Store, spec: &ApiKeySpec) -> Result<Target, Problem> {
     match &spec.team {
         Some(t) => match store.get::<TeamSpec>(t).await {
@@ -1016,6 +1012,28 @@ async fn key_target(store: &Store, spec: &ApiKeySpec) -> Result<Target, Problem>
             Err(e) => Err(e.into()),
         },
         None => Ok(Target::Global),
+    }
+}
+
+/// F3: Organisation ist Pflicht und muss existieren; mit Team die Organisation des Teams
+/// (`422`). Keys ohne Team erben Limits, Budgets und Plugins der Organisation.
+async fn check_key_org(store: &Store, spec: &ApiKeySpec) -> Result<(), Problem> {
+    let team_org = match &spec.team {
+        Some(t) => match store.get::<TeamSpec>(t).await {
+            Ok(team) => Some(team.spec.organization),
+            Err(aigw_store::StoreError::NotFound { .. }) => None,
+            Err(e) => return Err(e.into()),
+        },
+        None => None,
+    };
+    validate::api_key_organization(spec, team_org.as_deref()).map_err(Problem::invalid)?;
+    match store.get::<OrganizationSpec>(&spec.organization).await {
+        Ok(_) => Ok(()),
+        Err(aigw_store::StoreError::NotFound { .. }) => Err(Problem::invalid(format!(
+            "organization: unbekannte Organisation {:?}",
+            spec.organization
+        ))),
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -1036,49 +1054,23 @@ pub(crate) async fn list_api_keys(
     q: Result<Query<ApiKeyQuery>, QueryRejection>,
 ) -> ApiResult {
     let Query(q) = q?;
-    // Team -> Organisation (Filter `organization`, Rollenprüfung je Key).
-    let team_orgs: HashMap<String, String> = st
-        .store
-        .list::<TeamSpec>()
-        .await?
-        .into_iter()
-        .map(|t| (t.metadata.name, t.spec.organization))
-        .collect();
-    let org_teams: Option<HashSet<&String>> = q.organization.as_ref().map(|org| {
-        team_orgs
+    let mut filters = Vec::new();
+    filters.extend(q.team.iter().map(|t| ListFilter::Team(t.clone())));
+    filters.extend(q.user.iter().map(|u| ListFilter::User(u.clone())));
+    filters.extend(
+        q.organization
             .iter()
-            .filter(|(_, o)| *o == org)
-            .map(|(t, _)| t)
-            .collect()
-    });
-    let items: Vec<ApiKey> = st
-        .store
-        .list_api_keys()
-        .await?
-        .into_iter()
-        .filter(|k| {
-            q.q.as_deref()
-                .is_none_or(|s| k.metadata.name.contains(s) || k.status.prefix.contains(s))
-                && q.team
-                    .as_ref()
-                    .is_none_or(|t| k.spec.team.as_ref() == Some(t))
-                && q.user
-                    .as_ref()
-                    .is_none_or(|u| k.spec.user.as_ref() == Some(u))
-                && q.state.is_none_or(|s| k.status.state == s)
-                && org_teams
-                    .as_ref()
-                    .is_none_or(|ts| k.spec.team.as_ref().is_some_and(|t| ts.contains(t)))
-                && p.can(Permission::Read, &key_target_of(&team_orgs, &k.spec))
-        })
-        .collect();
+            .map(|o| ListFilter::Organization(o.clone())),
+    );
+    filters.extend(q.state.map(|s| ListFilter::State(s.as_str().to_owned())));
     let args = ListArgs {
         limit: q.limit,
         cursor: q.cursor.as_deref(),
-        q: None,
+        q: q.q.as_deref(),
         label: q.label.as_deref(),
     };
-    let (items, next_cursor) = paginate(items, |k| &k.metadata, &args)?;
+    let lq = list_query(&args, filters, read_scope(&p))?;
+    let (items, next_cursor) = page_parts(st.store.list_api_keys_page(&lq).await?);
     Ok(json_with(
         StatusCode::OK,
         None,
@@ -1113,6 +1105,7 @@ pub(crate) async fn create_api_key(
         Permission::Write,
         &key_target(&st.store, &input.spec).await?,
     )?;
+    check_key_org(&st.store, &input.spec).await?;
     check_models(&st.store, &input.spec.allowed_models).await?;
     let _guard = st.write_lock.lock().await;
     let extras = bounds::api_key(&st.store, &p, &input.metadata.name, &input.spec, &q).await?;
@@ -1186,6 +1179,7 @@ pub(crate) async fn put_api_key(
         Permission::Write,
         &key_target(&st.store, &input.spec).await?,
     )?;
+    check_key_org(&st.store, &input.spec).await?;
     check_models(&st.store, &input.spec.allowed_models).await?;
     let _guard = st.write_lock.lock().await;
     let current = st.store.get_api_key(&name).await?;
@@ -1482,32 +1476,32 @@ mod tests {
     }
 
     #[test]
-    fn pagination_with_cursor_and_filters() {
-        let items: Vec<ObjectMeta> = ["a", "b", "c", "d", "e"]
-            .iter()
-            .map(|n| meta(n, &[("env", if *n < "c" { "dev" } else { "prod" })]))
-            .collect();
+    fn list_query_checks_limit_and_labels() {
         let args = |limit, cursor, label| ListArgs {
             limit: Some(limit),
             cursor,
-            q: None,
+            q: Some("x"),
             label,
         };
-        let (p, next) = paginate(items.clone(), |m| m, &args(2, None, None)).unwrap();
-        assert_eq!(p.len(), 2);
-        assert_eq!(next.as_deref(), Some("b"));
-        let (p, next) = paginate(items.clone(), |m| m, &args(2, Some("b"), None)).unwrap();
-        assert_eq!(p[0].name, "c");
-        assert_eq!(next.as_deref(), Some("d"));
-        let (p, next) = paginate(items.clone(), |m| m, &args(2, Some("d"), None)).unwrap();
-        assert_eq!(p.len(), 1);
-        assert_eq!(next, None);
-        let (p, _) = paginate(items.clone(), |m| m, &args(50, None, Some("env=prod"))).unwrap();
-        assert_eq!(p.len(), 3);
-        let (p, _) = paginate(items.clone(), |m| m, &args(50, None, Some("missing"))).unwrap();
-        assert!(p.is_empty());
-        assert!(paginate(items.clone(), |m| m, &args(0, None, None)).is_err());
-        assert!(paginate(items, |m| m, &args(501, None, None)).is_err());
+        let lq = list_query(
+            &args(2, Some("b"), Some("env=prod,tier")),
+            vec![],
+            AuditScope::All,
+        )
+        .unwrap();
+        assert_eq!(lq.limit, 2);
+        assert_eq!(lq.after.as_deref(), Some("b"));
+        assert_eq!(lq.search.as_deref(), Some("x"));
+        assert_eq!(
+            lq.labels,
+            vec![
+                ("env".to_owned(), Some("prod".to_owned())),
+                ("tier".to_owned(), None)
+            ]
+        );
+        assert!(list_query(&args(0, None, None), vec![], AuditScope::All).is_err());
+        assert!(list_query(&args(501, None, None), vec![], AuditScope::All).is_err());
+        assert!(list_query(&args(5, None, Some("=x")), vec![], AuditScope::All).is_err());
     }
 
     #[test]

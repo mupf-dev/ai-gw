@@ -233,8 +233,10 @@ fn team(name: &str, org: &str) -> Value {
     json!({"metadata": {"name": name}, "spec": {"organization": org}})
 }
 
+/// Key im Team (F3: Organisation = die des Teams).
 fn key(name: &str, team: &str) -> Value {
-    json!({"metadata": {"name": name}, "spec": {"team": team}})
+    let org = if team == "ops" { "other" } else { "acme" };
+    json!({"metadata": {"name": name}, "spec": {"organization": org, "team": team}})
 }
 
 fn field<'a>(e: &'a Value, f: &str) -> &'a str {

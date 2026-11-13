@@ -26,8 +26,8 @@ Aufbewahrungs-Task: stündlich Rohlogs / Payloads / Rollups nach Frist löschen
 | Prometheus-Metriken (`GatewayMetrics`, `MetricsObserver`), §11 | `aigw_observe::prom` |
 | OTLP-Export: `tracing`-Layer für Traces, `OtlpLogExporter`, §12 | `aigw_observe::otel` |
 | Trace-Konventionen (`TRACE_TARGET`, `current_traceparent`, `gen_ai_system`) | `aigw_core::observe` |
-| Tabellen, Batch-Schreiben, Löschen, Lesen | `aigw_store::observe`, Migration `0002_observe.sql` |
-| Dashboards/Log-Explorer: Abfragen, Stunden-Rollups, §13 | `aigw_store::analytics`, `aigw_admin::analytics`, Migration `0005_analytics.sql` |
+| Tabellen, Batch-Schreiben, Löschen, Lesen | `aigw_store::observe` (Schema seit AIGW-73: `migrations/{sqlite,postgres}/0001_init.sql`) |
+| Dashboards/Log-Explorer: Abfragen, Stunden-Rollups, §13 | `aigw_store::analytics`, `aigw_admin::analytics` |
 
 **Eigene Crate statt Modul:** Der Proxy hängt nur vom Trait in `aigw-core` ab und bleibt frei von
 Datenbank-, Regex- und (ab AIGW-45) OpenTelemetry-Abhängigkeiten. Das Request-Log ist isoliert
@@ -81,6 +81,12 @@ nicht – es bekommt fertige Zeilen und Rollup-Deltas.
 - **Fehler der DB** (Q8): bis zu 4 Versuche mit 250 ms / 500 ms / 1 s Pause. Währenddessen liest
   der Writer nicht; der Kanal läuft voll, weitere Einträge werden gezählt verworfen. Danach ist
   der Batch verloren (`aigw_log_write_failed_total`).
+- **Rollups exakt bei Wiederholungen (F34, AIGW-73):** Jeder Batch bekommt **eine** ID (UUIDv7),
+  gleich für alle Versuche (`Store::write_request_batch_once`). Die Transaktion trägt sie zuerst
+  in `observe_batch` ein (`ON CONFLICT DO NOTHING`); ist sie schon vorhanden – der vorige
+  Versuch wurde trotz Fehlermeldung committet (z. B. Verbindung beim `COMMIT` abgerissen) –,
+  wird nichts geschrieben und der Batch gilt als erledigt. So zählen die additiven Rollups nie
+  doppelt. Die Retention löscht Einträge in `observe_batch` nach 7 Tagen.
 - **Exporter** bekommen denselben aufbereiteten Batch nach dem DB-Schreiben (nacheinander).
   Fehler → `aigw_log_export_errors_total` + Warnung, kein Wiederholen.
 - **Graceful Shutdown** (`ObserveHandle::shutdown`): Signal → Writer schließt den Kanal (neue
@@ -451,6 +457,9 @@ Lese-API: [08-admin-api.md](08-admin-api.md) §5.11. Hier: Datenbasis, Aggregati
   Fehlerklasse, Upstream-Status, Dauer) und `request_log.client_request_id`
   (`x-request-id`/`x-client-request-id` des Clients; nur sichtbares ASCII, höchstens 128
   Zeichen). Ältere Einträge: leer.
+- `request_log.parent_request_id` (F191, AIGW-73: Spalte, Index und Store-Filter
+  `LogQuery::parent_request_id`): auslösende Anfrage, z. B. das Embedding des semantischen
+  Caches. Noch ungefüllt – der Writer setzt sie, sobald `RequestRecord` das Feld trägt.
 - Indizes: `usage_rollup (api_key_id|organization_id, bucket_start)`, je Dimension auf
   `usage_rollup_hour`, `request_log (organization_id|model_group|deployment_id, at)` und
   `request_log (client_request_id)`.
@@ -514,6 +523,28 @@ Postgres 17 im Docker-Container auf derselben Box.
 | `timeseries` 24 h `requests` (auto → 5m, nur Minuten-Rollups, ≈ 144 000 Zeilen) | **380 ms** | 79 ms |
 | `request-logs` Seite 1 / Seite 2 (Cursor) | 1,8 / 1,6 ms | 7,0 / 3,6 ms |
 | `request-logs?status=error` / `modelGroup` + 24 h / `clientRequestId` | 6,7 / 1,7 / 0,8 ms | 5,2 / 3,6 / 2,8 ms |
+
+**Nachmessung AIGW-73** (getrennte Treiber, Postgres mit `UUID`/`TIMESTAMPTZ`, F7): gleiche
+Messung, alter Stand (vor AIGW-73) und neuer Stand direkt nacheinander auf der geteilten,
+ausgelasteten Buildbox (Absolutwerte daher nur untereinander vergleichbar), Median aus 5 Läufen:
+
+| Abfrage | SQLite alt → neu | Postgres alt → neu |
+|---|---|---|
+| `summary` 7 Tage | 28,1 → 29,1 ms | 17,5 → 21,1 ms |
+| `timeseries` 7 Tage `requests` (1h) | 7,5 → 6,8 ms | 5,1 → 7,6 ms |
+| `timeseries` 7 Tage `cost`, `groupBy=model_group` | 30,5 → 27,8 ms | 26,8 → 24,0 ms |
+| `timeseries` 7 Tage `latency_p95`, `groupBy=key` | 38,9 → 37,1 ms | 30,1 → 26,8 ms |
+| `timeseries` 7 Tage `ttft_p95`, `groupBy=provider` | 27,9 → 27,9 ms | 25,3 → 22,0 ms |
+| `top` 7 Tage Keys nach Kosten | 11,6 → 11,7 ms | 13,9 → 10,1 ms |
+| `timeseries` 24 h `requests` (5m) | 317,9 → 309,1 ms | 52,8 → 51,8 ms |
+| `summary` / `timeseries groupBy=team`, team-scoped | 7,7 / 9,1 → 8,0 / 9,3 ms | 7,5 / 6,6 → 6,1 / 6,6 ms |
+| `request-logs` Seite 1 / Seite 2 | 1,5 / 1,7 → 2,0 / 2,3 ms | 2,5 / 2,7 → 2,3 / 2,4 ms |
+| `request-logs?status=error` / `modelGroup` + 24 h / `clientRequestId` | 2,2 / 1,7 / 0,7 → 5,0 / 1,8 / 1,5 ms | 4,6 / 3,1 / 1,9 → 3,4 / 2,6 / 2,0 ms |
+
+Ergebnis: im Rahmen der Messschwankung unverändert (Läufe derselben Version streuen auf der
+geteilten Box um ±30 %). Postgres gruppiert Zeitreihen nach dem Roh-Bucket (`bucket_start`)
+und fasst auf den Schritt im Speicher zusammen; ein erster Versuch mit `date_bin(…)` je Zeile
+war bei 24 h/5 min deutlich langsamer (84 statt 56 ms).
 | `request-logs` team-scoped | 1,4 ms | 3,5 ms |
 
 Ziel < 200 ms für Dashboard-Abfragen über 7 Tage: eingehalten (Stunden-Rollups). Ohne

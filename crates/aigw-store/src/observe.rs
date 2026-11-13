@@ -6,15 +6,18 @@
 //! Geschrieben wird ausschließlich gebündelt vom Writer in `aigw-observe`: ein Batch = eine
 //! Transaktion mit mehrzeiligen `INSERT`s (Rohlog, Payload) und additiven `UPSERT`s
 //! (`ON CONFLICT … DO UPDATE SET x = usage_rollup.x + excluded.x`) für die Rollups. Das läuft
-//! unverändert auf SQLite und Postgres und verträgt mehrere Instanzen ohne Read-Modify-Write.
+//! auf SQLite und Postgres und verträgt mehrere Instanzen ohne Read-Modify-Write. Jeder Batch
+//! trägt eine ID (`observe_batch`, F34): Wiederholungen nach unklarem Commit-Ausgang wenden ihn
+//! nicht doppelt an.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+use aigw_core::resource::{Id, new_id};
 use serde::{Deserialize, Serialize};
-use sqlx::any::AnyRow;
-use sqlx::{AssertSqlSafe, Row as _};
+use time::OffsetDateTime;
 
+use crate::db::{DbRow, Q, Tx, Val};
 use crate::{Backend, Store, StoreError};
 
 /// Obergrenzen (inklusive, Millisekunden) der Latenz-Buckets; danach folgt `+Inf`.
@@ -138,6 +141,10 @@ pub struct RequestLogRow {
     /// Upstream-Versuche (Retries, Fallbacks) in Reihenfolge; leer = keine aufgezeichnet.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attempts: Vec<AttemptRow>,
+    /// Auslösende Anfrage (F191, z. B. das Embedding des semantischen Caches gehört zur
+    /// Chat-Anfrage, die es ausgelöst hat).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_request_id: Option<String>,
 }
 
 /// Ein Upstream-Versuch einer Anfrage (Spalte `request_log.attempts`, JSON-Array; AIGW-46).
@@ -279,7 +286,7 @@ impl RollupCounts {
     }
 }
 
-pub(crate) const REQUEST_LOG_COLUMNS: [&str; 29] = [
+pub(crate) const REQUEST_LOG_COLUMNS: [&str; 30] = [
     "id",
     "at",
     "endpoint",
@@ -309,6 +316,7 @@ pub(crate) const REQUEST_LOG_COLUMNS: [&str; 29] = [
     "metadata",
     "attempts",
     "client_request_id",
+    "parent_request_id",
 ];
 
 pub(crate) const ROLLUP_KEY_COLUMNS: [&str; 6] = [
@@ -367,13 +375,55 @@ fn insert_sql(backend: Backend, table: &str, cols: &[&str], rows: usize) -> Stri
     sql
 }
 
-fn b(v: bool) -> i64 {
-    i64::from(v)
+impl RequestLogRow {
+    /// Werte in Spaltenreihenfolge von [`REQUEST_LOG_COLUMNS`].
+    fn vals(&self) -> Result<[Val; 30], StoreError> {
+        let id = |s: Option<&str>, what: &str| Val::uuid_text(s, what);
+        Ok([
+            id(Some(&self.id), "request_log.id")?,
+            Val::ms(self.at),
+            Val::text(self.endpoint.clone()),
+            id(self.api_key_id.as_deref(), "request_log.api_key_id")?,
+            id(self.team_id.as_deref(), "request_log.team_id")?,
+            id(
+                self.organization_id.as_deref(),
+                "request_log.organization_id",
+            )?,
+            Val::Text(self.model_requested.clone()),
+            Val::Text(self.model_group.clone()),
+            id(self.deployment_id.as_deref(), "request_log.deployment_id")?,
+            Val::Text(self.provider.clone()),
+            Val::Text(self.provider_model.clone()),
+            Val::int(self.status),
+            Val::Text(self.error_code.clone()),
+            Val::int(self.input_tokens),
+            Val::int(self.output_tokens),
+            Val::int(self.cached_tokens),
+            Val::int(self.cache_write_tokens),
+            Val::int(self.reasoning_tokens),
+            Val::bool(self.usage_estimated),
+            Val::int(self.cost),
+            Val::int(self.latency_ms),
+            Val::Int(self.ttft_ms),
+            Val::Text(self.cache.clone()),
+            Val::bool(self.stream),
+            Val::bool(self.client_aborted),
+            Val::Text(self.client_ip.clone()),
+            Val::Json(Some(serde_json::Value::Object(serde_json::Map::new()))),
+            attempts_json(&self.attempts)?,
+            Val::Text(self.client_request_id.clone()),
+            id(
+                self.parent_request_id.as_deref(),
+                "request_log.parent_request_id",
+            )?,
+        ])
+    }
 }
 
 impl Store {
     /// Schreibt einen Batch in **einer** Transaktion: Rohlogs (doppelte IDs werden
-    /// ignoriert), Payloads und additive Rollup-Deltas.
+    /// ignoriert), Payloads und additive Rollup-Deltas. Jeder Aufruf ist ein neuer Batch –
+    /// für Wiederholungen [`Store::write_request_batch_once`] verwenden.
     ///
     /// `rollups` muss je Schlüssel höchstens einen Eintrag enthalten (Postgres lehnt
     /// doppelte Schlüssel in einem `UPSERT` ab).
@@ -383,80 +433,93 @@ impl Store {
         payloads: &[&PayloadRow],
         rollups: &[(RollupKey, RollupCounts)],
     ) -> Result<(), StoreError> {
+        self.write_request_batch_once(new_id(), logs, payloads, rollups)
+            .await
+            .map(drop)
+    }
+
+    /// Wie [`Store::write_request_batch`], aber **idempotent** je `batch_id` (F34): Die ID
+    /// wird in derselben Transaktion in `observe_batch` eingetragen; ist sie schon vorhanden
+    /// (Wiederholung nach unklarem Commit-Ausgang), wird nichts geschrieben und `false`
+    /// geliefert. So zählen Rollups auch bei Wiederholungen exakt einmal.
+    pub async fn write_request_batch_once(
+        &self,
+        batch_id: Id,
+        logs: &[&RequestLogRow],
+        payloads: &[&PayloadRow],
+        rollups: &[(RollupKey, RollupCounts)],
+    ) -> Result<bool, StoreError> {
         if logs.is_empty() && payloads.is_empty() && rollups.is_empty() {
-            return Ok(());
+            return Ok(true);
         }
+        // Werte vorab umwandeln: ungültige IDs scheitern vor dem Öffnen der Transaktion.
+        let log_vals = logs
+            .iter()
+            .map(|r| r.vals())
+            .collect::<Result<Vec<_>, _>>()?;
+        let backend = self.backend();
         let mut tx = self.pool.begin().await?;
 
-        for chunk in logs.chunks(ROWS_PER_STATEMENT) {
-            let sql = insert_sql(
-                self.backend(),
-                "request_log",
-                &REQUEST_LOG_COLUMNS,
-                chunk.len(),
-            ) + " ON CONFLICT (id) DO NOTHING";
-            let mut q = sqlx::query(AssertSqlSafe(sql));
-            for r in chunk {
-                q = q
-                    .bind(r.id.clone())
-                    .bind(r.at)
-                    .bind(r.endpoint.clone())
-                    .bind(r.api_key_id.clone())
-                    .bind(r.team_id.clone())
-                    .bind(r.organization_id.clone())
-                    .bind(r.model_requested.clone())
-                    .bind(r.model_group.clone())
-                    .bind(r.deployment_id.clone())
-                    .bind(r.provider.clone())
-                    .bind(r.provider_model.clone())
-                    .bind(r.status)
-                    .bind(r.error_code.clone())
-                    .bind(r.input_tokens)
-                    .bind(r.output_tokens)
-                    .bind(r.cached_tokens)
-                    .bind(r.cache_write_tokens)
-                    .bind(r.reasoning_tokens)
-                    .bind(b(r.usage_estimated))
-                    .bind(r.cost)
-                    .bind(r.latency_ms)
-                    .bind(r.ttft_ms)
-                    .bind(r.cache.clone())
-                    .bind(b(r.stream))
-                    .bind(b(r.client_aborted))
-                    .bind(r.client_ip.clone())
-                    .bind("{}")
-                    .bind(attempts_json(&r.attempts)?)
-                    .bind(r.client_request_id.clone());
+        let fresh = Q::new(
+            "INSERT INTO observe_batch (batch_id, applied_at) VALUES ($1, $2) \
+             ON CONFLICT (batch_id) DO NOTHING",
+        )
+        .bind(Val::uuid(batch_id))
+        .bind(Val::time(OffsetDateTime::now_utc()))
+        .execute(&mut tx)
+        .await?;
+        if fresh == 0 {
+            // Bereits angewendet; Transaktion verwerfen (Drop = Rollback).
+            return Ok(false);
+        }
+
+        for chunk in log_vals.chunks(ROWS_PER_STATEMENT) {
+            let mut q = Q::new(
+                insert_sql(backend, "request_log", &REQUEST_LOG_COLUMNS, chunk.len())
+                    + " ON CONFLICT (id) DO NOTHING",
+            );
+            for vals in chunk {
+                q.args.extend(vals.iter().cloned());
             }
-            q.execute(&mut *tx).await?;
+            q.execute(&mut tx).await?;
         }
 
         for chunk in payloads.chunks(ROWS_PER_STATEMENT) {
-            let sql = insert_sql(
-                self.backend(),
-                "request_payload",
-                &["id", "at", "mode", "payload"],
-                chunk.len(),
-            ) + " ON CONFLICT (id) DO NOTHING";
-            let mut q = sqlx::query(AssertSqlSafe(sql));
+            let mut q = Q::new(
+                insert_sql(
+                    backend,
+                    "request_payload",
+                    &["id", "at", "mode", "payload"],
+                    chunk.len(),
+                ) + " ON CONFLICT (id) DO NOTHING",
+            );
             for p in chunk {
-                q = q
-                    .bind(p.id.clone())
-                    .bind(p.at)
-                    .bind(p.mode.clone())
-                    .bind(serde_json::to_string(&p.payload)?);
+                q.args
+                    .push(Val::uuid_text(Some(&p.id), "request_payload.id")?);
+                q.args.push(Val::ms(p.at));
+                q.args.push(Val::text(p.mode.clone()));
+                q.args.push(Val::Json(Some(p.payload.clone())));
             }
-            q.execute(&mut *tx).await?;
+            q.execute(&mut tx).await?;
         }
 
         if !rollups.is_empty() {
-            upsert_rollups(&mut tx, self.backend(), "usage_rollup", rollups).await?;
+            upsert_rollups(&mut tx, backend, "usage_rollup", rollups).await?;
             let hourly = to_hourly(rollups);
-            upsert_rollups(&mut tx, self.backend(), "usage_rollup_hour", &hourly).await?;
+            upsert_rollups(&mut tx, backend, "usage_rollup_hour", &hourly).await?;
         }
 
         tx.commit().await?;
-        Ok(())
+        Ok(true)
+    }
+
+    /// Löscht Einträge in `observe_batch` mit `applied_at < before_ms` (F34). Liefert die
+    /// Anzahl.
+    pub async fn purge_observe_batches(&self, before_ms: i64) -> Result<u64, StoreError> {
+        Ok(Q::new("DELETE FROM observe_batch WHERE applied_at < $1")
+            .bind(Val::ms(before_ms))
+            .execute(&self.pool)
+            .await?)
     }
 
     /// Löscht Rohlogs mit `at < before_ms` (in Häppchen). Liefert die Anzahl.
@@ -475,12 +538,11 @@ impl Store {
         );
         let mut total = 0;
         loop {
-            let n = sqlx::query(AssertSqlSafe(sql.clone()))
-                .bind(before_ms)
-                .bind(PURGE_CHUNK)
+            let n = Q::new(sql.clone())
+                .bind(Val::ms(before_ms))
+                .bind(Val::int(PURGE_CHUNK))
                 .execute(&self.pool)
-                .await?
-                .rows_affected();
+                .await?;
             total += n;
             if n < PURGE_CHUNK.unsigned_abs() {
                 return Ok(total);
@@ -491,13 +553,12 @@ impl Store {
     /// Löscht Minuten-Rollups mit `bucket_start < before_ms` und Stunden-Rollups, deren
     /// Stunde vollständig davor liegt. Liefert die Anzahl der Minuten-Rollups.
     pub async fn purge_rollups(&self, before_ms: i64) -> Result<u64, StoreError> {
-        let n = sqlx::query("DELETE FROM usage_rollup WHERE bucket_start < $1")
-            .bind(before_ms)
+        let n = Q::new("DELETE FROM usage_rollup WHERE bucket_start < $1")
+            .bind(Val::ms(before_ms))
             .execute(&self.pool)
-            .await?
-            .rows_affected();
-        sqlx::query("DELETE FROM usage_rollup_hour WHERE bucket_start < $1")
-            .bind(before_ms.div_euclid(HOUR_MS) * HOUR_MS)
+            .await?;
+        Q::new("DELETE FROM usage_rollup_hour WHERE bucket_start < $1")
+            .bind(Val::ms(before_ms.div_euclid(HOUR_MS) * HOUR_MS))
             .execute(&self.pool)
             .await?;
         Ok(n)
@@ -539,22 +600,31 @@ impl Store {
             cols.join(", "),
             ROLLUP_KEY_COLUMNS.join(", ")
         );
-        let rows = sqlx::query(AssertSqlSafe(sql))
-            .bind(from_ms)
-            .bind(to_ms)
+        let rows = Q::new(sql)
+            .bind(Val::ms(from_ms))
+            .bind(Val::ms(to_ms))
             .fetch_all(&self.pool)
             .await?;
-        rows.iter().map(rollup_from_row).collect()
+        let mut out = rows
+            .iter()
+            .map(rollup_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        // Sortierung wie der Schlüssel (Text-IDs): Postgres sortiert UUIDs als Bytes.
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(out)
     }
 
-    /// Ein Rohlog-Eintrag.
+    /// Ein Rohlog-Eintrag (`None` auch bei einer ID, die keine UUID ist).
     pub async fn get_request_log(&self, id: &str) -> Result<Option<RequestLogRow>, StoreError> {
+        let Ok(id) = Id::parse_str(id) else {
+            return Ok(None);
+        };
         let sql = format!(
             "SELECT {} FROM request_log WHERE id = $1",
             REQUEST_LOG_COLUMNS.join(", ")
         );
-        let row = sqlx::query(AssertSqlSafe(sql))
-            .bind(id.to_owned())
+        let row = Q::new(sql)
+            .bind(Val::uuid(id))
             .fetch_optional(&self.pool)
             .await?;
         row.as_ref().map(request_log_from_row).transpose()
@@ -562,27 +632,31 @@ impl Store {
 
     /// Payload zu einer Anfrage.
     pub async fn get_request_payload(&self, id: &str) -> Result<Option<PayloadRow>, StoreError> {
-        let row = sqlx::query("SELECT id, at, mode, payload FROM request_payload WHERE id = $1")
-            .bind(id.to_owned())
+        let Ok(id) = Id::parse_str(id) else {
+            return Ok(None);
+        };
+        let row = Q::new("SELECT id, at, mode, payload FROM request_payload WHERE id = $1")
+            .bind(Val::uuid(id))
             .fetch_optional(&self.pool)
             .await?;
         let Some(row) = row else { return Ok(None) };
-        let text: String = row.try_get("payload")?;
         Ok(Some(PayloadRow {
-            id: row.try_get("id")?,
-            at: row.try_get("at")?,
-            mode: row.try_get("mode")?,
-            payload: serde_json::from_str(&text)?,
+            id: row.uuid("id")?.hyphenated().to_string(),
+            at: row.ms("at")?,
+            mode: row.text("mode")?,
+            payload: row
+                .opt_json_value("payload")?
+                .unwrap_or(serde_json::Value::Null),
         }))
     }
 
     /// Anzahl Rohlogs bzw. Payloads (Tests, Diagnose).
     pub async fn count_request_logs(&self) -> Result<(i64, i64), StoreError> {
-        let logs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM request_log")
-            .fetch_one(&self.pool)
+        let logs = Q::new("SELECT COUNT(*) FROM request_log")
+            .fetch_i64(&self.pool)
             .await?;
-        let payloads: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM request_payload")
-            .fetch_one(&self.pool)
+        let payloads = Q::new("SELECT COUNT(*) FROM request_payload")
+            .fetch_i64(&self.pool)
             .await?;
         Ok((logs, payloads))
     }
@@ -609,7 +683,7 @@ fn to_hourly(rollups: &[(RollupKey, RollupCounts)]) -> Vec<(RollupKey, RollupCou
 
 /// Additiver UPSERT von Rollup-Deltas in `table` (`usage_rollup` oder `usage_rollup_hour`).
 async fn upsert_rollups(
-    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    tx: &mut Tx,
     backend: Backend,
     table: &str,
     rollups: &[(RollupKey, RollupCounts)],
@@ -630,116 +704,112 @@ async fn upsert_rollups(
         let _ = write!(suffix, "{c} = {table}.{c} + excluded.{c}");
     }
     for chunk in rollups.chunks(ROWS_PER_STATEMENT) {
-        let sql = insert_sql(backend, table, &cols, chunk.len()) + &suffix;
-        let mut q = sqlx::query(AssertSqlSafe(sql));
+        let mut q = Q::new(insert_sql(backend, table, &cols, chunk.len()) + &suffix);
+        q.args.reserve(chunk.len() * cols.len());
         for (k, c) in chunk {
-            q = q
-                .bind(k.bucket_start)
-                .bind(k.api_key_id.clone())
-                .bind(k.team_id.clone())
-                .bind(k.organization_id.clone())
-                .bind(k.model_group.clone())
-                .bind(k.deployment_id.clone());
-            for v in c.scalars() {
-                q = q.bind(v);
-            }
-            for v in c.latency_hist {
-                q = q.bind(v);
-            }
-            for v in c.ttft_hist {
-                q = q.bind(v);
-            }
+            q.args.push(Val::ms(k.bucket_start));
+            q.args.push(Val::dim_text(&k.api_key_id, "api_key_id")?);
+            q.args.push(Val::dim_text(&k.team_id, "team_id")?);
+            q.args
+                .push(Val::dim_text(&k.organization_id, "organization_id")?);
+            q.args.push(Val::text(k.model_group.clone()));
+            q.args
+                .push(Val::dim_text(&k.deployment_id, "deployment_id")?);
+            q.args.extend(
+                c.scalars()
+                    .into_iter()
+                    .chain(c.latency_hist)
+                    .chain(c.ttft_hist)
+                    .map(Val::int),
+            );
         }
-        q.execute(&mut **tx).await?;
+        q.execute(&mut *tx).await?;
     }
     Ok(())
 }
 
-fn attempts_json(a: &[AttemptRow]) -> Result<Option<String>, StoreError> {
+fn attempts_json(a: &[AttemptRow]) -> Result<Val, StoreError> {
     if a.is_empty() {
-        Ok(None)
+        Ok(Val::Json(None))
     } else {
-        Ok(Some(serde_json::to_string(a)?))
+        Ok(Val::Json(Some(serde_json::to_value(a)?)))
     }
 }
 
-fn flag(row: &AnyRow, col: &str) -> Result<bool, StoreError> {
-    Ok(row.try_get::<i64, _>(col)? != 0)
-}
-
-pub(crate) fn request_log_from_row(row: &AnyRow) -> Result<RequestLogRow, StoreError> {
+pub(crate) fn request_log_from_row(row: &DbRow) -> Result<RequestLogRow, StoreError> {
     Ok(RequestLogRow {
-        id: row.try_get("id")?,
-        at: row.try_get("at")?,
-        endpoint: row.try_get("endpoint")?,
-        api_key_id: row.try_get("api_key_id")?,
-        team_id: row.try_get("team_id")?,
-        organization_id: row.try_get("organization_id")?,
-        model_requested: row.try_get("model_requested")?,
-        model_group: row.try_get("model_group")?,
-        deployment_id: row.try_get("deployment_id")?,
-        provider: row.try_get("provider")?,
-        provider_model: row.try_get("provider_model")?,
-        status: row.try_get("status")?,
-        error_code: row.try_get("error_code")?,
-        input_tokens: row.try_get("input_tokens")?,
-        output_tokens: row.try_get("output_tokens")?,
-        cached_tokens: row.try_get("cached_tokens")?,
-        cache_write_tokens: row.try_get("cache_write_tokens")?,
-        reasoning_tokens: row.try_get("reasoning_tokens")?,
-        usage_estimated: flag(row, "usage_estimated")?,
-        cost: row.try_get("cost")?,
-        latency_ms: row.try_get("latency_ms")?,
-        ttft_ms: row.try_get("ttft_ms")?,
-        cache: row.try_get("cache")?,
-        stream: flag(row, "stream")?,
-        client_aborted: flag(row, "client_aborted")?,
-        client_ip: row.try_get("client_ip")?,
-        client_request_id: row.try_get("client_request_id")?,
-        attempts: match row.try_get::<Option<String>, _>("attempts")? {
-            Some(t) if !t.is_empty() => serde_json::from_str(&t)?,
+        id: row.uuid("id")?.hyphenated().to_string(),
+        at: row.ms("at")?,
+        endpoint: row.text("endpoint")?,
+        api_key_id: row.opt_uuid_text("api_key_id")?,
+        team_id: row.opt_uuid_text("team_id")?,
+        organization_id: row.opt_uuid_text("organization_id")?,
+        model_requested: row.opt_text("model_requested")?,
+        model_group: row.opt_text("model_group")?,
+        deployment_id: row.opt_uuid_text("deployment_id")?,
+        provider: row.opt_text("provider")?,
+        provider_model: row.opt_text("provider_model")?,
+        status: row.i64("status")?,
+        error_code: row.opt_text("error_code")?,
+        input_tokens: row.i64("input_tokens")?,
+        output_tokens: row.i64("output_tokens")?,
+        cached_tokens: row.i64("cached_tokens")?,
+        cache_write_tokens: row.i64("cache_write_tokens")?,
+        reasoning_tokens: row.i64("reasoning_tokens")?,
+        usage_estimated: row.bool("usage_estimated")?,
+        cost: row.i64("cost")?,
+        latency_ms: row.i64("latency_ms")?,
+        ttft_ms: row.opt_i64("ttft_ms")?,
+        cache: row.opt_text("cache")?,
+        stream: row.bool("stream")?,
+        client_aborted: row.bool("client_aborted")?,
+        client_ip: row.opt_text("client_ip")?,
+        client_request_id: row.opt_text("client_request_id")?,
+        parent_request_id: row.opt_uuid_text("parent_request_id")?,
+        attempts: match row.opt_json_value("attempts")? {
+            Some(v) if !v.is_null() => serde_json::from_value(v)?,
             _ => Vec::new(),
         },
     })
 }
 
-fn rollup_from_row(row: &AnyRow) -> Result<(RollupKey, RollupCounts), StoreError> {
+fn rollup_from_row(row: &DbRow) -> Result<(RollupKey, RollupCounts), StoreError> {
     let key = RollupKey {
-        bucket_start: row.try_get("bucket_start")?,
-        api_key_id: row.try_get("api_key_id")?,
-        team_id: row.try_get("team_id")?,
-        organization_id: row.try_get("organization_id")?,
-        model_group: row.try_get("model_group")?,
-        deployment_id: row.try_get("deployment_id")?,
+        bucket_start: row.ms("bucket_start")?,
+        api_key_id: row.dim("api_key_id")?,
+        team_id: row.dim("team_id")?,
+        organization_id: row.dim("organization_id")?,
+        model_group: row.dim("model_group")?,
+        deployment_id: row.dim("deployment_id")?,
     };
     Ok((key, rollup_counts_from_row(row)?))
 }
 
 /// Zählspalten (Namen wie in der Tabelle) aus einer Ergebniszeile.
-pub(crate) fn rollup_counts_from_row(row: &AnyRow) -> Result<RollupCounts, StoreError> {
+pub(crate) fn rollup_counts_from_row(row: &DbRow) -> Result<RollupCounts, StoreError> {
     let mut hist = [0; LATENCY_BUCKET_COUNT];
     for (slot, col) in hist.iter_mut().zip(LATENCY_COLUMNS) {
-        *slot = row.try_get(col)?;
+        *slot = row.i64(col)?;
     }
     let mut ttft_hist = [0; LATENCY_BUCKET_COUNT];
     for (slot, col) in ttft_hist.iter_mut().zip(TTFT_COLUMNS) {
-        *slot = row.try_get(col)?;
+        *slot = row.i64(col)?;
     }
     Ok(RollupCounts {
-        requests: row.try_get("requests")?,
-        errors: row.try_get("errors")?,
-        cache_hits: row.try_get("cache_hits")?,
-        input_tokens: row.try_get("input_tokens")?,
-        output_tokens: row.try_get("output_tokens")?,
-        cached_tokens: row.try_get("cached_tokens")?,
-        cache_write_tokens: row.try_get("cache_write_tokens")?,
-        reasoning_tokens: row.try_get("reasoning_tokens")?,
-        cost: row.try_get("cost")?,
-        latency_ms_sum: row.try_get("latency_ms_sum")?,
-        estimated: row.try_get("estimated")?,
-        aborted: row.try_get("aborted")?,
-        ttft_ms_sum: row.try_get("ttft_ms_sum")?,
-        ttft_count: row.try_get("ttft_count")?,
+        requests: row.i64("requests")?,
+        errors: row.i64("errors")?,
+        cache_hits: row.i64("cache_hits")?,
+        input_tokens: row.i64("input_tokens")?,
+        output_tokens: row.i64("output_tokens")?,
+        cached_tokens: row.i64("cached_tokens")?,
+        cache_write_tokens: row.i64("cache_write_tokens")?,
+        reasoning_tokens: row.i64("reasoning_tokens")?,
+        cost: row.i64("cost")?,
+        latency_ms_sum: row.i64("latency_ms_sum")?,
+        estimated: row.i64("estimated")?,
+        aborted: row.i64("aborted")?,
+        ttft_ms_sum: row.i64("ttft_ms_sum")?,
+        ttft_count: row.i64("ttft_count")?,
         latency_hist: hist,
         ttft_hist,
     })

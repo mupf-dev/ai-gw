@@ -17,6 +17,7 @@ pub mod audit;
 pub(crate) mod credential;
 mod extras;
 mod kinds;
+pub mod list;
 
 pub use extras::WriteExtras;
 
@@ -28,10 +29,10 @@ use aigw_core::resource::{
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use sqlx::any::AnyRow;
-use sqlx::{Any, AssertSqlSafe, Row as _, Transaction};
 use time::OffsetDateTime;
 
+pub(crate) use crate::db::Val;
+use crate::db::{DbRow, Q, Tx};
 use crate::{Store, StoreError};
 
 /// Tabelle einer Ressourcenart.
@@ -62,13 +63,6 @@ pub(crate) fn level_kind(level: ScopeLevel) -> Option<ResourceKind> {
     }
 }
 
-/// Wert einer Spalte.
-#[derive(Debug, Clone)]
-pub(crate) enum Val {
-    Text(Option<String>),
-    Int(Option<i64>),
-}
-
 /// Spalte beim Schreiben: Wert oder Verweis (Name → ID wird aufgelöst).
 #[derive(Debug, Clone)]
 pub(crate) enum Col {
@@ -90,15 +84,19 @@ impl Col {
         Self::V(Val::Int(i))
     }
     pub(crate) fn bool(b: bool) -> Self {
-        Self::int(i64::from(b))
+        Self::V(Val::Bool(Some(b)))
+    }
+    pub(crate) fn opt_time(t: Option<OffsetDateTime>) -> Self {
+        Self::V(Val::opt_time(t))
+    }
+    pub(crate) fn time(t: OffsetDateTime) -> Self {
+        Self::V(Val::time(t))
     }
     pub(crate) fn json<T: Serialize>(v: &T) -> Result<Self, StoreError> {
-        Ok(Self::text(serde_json::to_string(v)?))
+        Ok(Self::V(Val::json(v)?))
     }
     pub(crate) fn opt_json<T: Serialize>(v: Option<&T>) -> Result<Self, StoreError> {
-        Ok(Self::V(Val::Text(
-            v.map(serde_json::to_string).transpose()?,
-        )))
+        Ok(Self::V(Val::Json(v.map(serde_json::to_value).transpose()?)))
     }
     pub(crate) fn reference(kind: ResourceKind, name: Option<&str>) -> Self {
         Self::Ref(name.map(|n| (kind, n.to_owned())))
@@ -115,25 +113,23 @@ pub(crate) enum RefCol {
 }
 
 /// Lesesicht auf eine Zeile mit typisierten Zugriffen.
-pub(crate) struct Row<'r>(pub(crate) &'r AnyRow);
+pub(crate) struct Row<'r>(pub(crate) &'r DbRow);
 
 impl Row<'_> {
     pub(crate) fn opt_text(&self, col: &str) -> Result<Option<String>, StoreError> {
-        Ok(self.0.try_get::<Option<String>, _>(col)?)
+        self.0.opt_text(col)
     }
     pub(crate) fn text(&self, col: &str) -> Result<String, StoreError> {
-        self.opt_text(col)?
-            .ok_or_else(|| StoreError::Corrupt(format!("Spalte {col} ist NULL")))
+        self.0.text(col)
     }
     pub(crate) fn opt_int(&self, col: &str) -> Result<Option<i64>, StoreError> {
-        Ok(self.0.try_get::<Option<i64>, _>(col)?)
+        self.0.opt_i64(col)
     }
     pub(crate) fn int(&self, col: &str) -> Result<i64, StoreError> {
-        self.opt_int(col)?
-            .ok_or_else(|| StoreError::Corrupt(format!("Spalte {col} ist NULL")))
+        self.0.i64(col)
     }
     pub(crate) fn bool(&self, col: &str) -> Result<bool, StoreError> {
-        Ok(self.int(col)? != 0)
+        self.0.bool(col)
     }
     pub(crate) fn u32(&self, col: &str) -> Result<u32, StoreError> {
         u32::try_from(self.int(col)?)
@@ -147,26 +143,29 @@ impl Row<'_> {
             .transpose()
     }
     pub(crate) fn json<T: DeserializeOwned>(&self, col: &str) -> Result<T, StoreError> {
-        Ok(serde_json::from_str(&self.text(col)?)?)
+        self.0.json(col)
     }
     pub(crate) fn opt_json<T: DeserializeOwned>(&self, col: &str) -> Result<Option<T>, StoreError> {
-        Ok(self
-            .opt_text(col)?
-            .map(|s| serde_json::from_str(&s))
-            .transpose()?)
+        self.0.opt_json(col)
     }
     pub(crate) fn opt_time(&self, col: &str) -> Result<Option<OffsetDateTime>, StoreError> {
-        self.opt_int(col)?.map(from_millis).transpose()
+        self.0.opt_time(col)
     }
     pub(crate) fn time(&self, col: &str) -> Result<OffsetDateTime, StoreError> {
-        from_millis(self.int(col)?)
+        self.0.time(col)
+    }
+    pub(crate) fn uuid(&self, col: &str) -> Result<Id, StoreError> {
+        self.0.uuid(col)
+    }
+    pub(crate) fn opt_uuid(&self, col: &str) -> Result<Option<Id>, StoreError> {
+        self.0.opt_uuid(col)
     }
     /// Name des Verweisziels (über die Unterabfrage `<col>__name`).
     pub(crate) fn ref_name(&self, col: &str) -> Result<Option<String>, StoreError> {
         self.opt_text(&format!("{col}__name"))
     }
     pub(crate) fn id(&self) -> Result<Id, StoreError> {
-        parse_id(&self.text("id")?)
+        self.uuid("id")
     }
     pub(crate) fn meta(&self) -> Result<ObjectMeta, StoreError> {
         Ok(ObjectMeta {
@@ -207,6 +206,9 @@ pub trait Resource: Serialize + DeserializeOwned + Clone + Send + Sync + Sized +
     /// Verweisspalten (für die Namensauflösung beim Lesen).
     #[doc(hidden)]
     const REFS: &'static [RefCol] = &[];
+    /// Weitere Textspalten, in denen die Listensuche (`?q=`) neben dem Namen sucht (F42).
+    #[doc(hidden)]
+    const SEARCH: &'static [&'static str] = &[];
 
     /// Spalten (ohne id, name, labels, created_at, updated_at).
     #[doc(hidden)]
@@ -234,7 +236,7 @@ pub trait PlainResource: Resource {}
 
 /// Eine laufende Admin-Transaktion.
 pub(crate) struct AdminTx {
-    pub(crate) tx: Transaction<'static, Any>,
+    pub(crate) tx: Tx,
     pub(crate) version: i64,
     pub(crate) actor: String,
     /// Für die Änderungsbenachrichtigung nach dem Commit (§14).
@@ -287,28 +289,15 @@ pub(crate) fn map_db(e: sqlx::Error, what: &str) -> StoreError {
     StoreError::Db(e)
 }
 
-macro_rules! bind_all {
-    ($q:expr, $vals:expr) => {{
-        let mut q = $q;
-        for v in $vals {
-            q = match v {
-                Val::Text(t) => q.bind(t),
-                Val::Int(i) => q.bind(i),
-            };
-        }
-        q
-    }};
-}
-
 impl AdminTx {
     /// Beginnt eine Transaktion und erhöht `config_version`.
     pub(crate) async fn begin(store: &Store, actor: &str) -> Result<Self, StoreError> {
         let mut tx = store.pool.begin().await?;
-        let version: i64 = sqlx::query_scalar(
+        let version = Q::new(
             "UPDATE config_version SET version = version + 1, updated_at = $1 WHERE id = 1 RETURNING version",
         )
-        .bind(millis(now()))
-        .fetch_one(&mut *tx)
+        .bind(Val::time(now()))
+        .fetch_i64(&mut tx)
         .await?;
         Ok(Self {
             tx,
@@ -326,12 +315,12 @@ impl AdminTx {
     pub(crate) async fn commit(mut self) -> Result<i64, StoreError> {
         if self.store.backend() == crate::Backend::Postgres {
             // Die Version ist eine Zahl aus der Datenbank – kein Einschleusen möglich.
-            sqlx::query(AssertSqlSafe(format!(
+            Q::new(format!(
                 "NOTIFY {}, '{}'",
                 crate::reload::NOTIFY_CHANNEL,
                 self.version
-            )))
-            .execute(&mut *self.tx)
+            ))
+            .execute(&mut self.tx)
             .await?;
         }
         self.tx.commit().await?;
@@ -375,29 +364,27 @@ impl AdminTx {
             Some(v) => self.scope_of(kind, name, v).await?,
             None => scope_before.clone(),
         };
-        let before = before.as_ref().map(serde_json::to_string).transpose()?;
-        let after = after.as_ref().map(serde_json::to_string).transpose()?;
-        sqlx::query(
+        Q::new(
             "INSERT INTO audit_log (id, at, actor, action, kind, object_id, object_name, config_version,
                                     before_json, after_json, organization, team,
                                     organization_before, team_before)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
         )
-        .bind(new_id().to_string())
-        .bind(millis(now()))
-        .bind(self.actor.clone())
-        .bind(action.as_str())
-        .bind(kind.to_owned())
-        .bind(id.map(|i| i.to_string()))
-        .bind(name.to_owned())
-        .bind(self.version)
-        .bind(before)
-        .bind(after)
-        .bind(scope_after.organization)
-        .bind(scope_after.team)
-        .bind(scope_before.organization)
-        .bind(scope_before.team)
-        .execute(&mut *self.tx)
+        .bind(Val::uuid(new_id()))
+        .bind(Val::time(now()))
+        .bind(Val::text(self.actor.clone()))
+        .bind(Val::text(action.as_str()))
+        .bind(Val::text(kind))
+        .bind(Val::Uuid(id))
+        .bind(Val::text(name))
+        .bind(Val::int(self.version))
+        .bind(Val::Json(before))
+        .bind(Val::Json(after))
+        .bind(Val::Text(scope_after.organization))
+        .bind(Val::Text(scope_after.team))
+        .bind(Val::Text(scope_before.organization))
+        .bind(Val::Text(scope_before.team))
+        .execute(&mut self.tx)
         .await?;
         Ok(())
     }
@@ -409,12 +396,12 @@ impl AdminTx {
         name: &str,
     ) -> Result<Id, StoreError> {
         let sql = format!("SELECT id FROM {} WHERE name = $1", table(kind));
-        let id: Option<String> = sqlx::query_scalar(AssertSqlSafe(sql))
-            .bind(name.to_owned())
-            .fetch_optional(&mut *self.tx)
+        let row = Q::new(sql)
+            .bind(Val::text(name))
+            .fetch_optional(&mut self.tx)
             .await?;
-        match id {
-            Some(id) => parse_id(&id),
+        match row {
+            Some(r) => r.uuid("id"),
             None => Err(StoreError::InvalidReference {
                 kind,
                 name: name.to_owned(),
@@ -431,10 +418,8 @@ impl AdminTx {
         for (name, col) in cols {
             let v = match col {
                 Col::V(v) => v,
-                Col::Ref(None) => Val::Text(None),
-                Col::Ref(Some((kind, target))) => {
-                    Val::Text(Some(self.resolve(kind, &target).await?.to_string()))
-                }
+                Col::Ref(None) => Val::Uuid(None),
+                Col::Ref(Some((kind, target))) => Val::uuid(self.resolve(kind, &target).await?),
             };
             out.push((name, v));
         }
@@ -449,14 +434,14 @@ impl AdminTx {
         meta: &ObjectMeta,
         cols: Vec<(&'static str, Val)>,
     ) -> Result<(), StoreError> {
-        let ts = millis(now());
+        let ts = now();
         let mut names = vec!["id", "name", "labels", "created_at", "updated_at"];
         let mut vals = vec![
-            Val::Text(Some(id.to_string())),
-            Val::Text(Some(meta.name.clone())),
-            Val::Text(Some(serde_json::to_string(&meta.labels)?)),
-            Val::Int(Some(ts)),
-            Val::Int(Some(ts)),
+            Val::uuid(id),
+            Val::text(meta.name.clone()),
+            Val::json(&meta.labels)?,
+            Val::time(ts),
+            Val::time(ts),
         ];
         for (n, v) in cols {
             names.push(n);
@@ -469,8 +454,8 @@ impl AdminTx {
             names.join(", "),
             placeholders.join(", ")
         );
-        bind_all!(sqlx::query(AssertSqlSafe(sql)), vals)
-            .execute(&mut *self.tx)
+        Q { sql, args: vals }
+            .execute(&mut self.tx)
             .await
             .map_err(|e| map_db(e, &format!("{kind} {:?}", meta.name)))?;
         Ok(())
@@ -485,23 +470,20 @@ impl AdminTx {
         cols: Vec<(&'static str, Val)>,
     ) -> Result<(), StoreError> {
         let mut sets = vec!["labels = $1".to_owned(), "updated_at = $2".to_owned()];
-        let mut vals = vec![
-            Val::Text(Some(serde_json::to_string(&meta.labels)?)),
-            Val::Int(Some(millis(now()))),
-        ];
+        let mut vals = vec![Val::json(&meta.labels)?, Val::time(now())];
         for (n, v) in cols {
             vals.push(v);
             sets.push(format!("{n} = ${}", vals.len()));
         }
-        vals.push(Val::Text(Some(id.to_string())));
+        vals.push(Val::uuid(id));
         let sql = format!(
             "UPDATE {} SET {} WHERE id = ${}",
             table(kind),
             sets.join(", "),
             vals.len()
         );
-        bind_all!(sqlx::query(AssertSqlSafe(sql)), vals)
-            .execute(&mut *self.tx)
+        Q { sql, args: vals }
+            .execute(&mut self.tx)
             .await
             .map_err(|e| map_db(e, &format!("{kind} {:?}", meta.name)))?;
         Ok(())
@@ -514,15 +496,15 @@ impl AdminTx {
         name: &str,
         aliases: &[String],
     ) -> Result<(), StoreError> {
-        sqlx::query("DELETE FROM model_alias WHERE model_group_id = $1")
-            .bind(id.to_string())
-            .execute(&mut *self.tx)
+        Q::new("DELETE FROM model_alias WHERE model_group_id = $1")
+            .bind(Val::uuid(id))
+            .execute(&mut self.tx)
             .await?;
         for alias in std::iter::once(name).chain(aliases.iter().map(String::as_str)) {
-            sqlx::query("INSERT INTO model_alias (alias, model_group_id) VALUES ($1, $2)")
-                .bind(alias.to_owned())
-                .bind(id.to_string())
-                .execute(&mut *self.tx)
+            Q::new("INSERT INTO model_alias (alias, model_group_id) VALUES ($1, $2)")
+                .bind(Val::text(alias))
+                .bind(Val::uuid(id))
+                .execute(&mut self.tx)
                 .await
                 .map_err(|e| map_db(e, &format!("Modellname/Alias {alias:?}")))?;
         }
@@ -535,7 +517,6 @@ impl AdminTx {
         kind: ResourceKind,
         id: Id,
     ) -> Result<(), StoreError> {
-        let id_s = id.to_string();
         let level = match kind {
             ResourceKind::Organization => Some(ScopeLevel::Organization),
             ResourceKind::Team => Some(ScopeLevel::Team),
@@ -544,21 +525,21 @@ impl AdminTx {
             _ => None,
         };
         if let Some(level) = level {
-            sqlx::query("DELETE FROM plugin_binding WHERE level = $1 AND target_id = $2")
-                .bind(level.as_str())
-                .bind(id_s.clone())
-                .execute(&mut *self.tx)
+            Q::new("DELETE FROM plugin_binding WHERE level = $1 AND target_id = $2")
+                .bind(Val::text(level.as_str()))
+                .bind(Val::uuid(id))
+                .execute(&mut self.tx)
                 .await?;
-            sqlx::query("DELETE FROM mcp_grant WHERE subject_level = $1 AND subject_id = $2")
-                .bind(level.as_str())
-                .bind(id_s.clone())
-                .execute(&mut *self.tx)
+            Q::new("DELETE FROM mcp_grant WHERE subject_level = $1 AND subject_id = $2")
+                .bind(Val::text(level.as_str()))
+                .bind(Val::uuid(id))
+                .execute(&mut self.tx)
                 .await?;
         }
         let sql = format!("DELETE FROM {} WHERE id = $1", table(kind));
-        sqlx::query(AssertSqlSafe(sql))
-            .bind(id_s)
-            .execute(&mut *self.tx)
+        Q::new(sql)
+            .bind(Val::uuid(id))
+            .execute(&mut self.tx)
             .await
             .map_err(|e| map_db(e, &kind.to_string()))?;
         Ok(())
@@ -601,11 +582,9 @@ pub(crate) fn select_sql(kind: ResourceKind, refs: &[RefCol], filter: &str) -> S
 impl Store {
     /// Aktuelle Konfigurationsversion.
     pub async fn config_version(&self) -> Result<i64, StoreError> {
-        Ok(
-            sqlx::query_scalar("SELECT version FROM config_version WHERE id = 1")
-                .fetch_one(&self.pool)
-                .await?,
-        )
+        Q::new("SELECT version FROM config_version WHERE id = 1")
+            .fetch_i64(&self.pool)
+            .await
     }
 
     pub(crate) async fn fetch_rows(
@@ -613,10 +592,9 @@ impl Store {
         kind: ResourceKind,
         refs: &[RefCol],
         filter: &str,
-        arg: Option<String>,
-    ) -> Result<Vec<AnyRow>, StoreError> {
-        let sql = select_sql(kind, refs, filter);
-        let mut q = sqlx::query(AssertSqlSafe(sql));
+        arg: Option<Val>,
+    ) -> Result<Vec<DbRow>, StoreError> {
+        let mut q = Q::new(select_sql(kind, refs, filter));
         if let Some(a) = arg {
             q = q.bind(a);
         }
@@ -628,8 +606,8 @@ impl Store {
         kind: ResourceKind,
         refs: &[RefCol],
         name: &str,
-    ) -> Result<AnyRow, StoreError> {
-        self.fetch_rows(kind, refs, "WHERE t.name = $1", Some(name.to_owned()))
+    ) -> Result<DbRow, StoreError> {
+        self.fetch_rows(kind, refs, "WHERE t.name = $1", Some(Val::text(name)))
             .await?
             .into_iter()
             .next()
@@ -639,7 +617,7 @@ impl Store {
             })
     }
 
-    fn object_from_row<R: Resource>(row: &AnyRow) -> Result<Object<R>, StoreError> {
+    pub(crate) fn object_from_row<R: Resource>(row: &DbRow) -> Result<Object<R>, StoreError> {
         let r = Row(row);
         Ok(Object {
             id: r.id()?,
@@ -656,7 +634,7 @@ impl Store {
 
     /// Liest eine Ressource über ihre ID.
     pub async fn get_by_id<R: Resource>(&self, id: Id) -> Result<Object<R>, StoreError> {
-        self.fetch_rows(R::KIND, R::REFS, "WHERE t.id = $1", Some(id.to_string()))
+        self.fetch_rows(R::KIND, R::REFS, "WHERE t.id = $1", Some(Val::uuid(id)))
             .await?
             .first()
             .map(Self::object_from_row)

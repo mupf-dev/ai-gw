@@ -95,7 +95,10 @@ async fn main() {
 
     if let Ok(base) = std::env::var("AIGW_TEST_POSTGRES_URL") {
         let pool = sqlx::PgPool::connect(&base).await.unwrap();
-        aigw_store::migrator().run(&pool).await.unwrap();
+        aigw_store::migrator(aigw_store::Backend::Postgres)
+            .run(&pool)
+            .await
+            .unwrap();
         let pg = Arc::new(PgSyncCounters::new_manual(pool, PgSyncOptions::default()));
         report("postgres-sync", pg.clone(), 200_000, 20_000).await;
         // Abgleichkosten bei vielen aktiven Zählern (Zähler aus dem Lauf oben).

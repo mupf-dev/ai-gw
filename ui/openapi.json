@@ -8481,6 +8481,9 @@
       "ApiKeySpec": {
         "type": "object",
         "description": "Virtueller API-Key (Spezifikation; Präfix/Hash/Zustand siehe [`ApiKeyStatus`]).",
+        "required": [
+          "organization"
+        ],
         "properties": {
           "allowedModels": {
             "type": "array",
@@ -8519,12 +8522,16 @@
             "$ref": "#/components/schemas/BTreeMap",
             "description": "Freie Metadaten (erscheinen im Request-Log)."
           },
+          "organization": {
+            "type": "string",
+            "description": "Organisation (Name, Pflicht; F3). Mit Team muss es die Organisation des Teams sein.\nKeys ohne Team erben Limits, Budgets und Plugins der Organisation."
+          },
           "team": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Team (Name)."
+            "description": "Team (Name, optional)."
           },
           "user": {
             "type": [

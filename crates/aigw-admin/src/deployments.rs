@@ -14,6 +14,7 @@
 use aigw_core::resource::{DeploymentSpec, Id, Object, ObjectMeta};
 use aigw_core::types::ProviderKind;
 use aigw_core::validate;
+use aigw_store::ListFilter;
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Extension, Path, Query, State};
@@ -84,22 +85,29 @@ impl AdminResource for DeploymentSpec {
         ListArgs {
             limit: q.limit,
             cursor: q.cursor.as_deref(),
-            q: None, // auch providerModel, siehe `filter`
+            q: q.q.as_deref(), // auch providerModel (Suchspalte im Store)
             label: q.label.as_deref(),
         }
     }
 
-    fn filter(d: &Object<Self>, q: &Self::Query) -> bool {
-        q.q.as_deref()
-            .is_none_or(|s| d.metadata.name.contains(s) || d.spec.provider_model.contains(s))
-            && q.model_group
-                .as_ref()
-                .is_none_or(|g| *g == d.spec.model_group)
-            && q.provider.is_none_or(|p| p == d.spec.provider)
-            && q.credential
-                .as_ref()
-                .is_none_or(|c| d.spec.credential.as_ref() == Some(c))
-            && q.enabled.is_none_or(|e| e == d.spec.enabled)
+    fn list_filters(q: &Self::Query) -> Result<Vec<ListFilter>, Problem> {
+        let mut f = Vec::new();
+        f.extend(
+            q.model_group
+                .iter()
+                .map(|g| ListFilter::ModelGroup(g.clone())),
+        );
+        f.extend(
+            q.provider
+                .map(|p| ListFilter::Provider(p.as_str().to_owned())),
+        );
+        f.extend(
+            q.credential
+                .iter()
+                .map(|c| ListFilter::Credential(c.clone())),
+        );
+        f.extend(q.enabled.map(ListFilter::Enabled));
+        Ok(f)
     }
 
     async fn check(

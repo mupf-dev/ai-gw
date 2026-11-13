@@ -87,6 +87,26 @@ pub struct Sealed {
     pub ciphertext: String,
 }
 
+impl Sealed {
+    /// Nonce und Chiffrat als Bytes (Speicherung als `BYTEA`/`BLOB`, AIGW-73).
+    pub(crate) fn to_bytes(&self) -> Result<(Vec<u8>, Vec<u8>), StoreError> {
+        let bad = || StoreError::Crypto("Nonce/Chiffrat sind kein Hex".into());
+        Ok((
+            unhex(&self.nonce).ok_or_else(bad)?,
+            unhex(&self.ciphertext).ok_or_else(bad)?,
+        ))
+    }
+
+    /// Gegenstück zu [`Sealed::to_bytes`].
+    pub(crate) fn from_bytes(key_id: String, nonce: &[u8], ciphertext: &[u8]) -> Self {
+        Self {
+            key_id,
+            nonce: hex(nonce),
+            ciphertext: hex(ciphertext),
+        }
+    }
+}
+
 /// Aktueller Master-Key plus frühere Keys zum Entschlüsseln.
 #[derive(Debug)]
 pub struct Keyring {

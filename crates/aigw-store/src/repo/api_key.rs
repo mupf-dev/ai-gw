@@ -8,14 +8,14 @@ use aigw_core::resource::{
     new_id, validate_name,
 };
 use aigw_core::snapshot::KeyHash;
-use sqlx::any::AnyRow;
 use time::OffsetDateTime;
 
-use super::{Action, AdminTx, Col, Resource, Row, Val, WriteExtras, millis, now};
+use super::{Action, AdminTx, Col, Resource, Row, Val, WriteExtras, now};
+use crate::db::{DbRow, Q};
 use crate::keys::generate_api_key;
 use crate::{Store, StoreError};
 
-pub(crate) fn api_key_from_row(row: &AnyRow) -> Result<(ApiKey, KeyHash), StoreError> {
+pub(crate) fn api_key_from_row(row: &DbRow) -> Result<(ApiKey, KeyHash), StoreError> {
     let r = Row(row);
     let state = r.text("state")?;
     let hash = r.text("key_hash")?;
@@ -33,6 +33,43 @@ pub(crate) fn api_key_from_row(row: &AnyRow) -> Result<(ApiKey, KeyHash), StoreE
     let hash = KeyHash::from_hex(&hash)
         .ok_or_else(|| StoreError::Corrupt("ungültiger Key-Hash".into()))?;
     Ok((key, hash))
+}
+
+impl AdminTx {
+    /// F3: Organisation ist Pflicht; mit Team muss sie die Organisation des Teams sein.
+    /// (Der zusammengesetzte Fremdschlüssel sichert das zusätzlich in der Datenbank ab.)
+    pub(crate) async fn check_key_scope(&mut self, spec: &ApiKeySpec) -> Result<(), StoreError> {
+        if spec.organization.is_empty() {
+            return Err(StoreError::Invalid(
+                "organization: Pflichtfeld (Keys gehören immer zu einer Organisation)".into(),
+            ));
+        }
+        let Some(team) = &spec.team else {
+            return Ok(());
+        };
+        let row = Q::new(
+            "SELECT o.name AS org FROM team t JOIN organization o ON o.id = t.organization_id \
+             WHERE t.name = $1",
+        )
+        .bind(Val::text(team.clone()))
+        .fetch_optional(&mut self.tx)
+        .await?;
+        let Some(row) = row else {
+            return Err(StoreError::InvalidReference {
+                kind: ResourceKind::Team,
+                name: team.clone(),
+            });
+        };
+        let org = row.text("org")?;
+        if org == spec.organization {
+            Ok(())
+        } else {
+            Err(StoreError::Invalid(format!(
+                "organization: Team {team:?} gehört zu Organisation {org:?}, nicht zu {:?}",
+                spec.organization
+            )))
+        }
+    }
 }
 
 impl Store {
@@ -59,6 +96,7 @@ impl Store {
         let generated = generate_api_key()?;
         let id = new_id();
         let mut tx = AdminTx::begin(self, actor).await?;
+        tx.check_key_scope(&spec).await?;
         let mut cols = spec.to_columns()?;
         cols.push(("prefix", Col::text(generated.prefix.clone())));
         cols.push(("key_hash", Col::text(generated.hash.to_hex())));
@@ -107,7 +145,7 @@ impl Store {
                 ResourceKind::ApiKey,
                 ApiKeySpec::REFS,
                 "WHERE t.id = $1",
-                Some(id.to_string()),
+                Some(Val::uuid(id)),
             )
             .await?;
         let row = rows.first().ok_or_else(|| StoreError::NotFound {
@@ -152,6 +190,7 @@ impl Store {
     ) -> Result<ApiKey, StoreError> {
         let before = self.get_api_key(&meta.name).await?;
         let mut tx = AdminTx::begin(self, actor).await?;
+        tx.check_key_scope(&spec).await?;
         let cols = tx.resolve_cols(spec.to_columns()?).await?;
         tx.update_row(ResourceKind::ApiKey, before.id, &meta, cols)
             .await?;
@@ -200,7 +239,7 @@ impl Store {
             ResourceKind::ApiKey,
             before.id,
             &before.metadata,
-            vec![("state", Val::Text(Some(state.as_str().into())))],
+            vec![("state", Val::text(state.as_str()))],
         )
         .await?;
         let mut after = before.clone();
@@ -299,11 +338,11 @@ impl Store {
 
     /// Vermerkt die letzte Nutzung (vom Log-Writer, ohne Versionserhöhung/Audit).
     pub async fn touch_api_keys(&self, ids: &[Id]) -> Result<(), StoreError> {
-        let ts = millis(now());
+        let ts = now();
         for id in ids {
-            sqlx::query("UPDATE api_key SET last_used_at = $1 WHERE id = $2")
-                .bind(ts)
-                .bind(id.to_string())
+            Q::new("UPDATE api_key SET last_used_at = $1 WHERE id = $2")
+                .bind(Val::time(ts))
+                .bind(Val::uuid(*id))
                 .execute(&self.pool)
                 .await?;
         }

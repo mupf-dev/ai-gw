@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use aigw_core::resource::{
     Id, McpGrantSpec, McpServerSpec, McpTransport, Object, ObjectMeta, ScopeLevel, TeamSpec,
 };
-use aigw_store::StoreError;
+use aigw_store::{ListFilter, StoreError};
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Extension, Path, Query, State};
@@ -34,8 +34,8 @@ use crate::auth::{Permission, Principal, Target};
 use crate::problem::Problem;
 use crate::resources::{
     AdminResource, ApiResult, BASE, ListArgs, St, check_if_match, create_impl, created_at,
-    delete_impl, etag_of, get_impl, json_with, list_impl, paginate, plain_resource, put_impl,
-    same_name,
+    delete_impl, etag_of, get_impl, json_with, list_impl, list_query, page_parts, plain_resource,
+    put_impl, read_scope, same_name,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -95,19 +95,26 @@ impl AdminResource for McpServerSpec {
         ListArgs {
             limit: q.limit,
             cursor: q.cursor.as_deref(),
-            q: None, // auch die URL, siehe `filter`
+            q: q.q.as_deref(), // auch die URL (Suchspalte im Store)
             label: q.label.as_deref(),
         }
     }
 
-    fn filter(s: &Object<Self>, q: &Self::Query) -> bool {
-        q.q.as_deref()
-            .is_none_or(|t| s.metadata.name.contains(t) || s.spec.url.contains(t))
-            && q.transport.is_none_or(|t| t == s.spec.transport)
-            && q.credential
-                .as_ref()
-                .is_none_or(|c| s.spec.credential.as_ref() == Some(c))
-            && q.enabled.is_none_or(|e| e == s.spec.enabled)
+    fn list_filters(q: &Self::Query) -> Result<Vec<ListFilter>, Problem> {
+        let mut f = Vec::new();
+        if let Some(t) = q.transport {
+            match serde_json::to_value(t) {
+                Ok(serde_json::Value::String(s)) => f.push(ListFilter::Transport(s)),
+                _ => return Err(Problem::bad_request("transport: unbekannter Wert")),
+            }
+        }
+        f.extend(
+            q.credential
+                .iter()
+                .map(|c| ListFilter::Credential(c.clone())),
+        );
+        f.extend(q.enabled.map(ListFilter::Enabled));
+        Ok(f)
     }
 
     async fn check(
@@ -289,33 +296,28 @@ pub(crate) async fn list_mcp_grants(
     q: Result<Query<McpGrantQuery>, QueryRejection>,
 ) -> ApiResult {
     let Query(q) = q?;
-    let scopes = Scopes::load(&st).await?;
-    let subject_is = |g: &McpGrantSpec, level: ScopeLevel, want: &Option<String>| {
-        want.as_ref()
-            .is_none_or(|w| g.subject.level == level && g.subject.target.as_ref() == Some(w))
-    };
-    let items: Vec<McpGrant> = st
-        .store
-        .list::<McpGrantSpec>()
-        .await?
-        .into_iter()
-        .filter(|g| {
-            q.server.as_ref().is_none_or(|s| *s == g.spec.server)
-                && subject_is(&g.spec, ScopeLevel::Team, &q.team)
-                && subject_is(&g.spec, ScopeLevel::ApiKey, &q.api_key)
-                && scopes
-                    .target(&g.spec)
-                    .is_ok_and(|t| p.can(Permission::Read, &t))
-        })
-        .map(McpGrant::from)
-        .collect();
+    // Filter und Geltungsbereich (Team bzw. Team des Keys) laufen in SQL (F42).
+    let mut filters = Vec::new();
+    filters.extend(q.server.iter().map(|s| ListFilter::Server(s.clone())));
+    filters.extend(
+        q.team
+            .iter()
+            .map(|t| ListFilter::Subject(ScopeLevel::Team, t.clone())),
+    );
+    filters.extend(
+        q.api_key
+            .iter()
+            .map(|k| ListFilter::Subject(ScopeLevel::ApiKey, k.clone())),
+    );
     let args = ListArgs {
         limit: q.limit,
         cursor: q.cursor.as_deref(),
         q: q.q.as_deref(),
         label: q.label.as_deref(),
     };
-    let (items, next_cursor) = paginate(items, |g| &g.metadata, &args)?;
+    let lq = list_query(&args, filters, read_scope(&p))?;
+    let (items, next_cursor) =
+        page_parts::<_, McpGrant>(st.store.list_page::<McpGrantSpec>(&lq).await?);
     Ok(json_with(
         StatusCode::OK,
         None,

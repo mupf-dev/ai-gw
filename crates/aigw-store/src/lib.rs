@@ -1,13 +1,15 @@
 // SPDX-FileCopyrightText: 2026 ai-gw contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Persistenz von ai-gw (AIGW-9).
+//! Persistenz von ai-gw (AIGW-9, AIGW-73).
 //!
 //! SQLite ist Standard, Postgres optional für HA (E4). Im Hot Path wird nicht auf die Datenbank
 //! zugegriffen; sie ist Quelle der Konfiguration (→ [`load_snapshot`]) und Ziel gebündelter Logs.
 //!
-//! Beide Datenbanken laufen über den `Any`-Treiber von sqlx mit **einem** portablen Schema
-//! (`migrations/`, nur `TEXT`/`BIGINT`, `$n`-Platzhalter) und damit einem Code-Pfad.
+//! Seit AIGW-73 (F7) laufen beide Datenbanken über **eigene sqlx-Treiber mit nativen Typen**
+//! (Postgres: `UUID`, `JSONB`, `TIMESTAMPTZ`, `BOOLEAN`, `BYTEA`) und je einem Migrationssatz
+//! (`migrations/sqlite/`, `migrations/postgres/`). Der Zugriff ist per Enum-Dispatch gekapselt
+//! (`db`-Modul): [`Store`] bleibt ein konkreter Typ mit unveränderter Schnittstelle.
 //! Details: `docs/konzept/02-datenmodell.md`.
 
 pub mod admin_auth;
@@ -15,6 +17,7 @@ pub mod analytics;
 pub mod budget;
 pub mod cache;
 pub mod crypto;
+pub(crate) mod db;
 pub mod events;
 pub mod gitops;
 pub mod keys;
@@ -23,15 +26,19 @@ pub mod reload;
 pub mod repo;
 mod snapshot;
 
+use std::str::FromStr as _;
 use std::sync::Arc;
 use std::time::Duration;
 
 use aigw_core::config::StoreConfig;
 use aigw_core::resource::ResourceKind;
-use sqlx::any::AnyPoolOptions;
-use sqlx::migrate::{Migration, MigrationType, Migrator};
-use sqlx::{AnyPool, SqlSafeStr as _};
+use sqlx::SqlSafeStr as _;
+use sqlx::migrate::{MigrateError, Migration, MigrationType, Migrator};
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use tokio::sync::watch;
+
+use crate::db::{Pool, Q};
 
 pub use crypto::{Keyring, MasterKey};
 pub use keys::{generate_api_key, hash_api_key};
@@ -39,6 +46,7 @@ pub use reload::{ReloadMetrics, ReloadOptions, Reloader, ReloaderTask};
 pub use repo::audit::{
     ActorType, AuditCursor, AuditEvent, AuditPage, AuditQuery, AuditScope, ScopeRule,
 };
+pub use repo::list::{ListFilter, ListQuery, Page};
 pub use repo::{AuditEntry, PlainResource, Resource, WriteExtras};
 pub use snapshot::load_snapshot;
 
@@ -82,7 +90,10 @@ pub enum StoreError {
     Json(#[from] serde_json::Error),
     /// Migration fehlgeschlagen.
     #[error(transparent)]
-    Migrate(#[from] sqlx::migrate::MigrateError),
+    Migrate(#[from] MigrateError),
+    /// Datenbank mit einem Schema, das dieser Stand nicht kennt (z. B. vor AIGW-73).
+    #[error("unbekannter Schemastand: {0}")]
+    IncompatibleSchema(String),
     /// Fehler des Datenbanktreibers.
     #[error(transparent)]
     Db(#[from] sqlx::Error),
@@ -113,65 +124,58 @@ impl Backend {
 /// Verbindungspool zur gewählten Datenbank.
 #[derive(Debug, Clone)]
 pub struct Store {
-    pub(crate) pool: AnyPool,
-    backend: Backend,
+    pub(crate) pool: Pool,
     /// Zuletzt in diesem Prozess committete `config_version` (Auslöser für den Reloader).
     commits: Arc<watch::Sender<i64>>,
 }
 
-/// Eingebettete Migrationen (ein Satz für SQLite und Postgres).
-pub fn migrator() -> Migrator {
-    Migrator::with_migrations(vec![
-        Migration::new(
-            1,
-            "init".into(),
-            MigrationType::Simple,
-            include_str!("../migrations/0001_init.sql").into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            2,
-            "observe".into(),
-            MigrationType::Simple,
-            include_str!("../migrations/0002_observe.sql").into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            3,
-            "admin_auth".into(),
-            MigrationType::Simple,
-            include_str!("../migrations/0003_admin_auth.sql").into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            4,
-            "audit_scope".into(),
-            MigrationType::Simple,
-            include_str!("../migrations/0004_audit_scope.sql").into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            5,
-            "analytics".into(),
-            MigrationType::Simple,
-            include_str!("../migrations/0005_analytics.sql").into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            6,
-            "event_dedup".into(),
-            MigrationType::Simple,
-            include_str!("../migrations/0006_event_dedup.sql").into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            7,
-            "cache_vectors".into(),
-            MigrationType::Simple,
-            include_str!("../migrations/0007_cache_vectors.sql").into_sql_str(),
-            false,
-        ),
-    ])
+/// Migrationssatz für SQLite (`migrations/sqlite/`): (Version, Beschreibung, SQL).
+const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[(
+    1,
+    "init",
+    include_str!("../migrations/sqlite/0001_init.sql"),
+)];
+
+/// Migrationssatz für Postgres (`migrations/postgres/`), gleiche Versionen wie SQLite.
+const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[(
+    1,
+    "init",
+    include_str!("../migrations/postgres/0001_init.sql"),
+)];
+
+/// Eingebettete Migrationen des Backends.
+pub fn migrator(backend: Backend) -> Migrator {
+    let set = match backend {
+        Backend::Sqlite => SQLITE_MIGRATIONS,
+        Backend::Postgres => POSTGRES_MIGRATIONS,
+    };
+    Migrator::with_migrations(
+        set.iter()
+            .map(|(v, name, sql)| {
+                Migration::new(
+                    *v,
+                    (*name).into(),
+                    MigrationType::Simple,
+                    sql.into_sql_str(),
+                    false,
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Verständlicher Fehler für Datenbanken mit älterem bzw. fremdem Schemastand.
+fn migrate_error(e: MigrateError) -> StoreError {
+    match e {
+        MigrateError::VersionMismatch(v) | MigrateError::VersionMissing(v) => {
+            StoreError::IncompatibleSchema(format!(
+                "Migration {v} der Datenbank passt nicht zu diesem Stand. Datenbanken aus der Zeit \
+                 vor AIGW-73 (gemeinsamer Migrationssatz 0001–0007) werden nicht übernommen – \
+                 neu anlegen und die Konfiguration per `aigw config export`/`apply` übertragen"
+            ))
+        }
+        other => StoreError::Migrate(other),
+    }
 }
 
 impl Store {
@@ -186,44 +190,62 @@ impl Store {
 
     /// Verbindet sich laut Startkonfiguration.
     pub async fn connect_with(cfg: &StoreConfig) -> Result<Self, StoreError> {
-        sqlx::any::install_default_drivers();
         let backend = Backend::from_url(&cfg.url)?;
-        let in_memory = backend == Backend::Sqlite
-            && (cfg.url.contains(":memory:") || cfg.url.contains("mode=memory"));
-        let mut opts = AnyPoolOptions::new().max_connections(cfg.max_connections.max(1));
-        if in_memory {
-            // Jede SQLite-Verbindung hätte sonst ihre eigene leere In-Memory-Datenbank.
-            opts = opts
-                .max_connections(1)
-                .min_connections(1)
-                .idle_timeout(None)
-                .max_lifetime(None);
-        } else {
-            opts = opts.acquire_timeout(Duration::from_secs(10));
-        }
-        let pool = opts.connect(&cfg.url).await?;
+        let max = cfg.max_connections.max(1);
+        let pool = match backend {
+            Backend::Sqlite => {
+                let in_memory = cfg.url.contains(":memory:") || cfg.url.contains("mode=memory");
+                // Fremdschlüssel sind bei sqlx standardmäßig an (Löschregeln, F3).
+                let opts = SqliteConnectOptions::from_str(&cfg.url)?.foreign_keys(true);
+                let mut pool = SqlitePoolOptions::new().max_connections(max);
+                if in_memory {
+                    // Jede SQLite-Verbindung hätte sonst ihre eigene leere In-Memory-Datenbank.
+                    pool = pool
+                        .max_connections(1)
+                        .min_connections(1)
+                        .idle_timeout(None)
+                        .max_lifetime(None);
+                } else {
+                    pool = pool.acquire_timeout(Duration::from_secs(10));
+                }
+                Pool::Sqlite(pool.connect_with(opts).await?)
+            }
+            Backend::Postgres => {
+                let opts = PgConnectOptions::from_str(&cfg.url)?;
+                Pool::Postgres(
+                    PgPoolOptions::new()
+                        .max_connections(max)
+                        .acquire_timeout(Duration::from_secs(10))
+                        .connect_with(opts)
+                        .await?,
+                )
+            }
+        };
         Ok(Self {
             pool,
-            backend,
             commits: Arc::new(watch::Sender::new(0)),
         })
     }
 
-    /// Wendet ausstehende Migrationen an.
+    /// Wendet ausstehende Migrationen an (Satz des jeweiligen Backends).
     pub async fn migrate(&self) -> Result<(), StoreError> {
-        migrator().run(&self.pool).await?;
-        Ok(())
+        let m = migrator(self.backend());
+        match &self.pool {
+            Pool::Sqlite(p) => m.run(p).await,
+            Pool::Postgres(p) => m.run(p).await,
+        }
+        .map_err(migrate_error)
     }
 
     /// Einfache Erreichbarkeitsprüfung (`SELECT 1`).
     pub async fn ping(&self) -> Result<(), StoreError> {
-        sqlx::query("SELECT 1").execute(&self.pool).await?;
+        Q::new("SELECT 1").execute(&self.pool).await?;
         Ok(())
     }
 
     /// Verwendetes Backend.
     pub fn backend(&self) -> Backend {
-        self.backend
+        self.pool.backend()
     }
 
     /// Abonnement auf Commits **dieses Prozesses** (Wert = neue `config_version`).

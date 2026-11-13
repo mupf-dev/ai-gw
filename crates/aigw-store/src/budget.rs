@@ -5,29 +5,38 @@
 //!
 //! Deltas werden **additiv** geschrieben (`amount = budget_usage.amount + excluded.amount`),
 //! damit mehrere Instanzen ohne Read-Modify-Write gleichzeitig buchen können; danach werden
-//! die Summen in derselben Transaktion zurückgelesen. Schema aus Migration 0001 (unverändert):
-//! Primärschlüssel (level, target_id, period, period_start), `amount` in Nano-Einheiten.
+//! die Summen in derselben Transaktion zurückgelesen. Primärschlüssel (level, target_id,
+//! period, period_start), `amount` in Nano-Einheiten (Postgres: `target_id UUID`,
+//! `period_start TIMESTAMPTZ`; SQLite: Text bzw. Unix-ms).
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use aigw_billing::{BudgetKey, BudgetLedger, LedgerError, period_code};
-use sqlx::{AssertSqlSafe, Row as _};
+use aigw_core::resource::Id;
 
+use crate::db::{Q, Val};
 use crate::{Store, StoreError};
 
 /// Zeilen je Statement (4–6 Parameter je Zeile).
 const ROWS_PER_STATEMENT: usize = 100;
 
-type RowKey = (String, String, String, i64);
+type RowKey = (String, Id, String, i64);
 
 fn row_key(k: &BudgetKey) -> RowKey {
     (
         k.level.as_str().to_owned(),
-        k.target.to_string(),
+        k.target,
         period_code(k.period).to_owned(),
         k.period_start_ms,
     )
+}
+
+fn bind_key(q: Q, k: &BudgetKey) -> Q {
+    q.bind(Val::text(k.level.as_str()))
+        .bind(Val::uuid(k.target))
+        .bind(Val::text(period_code(k.period)))
+        .bind(Val::ms(k.period_start_ms))
 }
 
 impl Store {
@@ -65,18 +74,11 @@ impl Store {
                 " ON CONFLICT (level, target_id, period, period_start) DO UPDATE SET \
                  amount = budget_usage.amount + excluded.amount, updated_at = excluded.updated_at",
             );
-            let mut q = sqlx::query(AssertSqlSafe(sql));
+            let mut q = Q::new(sql);
             for (k, d) in chunk {
-                let (level, target, period, start) = row_key(k);
-                q = q
-                    .bind(level)
-                    .bind(target)
-                    .bind(period)
-                    .bind(start)
-                    .bind(*d)
-                    .bind(now_ms);
+                q = bind_key(q, k).bind(Val::int(*d)).bind(Val::ms(now_ms));
             }
-            q.execute(&mut *tx).await?;
+            q.execute(&mut tx).await?;
         }
 
         let mut found: HashMap<RowKey, i64> = HashMap::with_capacity(read.len());
@@ -98,19 +100,18 @@ impl Store {
                     n + 4
                 );
             }
-            let mut q = sqlx::query(AssertSqlSafe(sql));
+            let mut q = Q::new(sql);
             for k in chunk {
-                let (level, target, period, start) = row_key(k);
-                q = q.bind(level).bind(target).bind(period).bind(start);
+                q = bind_key(q, k);
             }
-            for row in q.fetch_all(&mut *tx).await? {
+            for row in q.fetch_all(&mut tx).await? {
                 let key: RowKey = (
-                    row.try_get("level")?,
-                    row.try_get("target_id")?,
-                    row.try_get("period")?,
-                    row.try_get("period_start")?,
+                    row.text("level")?,
+                    row.uuid("target_id")?,
+                    row.text("period")?,
+                    row.ms("period_start")?,
                 );
-                found.insert(key, row.try_get("amount")?);
+                found.insert(key, row.i64("amount")?);
             }
         }
         tx.commit().await?;
@@ -127,12 +128,12 @@ impl Store {
 
     /// Löscht Budgetstände, deren Zeitraum vor `before_ms` begann (außer `total`).
     pub async fn prune_budget_usage(&self, before_ms: i64) -> Result<u64, StoreError> {
-        let r =
-            sqlx::query("DELETE FROM budget_usage WHERE period <> 'total' AND period_start < $1")
-                .bind(before_ms)
+        Ok(
+            Q::new("DELETE FROM budget_usage WHERE period <> 'total' AND period_start < $1")
+                .bind(Val::ms(before_ms))
                 .execute(&self.pool)
-                .await?;
-        Ok(r.rows_affected())
+                .await?,
+        )
     }
 }
 

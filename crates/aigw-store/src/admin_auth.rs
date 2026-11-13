@@ -14,12 +14,12 @@
 
 use aigw_core::resource::{Id, RoleBinding, new_id, validate_name};
 use aigw_core::snapshot::KeyHash;
-use sqlx::any::AnyRow;
 use time::OffsetDateTime;
 
+use crate::db::{DbRow, Q, Val};
 use crate::keys::generate_admin_api_key;
 use crate::repo::audit::{AuditEvent, BOOTSTRAP_TOKEN_KIND};
-use crate::repo::{Action, AdminTx, Row, map_db, millis, now, parse_id};
+use crate::repo::{Action, AdminTx, Row, map_db, now};
 use crate::{Store, StoreError};
 
 /// Art im Audit-Log für Admin-API-Keys.
@@ -69,17 +69,17 @@ impl Store {
         groups: &[String],
         expires_at: OffsetDateTime,
     ) -> Result<(), StoreError> {
-        let t = millis(now());
-        sqlx::query(
+        let t = now();
+        Q::new(
             "INSERT INTO admin_session (id_hash, user_id, groups, created_at, last_seen_at, expires_at)
              VALUES ($1, $2, $3, $4, $5, $6)",
         )
-        .bind(id_hash.to_hex())
-        .bind(user_id.to_string())
-        .bind(serde_json::to_string(groups)?)
-        .bind(t)
-        .bind(t)
-        .bind(millis(expires_at))
+        .bind(Val::text(id_hash.to_hex()))
+        .bind(Val::uuid(user_id))
+        .bind(Val::json(&groups)?)
+        .bind(Val::time(t))
+        .bind(Val::time(t))
+        .bind(Val::time(expires_at))
         .execute(&self.pool)
         .await
         .map_err(|e| map_db(e, "admin_session"))?;
@@ -91,14 +91,14 @@ impl Store {
         &self,
         id_hash: &KeyHash,
     ) -> Result<Option<SessionRecord>, StoreError> {
-        let row = sqlx::query("SELECT * FROM admin_session WHERE id_hash = $1")
-            .bind(id_hash.to_hex())
+        let row = Q::new("SELECT * FROM admin_session WHERE id_hash = $1")
+            .bind(Val::text(id_hash.to_hex()))
             .fetch_optional(&self.pool)
             .await?;
         row.map(|r| {
             let r = Row(&r);
             Ok(SessionRecord {
-                user_id: parse_id(&r.text("user_id")?)?,
+                user_id: r.uuid("user_id")?,
                 groups: r.json("groups")?,
                 created_at: r.time("created_at")?,
                 last_seen_at: r.time("last_seen_at")?,
@@ -114,9 +114,9 @@ impl Store {
         id_hash: &KeyHash,
         at: OffsetDateTime,
     ) -> Result<(), StoreError> {
-        sqlx::query("UPDATE admin_session SET last_seen_at = $1 WHERE id_hash = $2")
-            .bind(millis(at))
-            .bind(id_hash.to_hex())
+        Q::new("UPDATE admin_session SET last_seen_at = $1 WHERE id_hash = $2")
+            .bind(Val::time(at))
+            .bind(Val::text(id_hash.to_hex()))
             .execute(&self.pool)
             .await?;
         Ok(())
@@ -124,8 +124,8 @@ impl Store {
 
     /// Löscht eine Session (Abmelden, Ablauf).
     pub async fn delete_admin_session(&self, id_hash: &KeyHash) -> Result<(), StoreError> {
-        sqlx::query("DELETE FROM admin_session WHERE id_hash = $1")
-            .bind(id_hash.to_hex())
+        Q::new("DELETE FROM admin_session WHERE id_hash = $1")
+            .bind(Val::text(id_hash.to_hex()))
             .execute(&self.pool)
             .await?;
         Ok(())
@@ -133,11 +133,10 @@ impl Store {
 
     /// Löscht alle Sessions eines Nutzers (z. B. nach Rollenentzug).
     pub async fn delete_admin_sessions_of(&self, user_id: Id) -> Result<u64, StoreError> {
-        Ok(sqlx::query("DELETE FROM admin_session WHERE user_id = $1")
-            .bind(user_id.to_string())
+        Ok(Q::new("DELETE FROM admin_session WHERE user_id = $1")
+            .bind(Val::uuid(user_id))
             .execute(&self.pool)
-            .await?
-            .rows_affected())
+            .await?)
     }
 
     /// Entfernt abgelaufene bzw. zu lange inaktive Sessions und alte Login-Zustände.
@@ -147,18 +146,15 @@ impl Store {
         idle_before: OffsetDateTime,
         login_before: OffsetDateTime,
     ) -> Result<u64, StoreError> {
-        let mut n =
-            sqlx::query("DELETE FROM admin_session WHERE expires_at <= $1 OR last_seen_at < $2")
-                .bind(millis(at))
-                .bind(millis(idle_before))
-                .execute(&self.pool)
-                .await?
-                .rows_affected();
-        n += sqlx::query("DELETE FROM admin_login_state WHERE created_at < $1")
-            .bind(millis(login_before))
+        let mut n = Q::new("DELETE FROM admin_session WHERE expires_at <= $1 OR last_seen_at < $2")
+            .bind(Val::time(at))
+            .bind(Val::time(idle_before))
             .execute(&self.pool)
-            .await?
-            .rows_affected();
+            .await?;
+        n += Q::new("DELETE FROM admin_login_state WHERE created_at < $1")
+            .bind(Val::time(login_before))
+            .execute(&self.pool)
+            .await?;
         Ok(n)
     }
 
@@ -168,15 +164,15 @@ impl Store {
         state_hash: &KeyHash,
         state: &LoginState,
     ) -> Result<(), StoreError> {
-        sqlx::query(
+        Q::new(
             "INSERT INTO admin_login_state (state_hash, nonce, code_verifier, return_to, created_at)
              VALUES ($1, $2, $3, $4, $5)",
         )
-        .bind(state_hash.to_hex())
-        .bind(state.nonce.clone())
-        .bind(state.code_verifier.clone())
-        .bind(state.return_to.clone())
-        .bind(millis(state.created_at))
+        .bind(Val::text(state_hash.to_hex()))
+        .bind(Val::text(state.nonce.clone()))
+        .bind(Val::text(state.code_verifier.clone()))
+        .bind(Val::text(state.return_to.clone()))
+        .bind(Val::time(state.created_at))
         .execute(&self.pool)
         .await
         .map_err(|e| map_db(e, "admin_login_state"))?;
@@ -188,11 +184,11 @@ impl Store {
         &self,
         state_hash: &KeyHash,
     ) -> Result<Option<LoginState>, StoreError> {
-        let row = sqlx::query(
+        let row = Q::new(
             "DELETE FROM admin_login_state WHERE state_hash = $1
              RETURNING nonce, code_verifier, return_to, created_at",
         )
-        .bind(state_hash.to_hex())
+        .bind(Val::text(state_hash.to_hex()))
         .fetch_optional(&self.pool)
         .await?;
         row.map(|r| {
@@ -213,9 +209,9 @@ impl Store {
 
     /// `true`, wenn das Bootstrap-Token (Modus `auto`) dauerhaft abgeschaltet wurde.
     pub async fn bootstrap_disabled(&self) -> Result<bool, StoreError> {
-        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM admin_auth_state WHERE name = $1")
-            .bind(BOOTSTRAP_DISABLED)
-            .fetch_one(&self.pool)
+        let n = Q::new("SELECT COUNT(*) FROM admin_auth_state WHERE name = $1")
+            .bind(Val::text(BOOTSTRAP_DISABLED))
+            .fetch_i64(&self.pool)
             .await?;
         Ok(n > 0)
     }
@@ -223,16 +219,15 @@ impl Store {
     /// Schaltet das Bootstrap-Token dauerhaft ab (idempotent; der erste Grund bleibt).
     /// Liefert `true`, wenn es bisher aktiv war.
     pub async fn disable_bootstrap(&self, reason: &str) -> Result<bool, StoreError> {
-        let n = sqlx::query(
+        let n = Q::new(
             "INSERT INTO admin_auth_state (name, value, updated_at) VALUES ($1, $2, $3)
              ON CONFLICT (name) DO NOTHING",
         )
-        .bind(BOOTSTRAP_DISABLED)
-        .bind(reason.to_owned())
-        .bind(millis(now()))
+        .bind(Val::text(BOOTSTRAP_DISABLED))
+        .bind(Val::text(reason))
+        .bind(Val::time(now()))
         .execute(&self.pool)
-        .await?
-        .rows_affected();
+        .await?;
         if n > 0 {
             self.record_audit_event(&AuditEvent {
                 actor: "system".into(),
@@ -298,7 +293,7 @@ pub struct AdminApiKeyRecord {
     pub last_used_at: Option<OffsetDateTime>,
 }
 
-fn admin_key_from_row(row: &AnyRow) -> Result<AdminApiKeyRecord, StoreError> {
+fn admin_key_from_row(row: &DbRow) -> Result<AdminApiKeyRecord, StoreError> {
     let r = Row(row);
     Ok(AdminApiKeyRecord {
         id: r.id()?,
@@ -340,24 +335,24 @@ impl Store {
         validate_name(name).map_err(StoreError::Invalid)?;
         let generated = generate_admin_api_key()?;
         let id = new_id();
-        let t = millis(now());
+        let t = now();
         let mut tx = AdminTx::begin(self, actor).await?;
-        sqlx::query(
+        Q::new(
             "INSERT INTO admin_api_key (id, name, prefix, key_hash, description, roles, expires_at,
                                         created_by, created_at, updated_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
-        .bind(id.to_string())
-        .bind(name.to_owned())
-        .bind(generated.prefix.clone())
-        .bind(generated.hash.to_hex())
-        .bind(spec.description.clone())
-        .bind(serde_json::to_string(&spec.roles)?)
-        .bind(spec.expires_at.map(millis))
-        .bind(actor.to_owned())
-        .bind(t)
-        .bind(t)
-        .execute(&mut *tx.tx)
+        .bind(Val::uuid(id))
+        .bind(Val::text(name))
+        .bind(Val::text(generated.prefix.clone()))
+        .bind(Val::text(generated.hash.to_hex()))
+        .bind(Val::Text(spec.description.clone()))
+        .bind(Val::json(&spec.roles)?)
+        .bind(Val::opt_time(spec.expires_at))
+        .bind(Val::text(actor))
+        .bind(Val::time(t))
+        .bind(Val::time(t))
+        .execute(&mut tx.tx)
         .await
         .map_err(|e| map_db(e, ADMIN_API_KEY_KIND))?;
         let rec = fetch_admin_key(&mut tx, name).await?;
@@ -386,16 +381,16 @@ impl Store {
     ) -> Result<AdminApiKeyRecord, StoreError> {
         let mut tx = AdminTx::begin(self, actor).await?;
         let before = fetch_admin_key(&mut tx, name).await?;
-        sqlx::query(
+        Q::new(
             "UPDATE admin_api_key SET description = $1, roles = $2, expires_at = $3, updated_at = $4
              WHERE name = $5",
         )
-        .bind(spec.description.clone())
-        .bind(serde_json::to_string(&spec.roles)?)
-        .bind(spec.expires_at.map(millis))
-        .bind(millis(now()))
-        .bind(name.to_owned())
-        .execute(&mut *tx.tx)
+        .bind(Val::Text(spec.description.clone()))
+        .bind(Val::json(&spec.roles)?)
+        .bind(Val::opt_time(spec.expires_at))
+        .bind(Val::time(now()))
+        .bind(Val::text(name))
+        .execute(&mut tx.tx)
         .await?;
         let after = fetch_admin_key(&mut tx, name).await?;
         tx.audit_kind(
@@ -415,9 +410,9 @@ impl Store {
     pub async fn delete_admin_api_key(&self, actor: &str, name: &str) -> Result<(), StoreError> {
         let mut tx = AdminTx::begin(self, actor).await?;
         let before = fetch_admin_key(&mut tx, name).await?;
-        sqlx::query("DELETE FROM admin_api_key WHERE name = $1")
-            .bind(name.to_owned())
-            .execute(&mut *tx.tx)
+        Q::new("DELETE FROM admin_api_key WHERE name = $1")
+            .bind(Val::text(name))
+            .execute(&mut tx.tx)
             .await?;
         tx.audit_kind(
             Action::Delete,
@@ -437,8 +432,8 @@ impl Store {
         &self,
         name: &str,
     ) -> Result<Option<AdminApiKeyRecord>, StoreError> {
-        sqlx::query("SELECT * FROM admin_api_key WHERE name = $1")
-            .bind(name.to_owned())
+        Q::new("SELECT * FROM admin_api_key WHERE name = $1")
+            .bind(Val::text(name))
             .fetch_optional(&self.pool)
             .await?
             .as_ref()
@@ -448,7 +443,7 @@ impl Store {
 
     /// Alle Admin-API-Keys, nach Name sortiert.
     pub async fn list_admin_api_keys(&self) -> Result<Vec<AdminApiKeyRecord>, StoreError> {
-        sqlx::query("SELECT * FROM admin_api_key ORDER BY name")
+        Q::new("SELECT * FROM admin_api_key ORDER BY name")
             .fetch_all(&self.pool)
             .await?
             .iter()
@@ -461,8 +456,8 @@ impl Store {
         &self,
         hash: &KeyHash,
     ) -> Result<Option<AdminApiKeyRecord>, StoreError> {
-        sqlx::query("SELECT * FROM admin_api_key WHERE key_hash = $1")
-            .bind(hash.to_hex())
+        Q::new("SELECT * FROM admin_api_key WHERE key_hash = $1")
+            .bind(Val::text(hash.to_hex()))
             .fetch_optional(&self.pool)
             .await?
             .as_ref()
@@ -478,14 +473,13 @@ impl Store {
         key: &AdminApiKeyRecord,
         at: OffsetDateTime,
     ) -> Result<bool, StoreError> {
-        let n = sqlx::query(
+        let n = Q::new(
             "UPDATE admin_api_key SET last_used_at = $1 WHERE id = $2 AND last_used_at IS NULL",
         )
-        .bind(millis(at))
-        .bind(key.id.to_string())
+        .bind(Val::time(at))
+        .bind(Val::uuid(key.id))
         .execute(&self.pool)
-        .await?
-        .rows_affected();
+        .await?;
         if n > 0 {
             self.record_audit_event(&AuditEvent {
                 actor: format!("admin-key:{}", key.name),
@@ -502,9 +496,9 @@ impl Store {
 
     /// Vermerkt die Nutzung eines Admin-API-Keys.
     pub async fn touch_admin_api_key(&self, id: Id, at: OffsetDateTime) -> Result<(), StoreError> {
-        sqlx::query("UPDATE admin_api_key SET last_used_at = $1 WHERE id = $2")
-            .bind(millis(at))
-            .bind(id.to_string())
+        Q::new("UPDATE admin_api_key SET last_used_at = $1 WHERE id = $2")
+            .bind(Val::time(at))
+            .bind(Val::uuid(id))
             .execute(&self.pool)
             .await?;
         Ok(())
@@ -512,9 +506,9 @@ impl Store {
 }
 
 async fn fetch_admin_key(tx: &mut AdminTx, name: &str) -> Result<AdminApiKeyRecord, StoreError> {
-    let row = sqlx::query("SELECT * FROM admin_api_key WHERE name = $1")
-        .bind(name.to_owned())
-        .fetch_optional(&mut *tx.tx)
+    let row = Q::new("SELECT * FROM admin_api_key WHERE name = $1")
+        .bind(Val::text(name))
+        .fetch_optional(&mut tx.tx)
         .await?
         .ok_or_else(|| not_found(name))?;
     admin_key_from_row(&row)

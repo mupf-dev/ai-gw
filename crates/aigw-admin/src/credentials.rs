@@ -37,8 +37,8 @@ use crate::AdminState;
 use crate::auth::{Permission, Principal, Target};
 use crate::problem::Problem;
 use crate::resources::{
-    ApiResult, BASE, ListArgs, St, check_if_match, created_at, etag_of, json_with, no_store,
-    paginate, same_name,
+    ApiResult, BASE, ListArgs, St, check_if_match, created_at, etag_of, json_with, list_query,
+    no_store, page_parts, same_name,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -314,21 +314,20 @@ pub(crate) async fn list_credentials(
 ) -> ApiResult {
     p.require_on(Permission::Read, &Target::Catalog)?;
     let Query(q) = q?;
-    let items: Vec<_> = st
-        .store
-        .list_credentials()
-        .await?
-        .into_iter()
-        .filter(|c| q.provider.is_none_or(|p| p == c.spec.provider))
-        .collect();
     let args = ListArgs {
         limit: q.limit,
         cursor: q.cursor.as_deref(),
         q: q.q.as_deref(),
         label: q.label.as_deref(),
     };
-    let (page, next_cursor) = paginate(items, |c| &c.metadata, &args)?;
-    let items = page.into_iter().map(ProviderCredential::from).collect();
+    let filters = q
+        .provider
+        .map(|p| aigw_store::ListFilter::Provider(p.as_str().to_owned()))
+        .into_iter()
+        .collect();
+    let lq = list_query(&args, filters, aigw_store::AuditScope::All)?;
+    let (items, next_cursor) =
+        page_parts::<_, ProviderCredential>(st.store.list_credentials_page(&lq).await?);
     Ok(json_with(
         StatusCode::OK,
         None,

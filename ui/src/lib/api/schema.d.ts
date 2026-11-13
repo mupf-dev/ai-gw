@@ -889,7 +889,12 @@ export interface components {
             limits?: components["schemas"]["LimitSpec"][];
             /** @description Freie Metadaten (erscheinen im Request-Log). */
             metadata?: components["schemas"]["BTreeMap"];
-            /** @description Team (Name). */
+            /**
+             * @description Organisation (Name, Pflicht; F3). Mit Team muss es die Organisation des Teams sein.
+             *     Keys ohne Team erben Limits, Budgets und Plugins der Organisation.
+             */
+            organization: string;
+            /** @description Team (Name, optional). */
             team?: string | null;
             /** @description Besitzender Nutzer (Name). */
             user?: string | null;

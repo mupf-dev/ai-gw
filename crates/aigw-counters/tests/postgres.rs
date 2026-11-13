@@ -36,7 +36,10 @@ async fn fresh_db() -> Option<(PgPool, PgPool, String)> {
         .unwrap();
     let (prefix, _) = base.rsplit_once('/').expect("URL mit Datenbankpfad");
     let pool = PgPool::connect(&format!("{prefix}/{db}")).await.unwrap();
-    aigw_store::migrator().run(&pool).await.unwrap();
+    aigw_store::migrator(aigw_store::Backend::Postgres)
+        .run(&pool)
+        .await
+        .unwrap();
     Some((admin, pool, db))
 }
 

@@ -63,8 +63,9 @@ rustls = { version = "0.23.35", default-features = false, features = ["aws_lc_rs
 
 # Persistenz (E4): SQLite (gebündelt) Standard, Postgres optional. Ohne Compile-Zeit-Makros
 # (kein DB-Zugriff beim Bauen), ohne SQLite-Erweiterungsladen.
-# `any`: ein Code-Pfad für beide Datenbanken (portables Schema, siehe docs/konzept/02-datenmodell.md).
-sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "sqlite-bundled", "postgres", "migrate", "any"] }
+# Getrennte Treiber mit nativen Typen (F7, AIGW-73): `json` (JSONB), `uuid`, `time` (TIMESTAMPTZ),
+# siehe docs/konzept/02-datenmodell.md.
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "sqlite-bundled", "postgres", "migrate", "json", "uuid", "time"] }
 
 # Admin-API: OpenAPI 3.1 aus Rust-Typen (E3: TS-Typen der UI werden daraus generiert).
 utoipa = { version = "6.0.0", default-features = false, features = ["macros", "uuid", "time"] }

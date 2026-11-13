@@ -11,17 +11,22 @@
 //!
 //! Berechtigungen kennt der Store nicht: Die Admin-API übergibt den erlaubten Bereich als
 //! Filter (z. B. erlaubte Team-IDs).
+//!
+//! Dialekte (AIGW-73): Zeit-Buckets in SQLite über Ganzzahl-Division der Unix-ms, in Postgres
+//! über den Roh-Bucket (`TIMESTAMPTZ`), im Speicher auf den Schritt gefaltet; ID-Schlüssel
+//! sind in Postgres `UUID` („kein Wert“ in den Rollups = Null-UUID), in SQLite Text (`''`).
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use sqlx::{AssertSqlSafe, Row as _};
+use uuid::Uuid;
 
+use crate::db::{Q, Val};
 use crate::observe::{
     HOUR_MS, LATENCY_BUCKET_COUNT, LATENCY_BUCKETS_MS, MINUTE_MS, RequestLogRow, RollupCounts,
     rollup_count_columns, rollup_counts_from_row,
 };
-use crate::{Store, StoreError};
+use crate::{Backend, Store, StoreError};
 
 /// Schlüsselspalte der Rollups, nach der gefiltert bzw. gruppiert werden kann.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -48,6 +53,33 @@ impl RollupDim {
             Self::Deployment => "deployment_id",
         }
     }
+
+    fn is_id(self) -> bool {
+        !matches!(self, Self::ModelGroup)
+    }
+}
+
+/// Wo ein Filterwert verglichen wird.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Table {
+    /// Rollups: „kein Wert“ = `''` (SQLite) bzw. Null-UUID (Postgres).
+    Rollup,
+    /// Rohlog: „kein Wert“ = `NULL` (passt zu keinem Filter).
+    Log,
+}
+
+/// Bindungswert eines Schlüssel-Filters; `None`, wenn der Wert sicher nichts findet (z. B.
+/// keine UUID für eine ID-Spalte).
+fn key_val(id_col: bool, table: Table, v: &str) -> Option<Val> {
+    if !id_col {
+        return Some(Val::text(v));
+    }
+    match (table, v.is_empty()) {
+        (Table::Rollup, true) => Some(Val::Dim(None)),
+        (Table::Log, true) => None,
+        (Table::Rollup, false) => Uuid::parse_str(v).ok().map(|u| Val::Dim(Some(u))),
+        (Table::Log, false) => Uuid::parse_str(v).ok().map(Val::uuid),
+    }
 }
 
 /// Filter auf Schlüsselspalten. `Some(liste)` = Wert muss in der Liste stehen (leere Liste =
@@ -68,13 +100,13 @@ pub struct KeyFilter {
 }
 
 impl KeyFilter {
-    fn lists(&self) -> [(&'static str, Option<&Vec<String>>); 5] {
+    fn lists(&self) -> [(RollupDim, Option<&Vec<String>>); 5] {
         [
-            ("api_key_id", self.api_keys.as_ref()),
-            ("team_id", self.teams.as_ref()),
-            ("organization_id", self.organizations.as_ref()),
-            ("model_group", self.model_groups.as_ref()),
-            ("deployment_id", self.deployments.as_ref()),
+            (RollupDim::ApiKey, self.api_keys.as_ref()),
+            (RollupDim::Team, self.teams.as_ref()),
+            (RollupDim::Organization, self.organizations.as_ref()),
+            (RollupDim::ModelGroup, self.model_groups.as_ref()),
+            (RollupDim::Deployment, self.deployments.as_ref()),
         ]
     }
 
@@ -167,53 +199,43 @@ fn segments(from: i64, to: i64, step: Option<i64>) -> Vec<(Resolution, i64, i64)
     out
 }
 
-/// Eine Bindung (Text oder Zahl).
-enum Bind {
-    Text(String),
-    Int(i64),
-}
-
-/// Baut Platzhalter `$n` in Reihenfolge und merkt sich die Bindungen.
-#[derive(Default)]
-struct Binds(Vec<Bind>);
-
-impl Binds {
-    fn push(&mut self, v: &str) -> String {
-        self.0.push(Bind::Text(v.to_owned()));
-        format!("${}", self.0.len())
-    }
-
-    fn int(&mut self, v: i64) -> String {
-        self.0.push(Bind::Int(v));
-        format!("${}", self.0.len())
-    }
-
-    fn list(&mut self, vs: &[String]) -> String {
-        vs.iter()
-            .map(|v| self.push(v))
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-
-    fn apply<'q>(
-        self,
-        mut q: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments>,
-    ) -> sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments> {
-        for b in self.0 {
-            q = match b {
-                Bind::Text(t) => q.bind(t),
-                Bind::Int(i) => q.bind(i),
-            };
-        }
-        q
-    }
-}
-
-fn key_filter_sql(f: &KeyFilter, binds: &mut Binds, sql: &mut String) {
-    for (col, list) in f.lists() {
+/// `AND col IN (…)` je gesetztem Filter; Werte, die sicher nichts finden, fallen weg (bleibt
+/// keiner übrig, passt nichts).
+fn key_filter_sql(f: &KeyFilter, table: Table, q: &mut Q, sql: &mut String) {
+    for (dim, list) in f.lists() {
         if let Some(l) = list {
-            let _ = write!(sql, " AND {col} IN ({})", binds.list(l));
+            let vals: Vec<Val> = l
+                .iter()
+                .filter_map(|v| key_val(dim.is_id(), table, v))
+                .collect();
+            if vals.is_empty() {
+                sql.push_str(" AND 1 = 0");
+            } else {
+                let _ = write!(sql, " AND {} IN ({})", dim.column(), q.list(vals));
+            }
         }
+    }
+}
+
+/// Bucket-Ausdruck (Unix-ms in SQLite, `TIMESTAMPTZ` in Postgres).
+///
+/// Postgres gruppiert nach dem Roh-Bucket der Tabelle (Minute bzw. Stunde); auf die
+/// Schrittweite fasst [`fold_bucket`] im Speicher zusammen. Gemessen war das schneller als
+/// `date_bin(…)` je Zeile (24 h in 5-Minuten-Schritten über ≈ 144 000 Minuten-Rollups).
+fn bucket_sql(backend: Backend, step_ms: Option<i64>) -> String {
+    match (backend, step_ms) {
+        (Backend::Sqlite, Some(s)) => format!("(bucket_start / {s}) * {s}"),
+        (Backend::Sqlite, None) => "CAST(0 AS BIGINT)".to_owned(),
+        (Backend::Postgres, Some(_)) => "bucket_start".to_owned(),
+        (Backend::Postgres, None) => "TIMESTAMPTZ '1970-01-01 00:00:00+00'".to_owned(),
+    }
+}
+
+/// Bucket-Beginn eines gelesenen Werts auf die Schrittweite ausgerichtet (an der Epoche).
+fn fold_bucket(b: i64, step_ms: Option<i64>) -> i64 {
+    match step_ms {
+        Some(s) => b.div_euclid(s) * s,
+        None => b,
     }
 }
 
@@ -263,27 +285,28 @@ impl Store {
         q: &RollupQuery,
         acc: &mut BTreeMap<(i64, String), RollupCounts>,
     ) -> Result<(), StoreError> {
-        let mut binds = Binds::default();
-        let p_from = binds.int(from);
-        let p_to = binds.int(to);
-        let bucket = match q.step_ms {
-            Some(s) => format!("(bucket_start / {s}) * {s}"),
-            None => "CAST(0 AS BIGINT)".to_owned(),
-        };
+        let mut binds = Q::default();
+        let p_from = binds.arg(Val::ms(from));
+        let p_to = binds.arg(Val::ms(to));
+        let bucket = bucket_sql(self.backend(), q.step_ms);
         let group = match &q.grouping {
             Grouping::None => "''".to_owned(),
             Grouping::Raw(d) => d.column().to_owned(),
             Grouping::Mapped { dim, groups, other } => {
                 let mut e = String::from("CASE");
                 for (label, values) in groups {
-                    if values.is_empty() {
+                    let vals: Vec<Val> = values
+                        .iter()
+                        .filter_map(|v| key_val(dim.is_id(), Table::Rollup, v))
+                        .collect();
+                    if vals.is_empty() {
                         continue;
                     }
-                    let vals = binds.list(values);
-                    let l = binds.push(label);
+                    let vals = binds.list(vals);
+                    let l = binds.arg(Val::text(label.clone()));
                     let _ = write!(e, " WHEN {} IN ({vals}) THEN {l}", dim.column());
                 }
-                let o = binds.push(other);
+                let o = binds.arg(Val::text(other.clone()));
                 if e == "CASE" {
                     o
                 } else {
@@ -304,15 +327,13 @@ impl Store {
             sql,
             " FROM {table} WHERE bucket_start >= {p_from} AND bucket_start < {p_to}"
         );
-        key_filter_sql(&q.filter, &mut binds, &mut sql);
+        key_filter_sql(&q.filter, Table::Rollup, &mut binds, &mut sql);
         sql.push_str(" GROUP BY 1, 2");
-        let rows = binds
-            .apply(sqlx::query(AssertSqlSafe(sql)))
-            .fetch_all(&self.pool)
-            .await?;
+        binds.sql = sql;
+        let rows = binds.fetch_all(&self.pool).await?;
         for row in &rows {
-            let b: i64 = row.try_get("b")?;
-            let g: String = row.try_get("g")?;
+            let b = fold_bucket(row.ms("b")?, q.step_ms);
+            let g = row.dim("g")?;
             let counts = rollup_counts_from_row(row)?;
             acc.entry((b, g)).or_default().merge(&counts);
         }
@@ -324,7 +345,7 @@ impl Store {
         if q.keys.is_empty_set() || q.providers.as_ref().is_some_and(Vec::is_empty) {
             return Ok(Vec::new());
         }
-        let mut binds = Binds::default();
+        let mut binds = Q::default();
         let mut sql = format!(
             "SELECT {}, CASE WHEN EXISTS (SELECT 1 FROM request_payload p WHERE p.id = \
              request_log.id) THEN CAST(1 AS BIGINT) ELSE CAST(0 AS BIGINT) END AS has_payload \
@@ -332,26 +353,27 @@ impl Store {
             crate::observe::REQUEST_LOG_COLUMNS.join(", ")
         );
         if let Some(f) = q.from_ms {
-            let p = binds.int(f);
+            let p = binds.arg(Val::ms(f));
             let _ = write!(sql, " AND at >= {p}");
         }
         if let Some(t) = q.to_ms {
-            let p = binds.int(t);
+            let p = binds.arg(Val::ms(t));
             let _ = write!(sql, " AND at < {p}");
         }
-        key_filter_sql(&q.keys, &mut binds, &mut sql);
+        key_filter_sql(&q.keys, Table::Log, &mut binds, &mut sql);
         if let Some(p) = &q.providers {
-            let _ = write!(sql, " AND provider IN ({})", binds.list(p));
+            let l = binds.list(p.iter().map(|v| Val::text(v.clone())));
+            let _ = write!(sql, " AND provider IN ({l})");
         }
         match q.status {
             None => {}
             Some(StatusFilter::Code(c)) => {
-                let p = binds.int(c);
+                let p = binds.arg(Val::int(c));
                 let _ = write!(sql, " AND status = {p}");
             }
             Some(StatusFilter::Class(c)) => {
-                let lo = binds.int(c * 100);
-                let hi = binds.int(c * 100 + 100);
+                let lo = binds.arg(Val::int(c * 100));
+                let hi = binds.arg(Val::int(c * 100 + 100));
                 let _ = write!(sql, " AND status >= {lo} AND status < {hi}");
             }
             Some(StatusFilter::Error) => {
@@ -362,16 +384,30 @@ impl Store {
             }
         }
         if let Some(e) = &q.error_codes {
-            let _ = write!(sql, " AND error_code IN ({})", binds.list(e));
+            let l = binds.list(e.iter().map(|v| Val::text(v.clone())));
+            let _ = write!(sql, " AND error_code IN ({l})");
         }
         if let Some(id) = &q.request_id {
-            let _ = write!(sql, " AND id = {}", binds.push(id));
+            let Ok(id) = Uuid::parse_str(id) else {
+                return Ok(Vec::new());
+            };
+            let _ = write!(sql, " AND id = {}", binds.arg(Val::uuid(id)));
         }
         if let Some(id) = &q.client_request_id {
-            let _ = write!(sql, " AND client_request_id = {}", binds.push(id));
+            let _ = write!(
+                sql,
+                " AND client_request_id = {}",
+                binds.arg(Val::text(id.clone()))
+            );
+        }
+        if let Some(id) = &q.parent_request_id {
+            let Ok(id) = Uuid::parse_str(id) else {
+                return Ok(Vec::new());
+            };
+            let _ = write!(sql, " AND parent_request_id = {}", binds.arg(Val::uuid(id)));
         }
         if let Some(s) = q.stream {
-            let p = binds.int(i64::from(s));
+            let p = binds.arg(Val::bool(s));
             let _ = write!(sql, " AND stream = {p}");
         }
         match &q.cache {
@@ -380,24 +416,29 @@ impl Store {
             Some(CacheFilter::Miss) => sql.push_str(" AND cache = 'miss'"),
             Some(CacheFilter::None) => sql.push_str(" AND cache IS NULL"),
             Some(CacheFilter::Value(v)) => {
-                let _ = write!(sql, " AND cache = {}", binds.push(v));
+                let _ = write!(sql, " AND cache = {}", binds.arg(Val::text(v.clone())));
             }
         }
         if let Some((at, id)) = &q.before {
-            let a1 = binds.int(*at);
-            let a2 = binds.int(*at);
-            let i = binds.push(id);
+            let Ok(id) = Uuid::parse_str(id) else {
+                return Err(StoreError::Invalid(format!(
+                    "Cursor: keine Request-ID {id:?}"
+                )));
+            };
+            let a1 = binds.arg(Val::ms(*at));
+            let a2 = binds.arg(Val::ms(*at));
+            let i = binds.arg(Val::uuid(id));
             let _ = write!(sql, " AND (at < {a1} OR (at = {a2} AND id < {i}))");
         }
         let _ = write!(sql, " ORDER BY at DESC, id DESC LIMIT {}", q.limit.max(1));
 
-        let query = binds.apply(sqlx::query(AssertSqlSafe(sql)));
-        let rows = query.fetch_all(&self.pool).await?;
+        binds.sql = sql;
+        let rows = binds.fetch_all(&self.pool).await?;
         rows.iter()
             .map(|r| {
                 Ok(LogListItem {
                     row: crate::observe::request_log_from_row(r)?,
-                    has_payload: r.try_get::<i64, _>("has_payload")? != 0,
+                    has_payload: r.i64("has_payload")? != 0,
                 })
             })
             .collect()
@@ -405,15 +446,18 @@ impl Store {
 
     /// Aktualisiert die Planer-Statistiken (`ANALYZE`), z. B. nach einem Massenimport.
     pub async fn analyze(&self) -> Result<(), StoreError> {
-        sqlx::query("ANALYZE").execute(&self.pool).await?;
+        Q::new("ANALYZE").execute(&self.pool).await?;
         Ok(())
     }
 
     /// `true`, wenn zu der Anfrage ein Payload gespeichert ist.
     pub async fn has_request_payload(&self, id: &str) -> Result<bool, StoreError> {
-        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM request_payload WHERE id = $1")
-            .bind(id.to_owned())
-            .fetch_one(&self.pool)
+        let Ok(id) = Uuid::parse_str(id) else {
+            return Ok(false);
+        };
+        let n = Q::new("SELECT COUNT(*) FROM request_payload WHERE id = $1")
+            .bind(Val::uuid(id))
+            .fetch_i64(&self.pool)
             .await?;
         Ok(n > 0)
     }
@@ -464,6 +508,8 @@ pub struct LogQuery {
     pub request_id: Option<String>,
     /// Genau diese Client-Request-ID.
     pub client_request_id: Option<String>,
+    /// Nur Folgeanfragen dieser Anfrage (F191, `parent_request_id`).
+    pub parent_request_id: Option<String>,
     /// Streaming ja/nein.
     pub stream: Option<bool>,
     /// Cache-Ergebnis.

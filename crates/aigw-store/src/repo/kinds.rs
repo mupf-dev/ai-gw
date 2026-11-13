@@ -11,7 +11,7 @@ use aigw_core::resource::{
 use aigw_core::types::ProviderKind;
 use serde::de::DeserializeOwned;
 
-use super::{Col, PlainResource, RefCol, Resource, Row, level_kind, millis, trunc_millis};
+use super::{Col, PlainResource, RefCol, Resource, Row, level_kind, trunc_millis};
 use crate::StoreError;
 
 fn provider(row: &Row<'_>, col: &str) -> Result<ProviderKind, StoreError> {
@@ -160,12 +160,18 @@ impl PlainResource for UserSpec {}
 impl Resource for ApiKeySpec {
     const KIND: ResourceKind = ResourceKind::ApiKey;
     const REFS: &'static [RefCol] = &[
+        RefCol::Fixed("organization_id", ResourceKind::Organization),
         RefCol::Fixed("team_id", ResourceKind::Team),
         RefCol::Fixed("user_id", ResourceKind::User),
     ];
+    const SEARCH: &'static [&'static str] = &["prefix"];
 
     fn to_columns(&self) -> Result<Vec<(&'static str, Col)>, StoreError> {
         Ok(vec![
+            (
+                "organization_id",
+                Col::reference(ResourceKind::Organization, Some(&self.organization)),
+            ),
             (
                 "team_id",
                 Col::reference(ResourceKind::Team, self.team.as_deref()),
@@ -174,7 +180,7 @@ impl Resource for ApiKeySpec {
                 "user_id",
                 Col::reference(ResourceKind::User, self.user.as_deref()),
             ),
-            ("expires_at", Col::opt_int(self.expires_at.map(millis))),
+            ("expires_at", Col::opt_time(self.expires_at)),
             ("allowed_models", Col::json(&self.allowed_models)?),
             ("limits", Col::json(&self.limits)?),
             ("budget", Col::opt_json(self.budget.as_ref())?),
@@ -184,6 +190,7 @@ impl Resource for ApiKeySpec {
 
     fn from_row(row: &Row<'_>) -> Result<Self, StoreError> {
         Ok(Self {
+            organization: row.ref_name("organization_id")?.unwrap_or_default(),
             team: row.ref_name("team_id")?,
             user: row.ref_name("user_id")?,
             expires_at: row.opt_time("expires_at")?,
@@ -239,6 +246,7 @@ impl Resource for DeploymentSpec {
         RefCol::Fixed("model_group_id", ResourceKind::ModelGroup),
         RefCol::Fixed("credential_id", ResourceKind::ProviderCredential),
     ];
+    const SEARCH: &'static [&'static str] = &["provider_model"];
 
     fn to_columns(&self) -> Result<Vec<(&'static str, Col)>, StoreError> {
         Ok(vec![
@@ -284,6 +292,7 @@ impl PlainResource for DeploymentSpec {}
 
 impl Resource for PriceSpec {
     const KIND: ResourceKind = ResourceKind::Price;
+    const SEARCH: &'static [&'static str] = &["model"];
 
     fn to_columns(&self) -> Result<Vec<(&'static str, Col)>, StoreError> {
         Ok(vec![
@@ -292,7 +301,7 @@ impl Resource for PriceSpec {
                 Col::text(self.provider.map(ProviderKind::as_str).unwrap_or_default()),
             ),
             ("model", Col::text(self.model.clone())),
-            ("valid_from", Col::int(millis(self.valid_from))),
+            ("valid_from", Col::time(self.valid_from)),
             ("token_prices", Col::json(&self.per_million_tokens)?),
             (
                 "per_request",
@@ -367,6 +376,7 @@ impl Resource for McpServerSpec {
         "credential_id",
         ResourceKind::ProviderCredential,
     )];
+    const SEARCH: &'static [&'static str] = &["url"];
 
     fn to_columns(&self) -> Result<Vec<(&'static str, Col)>, StoreError> {
         Ok(vec![

@@ -2,30 +2,38 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Zugangsdaten der Anbieter: verschlüsselt speichern, nie im Klartext ausgeben.
+//!
+//! F54: Zu jedem Feld, dessen Wert aus einem `valueFrom`-Verweis kam (`env`/`file`), wird der
+//! Verweis selbst unverschlüsselt mitgespeichert (Spalte `refs`, nur Namen, keine Werte). Der
+//! GitOps-Export gibt diese Verweise originalgetreu aus; Felder ohne Verweis (Klartext über die
+//! Admin-API) erscheinen dort weiter als Platzhalter `AIGW_SECRET_…`.
 
 use std::collections::{BTreeMap, HashMap};
 
 use aigw_core::resource::{
     CredentialData, Id, ObjectMeta, ProviderCredential, ProviderCredentialInfo,
-    ProviderCredentialSpec, ResourceKind, SecretString, new_id, validate_name,
+    ProviderCredentialSpec, ResourceKind, SecretString, ValueFrom, new_id, validate_name,
 };
 use aigw_core::types::ProviderKind;
-use sqlx::any::AnyRow;
 
 use super::{Action, AdminTx, Row, Val};
 use crate::crypto::{Keyring, Sealed};
+use crate::db::{DbRow, Q};
 use crate::{Store, StoreError};
 
 const NO_REFS: &[super::RefCol] = &[];
 
-fn info_from_row(row: &AnyRow) -> Result<(ProviderCredential, Sealed), StoreError> {
+/// `valueFrom`-Verweise je Feld (F54).
+pub(crate) type CredentialRefs = BTreeMap<String, ValueFrom>;
+
+fn info_from_row(row: &DbRow) -> Result<(ProviderCredential, Sealed), StoreError> {
     let r = Row(row);
     let p = r.text("provider")?;
-    let sealed = Sealed {
-        key_id: r.text("key_id")?,
-        nonce: r.text("nonce")?,
-        ciphertext: r.text("ciphertext")?,
-    };
+    let sealed = Sealed::from_bytes(
+        r.text("key_id")?,
+        &row.bytes("nonce")?,
+        &row.bytes("ciphertext")?,
+    );
     let obj = ProviderCredential {
         id: r.id()?,
         metadata: r.meta()?,
@@ -37,6 +45,19 @@ fn info_from_row(row: &AnyRow) -> Result<(ProviderCredential, Sealed), StoreErro
         },
     };
     Ok((obj, sealed))
+}
+
+/// Gelesene Sicht (ohne Werte) aus einer Zeile.
+pub(crate) fn credential_from_row(row: &DbRow) -> Result<ProviderCredential, StoreError> {
+    Ok(info_from_row(row)?.0)
+}
+
+/// `valueFrom`-Verweise einer Eingabe (Felder mit Klartext fehlen).
+pub(crate) fn refs_of(spec: &ProviderCredentialSpec) -> CredentialRefs {
+    spec.data
+        .iter()
+        .filter_map(|(f, r)| r.value_from.clone().map(|v| (f.clone(), v)))
+        .collect()
 }
 
 /// Löst die Werte auf (Klartext oder `valueFrom`) und verschlüsselt sie, gebunden an `id`.
@@ -60,14 +81,23 @@ pub(crate) fn seal_spec(
 pub(crate) fn sealed_cols(
     provider: ProviderKind,
     fields: &[String],
+    refs: &CredentialRefs,
     sealed: Sealed,
 ) -> Result<Vec<(&'static str, Val)>, StoreError> {
+    let (nonce, ciphertext) = sealed.to_bytes()?;
+    // Nur Verweise auf vorhandene Felder.
+    let refs: CredentialRefs = refs
+        .iter()
+        .filter(|(f, _)| fields.contains(f))
+        .map(|(f, v)| (f.clone(), v.clone()))
+        .collect();
     Ok(vec![
-        ("provider", Val::Text(Some(provider.as_str().to_owned()))),
-        ("fields", Val::Text(Some(serde_json::to_string(fields)?))),
-        ("key_id", Val::Text(Some(sealed.key_id))),
-        ("nonce", Val::Text(Some(sealed.nonce))),
-        ("ciphertext", Val::Text(Some(sealed.ciphertext))),
+        ("provider", Val::text(provider.as_str())),
+        ("fields", Val::json(&fields)?),
+        ("refs", Val::json(&refs)?),
+        ("key_id", Val::text(sealed.key_id)),
+        ("nonce", Val::Bytes(Some(nonce))),
+        ("ciphertext", Val::Bytes(Some(ciphertext))),
     ])
 }
 
@@ -88,7 +118,7 @@ impl Store {
             ResourceKind::ProviderCredential,
             id,
             &meta,
-            sealed_cols(spec.provider, &fields, sealed)?,
+            sealed_cols(spec.provider, &fields, &refs_of(&spec), sealed)?,
         )
         .await?;
         let after = ProviderCredential {
@@ -128,7 +158,7 @@ impl Store {
             ResourceKind::ProviderCredential,
             before.id,
             &meta,
-            sealed_cols(spec.provider, &fields, sealed)?,
+            sealed_cols(spec.provider, &fields, &refs_of(&spec), sealed)?,
         )
         .await?;
         let after = ProviderCredential {
@@ -170,9 +200,12 @@ impl Store {
             .fetch_one_row(ResourceKind::ProviderCredential, NO_REFS, name)
             .await?;
         let (before, sealed) = info_from_row(&row)?;
+        // Verweise unveränderter Felder bleiben; geänderte Felder sind jetzt Klartext.
+        let mut refs: CredentialRefs = row.json("refs")?;
         let plain = keyring.open(before.id.as_bytes(), &sealed)?;
         let mut values: BTreeMap<String, String> = serde_json::from_slice(&plain)?;
         for (field, v) in changes {
+            refs.remove(&field);
             match v {
                 Some(v) => values.insert(field, v.expose().to_owned()),
                 None => values.remove(&field),
@@ -196,7 +229,7 @@ impl Store {
             ResourceKind::ProviderCredential,
             before.id,
             &meta,
-            sealed_cols(provider, &fields, sealed)?,
+            sealed_cols(provider, &fields, &refs, sealed)?,
         )
         .await?;
         let after = ProviderCredential {
@@ -243,6 +276,16 @@ impl Store {
         .collect()
     }
 
+    /// Gespeicherte `valueFrom`-Verweise aller Zugangsdaten (F54), Schlüssel: Name.
+    pub async fn credential_refs(&self) -> Result<HashMap<String, CredentialRefs>, StoreError> {
+        let rows = Q::new("SELECT name, refs FROM provider_credential")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter()
+            .map(|r| Ok((r.text("name")?, r.json("refs")?)))
+            .collect()
+    }
+
     /// Entschlüsselt alle Zugangsdaten (für den Snapshot), Schlüssel: Name.
     pub async fn decrypt_credentials(
         &self,
@@ -278,7 +321,7 @@ impl Store {
                 ResourceKind::ProviderCredential,
                 NO_REFS,
                 "WHERE t.key_id <> $1",
-                Some(keyring.primary_id().to_owned()),
+                Some(Val::text(keyring.primary_id())),
             )
             .await?;
         if rows.is_empty() {
@@ -289,14 +332,15 @@ impl Store {
             let (info, sealed) = info_from_row(row)?;
             let plain = keyring.open(info.id.as_bytes(), &sealed)?;
             let resealed = keyring.seal(info.id.as_bytes(), &plain)?;
-            sqlx::query(
+            let (nonce, ciphertext) = resealed.to_bytes()?;
+            Q::new(
                 "UPDATE provider_credential SET key_id = $1, nonce = $2, ciphertext = $3 WHERE id = $4",
             )
-            .bind(resealed.key_id.clone())
-            .bind(resealed.nonce)
-            .bind(resealed.ciphertext)
-            .bind(info.id.to_string())
-            .execute(&mut *tx.tx)
+            .bind(Val::text(resealed.key_id.clone()))
+            .bind(Val::Bytes(Some(nonce)))
+            .bind(Val::Bytes(Some(ciphertext)))
+            .bind(Val::uuid(info.id))
+            .execute(&mut tx.tx)
             .await?;
             let mut after = info.clone();
             after.spec.key_id = resealed.key_id;

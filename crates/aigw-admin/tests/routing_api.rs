@@ -835,12 +835,20 @@ async fn deployments(env: &Env) {
 }
 
 async fn snapshot_and_data_plane(env: &Env) {
+    // Keys brauchen eine Organisation (F3).
+    env.admin(
+        Method::POST,
+        "/organizations",
+        Some(json!({"metadata": {"name": "apps"}, "spec": {}})),
+    )
+    .await
+    .expect(StatusCode::CREATED);
     // Key ohne Einschränkung
     let r = env
         .admin(
             Method::POST,
             "/api-keys",
-            Some(json!({"metadata": {"name": "app"}, "spec": {}})),
+            Some(json!({"metadata": {"name": "app"}, "spec": {"organization": "apps"}})),
         )
         .await
         .expect(StatusCode::CREATED);
@@ -851,7 +859,7 @@ async fn snapshot_and_data_plane(env: &Env) {
             Method::POST,
             "/api-keys",
             Some(json!({"metadata": {"name": "only-gpt"},
-                        "spec": {"allowedModels": ["gpt-4o-latest"]}})),
+                        "spec": {"organization": "apps", "allowedModels": ["gpt-4o-latest"]}})),
         )
         .await
         .expect(StatusCode::CREATED);
