@@ -314,7 +314,10 @@ impl ResponseCache {
             }
             Err(_) => {
                 self.metrics.embedded(false, started.elapsed());
-                tracing::debug!(model = s.embedding_model, "Cache: Embedding-Zeitlimit (Miss)");
+                tracing::debug!(
+                    model = s.embedding_model,
+                    "Cache: Embedding-Zeitlimit (Miss)"
+                );
                 return None;
             }
         };
@@ -346,7 +349,12 @@ impl ResponseCache {
 
     /// Speichert eine Antwort (RAM sofort, Redis und Vektor-Backend im Hintergrund).
     /// `false`, wenn sie zu groß ist.
-    pub fn store(self: &Arc<Self>, ticket: StoreTicket, resp: &ChatResponse, ttl: Duration) -> bool {
+    pub fn store(
+        self: &Arc<Self>,
+        ticket: StoreTicket,
+        resp: &ChatResponse,
+        ttl: Duration,
+    ) -> bool {
         let ttl = ttl.min(Duration::from_secs(self.cfg.max_ttl_secs.max(1)));
         let Ok(json) = serde_json::to_vec(resp) else {
             return false;
@@ -356,10 +364,13 @@ impl ResponseCache {
             self.metrics.skipped(SkipReason::TooLarge);
             return false;
         }
-        if self
-            .memory
-            .insert(ticket.key, Arc::new(resp.clone()), size, ttl, Instant::now())
-        {
+        if self.memory.insert(
+            ticket.key,
+            Arc::new(resp.clone()),
+            size,
+            ttl,
+            Instant::now(),
+        ) {
             self.metrics.stored_memory();
         }
         if self.redis.is_none() && ticket.semantic.is_none() {
@@ -465,7 +476,10 @@ pub struct Persistence {
 ///
 /// Fehler externer Backends beim Start sind keine Startfehler (Ausfall = Miss); Fehler sind
 /// nur ungültige Konfigurationen (z. B. `pgvector` ohne Dimension).
-pub async fn start(config: &Config, persistence: Option<Persistence>) -> Result<CacheRuntime, String> {
+pub async fn start(
+    config: &Config,
+    persistence: Option<Persistence>,
+) -> Result<CacheRuntime, String> {
     let cfg = &config.cache;
     let timeout = Duration::from_millis(cfg.backend_timeout_ms.max(1));
     let mut cache = ResponseCache::new(cfg);
@@ -495,9 +509,14 @@ pub async fn start(config: &Config, persistence: Option<Persistence>) -> Result<
                 match persist::load(&p.store, &p.keyring, sem.max_entries).await {
                     Ok(entries) => {
                         let n = index.warm(entries);
-                        tracing::info!(entries = n, "semantischer Cache: Warmstart aus der Datenbank");
+                        tracing::info!(
+                            entries = n,
+                            "semantischer Cache: Warmstart aus der Datenbank"
+                        );
                     }
-                    Err(e) => tracing::warn!(error = %e, "semantischer Cache: Warmstart fehlgeschlagen"),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "semantischer Cache: Warmstart fehlgeschlagen")
+                    }
                 }
                 let (tx, task) = persist::spawn_writer(p.store.clone(), Arc::clone(&p.keyring));
                 index = index.with_persist(tx);

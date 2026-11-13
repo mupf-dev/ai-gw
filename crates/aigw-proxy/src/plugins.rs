@@ -129,9 +129,7 @@ impl PluginRun {
     }
 
     /// Wirksame Cache-Richtlinie (Plugin `cache`, AIGW-39/40) oder `None` ohne Bindung.
-    pub(crate) fn cache_policy(
-        &self,
-    ) -> Option<Arc<aigw_plugins::builtin::cache::CachePolicy>> {
+    pub(crate) fn cache_policy(&self) -> Option<Arc<aigw_plugins::builtin::cache::CachePolicy>> {
         if self.chain.is_empty() {
             return None;
         }

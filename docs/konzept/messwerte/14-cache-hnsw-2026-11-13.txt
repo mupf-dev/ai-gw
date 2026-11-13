@@ -1,0 +1,21 @@
+CPU(s):                                  8
+Model name:                              AMD EPYC-Genoa Processor
+# HNSW-Recall (aigw-cache), N=100000, Dim=768, Anfragen=500, k=10, M=16, efConstruction=200, Threads Brute-Force=8
+
+## Daten clustered: Aufbau 94.7 s (947 µs/Vektor), Brute-Force 2.2 s
+
+| efSearch | Recall@10 | Recall@1 | p50 µs | p99 µs | max µs |
+|---:|---:|---:|---:|---:|---:|
+| 32 | 0.9240 | 0.9280 | 256 | 471 | 1327 |
+| 64 | 0.9868 | 0.9880 | 359 | 651 | 1141 |
+| 128 | 1.0000 | 1.0000 | 495 | 721 | 969 |
+| 256 | 1.0000 | 1.0000 | 701 | 978 | 1148 |
+
+## Daten uniform: Aufbau 274.4 s (2744 µs/Vektor), Brute-Force 3.8 s
+
+| efSearch | Recall@10 | Recall@1 | p50 µs | p99 µs | max µs |
+|---:|---:|---:|---:|---:|---:|
+| 32 | 0.0304 | 0.0380 | 563 | 782 | 808 |
+| 64 | 0.0542 | 0.0780 | 1020 | 1379 | 1642 |
+| 128 | 0.1010 | 0.1340 | 1929 | 4779 | 9232 |
+| 256 | 0.1762 | 0.2140 | 3414 | 4126 | 4333 |

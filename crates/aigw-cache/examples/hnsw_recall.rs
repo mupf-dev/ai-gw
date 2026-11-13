@@ -53,11 +53,16 @@ fn main() {
         .collect();
     let kinds = std::env::var("DATA").unwrap_or_else(|_| "clustered,uniform".into());
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
-    println!("# HNSW-Recall (aigw-cache), N={n}, Dim={dim}, Anfragen={queries}, k={k}, M={m}, efConstruction={efc}, Threads Brute-Force={threads}");
+    println!(
+        "# HNSW-Recall (aigw-cache), N={n}, Dim={dim}, Anfragen={queries}, k={k}, M={m}, efConstruction={efc}, Threads Brute-Force={threads}"
+    );
     for kind in kinds.split(',') {
         let mut rng = TestRng::new(20261113);
         let (data, qs) = match kind {
-            "uniform" => (rng.clustered(n, dim, 1, 1e3), rng.clustered(queries, dim, 1, 1e3)),
+            "uniform" => (
+                rng.clustered(n, dim, 1, 1e3),
+                rng.clustered(queries, dim, 1, 1e3),
+            ),
             _ => {
                 let all = rng.clustered(n + queries, dim, 200, 1.0);
                 let (d, q) = all.split_at(n);

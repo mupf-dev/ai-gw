@@ -196,9 +196,9 @@ fn serve(
             config: aigw_proxy::ProxyConfig::from(&config.server.data),
         };
         // Semantischer Cache: Embeddings über das interne Routing (AIGW-21/40).
-        cache_rt
-            .cache
-            .set_embedder(std::sync::Arc::new(aigw_proxy::cache::RoutedEmbedder::for_state(&state)));
+        cache_rt.cache.set_embedder(std::sync::Arc::new(
+            aigw_proxy::cache::RoutedEmbedder::for_state(&state),
+        ));
         // Steuerebene: Admin-API/-UI (Anmeldung: AIGW-28/32), GitOps (AIGW-33) und
         // /metrics (AIGW-43); Modus „nur YAML“ sperrt die Schreibrouten.
         let auth_cfg = &config.admin.auth;

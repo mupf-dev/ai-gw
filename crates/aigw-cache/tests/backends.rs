@@ -112,12 +112,7 @@ fn team(t: &str) -> Scope {
     Scope::Team(t.into())
 }
 
-async fn lookup(
-    c: &ResponseCache,
-    scope: Scope,
-    r: &ChatRequest,
-    semantic: bool,
-) -> Lookup {
+async fn lookup(c: &ResponseCache, scope: Scope, r: &ChatRequest, semantic: bool) -> Lookup {
     c.lookup(&LookupRequest {
         scope,
         model_group: "g",
@@ -134,9 +129,7 @@ async fn lookup(
 
 fn hit_text(l: &Lookup) -> Option<(HitKind, String)> {
     match l {
-        Lookup::Hit { kind, response } => {
-            Some((*kind, response.choices[0].message.content.text()))
-        }
+        Lookup::Hit { kind, response } => Some((*kind, response.choices[0].message.content.text())),
         Lookup::Miss(_) => None,
     }
 }
@@ -192,13 +185,17 @@ async fn too_large_entries_are_skipped() {
         panic!()
     };
     assert!(!c.store(t, &resp(&"x".repeat(500)), Duration::from_secs(60)));
-    assert_eq!(c.metrics().skipped_count(aigw_cache::SkipReason::TooLarge), 1);
+    assert_eq!(
+        c.metrics().skipped_count(aigw_cache::SkipReason::TooLarge),
+        1
+    );
 }
 
 #[tokio::test]
 async fn redis_outage_is_a_miss() {
     // Port 1: keine Verbindung möglich.
-    let conn = Arc::new(RedisConn::new("redis://127.0.0.1:1/0", Duration::from_millis(100)).unwrap());
+    let conn =
+        Arc::new(RedisConn::new("redis://127.0.0.1:1/0", Duration::from_millis(100)).unwrap());
     let c = Arc::new(ResponseCache::new(&CacheConfig::default()).with_redis(conn));
     let r = req("sys", "x");
     let Lookup::Miss(t) = lookup(&c, team("a"), &r, false).await else {
@@ -243,7 +240,10 @@ async fn semantic_hit_threshold_partition_and_embedder_outage() {
     // Ohne semantischen Modus: Miss.
     assert!(hit_text(&lookup(&c, team("a"), &similar, false).await).is_none());
     // Anderer Systemprompt (harter Filter), anderes Team, anderes Thema: Miss.
-    let other_sys = req("Antworte nur auf Englisch.", "wie spät ist es in Berlin gerade?");
+    let other_sys = req(
+        "Antworte nur auf Englisch.",
+        "wie spät ist es in Berlin gerade?",
+    );
     assert!(hit_text(&lookup(&c, team("a"), &other_sys, true).await).is_none());
     assert!(hit_text(&lookup(&c, team("b"), &similar, true).await).is_none());
     let unrelated = req("Du bist hilfreich.", "Erkläre mir die Relativitätstheorie");
@@ -289,7 +289,11 @@ async fn memory_index_warm_start_from_database() {
     // Löschen kommt ebenfalls in der Datenbank an.
     index.evict(Evict::Id(hid(1))).await.unwrap();
     for _ in 0..200 {
-        if persist::load(&store, &keyring, 100).await.unwrap().is_empty() {
+        if persist::load(&store, &keyring, 100)
+            .await
+            .unwrap()
+            .is_empty()
+        {
             return;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -344,30 +348,69 @@ async fn exercise(index: &dyn VectorIndex) {
     assert_eq!(hits.len(), 1, "{}", index.name());
     assert_eq!(hits[0].id, hid(1));
     assert_eq!(hits[0].payload, Bytes::from("payload-1"));
-    assert!(hits[0].score > 0.95 && hits[0].score <= 1.0001, "{}", hits[0].score);
+    assert!(
+        hits[0].score > 0.95 && hits[0].score <= 1.0001,
+        "{}",
+        hits[0].score
+    );
     // Schwelle.
     let mid: Vec<f32> = (0..DIM).map(|i| if i < 3 { 1.0 } else { 0.0 }).collect();
     assert!(index.search(query(1, &mid, 0.9)).await.unwrap().is_empty());
     // Partition ist harter Filter.
-    assert!(index.search(query(3, &unit(0), 0.1)).await.unwrap().is_empty());
+    assert!(
+        index
+            .search(query(3, &unit(0), 0.1))
+            .await
+            .unwrap()
+            .is_empty()
+    );
     // Ersetzen.
     index.insert(entry(1, 1, unit(2), 60_000)).await.unwrap();
-    assert!(index.search(query(1, &unit(0), 0.9)).await.unwrap().is_empty());
+    assert!(
+        index
+            .search(query(1, &unit(0), 0.9))
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(
         index.search(query(1, &unit(2), 0.9)).await.unwrap()[0].id,
         hid(1)
     );
     // Abgelaufen.
     index.insert(entry(4, 1, unit(3), -1)).await.unwrap();
-    assert!(index.search(query(1, &unit(3), 0.9)).await.unwrap().is_empty());
+    assert!(
+        index
+            .search(query(1, &unit(3), 0.9))
+            .await
+            .unwrap()
+            .is_empty()
+    );
     // Löschen.
     assert_eq!(index.evict(Evict::Id(hid(2))).await.unwrap(), 1);
-    assert!(index.search(query(1, &unit(1), 0.9)).await.unwrap().is_empty());
+    assert!(
+        index
+            .search(query(1, &unit(1), 0.9))
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(index.evict(Evict::Partition(hid(1002))).await.unwrap(), 1);
-    assert!(index.search(query(2, &unit(0), 0.1)).await.unwrap().is_empty());
+    assert!(
+        index
+            .search(query(2, &unit(0), 0.1))
+            .await
+            .unwrap()
+            .is_empty()
+    );
     index.evict(Evict::Expired).await.unwrap();
     // Falsche Dimension.
-    assert!(index.insert(entry(9, 1, vec![1.0; DIM + 1], 1000)).await.is_err());
+    assert!(
+        index
+            .insert(entry(9, 1, vec![1.0; DIM + 1], 1000))
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -484,10 +527,12 @@ async fn pgvector_backend() {
         assert_eq!(n, 1);
         pool.close().await;
     }
-    sqlx::query(sqlx::AssertSqlSafe(format!("DROP DATABASE {db} WITH (FORCE)")))
-        .execute(&admin)
-        .await
-        .unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DROP DATABASE {db} WITH (FORCE)"
+    )))
+    .execute(&admin)
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -506,5 +551,8 @@ async fn pgvector_outage_is_an_error_not_a_hang() {
     let c = Arc::new(ResponseCache::new(&CacheConfig::default()).with_vectors(Arc::new(index)));
     c.set_embedder(Arc::new(WordEmbedder::default()));
     let r = req("sys", "irgendwas");
-    assert!(matches!(lookup(&c, team("a"), &r, true).await, Lookup::Miss(_)));
+    assert!(matches!(
+        lookup(&c, team("a"), &r, true).await,
+        Lookup::Miss(_)
+    ));
 }

@@ -256,7 +256,11 @@ mod tests {
         assert_eq!(pol.mode, CacheMode::Exact);
         assert!(!pol.cache_non_zero_temperature);
         assert!(Factory.build(&json!({"ttlSecs": 0})).is_err());
-        assert!(Factory.build(&json!({"semantic": {"threshold": 1.5}})).is_err());
+        assert!(
+            Factory
+                .build(&json!({"semantic": {"threshold": 1.5}}))
+                .is_err()
+        );
         assert!(Factory.build(&json!({"unknown": 1})).is_err());
         assert!(Factory.build(&json!({"scope": "everyone"})).is_err());
     }

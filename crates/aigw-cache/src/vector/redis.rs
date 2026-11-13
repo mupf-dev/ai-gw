@@ -282,4 +282,3 @@ impl VectorIndex for RedisVectorIndex {
         }
     }
 }
-

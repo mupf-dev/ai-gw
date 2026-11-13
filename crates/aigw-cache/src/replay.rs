@@ -230,8 +230,7 @@ impl StreamCollector {
                 },
             }));
         }
-        let single_text =
-            parts.len() == 1 && matches!(parts[0].kind, PartKind::Text { .. });
+        let single_text = parts.len() == 1 && matches!(parts[0].kind, PartKind::Text { .. });
         let content = if single_text {
             match parts.pop().map(|p| p.kind) {
                 Some(PartKind::Text { text }) => Content::Text(text),
@@ -336,7 +335,9 @@ mod tests {
             Content::Text(_) => Vec::new(),
         };
         assert_eq!(p.len(), 2);
-        assert!(matches!(&p[1].kind, PartKind::ToolCall { arguments, .. } if arguments == "{\"a\":1}"));
+        assert!(
+            matches!(&p[1].kind, PartKind::ToolCall { arguments, .. } if arguments == "{\"a\":1}")
+        );
     }
 
     #[test]

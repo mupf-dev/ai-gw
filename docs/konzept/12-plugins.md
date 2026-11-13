@@ -328,8 +328,9 @@ Plugins im Sub-µs-Bereich.
 - **PII/Guardrails (AIGW-37):** `on_request` (maskieren/ablehnen), `on_response` + `on_chunk`
   mit `TextWindow`/Zurückhalten (Rückübersetzung über `Meta`), optional
   `needs_buffered_output`.
-- **Cache (AIGW-39):** `on_request` → `Flow::Respond` bei Treffer; Speichern in `on_response`
-  bzw. über `Meta` + `on_stream_end`.
+- **Cache (AIGW-39/40):** umgesetzt als eigener Pipeline-Schritt nach allen Pre-Plugins
+  (nicht als `Respond`); das Plugin `cache` ohne Haken trägt nur die Richtlinie und nutzt die
+  Vererbung der Bindungen. Begründung und Details: [14-cache.md](14-cache.md).
 - **Webhook (AIGW-61):** umgesetzt (§5 `webhook`): `Hook::Pending` mit Zeitlimit/Fehlermodus
   der Bindung; nicht im Chunk-Pfad (keine `chunk`-Phase), für Ausgaben `needs_buffered_output`.
 - **WASM (nach MVP):** Die Schnittstelle ist auf WIT abbildbar: `Meta` und IR sind JSON-fähig,

@@ -321,7 +321,9 @@ impl MemoryIndex {
         let (removed, empty) = {
             let mut p = part.write().unwrap_or_else(PoisonError::into_inner);
             let removed = match p.by_id.get(id).copied() {
-                Some(i) if seq.is_none_or(|s| p.nodes.get(i as usize).map(|n| n.seq) == Some(s)) => {
+                Some(i)
+                    if seq.is_none_or(|s| p.nodes.get(i as usize).map(|n| n.seq) == Some(s)) =>
+                {
                     match p.tombstone(i) {
                         Some(freed) => {
                             self.release(freed);
@@ -535,9 +537,19 @@ mod tests {
         assert_eq!(hits[0].id, h(1));
         assert_eq!(hits[0].payload, Bytes::from("p1"));
         // Schwelle.
-        assert!(idx.search(q(0, &[0.5, 0.5, 0.7], 0.9)).await.unwrap().is_empty());
+        assert!(
+            idx.search(q(0, &[0.5, 0.5, 0.7], 0.9))
+                .await
+                .unwrap()
+                .is_empty()
+        );
         // Partition ist harter Filter.
-        assert!(idx.search(q(2, &[1.0, 0.0, 0.0], 0.1)).await.unwrap().is_empty());
+        assert!(
+            idx.search(q(2, &[1.0, 0.0, 0.0], 0.1))
+                .await
+                .unwrap()
+                .is_empty()
+        );
         // Ersetzen: gleiche ID, neuer Vektor.
         idx.insert(entry(1, 0, vec![0.0, 0.0, 1.0], 60_000))
             .await
@@ -547,7 +559,12 @@ mod tests {
         assert_eq!(idx.len_hint(), Some(3));
         // Löschen.
         assert_eq!(idx.evict(Evict::Id(h(2))).await.unwrap(), 1);
-        assert!(idx.search(q(0, &[0.0, 1.0, 0.0], 0.5)).await.unwrap().is_empty());
+        assert!(
+            idx.search(q(0, &[0.0, 1.0, 0.0], 0.5))
+                .await
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(idx.evict(Evict::Partition(h(1001))).await.unwrap(), 1);
         assert_eq!(idx.len_hint(), Some(1));
         // Falsche Dimension.

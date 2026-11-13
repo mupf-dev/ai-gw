@@ -467,7 +467,13 @@ impl TestRng {
 
     /// Geclusterte Vektoren (Gauß-Mischung um `clusters` zufällige Zentren, Streuung `spread`)
     /// – ähnlich realen Embeddings, deren Ähnlichkeiten nicht gleichverteilt sind.
-    pub fn clustered(&mut self, n: usize, dim: usize, clusters: usize, spread: f32) -> Vec<Vec<f32>> {
+    pub fn clustered(
+        &mut self,
+        n: usize,
+        dim: usize,
+        clusters: usize,
+        spread: f32,
+    ) -> Vec<Vec<f32>> {
         let centers: Vec<Vec<f32>> = (0..clusters.max(1))
             .map(|_| (0..dim).map(|_| self.normal()).collect())
             .collect();

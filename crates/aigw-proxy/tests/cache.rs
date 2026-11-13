@@ -69,7 +69,12 @@ impl RequestObserver for Records {
 
 impl Records {
     fn last(&self) -> RequestRecord {
-        self.0.lock().unwrap().last().cloned().expect("kein Datensatz")
+        self.0
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .expect("kein Datensatz")
     }
 }
 
@@ -249,7 +254,13 @@ async fn settle() {
 #[tokio::test]
 async fn exact_hit_skips_upstream_and_counts_no_tokens() {
     let s = setup(Some(json!({})), false).await;
-    let a = post(s.addr, "/v1/chat/completions", &[], openai("Hallo Welt", false)).await;
+    let a = post(
+        s.addr,
+        "/v1/chat/completions",
+        &[],
+        openai("Hallo Welt", false),
+    )
+    .await;
     assert_eq!(a.status, StatusCode::OK);
     assert_eq!(a.cache(), Some("miss"));
     assert_eq!(s.calls(), 1);
@@ -257,14 +268,24 @@ async fn exact_hit_skips_upstream_and_counts_no_tokens() {
     assert_eq!(rec.cache, Some(CacheOutcome::Miss));
     assert!(rec.usage.total_tokens() > 0);
 
-    let b = post(s.addr, "/v1/chat/completions", &[], openai("Hallo Welt", false)).await;
+    let b = post(
+        s.addr,
+        "/v1/chat/completions",
+        &[],
+        openai("Hallo Welt", false),
+    )
+    .await;
     assert_eq!(b.status, StatusCode::OK);
     assert_eq!(b.cache(), Some("hit-exact"));
     assert_eq!(s.calls(), 1, "Treffer darf den Upstream nicht aufrufen");
     assert_eq!(openai_text(&b.json()), openai_text(&a.json()));
     let rec = s.records.last();
     assert_eq!(rec.cache, Some(CacheOutcome::HitExact));
-    assert_eq!(rec.usage.total_tokens(), 0, "Treffer verbrauchen keine Upstream-Tokens");
+    assert_eq!(
+        rec.usage.total_tokens(),
+        0,
+        "Treffer verbrauchen keine Upstream-Tokens"
+    );
     assert!(!rec.usage_estimated);
     assert_eq!(rec.model_group.as_deref(), Some("mock"));
     assert!(rec.deployment_id.is_none());
@@ -273,7 +294,10 @@ async fn exact_hit_skips_upstream_and_counts_no_tokens() {
     let c = post(s.addr, "/v1/messages", &[], anthropic("Hallo Welt", false)).await;
     assert_eq!(c.cache(), Some("hit-exact"));
     assert_eq!(c.json()["type"], "message");
-    assert_eq!(c.json()["content"][0]["text"], openai_text(&a.json()).as_str());
+    assert_eq!(
+        c.json()["content"][0]["text"],
+        openai_text(&a.json()).as_str()
+    );
     assert_eq!(s.calls(), 1);
     assert_eq!(s.cache.metrics().lookups(CacheOutcome::HitExact), 2);
 }
@@ -281,13 +305,25 @@ async fn exact_hit_skips_upstream_and_counts_no_tokens() {
 #[tokio::test]
 async fn streamed_answer_is_stored_and_replayed_as_chunked_stream() {
     let s = setup(Some(json!({})), false).await;
-    let a = post(s.addr, "/v1/chat/completions", &[], openai("Erzähl etwas", true)).await;
+    let a = post(
+        s.addr,
+        "/v1/chat/completions",
+        &[],
+        openai("Erzähl etwas", true),
+    )
+    .await;
     assert_eq!(a.cache(), Some("miss"));
     let (text, _) = a.sse_text();
     assert!(!text.is_empty());
     settle().await;
 
-    let b = post(s.addr, "/v1/chat/completions", &[], openai("Erzähl etwas", true)).await;
+    let b = post(
+        s.addr,
+        "/v1/chat/completions",
+        &[],
+        openai("Erzähl etwas", true),
+    )
+    .await;
     assert_eq!(b.cache(), Some("hit-exact"));
     let (replayed, chunks) = b.sse_text();
     assert_eq!(replayed, text);
@@ -302,7 +338,13 @@ async fn streamed_answer_is_stored_and_replayed_as_chunked_stream() {
     assert_eq!(c.sse_text().0, text);
     assert!(String::from_utf8_lossy(&c.body).contains("message_stop"));
     // Und nicht gestreamt.
-    let d = post(s.addr, "/v1/chat/completions", &[], openai("Erzähl etwas", false)).await;
+    let d = post(
+        s.addr,
+        "/v1/chat/completions",
+        &[],
+        openai("Erzähl etwas", false),
+    )
+    .await;
     assert_eq!(d.cache(), Some("hit-exact"));
     assert_eq!(openai_text(&d.json()), text);
     assert_eq!(s.calls(), 1);
@@ -322,9 +364,21 @@ async fn temperature_and_client_control() {
     assert_eq!(s.records.last().cache, Some(CacheOutcome::Bypass));
 
     // no-cache: nicht nachschlagen, aber speichern.
-    let r = post(s.addr, "/v1/chat/completions", &[("cache-control", "no-cache")], openai("frisch", false)).await;
+    let r = post(
+        s.addr,
+        "/v1/chat/completions",
+        &[("cache-control", "no-cache")],
+        openai("frisch", false),
+    )
+    .await;
     assert_eq!(r.cache(), Some("bypass"));
-    let r = post(s.addr, "/v1/chat/completions", &[("cache-control", "no-cache")], openai("frisch", false)).await;
+    let r = post(
+        s.addr,
+        "/v1/chat/completions",
+        &[("cache-control", "no-cache")],
+        openai("frisch", false),
+    )
+    .await;
     assert_eq!(r.cache(), Some("bypass"));
     assert_eq!(s.calls(), 4);
     let r = post(s.addr, "/v1/chat/completions", &[], openai("frisch", false)).await;
@@ -332,14 +386,26 @@ async fn temperature_and_client_control() {
     assert_eq!(s.calls(), 4);
 
     // no-store: nachschlagen, nicht speichern.
-    let r = post(s.addr, "/v1/chat/completions", &[("cache-control", "no-store")], openai("geheim", false)).await;
+    let r = post(
+        s.addr,
+        "/v1/chat/completions",
+        &[("cache-control", "no-store")],
+        openai("geheim", false),
+    )
+    .await;
     assert_eq!(r.cache(), Some("miss"));
     let r = post(s.addr, "/v1/chat/completions", &[], openai("geheim", false)).await;
     assert_eq!(r.cache(), Some("miss"));
     assert_eq!(s.calls(), 6);
 
     // x-aigw-cache-ttl: 0 → nicht speichern.
-    post(s.addr, "/v1/chat/completions", &[("x-aigw-cache-ttl", "0")], openai("ttl", false)).await;
+    post(
+        s.addr,
+        "/v1/chat/completions",
+        &[("x-aigw-cache-ttl", "0")],
+        openai("ttl", false),
+    )
+    .await;
     let r = post(s.addr, "/v1/chat/completions", &[], openai("ttl", false)).await;
     assert_eq!(r.cache(), Some("miss"));
     // Gleich nochmal: jetzt gespeichert.
@@ -352,12 +418,25 @@ async fn non_zero_temperature_can_be_allowed() {
     let s = setup(Some(json!({"cacheNonZeroTemperature": true})), false).await;
     let mut hot = openai("heiß", false);
     hot["temperature"] = json!(0.7);
-    assert_eq!(post(s.addr, "/v1/chat/completions", &[], hot.clone()).await.cache(), Some("miss"));
-    assert_eq!(post(s.addr, "/v1/chat/completions", &[], hot).await.cache(), Some("hit-exact"));
+    assert_eq!(
+        post(s.addr, "/v1/chat/completions", &[], hot.clone())
+            .await
+            .cache(),
+        Some("miss")
+    );
+    assert_eq!(
+        post(s.addr, "/v1/chat/completions", &[], hot).await.cache(),
+        Some("hit-exact")
+    );
     // Andere Temperatur = anderer Schlüssel.
     let mut hotter = openai("heiß", false);
     hotter["temperature"] = json!(0.9);
-    assert_eq!(post(s.addr, "/v1/chat/completions", &[], hotter).await.cache(), Some("miss"));
+    assert_eq!(
+        post(s.addr, "/v1/chat/completions", &[], hotter)
+            .await
+            .cache(),
+        Some("miss")
+    );
 }
 
 #[tokio::test]
@@ -388,8 +467,18 @@ async fn errors_and_tool_calls_are_not_stored() {
         assert_eq!(r.json()["choices"][0]["finish_reason"], "tool_calls");
     }
     assert_eq!(s.calls(), 6);
-    assert!(s.cache.metrics().skipped_count(aigw_cache::SkipReason::ToolCalls) >= 2);
-    assert!(s.cache.metrics().skipped_count(aigw_cache::SkipReason::Incomplete) >= 2);
+    assert!(
+        s.cache
+            .metrics()
+            .skipped_count(aigw_cache::SkipReason::ToolCalls)
+            >= 2
+    );
+    assert!(
+        s.cache
+            .metrics()
+            .skipped_count(aigw_cache::SkipReason::Incomplete)
+            >= 2
+    );
 }
 
 #[tokio::test]
@@ -406,11 +495,19 @@ async fn without_binding_there_is_no_cache() {
 #[tokio::test]
 async fn semantic_hit_through_the_pipeline() {
     let s = setup(
-        Some(json!({"mode": "semantic", "semantic": {"threshold": 0.9, "embeddingModel": "embed"}})),
+        Some(
+            json!({"mode": "semantic", "semantic": {"threshold": 0.9, "embeddingModel": "embed"}}),
+        ),
         true,
     )
     .await;
-    let a = post(s.addr, "/v1/chat/completions", &[], openai("Wie spät ist es in Berlin", false)).await;
+    let a = post(
+        s.addr,
+        "/v1/chat/completions",
+        &[],
+        openai("Wie spät ist es in Berlin", false),
+    )
+    .await;
     assert_eq!(a.cache(), Some("miss"));
     for _ in 0..100 {
         if s.cache.metrics().vector_stores() == 1 {
@@ -418,12 +515,24 @@ async fn semantic_hit_through_the_pipeline() {
         }
         settle().await;
     }
-    let b = post(s.addr, "/v1/chat/completions", &[], openai("wie spät ist es in berlin?", false)).await;
+    let b = post(
+        s.addr,
+        "/v1/chat/completions",
+        &[],
+        openai("wie spät ist es in berlin?", false),
+    )
+    .await;
     assert_eq!(b.cache(), Some("hit-semantic"));
     assert_eq!(openai_text(&b.json()), openai_text(&a.json()));
     assert_eq!(s.records.last().cache, Some(CacheOutcome::HitSemantic));
     assert_eq!(s.records.last().usage.total_tokens(), 0);
-    let c = post(s.addr, "/v1/chat/completions", &[], openai("Erkläre Photosynthese", false)).await;
+    let c = post(
+        s.addr,
+        "/v1/chat/completions",
+        &[],
+        openai("Erkläre Photosynthese", false),
+    )
+    .await;
     assert_eq!(c.cache(), Some("miss"));
     assert_eq!(s.calls(), 2);
 }
@@ -436,5 +545,6 @@ async fn routed_embedder_uses_internal_routing() {
     let b = e.embed("mock", "Hallo").await.unwrap();
     assert!(!a.is_empty());
     assert_eq!(a, b, "deterministisch");
-    assert!(e.embed("gibt-es-nicht", "x").await.is_err());
+    // Fehler des Upstreams (nach Retries) kommen als Fehler zurück (im Cache: Miss).
+    assert!(e.embed("mock-error", "x").await.is_err());
 }

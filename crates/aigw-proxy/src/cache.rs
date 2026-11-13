@@ -29,8 +29,8 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use aigw_cache::{
-    Lookup, LookupRequest, ResponseCache, Scope, SemanticLookup, SkipReason,
-    StoreTicket, StreamCollector,
+    Lookup, LookupRequest, ResponseCache, Scope, SemanticLookup, SkipReason, StoreTicket,
+    StreamCollector,
 };
 use aigw_core::ir::{ChatRequest, ChatResponse, Content, PartKind, StopReason, StreamEvent};
 use aigw_core::observe::CacheOutcome;
@@ -111,7 +111,8 @@ fn storable(resp: &ChatResponse, policy: &CachePolicy) -> Result<(), SkipReason>
     };
     for c in &resp.choices {
         match &c.stop_reason {
-            Some(StopReason::EndTurn | StopReason::MaxTokens | StopReason::StopSequence) | None => {}
+            Some(StopReason::EndTurn | StopReason::MaxTokens | StopReason::StopSequence) | None => {
+            }
             Some(StopReason::ToolUse) => {
                 if !policy.cache_tool_calls {
                     return Err(SkipReason::ToolCalls);
@@ -182,11 +183,11 @@ impl CacheStep {
             cache.metrics().lookup(CacheOutcome::Bypass);
             return Some(step);
         }
-        let embedding_model = policy
+        let embedding_model = policy.semantic.embedding_model.as_deref().or(cache
+            .config()
             .semantic
             .embedding_model
-            .as_deref()
-            .or(cache.config().semantic.embedding_model.as_deref());
+            .as_deref());
         let semantic = match (policy.mode, embedding_model) {
             (CacheMode::Semantic, Some(m)) if cache.semantic_available() => Some(SemanticLookup {
                 embedding_model: m,
@@ -426,13 +427,19 @@ mod tests {
     #[test]
     fn client_control_headers() {
         let mut h = HeaderMap::new();
-        h.insert("cache-control", HeaderValue::from_static("No-Cache, max-age=0"));
+        h.insert(
+            "cache-control",
+            HeaderValue::from_static("No-Cache, max-age=0"),
+        );
         h.append("cache-control", HeaderValue::from_static("no-store"));
         h.insert(CACHE_TTL_HEADER, HeaderValue::from_static(" 120 "));
         let c = ClientControl::from_headers(&h);
         assert!(c.no_cache && c.no_store);
         assert_eq!(c.ttl, Some(120));
-        assert_eq!(ClientControl::from_headers(&HeaderMap::new()), ClientControl::default());
+        assert_eq!(
+            ClientControl::from_headers(&HeaderMap::new()),
+            ClientControl::default()
+        );
     }
 
     #[test]

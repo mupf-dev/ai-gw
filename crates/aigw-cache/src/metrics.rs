@@ -186,7 +186,10 @@ impl CacheMetrics {
             out,
             "# HELP aigw_cache_backend_errors_total Fehler externer Cache-Backends (gelten als Miss).\n# TYPE aigw_cache_backend_errors_total counter"
         );
-        for (b, v) in [("redis", &self.errors_redis), ("vector", &self.errors_vector)] {
+        for (b, v) in [
+            ("redis", &self.errors_redis),
+            ("vector", &self.errors_vector),
+        ] {
             let _ = writeln!(
                 out,
                 "aigw_cache_backend_errors_total{{backend=\"{b}\"}} {}",

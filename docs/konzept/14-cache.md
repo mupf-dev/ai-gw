@@ -146,8 +146,24 @@ Heuristik aus dem Paper (wie hnswlib), Besuchslisten mit Generationszähler aus 
 Skalarprodukt mit acht Akkumulatoren (Autovektorisierung). Suchen parallel (`RwLock` je
 Partition), Einfügen exklusiv je Partition.
 
-Messung: `cargo run --release -p aigw-cache --example hnsw_recall` (Werte in
-[messwerte/14-cache-hnsw-2026-11-13.txt](messwerte/14-cache-hnsw-2026-11-13.txt)).
+Messung: `cargo run --release -p aigw-cache --example hnsw_recall` (Buildbox AMD EPYC Genoa,
+8 vCPU geteilt, 1 Thread je Suche, 100 000 Vektoren × 768 Dim., 500 Anfragen, k = 10, M = 16,
+efConstruction = 200; Rohwerte in
+[messwerte/14-cache-hnsw-2026-11-13.txt](messwerte/14-cache-hnsw-2026-11-13.txt)):
+
+| Daten | efSearch | Recall@10 | Recall@1 | p50 | p99 |
+|---|---:|---:|---:|---:|---:|
+| geclustert (embedding-ähnlich) | 32 | 0,924 | 0,928 | 256 µs | 471 µs |
+| geclustert | **64 (Standard)** | **0,987** | 0,988 | 359 µs | **651 µs** |
+| geclustert | 128 | 1,000 | 1,000 | 495 µs | 721 µs |
+| isotrop gleichverteilt (Worst Case) | 256 | 0,176 | 0,214 | 3,4 ms | 4,1 ms |
+
+Abnahme (Recall ≥ 0,95 bei 100k × 768) ist für embedding-ähnliche Daten ab `ef_search` 64
+erfüllt. Isotrope Zufallsvektoren in 768 Dimensionen haben praktisch keine „nächsten“
+Nachbarn (alle Ähnlichkeiten ≈ 0) – dort scheitert jeder Graph-Index; für den Cache ist nur
+der Treffer oberhalb der Schwelle (≥ 0,9) relevant, der in diesem Fall gar nicht existiert.
+Aufbau: ≈ 0,95 ms je Vektor (single-threaded, efConstruction = 200); der Cache fügt einzeln im
+Hintergrund ein.
 
 ## 5. Konfiguration (`cache`)
 

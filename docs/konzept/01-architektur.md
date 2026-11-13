@@ -173,7 +173,8 @@ pub trait Plugin: Send + Sync {
   - `redis`: Redis Stack / Valkey Search (`FT.SEARCH` KNN) für gemeinsamen Cache.
   Bei Ausfall eines externen Backends: Cache-Miss, keine Fehlerweitergabe.
 - **Scope** (Standard: Team) verhindert, dass Antworten zwischen Mandanten durchsickern. Nie mandantenübergreifend.
-- Antwort-Header `x-aigw-cache: hit-exact | hit-semantic | miss`; ein Cache-Treffer verbraucht keine Upstream-Tokens, wird aber im Log gezählt.
+- Antwort-Header `x-aigw-cache: hit-exact | hit-semantic | miss | bypass`; ein Cache-Treffer verbraucht keine Upstream-Tokens, wird aber im Log gezählt.
+- Umsetzung (AIGW-39/40): [14-cache.md](14-cache.md) – Pipeline-Schritt 6 mit Richtlinie aus dem Plugin `cache`, Crate `aigw-cache`.
 
 ## 11. MCP-Gateway
 
