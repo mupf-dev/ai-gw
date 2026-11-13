@@ -22,8 +22,25 @@ server:
     # Maximale Größe eines Audio-Uploads (/v1/audio/transcriptions und /translations,
     # 25 MiB, AIGW-21); wirksam höchstens max_body_bytes
     max_audio_bytes: 26214400
+    # Höchstzahl gleichzeitiger Verbindungen (0 = unbegrenzt); weitere → sofort 503 (S-32)
+    max_connections: 10000
   control:
     listen: "127.0.0.1:4001"
+    max_connections: 1024
+  # Lese-Timeouts und HTTP/2-Grenzen beider Listener (S-32, AIGW-80; 0 = aus). Laufende
+  # Antworten (SSE-Streams) brechen sie nicht ab. Details: docs/betrieb/haertung.md
+  http:
+    # HTTP/1: vom ersten Byte bis zum vollständigen Anfragekopf (Slowloris)
+    header_read_timeout_secs: 10
+    # Höchste Pause zwischen zwei Teilen des Anfragekörpers
+    body_read_timeout_secs: 30
+    # Mindestrate des Anfragekörpers (Bytes/s) nach body_read_timeout_secs Vorlauf
+    body_min_bytes_per_sec: 1024
+    # Keep-Alive-Leerlauf; größer als das Leerlauf-Timeout eines vorgeschalteten Load Balancers
+    idle_timeout_secs: 120
+    http2_max_concurrent_streams: 256
+    http2_keepalive_interval_secs: 30
+    http2_keepalive_timeout_secs: 20
 
 store:
   # SQLite (Standard) oder postgres://benutzer@host/datenbank

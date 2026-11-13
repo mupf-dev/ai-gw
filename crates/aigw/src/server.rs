@@ -13,19 +13,23 @@
 //! Datenbank abgleichbar) oder aus dem Platten-Cache stammt. Der Gateway bedient Anfragen in
 //! beiden Fällen weiter (letzter bekannter Stand); `degraded` ist ein Signal für Monitoring und
 //! UI, kein Grund, die Instanz aus dem Load Balancer zu nehmen.
+//!
+//! Verbindungsgrenzen und Lese-Timeouts (S-32): [`crate::serve`].
 
-use std::future::{Future, IntoFuture as _};
+use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use aigw_core::config::ServerConfig;
 use aigw_core::snapshot::SnapshotHandle;
 use axum::extract::State;
 use axum::routing::get;
-use axum::serve::ListenerExt as _;
 use axum::{Json, Router};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
+
+use crate::serve::{HttpLimits, ServerMetrics, serve};
 
 /// Gebundene Listener.
 #[derive(Debug)]
@@ -34,6 +38,14 @@ pub(crate) struct Listeners {
     pub(crate) data: TcpListener,
     /// Steuerebene, `None` bei gemeinsamer Adresse.
     pub(crate) control: Option<TcpListener>,
+    /// `server.data.max_connections` (gilt auch für den gemeinsamen Listener).
+    data_max: usize,
+    /// `server.control.max_connections`.
+    control_max: usize,
+    /// `server.http`.
+    limits: Arc<HttpLimits>,
+    /// Verbindungsmetriken (`/metrics`).
+    metrics: Arc<ServerMetrics>,
 }
 
 /// Länge der Accept-Warteschlange der Datenebene (vom Kernel auf `net.core.somaxconn`
@@ -64,7 +76,22 @@ impl Listeners {
         } else {
             Some(TcpListener::bind(cfg.control.listen).await?)
         };
-        Ok(Self { data, control })
+        Ok(Self {
+            data,
+            control,
+            data_max: cfg.data.max_connections,
+            control_max: cfg.control.max_connections,
+            limits: Arc::new(HttpLimits::from(&cfg.http)),
+            metrics: Arc::new(ServerMetrics::default()),
+        })
+    }
+
+    /// Verbindungsmetriken für `/metrics` (`aigw_server_*`).
+    pub(crate) fn metrics(&self) -> crate::observe::ServerMetricsSource {
+        crate::observe::ServerMetricsSource {
+            metrics: Arc::clone(&self.metrics),
+            with_control: self.control.is_some(),
+        }
     }
 
     /// Tatsächliche Adressen (Daten, Steuerung).
@@ -123,33 +150,42 @@ pub(crate) async fn run(
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
     let data_router = data_router.merge(readyz_router(snapshot.clone()));
-    // TCP_NODELAY: SSE-Chunks sofort senden statt auf ACKs zu warten (Nagle, Q4).
-    let data_listener = listeners.data.tap_io(|tcp| {
-        let _ = tcp.set_nodelay(true);
+    let (tx, rx) = watch::channel(false);
+    tokio::spawn(async move {
+        shutdown.await;
+        let _ = tx.send(true);
     });
-    match listeners.control {
+    let Listeners {
+        data,
+        control,
+        data_max,
+        control_max,
+        limits,
+        metrics,
+    } = listeners;
+    match control {
         None => {
             // `/healthz` und `/readyz` liefert bereits der Daten-Router.
             let app = data_router.merge(control_router(control_plane, None));
-            axum::serve(data_listener, app)
-                .with_graceful_shutdown(shutdown)
-                .await
+            serve(data, app, data_max, limits, Arc::clone(&metrics.data), rx).await
         }
         Some(control) => {
-            let (tx, rx) = watch::channel(false);
-            tokio::spawn(async move {
-                shutdown.await;
-                let _ = tx.send(true);
-            });
-            let wait = |mut rx: watch::Receiver<bool>| async move {
-                let _ = rx.wait_for(|stop| *stop).await;
-            };
-            let data = axum::serve(data_listener, data_router)
-                .with_graceful_shutdown(wait(rx.clone()))
-                .into_future();
-            let ctrl = axum::serve(control, control_router(control_plane, Some(&snapshot)))
-                .with_graceful_shutdown(wait(rx))
-                .into_future();
+            let data = serve(
+                data,
+                data_router,
+                data_max,
+                Arc::clone(&limits),
+                Arc::clone(&metrics.data),
+                rx.clone(),
+            );
+            let ctrl = serve(
+                control,
+                control_router(control_plane, Some(&snapshot)),
+                control_max,
+                limits,
+                Arc::clone(&metrics.control),
+                rx,
+            );
             tokio::try_join!(data, ctrl).map(|_| ())
         }
     }
@@ -184,7 +220,9 @@ mod tests {
             },
             control: ControlListenerConfig {
                 listen: control.parse().unwrap(),
+                ..ControlListenerConfig::default()
             },
+            ..ServerConfig::default()
         }
     }
 

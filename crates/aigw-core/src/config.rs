@@ -226,6 +226,49 @@ pub struct ServerConfig {
     pub data: DataListenerConfig,
     /// Steuerebene: Admin-API, Admin-UI und `/healthz`.
     pub control: ControlListenerConfig,
+    /// Verbindungs-Timeouts und HTTP/2-Grenzen beider Listener (S-32, AIGW-80).
+    pub http: HttpServerConfig,
+}
+
+/// Verbindungs-Timeouts und HTTP/2-Grenzen beider Listener (S-32, AIGW-80; Slowloris).
+///
+/// Lese-Timeouts gelten nur, solange der Server auf Daten des Clients wartet (Anfragekopf,
+/// Anfragekörper, nächste Anfrage). Laufende Antworten – auch lange SSE-Streams – brechen sie
+/// nicht ab. `0` schaltet den jeweiligen Wert ab. Details: docs/betrieb/haertung.md.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HttpServerConfig {
+    /// Höchstdauer vom ersten Byte bis zum vollständigen Anfragekopf (HTTP/1, Sekunden).
+    pub header_read_timeout_secs: u64,
+    /// Höchste Pause zwischen zwei Teilen eines Anfragekörpers (Sekunden).
+    pub body_read_timeout_secs: u64,
+    /// Mindestrate des Anfragekörpers in Bytes/s, gemessen ab Beginn des Lesens mit
+    /// `body_read_timeout_secs` Vorlauf.
+    pub body_min_bytes_per_sec: u64,
+    /// Keep-Alive-Leerlauf: Verbindung ohne laufende Anfrage wird nach so vielen Sekunden
+    /// geschlossen (HTTP/1 und HTTP/2). Größer als das Leerlauf-Timeout eines vorgeschalteten
+    /// Load Balancers wählen.
+    pub idle_timeout_secs: u64,
+    /// HTTP/2: höchstens so viele gleichzeitige Streams je Verbindung.
+    pub http2_max_concurrent_streams: u32,
+    /// HTTP/2: PING-Abstand zur Erkennung toter Gegenstellen (Sekunden).
+    pub http2_keepalive_interval_secs: u64,
+    /// HTTP/2: Wartezeit auf die PING-Antwort, danach wird die Verbindung geschlossen.
+    pub http2_keepalive_timeout_secs: u64,
+}
+
+impl Default for HttpServerConfig {
+    fn default() -> Self {
+        Self {
+            header_read_timeout_secs: 10,
+            body_read_timeout_secs: 30,
+            body_min_bytes_per_sec: 1024,
+            idle_timeout_secs: 120,
+            http2_max_concurrent_streams: 256,
+            http2_keepalive_interval_secs: 30,
+            http2_keepalive_timeout_secs: 20,
+        }
+    }
 }
 
 impl ServerConfig {
@@ -254,6 +297,10 @@ pub struct DataListenerConfig {
     /// Maximale Größe eines Audio-Uploads (`/v1/audio/transcriptions|translations`) in Bytes
     /// (Standard 25 MiB wie bei OpenAI; wirksam höchstens `max_body_bytes`).
     pub max_audio_bytes: usize,
+    /// Höchstzahl gleichzeitiger Verbindungen (Standard 10 000, `0` = unbegrenzt); weitere
+    /// Verbindungen bekommen sofort `503` und werden geschlossen (S-32). Gilt bei gemeinsamer
+    /// Adresse für den gemeinsamen Listener.
+    pub max_connections: usize,
 }
 
 impl Default for DataListenerConfig {
@@ -263,6 +310,7 @@ impl Default for DataListenerConfig {
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             routing_headers: true,
             max_audio_bytes: DEFAULT_MAX_AUDIO_BYTES,
+            max_connections: 10_000,
         }
     }
 }
@@ -273,12 +321,15 @@ impl Default for DataListenerConfig {
 pub struct ControlListenerConfig {
     /// Adresse (Standard `127.0.0.1:4001`).
     pub listen: SocketAddr,
+    /// Höchstzahl gleichzeitiger Verbindungen (Standard 1 024, `0` = unbegrenzt, S-32).
+    pub max_connections: usize,
 }
 
 impl Default for ControlListenerConfig {
     fn default() -> Self {
         Self {
             listen: SocketAddr::from(([127, 0, 0, 1], 4001)),
+            max_connections: 1024,
         }
     }
 }
@@ -1565,6 +1616,8 @@ counters:
                 ("AIGW_SERVER__DATA__LISTEN", "0.0.0.0:9000"),
                 ("AIGW_SERVER__DATA__MAX_BODY_BYTES", "1024"),
                 ("AIGW_SERVER__CONTROL__LISTEN", "0.0.0.0:9001"),
+                ("AIGW_SERVER__CONTROL__MAX_CONNECTIONS", "64"),
+                ("AIGW_SERVER__HTTP__HEADER_READ_TIMEOUT_SECS", "5"),
                 ("AIGW_COUNTERS__BACKEND", "redis"),
                 ("AIGW_COUNTERS__REDIS_URL", "redis://r:6379"),
                 ("AIGW_SECRETS__MASTER_KEY_FILE", "/run/secrets/aigw-key"),
@@ -1582,6 +1635,9 @@ counters:
         assert_eq!(cfg.server.data.listen.port(), 9000);
         assert_eq!(cfg.server.data.max_body_bytes, 1024);
         assert_eq!(cfg.server.control.listen.port(), 9001);
+        assert_eq!(cfg.server.control.max_connections, 64);
+        assert_eq!(cfg.server.http.header_read_timeout_secs, 5);
+        assert_eq!(cfg.server.http.idle_timeout_secs, 120);
         assert_eq!(cfg.counters.backend, CounterBackendKind::Redis);
         assert_eq!(cfg.counters.redis_url.as_deref(), Some("redis://r:6379"));
         assert_eq!(

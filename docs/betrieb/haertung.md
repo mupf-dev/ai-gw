@@ -8,11 +8,36 @@ AIGW-58). Verweise `S-xx` beziehen sich auf die dortigen Befunde.
 - **Datenebene (`:4000`) und Steuerebene (`:4001`) trennen.** Die Steuerebene (Admin-API, UI,
   `/metrics`) nur im Verwaltungsnetz bzw. hinter dem Ingress mit Zugriffsbeschränkung
   veröffentlichen. Zusammenlegen nur, wenn beide ohnehin gleich exponiert sind.
-- **Reverse Proxy / Ingress vor die Datenebene** (S-32): TLS-Terminierung, Header-/Body-
-  Lese-Timeouts (Slowloris), Verbindungs- und Ratenlimits je Client-IP, maximale
-  Header-Größe. Der Gateway selbst begrenzt Body-Größe (`server.data.max_body_bytes`) und
-  liest den Body erst nach gültigem Schlüssel (S-02), hat aber keine globale
-  Verbindungsgrenze.
+- **Reverse Proxy / Ingress vor die Datenebene**: TLS-Terminierung (ai-gw spricht selbst nur
+  Klartext-HTTP/1.1 und h2c, daher auch kein TLS-Handshake-Timeout im Gateway), Verbindungs-
+  und Ratenlimits **je Client-IP**, maximale Header-Größe. Der Gateway begrenzt selbst
+  Body-Größe (`server.data.max_body_bytes`), liest den Body erst nach gültigem Schlüssel (S-02)
+  und hat Verbindungsgrenzen und Lese-Timeouts (S-32, unten).
+- **Verbindungsgrenzen und Lese-Timeouts (S-32, AIGW-80).** Je Listener höchstens
+  `server.data.max_connections` (Standard 10 000) bzw. `server.control.max_connections`
+  (1 024) gleichzeitige Verbindungen (`0` = unbegrenzt); weitere bekommen sofort `503` mit
+  `retry-after: 1` und werden geschlossen, ohne die Accept-Schleife aufzuhalten. Pro offener
+  Verbindung rechnen: ≈ 85 KiB unter Last (leistung.md) und ein Dateideskriptor –
+  `ulimit -n` über `max_connections` beider Listener plus Upstream-Verbindungen setzen.
+  Timeouts im Abschnitt `server.http` (gelten für beide Listener, `0` = aus):
+
+  | Feld | Standard | Wirkung |
+  |---|---|---|
+  | `header_read_timeout_secs` | 10 | HTTP/1: vom ersten Byte einer Anfrage bis zum vollständigen Kopf; danach hartes Schließen (Slowloris). |
+  | `body_read_timeout_secs` | 30 | höchste Pause zwischen zwei Teilen des Anfragekörpers. |
+  | `body_min_bytes_per_sec` | 1024 | Mindestrate des Anfragekörpers nach `body_read_timeout_secs` Vorlauf (32 MiB brauchen damit höchstens ≈ 9 h; strenger stellen, wenn große Uploads nicht vorkommen). |
+  | `idle_timeout_secs` | 120 | Keep-Alive-Leerlauf (HTTP/1 und HTTP/2, geordnet: HTTP/2 mit GOAWAY). **Größer** als das Leerlauf-Timeout eines vorgeschalteten Load Balancers wählen (z. B. AWS ALB 60 s), sonst schließt der Gateway Verbindungen, die der LB noch für offen hält. |
+  | `http2_max_concurrent_streams` | 256 | gleichzeitige Streams je HTTP/2-Verbindung. |
+  | `http2_keepalive_interval_secs` / `http2_keepalive_timeout_secs` | 30 / 20 | PING an HTTP/2-Gegenstellen; ohne Antwort wird die Verbindung geschlossen (tote Clients mit laufenden Streams). |
+
+  Lese-Timeouts gelten nur, solange der Gateway auf Daten des Clients wartet. Laufende
+  Antworten – auch minutenlange SSE-Streams mit langen Pausen (Reasoning) – brechen sie nicht
+  ab; die Verbindung zählt bis zum Ende der Antwort als beschäftigt. Kopf- und Leerlauf-Timeout
+  werden im Abstand des halben kleineren Werts geprüft (höchstens 5 s), greifen also bis zu
+  diesem Abstand später. Metriken auf `/metrics`: `aigw_server_connections_active`,
+  `aigw_server_connections_accepted_total`, `aigw_server_connections_rejected_total`
+  (Grenze erreicht – Alarm lohnt sich), `aigw_server_timeouts_total{kind=header|body|idle|keepalive}`,
+  jeweils mit `listener="data"|"control"`.
 - **HSTS** am Proxy setzen, wenn TLS dort endet (der Gateway setzt kein HSTS).
 - Ausgehend: Egress-Firewall zusätzlich zur SSRF-Prüfung – nur Anbieter, IdP, Webhook-/MCP-
   Ziele erlauben; Cloud-Metadaten (`169.254.169.254`, `fd00:ec2::254`) auf Netzebene sperren.

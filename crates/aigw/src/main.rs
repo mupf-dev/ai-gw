@@ -23,6 +23,7 @@ mod healthcheck;
 mod keygen;
 mod observe;
 mod runtime;
+mod serve;
 mod server;
 
 use std::io::{IsTerminal as _, Write as _};
@@ -359,6 +360,7 @@ fn serve(
         .merge(observe::metrics_router(observe::MetricsSources {
             cache: Some(std::sync::Arc::clone(&cache_rt.cache)),
             plugins: Some(plugin_metrics),
+            server: Some(listeners.metrics()),
             ..runtime_state.metrics_sources()
         }));
         let control = aigw_admin::read_only::apply(control, config.gitops.read_only_admin);

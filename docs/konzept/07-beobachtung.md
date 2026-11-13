@@ -364,6 +364,8 @@ Label-Schlüssel braucht und ein `RwLock` nimmt).
 | `aigw_counter_replay_pending` | gauge | – | noch nicht nachgetragene Deltas |
 | `aigw_log_*` | counter | – | Request-Log (§7) |
 | `aigw_otlp_spans_exported_total`, `aigw_otlp_spans_dropped_total`, `aigw_otlp_logs_exported_total`, `aigw_otlp_export_errors_total{signal}`, `aigw_otlp_export_retries_total{signal}` | counter | – | OTLP-Export (§12) |
+| `aigw_server_connections_active`, `aigw_server_connections_accepted_total`, `aigw_server_connections_rejected_total` | gauge / counter | listener (`data`, `control`) | Client-Verbindungen der Listener; `rejected` = über `server.*.max_connections` mit `503` geschlossen (S-32, AIGW-80, `aigw/src/serve.rs`) |
+| `aigw_server_timeouts_total` | counter | listener, kind (`header`, `body`, `idle`, `keepalive`) | wegen Lese-/Leerlauf-Timeout geschlossene Verbindungen (`server.http`, docs/betrieb/haertung.md) |
 
 Tokens, Kosten und Abbrüche werden beim Ausgeben über die Statusklassen summiert.
 

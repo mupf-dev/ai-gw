@@ -197,6 +197,7 @@ impl Runtime {
             events: self.events.as_ref().map(|(d, _)| Arc::clone(d.metrics())),
             cache: None,
             plugins: None,
+            server: None,
         }
     }
 

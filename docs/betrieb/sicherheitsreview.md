@@ -49,7 +49,7 @@ Schweregrade: **hoch** – ausnutzbar mit geringen Rechten, deutlicher Schaden;
 | ID | Befund | Status |
 |---|---|---|
 | S-01 | **Abfluss globaler Secrets/Zugangsdaten über Plugin-Bindungen.** `org-admin`/`team-admin` durften in eigenen Bindungen (`content-safety`, `webhook`) auf jedes globale `Secret`/jede `ProviderCredential` verweisen und den `endpoint` frei wählen – der Gateway schickte den Anbieter-Key als Bearer an den Angreifer. | **behoben:** Bindungen mit `config.secret`/`config.credential` schreibt nur der globale `admin` (`403`), `plugin_bindings.rs::respect_secret_refs`; Test `admin_auth_api.rs` (F183-Abschnitt). |
-| S-02 | **Body wird vor der Key-Prüfung gelesen.** axum liest den Body (bis `max_body_bytes`, Standard 32 MiB) vor dem Handler; anonyme Anfragen konnten so N × 32 MiB RAM belegen. | **behoben:** Middleware `auth_gate` (Datenebene und `/mcp`) prüft den Schlüssel vor dem Body; ohne gültigen Schlüssel wird der Body verworfen, der Handler antwortet wie gewohnt `401`. Test `aigw-proxy/tests/auth_gate.rs`. Verbindungs-/Nebenläufigkeitsgrenzen und Lese-Timeouts: siehe S-32. |
+| S-02 | **Body wird vor der Key-Prüfung gelesen.** axum liest den Body (bis `max_body_bytes`, Standard 32 MiB) vor dem Handler; anonyme Anfragen konnten so N × 32 MiB RAM belegen. | **behoben:** Middleware `auth_gate` (Datenebene und `/mcp`) prüft den Schlüssel vor dem Body; ohne gültigen Schlüssel wird der Body verworfen, der Handler antwortet wie gewohnt `401`. Test `aigw-proxy/tests/auth_gate.rs`. Verbindungsgrenzen und Lese-Timeouts: siehe S-32 (behoben). |
 | S-03 | **content-safety prüfte nur das Ende des Texts** (letzte `maxChars`): schädlicher Inhalt am Anfang plus Auffüllen umging die Prüfung (Anfrage und gepufferte Antwort). | **behoben:** ganzer Text in Fenstern zu `maxChars` (10 % Überlappung, parallel, max. 16 Fenster; länger → Plugin-Fehler nach `failMode`). Test `windows_cover_whole_text`. Satzmodus im Stream war nicht betroffen. |
 
 ### Mittel
@@ -89,7 +89,7 @@ Schweregrade: **hoch** – ausnutzbar mit geringen Rechten, deutlicher Schaden;
 | S-29 | Bootstrap-Abschaltung kann still scheitern; Fehlversuche nicht gezählt/gedrosselt. | offen |
 | S-30 | Webhook-Plugin `modify`: `n`/`max_tokens` nach der Admission nicht erneut geprüft. | offen |
 | S-31 | (unsicher) Freigabe und Routing-Tabelle werden getrennt geladen – bei Konfig-Wechsel kann ein umgehängter Alias kurz auf eine andere Gruppe zeigen. | offen |
-| S-32 | Keine globale Verbindungs-/Nebenläufigkeitsgrenze, kein expliziter Header-/Body-Lese-Timeout (Slowloris) im Server. | offen → Reverse Proxy (haertung.md) |
+| S-32 | Keine globale Verbindungs-/Nebenläufigkeitsgrenze, kein expliziter Header-/Body-Lese-Timeout (Slowloris) im Server. | **behoben (AIGW-80):** eigene Accept-Schleife (`aigw/src/serve.rs`): `server.data|control.max_connections` (über der Grenze sofort `503` + Schließen, Accept blockiert nie), `server.http`: Kopf-Timeout ab dem ersten Byte, Körper-Pause und -Mindestrate, Keep-Alive-Leerlauf, HTTP/2 max. Streams und PING-Keepalive; laufende Antworten (SSE) ohne Lese-Timeout. Metriken `aigw_server_connections_*`, `aigw_server_timeouts_total`. Tests in `serve.rs` (Slowloris Kopf/Körper/Mindestrate, Grenze, Leerlauf, Streams über HTTP/1.1 und h2). Limits je Client-IP und TLS bleiben beim Reverse Proxy (haertung.md). |
 
 ### Info
 
@@ -143,7 +143,7 @@ Schweregrade: **hoch** – ausnutzbar mit geringen Rechten, deutlicher Schaden;
 ## 6 Folgepunkte (Empfehlung)
 
 1. ~~S-09 `payloadModeMax`/`locked` an Org/global (F203-Folgepunkt)~~ – behoben (AIGW-79).
-2. S-32 Verbindungs-/Nebenläufigkeitsgrenzen und Lese-Timeouts im Server (bis dahin Proxy).
+2. ~~S-32 Verbindungs-/Nebenläufigkeitsgrenzen und Lese-Timeouts im Server~~ – behoben (AIGW-80).
 3. S-10/S-13 content-safety: Tool-Calls im Stream, Kosten des Prüfmodells zurechnen.
 4. S-12 `concurrency` durchsetzen.
 5. S-28 MCP-Grenzen je Key; S-27 Cache-AAD mit Partition; S-23 `__Host-`-Cookies.

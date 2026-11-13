@@ -90,6 +90,16 @@ pub(crate) struct MetricsSources {
     pub(crate) cache: Option<Arc<aigw_cache::ResponseCache>>,
     /// Plugin-Kette: `aigw_plugin_failmode_triggered_total` (F148).
     pub(crate) plugins: Option<Arc<aigw_plugins::PluginMetrics>>,
+    /// Verbindungen der Listener: `aigw_server_*` (S-32, AIGW-80).
+    pub(crate) server: Option<ServerMetricsSource>,
+}
+
+/// Verbindungsmetriken der Listener für `/metrics`.
+#[derive(Debug, Clone)]
+pub(crate) struct ServerMetricsSource {
+    pub(crate) metrics: Arc<crate::serve::ServerMetrics>,
+    /// Getrennter Steuer-Listener (sonst nur `listener="data"`).
+    pub(crate) with_control: bool,
 }
 
 impl MetricsSources {
@@ -109,6 +119,9 @@ impl MetricsSources {
         }
         if let Some(p) = &self.plugins {
             p.render_prometheus(&mut out);
+        }
+        if let Some(s) = &self.server {
+            s.metrics.render_prometheus(&mut out, s.with_control);
         }
         out
     }
