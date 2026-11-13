@@ -377,3 +377,4 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 213. [x] Topbar „Alle Organisationen“ für globale Admins → Empfehlung übernommen (Umsetzung nötig, klein)
 214. [x] Plugin-Formulare je Plugin erst mit Plugin-Schema → Empfehlung übernommen
 - Verdacht Bug: Key löschen + gleichnamig neu anlegen → 401 (inkrementeller Snapshot) – Fix-Agent beauftragt
+- Folge: ui/e2e fixtures.js ensure() für api-keys bei 409 hart fehlschlagen lassen (verdeckte sonst 428/409-Ketten)
