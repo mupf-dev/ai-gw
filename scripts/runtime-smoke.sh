@@ -464,6 +464,22 @@ if [[ -n "${OTLP_PID:-}" ]]; then
   curl -fsS "$CBASE/metrics" | grep '^aigw_otlp_'
 fi
 test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/metrics")" = 404
+echo "--- Secret (F149): Antwort ohne Wert, Webhook-/MCP-Verweis; MCP-Upstream-Status (AIGW-41-Folge)"
+adm POST /secrets '{"metadata":{"name":"smoke-hmac"},"spec":{"description":"Smoke","data":{"value":{"value":"hmac-smoke-nicht-echt"}}}}' |
+  tee "$TMP/secret.json"; echo
+expect 201
+if grep -q 'hmac-smoke-nicht-echt' "$TMP/secret.json"; then echo 'Geheimnis in Antwort' >&2; exit 1; fi
+grep -q '"fields":\["value"\]' "$TMP/secret.json"
+adm GET /mcp-servers:status | tee "$TMP/mcpstatus.json"; echo
+expect 200
+grep -q '"gatewayEnabled"' "$TMP/mcpstatus.json"
+echo "--- Audit-Log (F115/F116): Arten kebab-case, Hash-Kette unversehrt (API und CLI)"
+adm GET '/audit-log?kind=secret&limit=1' | grep -q '"kind":"secret"'
+expect 200
+adm GET /audit-log/verify | tee "$TMP/verify.json"; echo
+expect 200
+grep -q '"ok":true' "$TMP/verify.json"
+AIGW_MASTER_KEY=$MASTER_KEY target/release/aigw audit verify --config "$TMP/aigw.yaml"
 echo "--- GET /admin/api/v1/version";   curl -fsS "$CBASE/admin/api/v1/version" | tee "$TMP/version.json"; echo
 grep -q '"snapshot":{' "$TMP/version.json"
 grep -q '"source":"database"' "$TMP/version.json"
