@@ -22,8 +22,8 @@ if [[ -z "${AIGW_BIN:-}" ]]; then (cd "$ROOT" && cargo build -q -p aigw); fi
 
 rm -rf "$OUT" && mkdir -p "$OUT/screens"
 RUN=$(mktemp -d)
-printf '[server]\nlisten = "127.0.0.1:%s"\n' "$PORT" > "$RUN/aigw.toml"
-(cd "$RUN" && exec "$BIN" serve --config "$RUN/aigw.toml") > "$OUT/server.log" 2>&1 &
+printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\n' "$PORT" "$PORT" > "$RUN/aigw.yaml"
+(cd "$RUN" && exec "$BIN" serve --config "$RUN/aigw.yaml") > "$OUT/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; rm -rf "$RUN"' EXIT
 for _ in $(seq 1 50); do curl -fsS -o /dev/null "http://127.0.0.1:$PORT/admin/" && break; sleep 0.2; done

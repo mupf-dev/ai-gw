@@ -8,7 +8,7 @@ import tailwindcss from '@tailwindcss/vite';
 // Strikte CSP: keine Inline-Skripte, keine data:-Assets (assetsInlineLimit 0),
 // kein Modulepreload-Polyfill (wäre ein Inline-Skript).
 // Entwicklung: `pnpm dev` leitet /admin/api an ein laufendes aigw weiter (AIGW_DEV_API,
-// Standard http://127.0.0.1:4000).
+// Standard http://127.0.0.1:4001).
 export default defineConfig({
   base: '/admin/',
   plugins: [tailwindcss(), svelte()],
