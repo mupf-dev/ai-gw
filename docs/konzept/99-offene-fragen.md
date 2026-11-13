@@ -357,3 +357,9 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 200. [x] Einladungen nicht per GitOps → Empfehlung übernommen
 201. [x] Höchstlaufzeit für bestehende Admin-Keys nur warnen (Log/UI) → Empfehlung übernommen (Umsetzung: UI-Hinweis in AIGW-77)
 202. [x] max_admin_key_lifetime als Dauer-Text → Empfehlung übernommen
+
+## AIGW-76 – Empfehlungen übernommen (2026-11-13)
+203. [x] payloadMode: spezifischstes Feld gewinnt (team-admin kann für eigene Keys full setzen; lesbar nur admin/auditor); optional später payloadModeMax/locked an Org → Empfehlung übernommen
+204. [x] error_class als Rollup-Dimension → Empfehlung übernommen
+205. [x] 15-min-Rollup-Stufe für SQLite-24h-Dashboards → Folgeticket bei Bedarf
+206. [x] UI-Folgen (limit-warnings, rollups:false, payloadMode/exposeReasoning-Formulare, neue Fensterwerte, errorClass/traceId/Guardrails) → an AIGW-77
