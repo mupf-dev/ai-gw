@@ -370,3 +370,10 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 209. [x] audit.retention_days Standard 0 (unbegrenzt) → Empfehlung übernommen
 210. [x] embeddings_max_bytes eigener Konfigwert → bei Bedarf (Folgeticket)
 - UI-Folgen aus 78: Seiten Secrets + MCP-Status (an AIGW-77 nach Merge)
+
+## AIGW-77 – Empfehlungen übernommen (2026-11-13)
+211. [x] Zugangsdaten/Preise/Admin-Keys-Listen im Browser (kleine Mengen) → Empfehlung übernommen
+212. [x] Filter „abgelaufen“ bei Bedarf über API expired=true → Folgeticket bei Bedarf
+213. [x] Topbar „Alle Organisationen“ für globale Admins → Empfehlung übernommen (Umsetzung nötig, klein)
+214. [x] Plugin-Formulare je Plugin erst mit Plugin-Schema → Empfehlung übernommen
+- Verdacht Bug: Key löschen + gleichnamig neu anlegen → 401 (inkrementeller Snapshot) – Fix-Agent beauftragt
