@@ -46,3 +46,27 @@ log:
   level: info
   # text | json
   format: text
+
+# Request-Log, Minuten-Rollups und Payload-Logging (docs/konzept/07-beobachtung.md).
+observe:
+  # Rohlog je Anfrage in der Datenbank (Rollups entstehen immer)
+  request_log: true
+  # Puffer Proxy → Writer; voll → verwerfen, gezählt als aigw_log_dropped_total
+  queue_capacity: 16384
+  # Schreiben alle 500 ms oder spätestens bei 1000 Einträgen
+  batch_size: 1000
+  flush_interval_ms: 500
+  shutdown_timeout_ms: 5000
+  # off | metadata | masked | full (Header Authorization/api-key/x-api-key nie)
+  payload: "off"
+  payload_max_bytes: 65536
+  retention:
+    # 0 = unbegrenzt
+    request_log_days: 30
+    payload_days: 7
+    rollup_days: 400
+    sweep_interval_secs: 3600
+  jsonl:
+    enabled: false
+    path: aigw-requests.jsonl
+    include_payload: false

@@ -4,7 +4,7 @@
 //! Startkonfiguration (YAML, E7).
 //!
 //! Die Startkonfiguration enthält nur, was vor dem Öffnen der Datenbank bekannt sein muss
-//! (Listener, Datenbank, Zähler-Backend, Master-Key, Logging). Alles Weitere (Modelle, Keys,
+//! (Listener, Datenbank, Zähler-Backend, Master-Key, Logging, Request-Log). Alles Weitere (Modelle, Keys,
 //! Plugins …) sind Ressourcen in der Datenbank bzw. GitOps-YAML, siehe [`crate::resource`].
 //!
 //! Jeder Wert lässt sich per Umgebungsvariable überschreiben:
@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
+use crate::observe::PayloadMode;
 
 /// Präfix der Umgebungsvariablen für Overrides.
 pub const ENV_PREFIX: &str = "AIGW_";
@@ -37,6 +38,8 @@ pub struct Config {
     pub secrets: SecretsConfig,
     /// Logging.
     pub log: LogConfig,
+    /// Request-Log, Rollups, Payload-Logging, Aufbewahrung, Export (AIGW-43).
+    pub observe: ObserveConfig,
 }
 
 impl Config {
@@ -331,6 +334,93 @@ impl Default for LogConfig {
     }
 }
 
+/// Request-Log und Auswertung (AIGW-43, `docs/konzept/07-beobachtung.md`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ObserveConfig {
+    /// Rohlog je Anfrage in `request_log` schreiben (Minuten-Rollups entstehen immer).
+    pub request_log: bool,
+    /// Kapazität des Puffers zwischen Proxy und Writer (Einträge); voll → verwerfen + zählen.
+    pub queue_capacity: usize,
+    /// Höchstzahl Einträge je Batch (Schreiben spätestens bei Erreichen).
+    pub batch_size: usize,
+    /// Schreiben spätestens nach dieser Zeit (Millisekunden).
+    pub flush_interval_ms: u64,
+    /// Höchstdauer für das Leeren des Puffers beim Herunterfahren (Millisekunden).
+    pub shutdown_timeout_ms: u64,
+    /// Payload-Logging: `off` | `metadata` | `masked` | `full` (global; später je Key/Team).
+    pub payload: PayloadMode,
+    /// Payload-Bodies werden auf diese Größe gekürzt (Bytes, je Request und Response).
+    pub payload_max_bytes: usize,
+    /// Aufbewahrungsfristen.
+    pub retention: RetentionConfig,
+    /// Export als JSON-Lines-Datei.
+    pub jsonl: JsonlExportConfig,
+}
+
+impl Default for ObserveConfig {
+    fn default() -> Self {
+        Self {
+            request_log: true,
+            queue_capacity: 16_384,
+            batch_size: 1000,
+            flush_interval_ms: 500,
+            shutdown_timeout_ms: 5000,
+            payload: PayloadMode::Off,
+            payload_max_bytes: 64 * 1024,
+            retention: RetentionConfig::default(),
+            jsonl: JsonlExportConfig::default(),
+        }
+    }
+}
+
+/// Aufbewahrungsfristen in Tagen (`0` = unbegrenzt).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RetentionConfig {
+    /// Rohlogs (`request_log`).
+    pub request_log_days: u32,
+    /// Payloads (`request_payload`), getrennt befristet; höchstens so lange wie die Rohlogs.
+    pub payload_days: u32,
+    /// Minuten-Rollups (`usage_rollup`).
+    pub rollup_days: u32,
+    /// Abstand der Löschläufe (Sekunden).
+    pub sweep_interval_secs: u64,
+}
+
+impl Default for RetentionConfig {
+    fn default() -> Self {
+        Self {
+            request_log_days: 30,
+            payload_days: 7,
+            rollup_days: 400,
+            sweep_interval_secs: 3600,
+        }
+    }
+}
+
+/// Export des Request-Logs als JSON-Lines-Datei (ein JSON-Objekt je Zeile, angehängt).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct JsonlExportConfig {
+    /// Export aktiv.
+    pub enabled: bool,
+    /// Zieldatei.
+    pub path: PathBuf,
+    /// Payload (sofern geloggt, also bereits maskiert) mit exportieren.
+    pub include_payload: bool,
+}
+
+impl Default for JsonlExportConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            path: PathBuf::from("aigw-requests.jsonl"),
+            include_payload: false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,6 +539,26 @@ counters:
                 .to_string()
                 .contains("Umgebung")
         );
+    }
+
+    #[test]
+    fn observe_section() {
+        let cfg = Config::from_yaml_with_env(
+            "observe:\n  payload: masked\n  retention:\n    payload_days: 3\n",
+            env(&[
+                ("AIGW_OBSERVE__BATCH_SIZE", "50"),
+                ("AIGW_OBSERVE__JSONL__ENABLED", "true"),
+                ("AIGW_OBSERVE__RETENTION__REQUEST_LOG_DAYS", "0"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(cfg.observe.payload, PayloadMode::Masked);
+        assert_eq!(cfg.observe.retention.payload_days, 3);
+        assert_eq!(cfg.observe.retention.request_log_days, 0);
+        assert_eq!(cfg.observe.batch_size, 50);
+        assert_eq!(cfg.observe.flush_interval_ms, 500);
+        assert!(cfg.observe.jsonl.enabled);
+        assert!(Config::from_yaml("observe:\n  payload: everything\n").is_err());
     }
 
     #[test]

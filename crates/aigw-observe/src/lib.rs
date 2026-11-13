@@ -1,0 +1,180 @@
+// SPDX-FileCopyrightText: 2026 ai-gw contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Request-Log von ai-gw (AIGW-43): Puffer, Batch-Writer, Minuten-Rollups,
+//! Payload-Maskierung, Aufbewahrung und Exporter.
+//!
+//! ```text
+//! Proxy ──record()──► RequestLogger ──try_send──► [begrenzter Kanal] ──► Writer-Task
+//!        (< 1 µs, nie wartend; voll → aigw_log_dropped_total)        │ alle 500 ms / 1000 Einträge
+//!                                                                     ▼
+//!                       Aufbereitung (spawn_blocking): Zeilen, Payload maskiert, Rollup-Deltas
+//!                                                                     ▼
+//!                  Store: eine Transaktion (request_log, request_payload, usage_rollup UPSERT)
+//!                                                                     ▼
+//!                                        Exporter (JSON-Lines, später OTLP/Webhook)
+//! ```
+//!
+//! Eigene Crate statt Modul in `aigw-proxy`: Der Proxy kennt nur den Trait
+//! [`aigw_core::observe::RequestObserver`] und bleibt frei von Datenbank-, Regex- und (später)
+//! OTLP-Abhängigkeiten; das Request-Log ist eigenständig testbar und austauschbar.
+//! Details: `docs/konzept/07-beobachtung.md`.
+
+pub mod export;
+pub mod logger;
+pub mod mask;
+pub mod metrics;
+pub mod process;
+pub mod retention;
+mod writer;
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use aigw_core::config::ObserveConfig;
+use aigw_core::observe::RequestObserver;
+use aigw_store::Store;
+use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
+
+pub use export::{ExportError, ExportFuture, JsonLinesExporter, LogExporter};
+pub use logger::RequestLogger;
+pub use mask::{PayloadMasker, RegexMasker};
+pub use metrics::{MetricsSnapshot, ObserveMetrics};
+pub use process::LogEntry;
+
+use crate::process::Processor;
+use crate::writer::Writer;
+
+/// Startet das Request-Log.
+#[derive(Debug)]
+pub struct ObserveBuilder {
+    cfg: ObserveConfig,
+    store: Option<Store>,
+    exporters: Vec<Arc<dyn LogExporter>>,
+    masker: Option<Arc<dyn PayloadMasker>>,
+}
+
+impl ObserveBuilder {
+    /// Builder aus dem Konfigurationsabschnitt `observe`.
+    pub fn new(cfg: ObserveConfig) -> Self {
+        Self {
+            cfg,
+            store: None,
+            exporters: Vec::new(),
+            masker: None,
+        }
+    }
+
+    /// Datenbank für Rohlogs, Payloads, Rollups und Aufbewahrung (ohne: nur Exporter).
+    pub fn store(mut self, store: Store) -> Self {
+        self.store = Some(store);
+        self
+    }
+
+    /// Zusätzlicher Exporter (der JSON-Lines-Exporter kommt aus der Konfiguration).
+    pub fn exporter(mut self, exporter: Arc<dyn LogExporter>) -> Self {
+        self.exporters.push(exporter);
+        self
+    }
+
+    /// Eigene Maskierung (PII-Engine, AIGW-37); Standard ist [`RegexMasker`].
+    pub fn masker(mut self, masker: Arc<dyn PayloadMasker>) -> Self {
+        self.masker = Some(masker);
+        self
+    }
+
+    /// Startet Writer- und Aufbewahrungs-Task (benötigt eine laufende Tokio-Runtime).
+    pub fn start(self) -> ObserveHandle {
+        let cfg = self.cfg;
+        let metrics = Arc::new(ObserveMetrics::default());
+        let (tx, rx) = mpsc::channel(cfg.queue_capacity.max(1));
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+        let mut exporters = self.exporters;
+        if cfg.jsonl.enabled {
+            exporters.push(Arc::new(JsonLinesExporter::new(
+                cfg.jsonl.path.clone(),
+                cfg.jsonl.include_payload,
+            )));
+        }
+        let writer = Writer {
+            store: self.store.clone(),
+            store_request_log: cfg.request_log,
+            exporters,
+            processor: Processor {
+                payload_mode: cfg.payload,
+                payload_max_bytes: cfg.payload_max_bytes,
+                masker: self.masker.unwrap_or_else(|| Arc::new(RegexMasker::new())),
+            },
+            metrics: Arc::clone(&metrics),
+            batch_size: cfg.batch_size,
+            flush_interval: Duration::from_millis(cfg.flush_interval_ms),
+        };
+        let writer = tokio::spawn(writer.run(rx, shutdown_rx.clone()));
+        let retention = self.store.map(|store| {
+            tokio::spawn(retention::run(
+                store,
+                cfg.retention.clone(),
+                Arc::clone(&metrics),
+                shutdown_rx,
+            ))
+        });
+        ObserveHandle {
+            logger: RequestLogger::new(tx, Arc::clone(&metrics), cfg.payload),
+            metrics,
+            shutdown: shutdown_tx,
+            writer,
+            retention,
+            shutdown_timeout: Duration::from_millis(cfg.shutdown_timeout_ms),
+        }
+    }
+}
+
+/// Laufendes Request-Log.
+#[derive(Debug)]
+pub struct ObserveHandle {
+    logger: RequestLogger,
+    metrics: Arc<ObserveMetrics>,
+    shutdown: watch::Sender<bool>,
+    writer: JoinHandle<()>,
+    retention: Option<JoinHandle<()>>,
+    shutdown_timeout: Duration,
+}
+
+impl ObserveHandle {
+    /// Logger für den Proxy (klonbar).
+    pub fn logger(&self) -> RequestLogger {
+        self.logger.clone()
+    }
+
+    /// Logger als Trait-Objekt für den Proxy-Zustand.
+    pub fn observer(&self) -> Arc<dyn RequestObserver> {
+        Arc::new(self.logger.clone())
+    }
+
+    /// Zähler.
+    pub fn metrics(&self) -> &Arc<ObserveMetrics> {
+        &self.metrics
+    }
+
+    /// Graceful Shutdown: nimmt nichts Neues mehr an und schreibt den Puffer vollständig
+    /// (höchstens `shutdown_timeout_ms`). Liefert `false` bei Zeitüberschreitung.
+    pub async fn shutdown(self) -> bool {
+        let _ = self.shutdown.send(true);
+        if let Some(r) = self.retention {
+            r.abort();
+        }
+        let mut writer = self.writer;
+        match tokio::time::timeout(self.shutdown_timeout, &mut writer).await {
+            Ok(_) => true,
+            Err(_) => {
+                writer.abort();
+                tracing::warn!(
+                    "Request-Log: Puffer beim Herunterfahren nicht vollständig geschrieben"
+                );
+                false
+            }
+        }
+    }
+}

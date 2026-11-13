@@ -224,8 +224,9 @@ erDiagram
 | `mcp_server`, `mcp_grant` | Freigabe je Team/Key (polymorph wie oben), `tools` als JSON-Liste |
 | `counter_state` | nur `postgres-sync`: (Schlüssel, Fensterbeginn, Instanz) → Wert |
 | `budget_usage` | (Ebene, Ziel, Zeitraum, Beginn) → Betrag (Nano) |
-| `request_log` | ein Eintrag je Anfrage (ID = `x-aigw-request-id`), Tokens, Kosten, Latenz/TTFT, Cache, optional maskierter Payload; Indizes nach Zeit, Key, Team |
-| `usage_rollup` | Minuten-Rollups je Key/Team/Org/Modellgruppe/Deployment (`''` statt NULL, da Teil des PK) |
+| `request_log` | ein Eintrag je Anfrage (ID = `x-aigw-request-id`), Tokens, Kosten, Latenz/TTFT, Cache, Abbruch; Indizes nach Zeit, Key, Team (Details [07-beobachtung.md](07-beobachtung.md)) |
+| `request_payload` | optionaler Payload (gefiltert/maskiert) je Anfrage, eigene Aufbewahrungsfrist (Migration 0002) |
+| `usage_rollup` | Minuten-Rollups je Key/Team/Org/Modellgruppe/Deployment (`''` statt NULL, da Teil des PK); Latenz-Histogramm als feste Spalten für additive UPSERTs (Migration 0002) |
 
 Löschen: Fremdschlüssel verhindern das Löschen verwendeter Ressourcen (Fehler `Conflict`), z. B.
 eine Modellgruppe mit Deployments; Aliasse und Freigaben eines MCP-Servers fallen per Kaskade weg.

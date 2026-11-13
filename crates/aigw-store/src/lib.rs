@@ -12,6 +12,7 @@
 
 pub mod crypto;
 pub mod keys;
+pub mod observe;
 pub mod reload;
 pub mod repo;
 mod snapshot;
@@ -111,13 +112,22 @@ pub struct Store {
 
 /// Eingebettete Migrationen (ein Satz für SQLite und Postgres).
 pub fn migrator() -> Migrator {
-    Migrator::with_migrations(vec![Migration::new(
-        1,
-        "init".into(),
-        MigrationType::Simple,
-        include_str!("../migrations/0001_init.sql").into_sql_str(),
-        false,
-    )])
+    Migrator::with_migrations(vec![
+        Migration::new(
+            1,
+            "init".into(),
+            MigrationType::Simple,
+            include_str!("../migrations/0001_init.sql").into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            2,
+            "observe".into(),
+            MigrationType::Simple,
+            include_str!("../migrations/0002_observe.sql").into_sql_str(),
+            false,
+        ),
+    ])
 }
 
 impl Store {
