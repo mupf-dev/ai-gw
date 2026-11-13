@@ -13,6 +13,7 @@
 pub mod admin_auth;
 pub mod analytics;
 pub mod budget;
+pub mod cache;
 pub mod crypto;
 pub mod events;
 pub mod gitops;
@@ -161,6 +162,13 @@ pub fn migrator() -> Migrator {
             "event_dedup".into(),
             MigrationType::Simple,
             include_str!("../migrations/0006_event_dedup.sql").into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            7,
+            "cache_vectors".into(),
+            MigrationType::Simple,
+            include_str!("../migrations/0007_cache_vectors.sql").into_sql_str(),
             false,
         ),
     ])

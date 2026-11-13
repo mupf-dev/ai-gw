@@ -32,6 +32,7 @@
 //! (Stream-Haken je IR-Ereignis); siehe `docs/konzept/12-plugins.md`.
 
 pub mod auth;
+pub mod cache;
 mod endpoints;
 mod error;
 mod handlers;
@@ -65,8 +66,10 @@ pub use request_id::{REQUEST_ID_HEADER, RequestId, RequestStart};
 pub use routes::{ModelRoutes, StaticRoutes};
 pub use routing::{GroupRoute, RoutesTask, SnapshotRoutes};
 
+pub use aigw_cache::ResponseCache;
 pub use aigw_core::config::{DEFAULT_MAX_AUDIO_BYTES, DEFAULT_MAX_BODY_BYTES};
 pub use aigw_plugins::PluginChains;
+pub use cache::{CACHE_HEADER, CACHE_TTL_HEADER};
 
 /// Antwort-Header: gewähltes Deployment (Name).
 pub const DEPLOYMENT_HEADER: &str = "x-aigw-deployment";
@@ -121,6 +124,8 @@ pub struct ProxyState {
     pub limits: Arc<Limiter>,
     /// Plugin-Ketten je (Org, Team, Key, Modellgruppe) (AIGW-36).
     pub plugins: Arc<PluginChains>,
+    /// Antwort-Cache (AIGW-39/40); wirksam nur, wo eine `cache`-Bindung gilt.
+    pub cache: Option<Arc<ResponseCache>>,
     /// Einstellungen.
     pub config: ProxyConfig,
 }
@@ -149,6 +154,7 @@ impl ProxyState {
             observer: Arc::new(NoopObserver),
             limits: Arc::new(Limiter::local()),
             plugins: Arc::new(PluginChains::default()),
+            cache: None,
             config: ProxyConfig::default(),
         }
     }

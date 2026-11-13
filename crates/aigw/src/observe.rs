@@ -86,6 +86,8 @@ pub(crate) struct MetricsSources {
     pub(crate) reload: Arc<ReloadMetrics>,
     /// Ereignis-Webhooks (AIGW-61), falls konfiguriert.
     pub(crate) events: Option<Arc<aigw_webhook::EventMetrics>>,
+    /// Antwort-Cache (AIGW-39/40).
+    pub(crate) cache: Option<Arc<aigw_cache::ResponseCache>>,
 }
 
 impl MetricsSources {
@@ -99,6 +101,9 @@ impl MetricsSources {
         self.otlp.render_prometheus(&mut out);
         if let Some(e) = &self.events {
             e.render_prometheus(&mut out);
+        }
+        if let Some(c) = &self.cache {
+            c.render_prometheus(&mut out);
         }
         out
     }

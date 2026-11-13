@@ -53,6 +53,8 @@ pub struct Config {
     pub billing: BillingConfig,
     /// Ereignis-Webhooks (Budget-Warnungen usw., AIGW-61).
     pub events: EventsConfig,
+    /// Antwort-Cache, exakt und semantisch (AIGW-39/40).
+    pub cache: CacheConfig,
 }
 
 impl Config {
@@ -497,6 +499,139 @@ fn default_event_timeout_ms() -> u64 {
 
 fn default_event_attempts() -> u32 {
     6
+}
+
+/// Antwort-Cache (AIGW-39/40, `docs/konzept/14-cache.md`).
+///
+/// Hier steht nur die Infrastruktur (Speicher, Backends, Grenzen). **Wo** gecacht wird
+/// (Ebene, Modus, TTL, Scope, Schwellen), legen Bindungen des Plugins `cache` fest; ohne
+/// Bindung ist der Cache für eine Anfrage aus.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CacheConfig {
+    /// Hauptschalter; `false` ignoriert alle `cache`-Bindungen.
+    pub enabled: bool,
+    /// Obergrenze des RAM-LRU für exakte Treffer (Bytes, serialisierte Antworten).
+    pub memory_max_bytes: u64,
+    /// Größte cachebare Antwort (Bytes, serialisiert); größere werden nicht gespeichert.
+    pub max_entry_bytes: u64,
+    /// Obergrenze jeder TTL (Sekunden), auch für `x-aigw-cache-ttl` und Bindungen.
+    pub max_ttl_secs: u64,
+    /// Optionale zweite Ebene für exakte Treffer in Redis/Valkey (gemeinsam für alle
+    /// Instanzen), z. B. `redis://redis:6379/0`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redis_url: Option<String>,
+    /// Schlüsselpräfix in Redis.
+    pub redis_key_prefix: String,
+    /// Zeitlimit je Zugriff auf externe Backends (Redis, pgvector) in Millisekunden;
+    /// Überschreitung = Cache-Miss.
+    pub backend_timeout_ms: u64,
+    /// Zeichen je simuliertem Chunk bei der Wiedergabe gecachter Antworten als Stream.
+    pub replay_chunk_chars: usize,
+    /// Semantischer Cache.
+    pub semantic: SemanticCacheConfig,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            memory_max_bytes: 256 * 1024 * 1024,
+            max_entry_bytes: 1024 * 1024,
+            max_ttl_secs: 7 * 24 * 3600,
+            redis_url: None,
+            redis_key_prefix: "aigw:cache:".to_owned(),
+            backend_timeout_ms: 250,
+            replay_chunk_chars: 32,
+            semantic: SemanticCacheConfig::default(),
+        }
+    }
+}
+
+/// Vektor-Backend des semantischen Caches (Architektur §10).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum VectorBackendKind {
+    /// Eigener HNSW-Index im RAM je Instanz (Warmstart aus der Datenbank).
+    #[default]
+    Memory,
+    /// Postgres mit Erweiterung `vector` (gemeinsam für alle Instanzen).
+    Pgvector,
+    /// Redis Stack / Valkey Search (`FT.SEARCH` KNN, gemeinsam für alle Instanzen).
+    Redis,
+}
+
+/// Semantischer Cache (AIGW-40).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SemanticCacheConfig {
+    /// Vektor-Backend.
+    pub backend: VectorBackendKind,
+    /// Standard-Modellgruppe für Embeddings (Bindungen können eine andere angeben). Ohne
+    /// Angabe ist der semantische Modus nur mit `semantic.embeddingModel` der Bindung aktiv.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<String>,
+    /// Dimension der Embeddings (Pflicht für `pgvector`/`redis`: Spaltentyp bzw. Index;
+    /// `memory` übernimmt sie aus dem ersten Vektor). Vektoren anderer Länge werden
+    /// ignoriert.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dimensions: Option<u32>,
+    /// Zeitlimit eines Embedding-Aufrufs (Millisekunden); Überschreitung = Cache-Miss.
+    pub embed_timeout_ms: u64,
+    /// Höchstzahl Vektoren (`memory`; älteste werden verdrängt).
+    pub max_entries: u64,
+    /// Obergrenze für Vektoren und Antworten im RAM (`memory`, Bytes).
+    pub max_bytes: u64,
+    /// HNSW-Parameter (`memory`, beim Anlegen auch `pgvector`/`redis`).
+    pub hnsw: HnswConfig,
+    /// `memory`: Einträge (verschlüsselt mit dem Master-Key) in der Datenbank ablegen und
+    /// beim Start laden (Warmstart).
+    pub persist: bool,
+    /// `pgvector`: Datenbank-URL (Standard: `store.url`, falls Postgres).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pgvector_url: Option<String>,
+    /// `redis`: URL von Redis Stack bzw. Valkey mit Search-Modul (Standard: `cache.redis_url`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redis_url: Option<String>,
+}
+
+impl Default for SemanticCacheConfig {
+    fn default() -> Self {
+        Self {
+            backend: VectorBackendKind::Memory,
+            embedding_model: None,
+            dimensions: None,
+            embed_timeout_ms: 2000,
+            max_entries: 100_000,
+            max_bytes: 512 * 1024 * 1024,
+            hnsw: HnswConfig::default(),
+            persist: true,
+            pgvector_url: None,
+            redis_url: None,
+        }
+    }
+}
+
+/// Parameter des HNSW-Index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HnswConfig {
+    /// Nachbarn je Knoten und Ebene (Ebene 0: 2·M).
+    pub m: usize,
+    /// Kandidatenliste beim Einfügen.
+    pub ef_construction: usize,
+    /// Kandidatenliste bei der Suche.
+    pub ef_search: usize,
+}
+
+impl Default for HnswConfig {
+    fn default() -> Self {
+        Self {
+            m: 16,
+            ef_construction: 200,
+            ef_search: 64,
+        }
+    }
 }
 
 /// Logging.
@@ -1187,5 +1322,27 @@ admin:
         cfg.counters.redis_url = Some("redis://x".into());
         let yaml = cfg.to_yaml().unwrap();
         assert_eq!(Config::from_yaml(&yaml).unwrap(), cfg);
+    }
+
+    #[test]
+    fn cache_section_yaml_and_env() {
+        let cfg = Config::from_yaml_with_env(
+            "cache:\n  memory_max_bytes: 1024\n  semantic:\n    backend: pgvector\n    dimensions: 768\n    hnsw: {m: 8}\n",
+            env(&[
+                ("AIGW_CACHE__SEMANTIC__HNSW__EF_SEARCH", "128"),
+                ("AIGW_CACHE__REDIS_URL", "redis://r:6379/0"),
+            ]),
+        )
+        .unwrap();
+        let c = &cfg.cache;
+        assert!(c.enabled);
+        assert_eq!(c.memory_max_bytes, 1024);
+        assert_eq!(c.redis_url.as_deref(), Some("redis://r:6379/0"));
+        assert_eq!(c.semantic.backend, VectorBackendKind::Pgvector);
+        assert_eq!(c.semantic.dimensions, Some(768));
+        assert_eq!(c.semantic.hnsw.m, 8);
+        assert_eq!(c.semantic.hnsw.ef_construction, 200);
+        assert_eq!(c.semantic.hnsw.ef_search, 128);
+        assert!(Config::from_yaml("cache:\n  semantic:\n    backend: faiss\n").is_err());
     }
 }

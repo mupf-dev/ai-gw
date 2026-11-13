@@ -57,9 +57,10 @@ impl Registry {
         Self::default()
     }
 
-    /// Registry mit den eingebauten Plugins (`header`, `request-transform`, `webhook`).
+    /// Registry mit den eingebauten Plugins (`header`, `request-transform`, `webhook`, `cache`).
     pub fn with_builtin() -> Self {
         let mut r = Self::new();
+        r.register(Arc::new(builtin::cache::Factory));
         r.register(Arc::new(builtin::header::Factory));
         r.register(Arc::new(builtin::request_transform::Factory));
         r.register(Arc::new(builtin::webhook::Factory::default()));

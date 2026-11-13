@@ -158,3 +158,26 @@ events:
   #     secret: {credential: hooks, field: webhookSecret}
   #     timeout_ms: 5000
   #     max_attempts: 6
+
+# Antwort-Cache (docs/konzept/14-cache.md). Wo gecacht wird (Ebene, Modus, Scope, TTL,
+# Schwellen), legen Bindungen des Plugins `cache` fest; hier nur Speicher und Backends.
+cache:
+  enabled: true
+  memory_max_bytes: 268435456   # RAM-LRU für exakte Treffer
+  max_entry_bytes: 1048576
+  max_ttl_secs: 604800
+  # redis_url: redis://redis:6379/0   # optionale gemeinsame zweite Ebene (exakt)
+  redis_key_prefix: "aigw:cache:"
+  backend_timeout_ms: 250       # Redis/pgvector; Überschreitung = Cache-Miss
+  replay_chunk_chars: 32        # simuliertes Chunking bei Wiedergabe als Stream
+  semantic:
+    backend: memory             # memory (eigener HNSW) | pgvector | redis (Redis Stack/Valkey Search)
+    # embedding_model: text-embedding-3-small   # Modellgruppe des Gateways
+    # dimensions: 1536          # Pflicht für pgvector/redis
+    embed_timeout_ms: 2000
+    max_entries: 100000
+    max_bytes: 536870912
+    hnsw: {m: 16, ef_construction: 200, ef_search: 64}
+    persist: true               # memory: Warmstart aus der Datenbank (verschlüsselt)
+    # pgvector_url: postgres://…  # Standard: store.url, falls Postgres
+    # redis_url: redis://…        # Standard: cache.redis_url

@@ -297,7 +297,10 @@ fn unreachable_state() -> ! {
 /// Ausgabe-Plugins, die Inhalte prüfen oder verändern, implementieren **beide**
 /// Ausgabehaken: [`Plugin::on_response`] (JSON und gepufferter Modus) und
 /// [`Plugin::on_chunk`] (Live-Stream). Je Antwort wird genau einer davon aufgerufen.
-pub trait Plugin: Send + Sync + 'static {
+///
+/// `Any` als Obertrait erlaubt der Pipeline, Richtlinien-Plugins ohne Haken (z. B.
+/// [`crate::builtin::cache`]) aus der Kette zu lesen.
+pub trait Plugin: Any + Send + Sync + 'static {
     /// Name des Plugins (wie in der Bindung, z. B. `header`).
     fn name(&self) -> &'static str;
 

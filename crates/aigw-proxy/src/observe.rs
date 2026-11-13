@@ -90,6 +90,8 @@ pub(crate) struct Recorder {
     span: Span,
     /// Reservierung der Limits; am Ende Kosten, Budget und Abgleich (AIGW-30/31).
     admission: Option<crate::limits::Admission>,
+    /// Antwort aus dem Cache (AIGW-39/40): Usage bleibt 0, Usage-Ereignisse zählen nicht.
+    cache_hit: bool,
 }
 
 impl Recorder {
@@ -116,6 +118,7 @@ impl Recorder {
             streamed_text: None,
             span: Span::none(),
             admission: None,
+            cache_hit: false,
         }
     }
 
@@ -245,6 +248,9 @@ impl Recorder {
     pub(crate) fn set_response(&mut self, resp: &ChatResponse) {
         self.span
             .record("gen_ai.response.model", resp.model.as_str());
+        if self.cache_hit {
+            return;
+        }
         match &resp.usage {
             Some(u) => {
                 self.usage = Some(u.clone());
@@ -262,6 +268,28 @@ impl Recorder {
             .record("gen_ai.response.model", resp.model.as_str());
         self.usage = Some(resp.usage.clone().unwrap_or_default());
         self.usage_final = true;
+    }
+
+    /// Ergebnis des Antwort-Caches (AIGW-39/40).
+    pub(crate) fn set_cache(&mut self, outcome: aigw_core::observe::CacheOutcome) {
+        self.span.record("aigw.cache", outcome.as_str());
+        if let Some(r) = self.rec() {
+            r.cache = Some(outcome);
+        }
+    }
+
+    /// Antwort aus dem Cache: kein Upstream-Verbrauch (Usage 0, keine Kosten); die
+    /// Token-Reservierung der Limits wird im Abschluss vollständig freigegeben. Gezählt wird
+    /// die Anfrage (Request-Limits, Log, Rollup `cache_hits`).
+    pub(crate) fn set_cache_hit(&mut self, model_group: &str, resp: &ChatResponse) {
+        self.span
+            .record("gen_ai.response.model", resp.model.as_str());
+        self.cache_hit = true;
+        self.usage = Some(Usage::default());
+        self.usage_final = true;
+        if let Some(r) = self.rec() {
+            r.model_group = Some(model_group.to_owned());
+        }
     }
 
     /// Fehler vor dem ersten Byte.
@@ -300,6 +328,7 @@ impl Recorder {
                 self.first_token();
             }
             StreamEvent::Stop { .. } => self.stopped = true,
+            StreamEvent::Usage(_) if self.cache_hit => {}
             StreamEvent::Usage(u) => {
                 self.usage = Some(u.clone());
                 self.usage_final = self.stopped;

@@ -10,6 +10,7 @@ members = [
     "crates/aigw",
     "crates/aigw-admin",
     "crates/aigw-billing",
+    "crates/aigw-cache",
     "crates/aigw-core",
     "crates/aigw-counters",
     "crates/aigw-observe",
@@ -32,6 +33,7 @@ publish = false
 [workspace.dependencies]
 aigw-admin = { path = "crates/aigw-admin" }
 aigw-billing = { path = "crates/aigw-billing" }
+aigw-cache = { path = "crates/aigw-cache" }
 aigw-core = { path = "crates/aigw-core" }
 aigw-counters = { path = "crates/aigw-counters" }
 aigw-observe = { path = "crates/aigw-observe" }
@@ -76,6 +78,10 @@ url = "2.5.8"
 tower-service = "0.3.3"
 # Mikro-Benchmarks (nur dev).
 divan = "0.1.21"
+
+# Exakter Antwort-Cache (AIGW-39): Schlüssel = BLAKE3 über normalisierte Anfrage (schnell,
+# kryptografisch, CC0/Apache-2.0); ohne Rayon/Mmap.
+blake3 = { version = "1.8", default-features = false, features = ["std"] }
 
 # Lock-freier Austausch des Konfigurations-Snapshots im Hot Path (§14).
 arc-swap = "1.7"

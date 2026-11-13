@@ -18,6 +18,7 @@ path = "src/main.rs"
 [dependencies]
 aigw-admin.workspace = true
 aigw-billing.workspace = true
+aigw-cache.workspace = true
 aigw-core.workspace = true
 aigw-counters.workspace = true
 aigw-observe.workspace = true

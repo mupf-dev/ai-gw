@@ -168,6 +168,17 @@ fn serve(
             aigw_plugins::IndexOptions::default(),
         ));
         let plugins_task = plugins.spawn(runtime_state.snapshot.clone());
+        // Antwort-Cache (AIGW-39/40): RAM-LRU, optional Redis, Vektor-Backend; Warmstart des
+        // eigenen HNSW aus der Datenbank (verschlüsselt mit dem Master-Key).
+        let cache_rt = aigw_cache::start(
+            &config,
+            Some(aigw_cache::Persistence {
+                store: runtime_state.store.clone(),
+                keyring: std::sync::Arc::clone(&runtime_state.keyring),
+            }),
+        )
+        .await
+        .map_err(|e| format!("cache: {e}"))?;
         let state = aigw_proxy::ProxyState {
             routes,
             auth: std::sync::Arc::new(aigw_proxy::SnapshotAuthenticator::new(
@@ -181,8 +192,13 @@ fn serve(
                 &config.limits,
             )),
             plugins,
+            cache: Some(std::sync::Arc::clone(&cache_rt.cache)),
             config: aigw_proxy::ProxyConfig::from(&config.server.data),
         };
+        // Semantischer Cache: Embeddings über das interne Routing (AIGW-21/40).
+        cache_rt
+            .cache
+            .set_embedder(std::sync::Arc::new(aigw_proxy::cache::RoutedEmbedder::for_state(&state)));
         // Steuerebene: Admin-API/-UI (Anmeldung: AIGW-28/32), GitOps (AIGW-33) und
         // /metrics (AIGW-43); Modus „nur YAML“ sperrt die Schreibrouten.
         let auth_cfg = &config.admin.auth;
@@ -228,11 +244,15 @@ fn serve(
                 auth: std::sync::Arc::clone(&auth),
             },
         ))
-        .merge(observe::metrics_router(runtime_state.metrics_sources()));
+        .merge(observe::metrics_router(observe::MetricsSources {
+            cache: Some(std::sync::Arc::clone(&cache_rt.cache)),
+            ..runtime_state.metrics_sources()
+        }));
         let control = aigw_admin::read_only::apply(control, config.gitops.read_only_admin);
         server::run(listeners, state, control, shutdown_signal()).await?;
         drop(routes_task);
         drop(plugins_task);
+        drop(cache_rt);
         runtime_state.shutdown().await;
         tracing::info!("ai-gw beendet");
         Ok(())

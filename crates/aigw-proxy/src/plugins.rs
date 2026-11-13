@@ -8,7 +8,8 @@
 //! 1. Auth, Modellfreigabe (`authorize_model`)
 //! 2. Limits/Budgets reservieren (AIGW-30/31) – **vor** den Pre-Plugins
 //! 3. [`PluginRun::run_pre_plugins`] – kann antworten (`Respond`) oder ablehnen (`Reject`)
-//! 4. (Cache, AIGW-39) → Routing/Upstream
+//! 4. Antwort-Cache ([`crate::cache`], AIGW-39/40; Richtlinie aus dem Plugin `cache`) →
+//!    Routing/Upstream
 //! 5. Nicht gestreamt bzw. gepuffert: [`PluginRun::run_post_plugins`] vor dem Encoder;
 //!    gestreamt: [`PluginRun::wrap_stream`] (Stream-Haken je Ereignis vor dem Encoder)
 //!
@@ -125,6 +126,16 @@ impl PluginRun {
             Flow::Respond(resp) => Ok(Pre::Respond(*resp)),
             Flow::Reject(e) => Err(e),
         }
+    }
+
+    /// Wirksame Cache-Richtlinie (Plugin `cache`, AIGW-39/40) oder `None` ohne Bindung.
+    pub(crate) fn cache_policy(
+        &self,
+    ) -> Option<Arc<aigw_plugins::builtin::cache::CachePolicy>> {
+        if self.chain.is_empty() {
+            return None;
+        }
+        aigw_plugins::builtin::cache::policy_of(&self.chain)
     }
 
     /// Anzahl der Plugins mit Haken in `phase`.

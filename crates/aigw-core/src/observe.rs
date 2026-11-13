@@ -83,12 +83,15 @@ pub enum CacheOutcome {
     HitSemantic,
     /// Kein Treffer.
     Miss,
+    /// Cache für diese Anfrage umgangen (Client-Steuerung `Cache-Control: no-cache`, nicht
+    /// cachebare Anfrage, z. B. `temperature > 0`).
+    Bypass,
 }
 
 impl CacheOutcome {
     /// `true` bei einem Treffer.
     pub fn is_hit(self) -> bool {
-        !matches!(self, Self::Miss)
+        matches!(self, Self::HitExact | Self::HitSemantic)
     }
 
     /// Bezeichner (Spalte `request_log.cache`).
@@ -97,6 +100,7 @@ impl CacheOutcome {
             Self::HitExact => "hit-exact",
             Self::HitSemantic => "hit-semantic",
             Self::Miss => "miss",
+            Self::Bypass => "bypass",
         }
     }
 }

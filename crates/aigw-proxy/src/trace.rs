@@ -75,6 +75,7 @@ pub(crate) fn request_span_op(
         aigw.ttft_ms = Empty,
         aigw.attempts = Empty,
         aigw.fallback = Empty,
+        aigw.cache = Empty,
     )
 }
 

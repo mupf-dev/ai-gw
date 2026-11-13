@@ -3,6 +3,7 @@
 
 //! Eingebaute Plugins.
 
+pub mod cache;
 pub mod header;
 pub mod request_transform;
 pub mod webhook;

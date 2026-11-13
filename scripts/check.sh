@@ -12,9 +12,15 @@
 #   AIGW_STRICT=1      fehlende Werkzeuge (cargo-deny, reuse) sind Fehler statt Warnung (CI)
 #   AIGW_TEST_POSTGRES_URL=postgres://…   Store-Tests zusätzlich gegen Postgres (legt je Lauf
 #                      eine Wegwerf-Datenbank an; der Benutzer braucht CREATEDB)
-#   AIGW_TEST_POSTGRES=docker   startet dafür selbst einen postgres:17-Container
+#   AIGW_TEST_POSTGRES=docker   startet dafür selbst einen Postgres-17-Container mit pgvector
+#                      (Image AIGW_TEST_POSTGRES_IMAGE, Standard pgvector/pgvector:pg17) und setzt
+#                      zusätzlich AIGW_TEST_PGVECTOR_URL (semantischer Cache, AIGW-40)
+#   AIGW_TEST_PGVECTOR_URL=postgres://…   Cache-Tests gegen Postgres mit Erweiterung `vector`
 #   AIGW_TEST_REDIS_URL=redis://…   Zähler-Tests (aigw-counters) zusätzlich gegen Redis/Valkey
-#   AIGW_TEST_REDIS=docker      startet dafür selbst einen redis:7-Container
+#   AIGW_TEST_REDIS=docker      startet dafür selbst einen Redis-Stack-Container (Image
+#                      AIGW_TEST_REDIS_IMAGE, Standard redis/redis-stack-server) und setzt
+#                      zusätzlich AIGW_TEST_REDIS_STACK_URL (Vektorsuche, AIGW-40)
+#   AIGW_TEST_REDIS_STACK_URL=redis://…   Cache-Tests gegen Redis Stack / Valkey Search
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -39,11 +45,12 @@ step "cargo clippy (-D warnings)"
 cargo clippy --workspace --all-targets "${LOCKED[@]}" -- -D warnings
 
 if [[ "${AIGW_TEST_POSTGRES:-}" == docker && -z "${AIGW_TEST_POSTGRES_URL:-}" ]]; then
-  step "Postgres 17 für Store-Tests starten (Docker, Wegwerf-Container)"
+  PG_IMAGE="${AIGW_TEST_POSTGRES_IMAGE:-pgvector/pgvector:pg17}"
+  step "Postgres 17 für Store-/Cache-Tests starten (Docker $PG_IMAGE, Wegwerf-Container)"
   PG_NAME="aigw-check-pg-$$"
   trap 'docker rm -f "$PG_NAME" >/dev/null 2>&1 || true' EXIT
   docker run -d --rm --name "$PG_NAME" -e POSTGRES_PASSWORD=aigw-test \
-    -p 127.0.0.1::5432 postgres:17 >/dev/null
+    -p 127.0.0.1::5432 "$PG_IMAGE" >/dev/null
   # Der Init-Server lauscht nur auf dem Socket; TCP-Bereitschaft = endgültiger Server.
   for _ in $(seq 1 60); do
     docker exec "$PG_NAME" pg_isready -q -h 127.0.0.1 -U postgres && break
@@ -51,23 +58,30 @@ if [[ "${AIGW_TEST_POSTGRES:-}" == docker && -z "${AIGW_TEST_POSTGRES_URL:-}" ]]
   done
   PG_PORT=$(docker port "$PG_NAME" 5432/tcp | head -1 | sed 's/.*://')
   export AIGW_TEST_POSTGRES_URL="postgres://postgres:aigw-test@127.0.0.1:${PG_PORT}/postgres"
+  if [[ "$PG_IMAGE" == *pgvector* && -z "${AIGW_TEST_PGVECTOR_URL:-}" ]]; then
+    export AIGW_TEST_PGVECTOR_URL="$AIGW_TEST_POSTGRES_URL"
+  fi
 fi
 
 if [[ "${AIGW_TEST_REDIS:-}" == docker && -z "${AIGW_TEST_REDIS_URL:-}" ]]; then
-  step "Redis 7 für Zähler-Tests starten (Docker, Wegwerf-Container)"
+  REDIS_IMAGE="${AIGW_TEST_REDIS_IMAGE:-redis/redis-stack-server}"
+  step "Redis für Zähler-/Cache-Tests starten (Docker $REDIS_IMAGE, Wegwerf-Container)"
   REDIS_NAME="aigw-check-redis-$$"
   # Bestehenden EXIT-Trap (Postgres) erhalten.
   trap 'docker rm -f "${PG_NAME:-}" "$REDIS_NAME" >/dev/null 2>&1 || true' EXIT
-  docker run -d --rm --name "$REDIS_NAME" -p 127.0.0.1::6379 redis:7 >/dev/null
+  docker run -d --rm --name "$REDIS_NAME" -p 127.0.0.1::6379 "$REDIS_IMAGE" >/dev/null
   for _ in $(seq 1 30); do
     docker exec "$REDIS_NAME" redis-cli ping 2>/dev/null | grep -q PONG && break
     sleep 1
   done
   REDIS_PORT=$(docker port "$REDIS_NAME" 6379/tcp | head -1 | sed 's/.*://')
   export AIGW_TEST_REDIS_URL="redis://127.0.0.1:${REDIS_PORT}/0"
+  if [[ "$REDIS_IMAGE" == *redis-stack* && -z "${AIGW_TEST_REDIS_STACK_URL:-}" ]]; then
+    export AIGW_TEST_REDIS_STACK_URL="$AIGW_TEST_REDIS_URL"
+  fi
 fi
 
-step "cargo test${AIGW_TEST_POSTGRES_URL:+ (inkl. Postgres)}${AIGW_TEST_REDIS_URL:+ (inkl. Redis)}"
+step "cargo test${AIGW_TEST_POSTGRES_URL:+ (inkl. Postgres)}${AIGW_TEST_PGVECTOR_URL:+ (inkl. pgvector)}${AIGW_TEST_REDIS_URL:+ (inkl. Redis)}${AIGW_TEST_REDIS_STACK_URL:+ (inkl. Redis Stack)}"
 cargo test --workspace "${LOCKED[@]}"
 
 step "cargo deny check"

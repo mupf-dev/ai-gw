@@ -116,6 +116,8 @@ pub(crate) struct RouteInfo {
     pub(crate) plugin_headers: ResponseHeaders,
     /// Antwort wegen Ausgabe-Plugins gepuffert.
     pub(crate) buffered: bool,
+    /// Ergebnis des Antwort-Caches (AIGW-39/40), Header `x-aigw-cache`.
+    pub(crate) cache: Option<aigw_core::observe::CacheOutcome>,
 }
 
 impl RouteInfo {
@@ -141,6 +143,12 @@ impl RouteInfo {
     }
 
     pub(crate) fn apply_plugins(&self, res: &mut Response) {
+        if let Some(c) = self.cache {
+            res.headers_mut().insert(
+                crate::cache::CACHE_HEADER,
+                HeaderValue::from_static(c.as_str()),
+            );
+        }
         if self.buffered {
             res.headers_mut()
                 .insert(BUFFERED_HEADER, HeaderValue::from_static("plugins"));
@@ -321,31 +329,76 @@ async fn chat_inner(
         info.buffered = true;
     }
 
-    // Auswahl, Retries, Fallbacks (AIGW-24/25/26).
-    let routed = exec::execute(
-        st.routes.as_ref(),
-        route,
-        req,
-        exec::CapacityCtx {
-            counters: st.limits.counters(),
-            tokens: est.total(),
-        },
-    )
-    .await;
-    if let Some(m) = &routed.last {
-        let d = m.provider().describe();
-        rec.set_deployment(d);
-        info.deployment = Some(d.deployment.to_owned());
+    // Schritt 6: Antwort-Cache (AIGW-39/40) – nach allen Pre-Plugins, vor dem Routing.
+    // Treffer laufen wie Upstream-Antworten durch Post-/Stream-Plugins; gespeichert wird die
+    // rohe Upstream-Antwort (vor den Post-Plugins).
+    let mut cache = match st.cache.as_ref() {
+        Some(c) => {
+            crate::cache::CacheStep::begin(
+                Some(c),
+                plugins.cache_policy(),
+                &auth,
+                model_group,
+                &req,
+                headers,
+            )
+            .await
+        }
+        None => None,
+    };
+    if let Some(c) = &cache {
+        info.cache = Some(c.outcome());
+        rec.set_cache(c.outcome());
     }
-    info.attempts = routed.attempts.len();
-    info.fallback.clone_from(&routed.fallback);
-    if let Some(f) = &routed.fallback {
-        // Wurzel-Span (OpenTelemetry): Ausweichgruppe.
-        tracing::Span::current().record("aigw.fallback", f.as_str());
-    }
-    rec.set_attempts(routed.attempts);
+    let outcome = match cache.as_mut().and_then(crate::cache::CacheStep::take_hit) {
+        Some(hit) => {
+            rec.set_cache_hit(model_group, &hit);
+            if req.is_stream() {
+                let chunk = cache
+                    .as_ref()
+                    .map_or(0, crate::cache::CacheStep::chunk_chars);
+                let events = aigw_cache::chunk_events(aigw_plugins::response_events(&hit), chunk);
+                Outcome::Stream(Box::pin(futures_util::stream::iter(events)))
+            } else {
+                Outcome::Json(hit)
+            }
+        }
+        None => {
+            // Auswahl, Retries, Fallbacks (AIGW-24/25/26).
+            let routed = exec::execute(
+                st.routes.as_ref(),
+                route,
+                req,
+                exec::CapacityCtx {
+                    counters: st.limits.counters(),
+                    tokens: est.total(),
+                },
+            )
+            .await;
+            if let Some(m) = &routed.last {
+                let d = m.provider().describe();
+                rec.set_deployment(d);
+                info.deployment = Some(d.deployment.to_owned());
+            }
+            info.attempts = routed.attempts.len();
+            info.fallback.clone_from(&routed.fallback);
+            if let Some(f) = &routed.fallback {
+                // Wurzel-Span (OpenTelemetry): Ausweichgruppe.
+                tracing::Span::current().record("aigw.fallback", f.as_str());
+            }
+            rec.set_attempts(routed.attempts);
+            match (routed.result?, cache.as_mut()) {
+                (Outcome::Stream(events), Some(c)) => Outcome::Stream(c.tee(events)),
+                (Outcome::Json(resp), Some(c)) => {
+                    c.store_response(&resp);
+                    Outcome::Json(resp)
+                }
+                (o, None) => o,
+            }
+        }
+    };
 
-    let resp = match routed.result? {
+    let resp = match outcome {
         // Schritt 10: Stream-Plugins je Ereignis vor dem Encoder.
         Outcome::Stream(events) => {
             return Ok(Reply::Stream(

@@ -269,6 +269,14 @@ spec:
   plugin: request-transform
   order: 10
   config: {caps: {maxTokens: 100}, rejectOverCap: true}
+---
+apiVersion: aigw/v1alpha1
+kind: PluginBinding
+metadata: {name: smoke-cache}
+spec:
+  scope: {level: model-group, target: mock-2}
+  plugin: cache
+  config: {ttlSecs: 600}
 YAML
 apply "$TMP/plugins.yaml"
 FOUND=0
@@ -280,6 +288,16 @@ for _ in $(seq 1 50); do
   sleep 0.2
 done
 test "$FOUND" = 1
+echo "--- Antwort-Cache (AIGW-39): zweite gleiche Anfrage mit temperature 0 = hit-exact"
+for i in 1 2; do
+  curl -fsS -D "$TMP/c$i.txt" -o "$TMP/c$i.json" "$BASE/v1/chat/completions" \
+    -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+    -d '{"model":"mock-2","temperature":0,"messages":[{"role":"user","content":"Cache-Test"}]}'
+done
+grep -i '^x-aigw-cache' "$TMP/c1.txt" "$TMP/c2.txt"
+grep -qi '^x-aigw-cache: miss' "$TMP/c1.txt"
+grep -qi '^x-aigw-cache: hit-exact' "$TMP/c2.txt"
+if grep -qi '^x-aigw-deployment' "$TMP/c2.txt"; then exit 1; fi
 # Andere Modellgruppe: kein Header; globaler Deckel → 400 (OpenAI-Eingang; der Zähler der
 # Anthropic-4xx unten erwartet genau einen Fehler).
 curl -fsS -D "$TMP/p3.txt" -o /dev/null "$BASE/v1/chat/completions" \
@@ -302,6 +320,7 @@ grep -q '^aigw_requests_total{model_group="mock",.*status_class="2xx"} [1-9]' "$
 grep -q '^aigw_upstream_errors_total{class="[a-z_]*"} [1-9]' "$TMP/metrics.txt"
 grep -q '^aigw_inflight_requests 0$' "$TMP/metrics.txt"
 grep -q '^aigw_snapshot_version [1-9]' "$TMP/metrics.txt"
+grep -q '^aigw_cache_lookups_total{result="hit-exact"} [1-9]' "$TMP/metrics.txt"
 grep -q '^aigw_snapshot_stale_seconds 0$' "$TMP/metrics.txt"
 # Limits nach der Metrik-Prüfung (erzeugt weitere 4xx).
 echo "--- Limits (AIGW-30): Key mit 1 Anfrage/Minute → zweite Anfrage 429 mit Rate-Limit-Headern"

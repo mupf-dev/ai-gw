@@ -60,7 +60,7 @@ fn unexpected_stream() -> UpstreamError {
 // Operationen für das Routing
 // ---------------------------------------------------------------------------------------------
 
-struct EmbeddingsOp;
+pub(crate) struct EmbeddingsOp;
 
 impl Operation for EmbeddingsOp {
     type Req = EmbeddingsRequest;

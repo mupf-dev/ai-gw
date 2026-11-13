@@ -1,0 +1,477 @@
+// SPDX-FileCopyrightText: 2026 ai-gw contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Schritt 6 der Pipeline: Antwort-Cache (AIGW-39/40, Architektur §3/§10,
+//! `docs/konzept/14-cache.md`).
+//!
+//! Der Cache sitzt **in der Pipeline** – nach allen Pre-Plugins, vor dem Routing – und nicht
+//! als Plugin-`Respond`:
+//!
+//! - Alle Pre-Plugins (Guardrails, PII-Maskierung, `request-transform`) laufen immer; der
+//!   Schlüssel entsteht aus der Anfrage, die tatsächlich an den Upstream ginge, unabhängig von
+//!   der `order` der Bindungen.
+//! - Treffer durchlaufen wie Upstream-Antworten die Post- und Stream-Plugins (Ausgabe-
+//!   Guardrails, Rückübersetzung von Pseudonymen); gespeichert wird die **rohe**
+//!   Upstream-Antwort vor den Post-Plugins.
+//! - Der semantische Cache braucht das interne Routing (Embedding-Modellgruppe), der Treffer
+//!   den Recorder (Usage 0, `RequestRecord.cache`).
+//!
+//! Wo der Cache gilt, bestimmt das Plugin `cache` ([`aigw_plugins::builtin::cache`]) über
+//! Bindungen mit Vererbung; ohne Bindung bleibt dieser Schritt ein Index-Lookup.
+//!
+//! Client-Steuerung (falls `clientControl`): `Cache-Control: no-cache` (nicht nachschlagen,
+//! aber speichern), `no-store` (nachschlagen, nicht speichern), beides = umgehen;
+//! `x-aigw-cache-ttl: <s>` (0 = nicht speichern, gedeckelt durch `clientMaxTtlSecs`).
+
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use std::time::Duration;
+
+use aigw_cache::{
+    Lookup, LookupRequest, ResponseCache, Scope, SemanticLookup, SkipReason,
+    StoreTicket, StreamCollector,
+};
+use aigw_core::ir::{ChatRequest, ChatResponse, Content, PartKind, StopReason, StreamEvent};
+use aigw_core::observe::CacheOutcome;
+use aigw_plugins::builtin::cache::{CacheMode, CachePolicy, CacheScope};
+use axum::http::HeaderMap;
+use futures_util::Stream;
+
+use crate::auth::AuthContext;
+use crate::provider::EventStream;
+
+/// Antwort-Header mit dem Cache-Ergebnis.
+pub const CACHE_HEADER: &str = "x-aigw-cache";
+/// Anfrage-Header: TTL (Sekunden) für das Speichern dieser Antwort.
+pub const CACHE_TTL_HEADER: &str = "x-aigw-cache-ttl";
+
+/// Client-Steuerung aus den Anfrage-Headern.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ClientControl {
+    no_cache: bool,
+    no_store: bool,
+    ttl: Option<u64>,
+}
+
+impl ClientControl {
+    fn from_headers(h: &HeaderMap) -> Self {
+        let mut c = Self::default();
+        for v in h.get_all(axum::http::header::CACHE_CONTROL) {
+            let Ok(v) = v.to_str() else { continue };
+            for d in v.split(',') {
+                match d.trim().to_ascii_lowercase().as_str() {
+                    "no-cache" => c.no_cache = true,
+                    "no-store" => c.no_store = true,
+                    _ => {}
+                }
+            }
+        }
+        c.ttl = h
+            .get(CACHE_TTL_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u64>().ok());
+        c
+    }
+}
+
+/// Scope laut Richtlinie, aufgelöst aus Key, Team und Organisation. Fehlt die Ebene (Key ohne
+/// Team), gilt die nächst engere – nie eine weitere.
+fn resolve_scope(policy: CacheScope, auth: &AuthContext) -> Scope {
+    if policy == CacheScope::Global {
+        return Scope::Global;
+    }
+    let Some(k) = auth.key.as_deref() else {
+        return Scope::Anonymous;
+    };
+    let key = || Scope::Key(k.key.id.to_string());
+    let team = || k.team.as_ref().map(|t| Scope::Team(t.id.to_string()));
+    match policy {
+        CacheScope::Key => key(),
+        CacheScope::Team => team().unwrap_or_else(key),
+        CacheScope::Organization => k
+            .organization
+            .as_ref()
+            .map(|o| Scope::Organization(o.id.to_string()))
+            .or_else(team)
+            .unwrap_or_else(key),
+        CacheScope::Global => Scope::Global,
+    }
+}
+
+/// Darf die Anfrage laut Richtlinie gecacht werden (Temperatur)?
+fn cacheable_request(req: &ChatRequest, policy: &CachePolicy) -> bool {
+    policy.cache_non_zero_temperature || req.sampling.temperature == Some(0.0)
+}
+
+/// Darf die Antwort gespeichert werden?
+fn storable(resp: &ChatResponse, policy: &CachePolicy) -> Result<(), SkipReason> {
+    let Some(choice) = resp.choices.first() else {
+        return Err(SkipReason::Incomplete);
+    };
+    for c in &resp.choices {
+        match &c.stop_reason {
+            Some(StopReason::EndTurn | StopReason::MaxTokens | StopReason::StopSequence) | None => {}
+            Some(StopReason::ToolUse) => {
+                if !policy.cache_tool_calls {
+                    return Err(SkipReason::ToolCalls);
+                }
+            }
+            Some(_) => return Err(SkipReason::StopReason),
+        }
+        if !policy.cache_tool_calls
+            && let Content::Parts(parts) = &c.message.content
+            && parts
+                .iter()
+                .any(|p| matches!(p.kind, PartKind::ToolCall { .. }))
+        {
+            return Err(SkipReason::ToolCalls);
+        }
+    }
+    if choice.stop_reason.is_none() {
+        return Err(SkipReason::Incomplete);
+    }
+    Ok(())
+}
+
+/// Cache-Schritt einer Anfrage.
+pub(crate) struct CacheStep {
+    cache: Arc<ResponseCache>,
+    policy: Arc<CachePolicy>,
+    outcome: CacheOutcome,
+    hit: Option<ChatResponse>,
+    /// Zum Speichern (nur bei Miss bzw. `no-cache`, wenn Speichern erlaubt).
+    ticket: Option<StoreTicket>,
+    ttl: Duration,
+}
+
+impl CacheStep {
+    /// Nachschlagen; `None`, wenn für die Anfrage kein Cache gilt (keine Bindung, Cache aus).
+    pub(crate) async fn begin(
+        cache: Option<&Arc<ResponseCache>>,
+        policy: Option<Arc<CachePolicy>>,
+        auth: &AuthContext,
+        model_group: &str,
+        req: &ChatRequest,
+        headers: &HeaderMap,
+    ) -> Option<Self> {
+        let cache = cache?;
+        if !cache.config().enabled {
+            return None;
+        }
+        let policy = policy?;
+        let ctl = if policy.client_control {
+            ClientControl::from_headers(headers)
+        } else {
+            ClientControl::default()
+        };
+        let ttl_secs = match ctl.ttl {
+            Some(t) => t.min(policy.client_max_ttl_secs),
+            None => policy.ttl_secs,
+        };
+        let may_store = !ctl.no_store && ttl_secs > 0;
+        let mut step = Self {
+            cache: Arc::clone(cache),
+            policy: Arc::clone(&policy),
+            outcome: CacheOutcome::Bypass,
+            hit: None,
+            ticket: None,
+            ttl: Duration::from_secs(ttl_secs),
+        };
+        if !cacheable_request(req, &policy) || (ctl.no_cache && !may_store) {
+            cache.metrics().lookup(CacheOutcome::Bypass);
+            return Some(step);
+        }
+        let embedding_model = policy
+            .semantic
+            .embedding_model
+            .as_deref()
+            .or(cache.config().semantic.embedding_model.as_deref());
+        let semantic = match (policy.mode, embedding_model) {
+            (CacheMode::Semantic, Some(m)) if cache.semantic_available() => Some(SemanticLookup {
+                embedding_model: m,
+                threshold: policy.semantic.threshold_for(model_group),
+                max_chars: policy.semantic.max_chars,
+            }),
+            _ => None,
+        };
+        let lookup = cache
+            .lookup(&LookupRequest {
+                scope: resolve_scope(policy.scope, auth),
+                model_group,
+                request: req,
+                semantic,
+                skip_lookup: ctl.no_cache,
+            })
+            .await;
+        match lookup {
+            Lookup::Hit { kind, response } => {
+                step.outcome = kind.outcome();
+                step.hit = Some(*response);
+            }
+            Lookup::Miss(ticket) => {
+                step.outcome = if ctl.no_cache {
+                    CacheOutcome::Bypass
+                } else {
+                    CacheOutcome::Miss
+                };
+                if may_store {
+                    step.ticket = Some(ticket);
+                } else {
+                    cache.metrics().skipped(SkipReason::NoStore);
+                }
+            }
+        }
+        cache.metrics().lookup(step.outcome);
+        Some(step)
+    }
+
+    /// Ergebnis für Header und Request-Log.
+    pub(crate) fn outcome(&self) -> CacheOutcome {
+        self.outcome
+    }
+
+    /// Treffer entnehmen.
+    pub(crate) fn take_hit(&mut self) -> Option<ChatResponse> {
+        self.hit.take()
+    }
+
+    /// Zeichen je simuliertem Chunk.
+    pub(crate) fn chunk_chars(&self) -> usize {
+        self.cache.config().replay_chunk_chars
+    }
+
+    /// Nicht gestreamte (bzw. gepufferte) Upstream-Antwort speichern – vor den Post-Plugins.
+    pub(crate) fn store_response(&mut self, resp: &ChatResponse) {
+        let Some(ticket) = self.ticket.take() else {
+            return;
+        };
+        match storable(resp, &self.policy) {
+            Ok(()) => {
+                self.cache.store(ticket, resp, self.ttl);
+            }
+            Err(r) => self.cache.metrics().skipped(r),
+        }
+    }
+
+    /// Gestreamte Upstream-Antwort mitschneiden und am regulären Ende speichern.
+    pub(crate) fn tee(&mut self, events: EventStream) -> EventStream {
+        let Some(ticket) = self.ticket.take() else {
+            return events;
+        };
+        let limit = usize::try_from(self.cache.config().max_entry_bytes).unwrap_or(usize::MAX);
+        Box::pin(CacheTee {
+            inner: events,
+            collector: Some(StreamCollector::new(limit)),
+            ticket: Some(ticket),
+            cache: Arc::clone(&self.cache),
+            policy: Arc::clone(&self.policy),
+            ttl: self.ttl,
+        })
+    }
+}
+
+/// Ereignisstrom, der die Antwort für den Cache zusammensetzt. Gespeichert wird nur bei
+/// regulärem Ende (Endgrund, kein Fehlerereignis); bricht der Client ab, wird nichts
+/// gespeichert.
+struct CacheTee {
+    inner: EventStream,
+    collector: Option<StreamCollector>,
+    ticket: Option<StoreTicket>,
+    cache: Arc<ResponseCache>,
+    policy: Arc<CachePolicy>,
+    ttl: Duration,
+}
+
+impl Stream for CacheTee {
+    type Item = StreamEvent;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<StreamEvent>> {
+        let this = self.get_mut();
+        match this.inner.as_mut().poll_next(cx) {
+            Poll::Ready(Some(ev)) => {
+                if let Some(c) = this.collector.as_mut() {
+                    c.push(&ev);
+                }
+                Poll::Ready(Some(ev))
+            }
+            Poll::Ready(None) => {
+                if let (Some(c), Some(ticket)) = (this.collector.take(), this.ticket.take()) {
+                    let overflow = c.overflowed();
+                    match c.finish() {
+                        Some(resp) => match storable(&resp, &this.policy) {
+                            Ok(()) => {
+                                this.cache.store(ticket, &resp, this.ttl);
+                            }
+                            Err(r) => this.cache.metrics().skipped(r),
+                        },
+                        None if overflow => this.cache.metrics().skipped(SkipReason::TooLarge),
+                        None => this.cache.metrics().skipped(SkipReason::Incomplete),
+                    }
+                }
+                Poll::Ready(None)
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+/// Embedder des semantischen Caches über das **interne Routing** des Gateways: die
+/// Embedding-Modellgruppe wird wie `POST /v1/embeddings` (AIGW-21) geroutet – Auswahl,
+/// Retries, Fallbacks, Circuit Breaker, Deployment-Kapazität –, aber ohne Key-Prüfung und
+/// ohne Abrechnung auf den anfragenden Key (siehe offene Fragen in `docs/konzept/14-cache.md`).
+pub struct RoutedEmbedder {
+    routes: Arc<dyn crate::ModelRoutes>,
+    counters: Arc<dyn aigw_counters::CounterBackend>,
+}
+
+impl std::fmt::Debug for RoutedEmbedder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RoutedEmbedder").finish_non_exhaustive()
+    }
+}
+
+impl RoutedEmbedder {
+    /// Embedder über `routes`; `counters` = Backend der Deployment-Kapazität.
+    pub fn new(
+        routes: Arc<dyn crate::ModelRoutes>,
+        counters: Arc<dyn aigw_counters::CounterBackend>,
+    ) -> Self {
+        Self { routes, counters }
+    }
+
+    /// Embedder für den Zustand der Datenebene.
+    pub fn for_state(st: &crate::ProxyState) -> Self {
+        Self::new(Arc::clone(&st.routes), Arc::clone(st.limits.counters()))
+    }
+}
+
+#[async_trait::async_trait]
+impl aigw_cache::Embedder for RoutedEmbedder {
+    async fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String> {
+        use aigw_core::ir::embeddings::{EmbeddingInput, EmbeddingsRequest};
+        let route = self
+            .routes
+            .route(model)
+            .ok_or_else(|| format!("Embedding-Modellgruppe {model:?} ist nicht konfiguriert"))?;
+        let req = EmbeddingsRequest {
+            model: model.to_owned(),
+            input: EmbeddingInput::Text(vec![text.to_owned()]),
+            single_input: true,
+            encoding_format: None,
+            dimensions: None,
+            user: None,
+            extra: Default::default(),
+            source: None,
+        };
+        let routed = crate::routing::exec::execute_op(
+            self.routes.as_ref(),
+            route,
+            &crate::endpoints::EmbeddingsOp,
+            req,
+            crate::routing::exec::CapacityCtx {
+                counters: &self.counters,
+                tokens: crate::observe::estimate_tokens(text.len()),
+            },
+        )
+        .await;
+        match routed.result.map_err(|e| e.to_string())? {
+            crate::routing::exec::Outcome::Json(resp) => resp
+                .data
+                .into_iter()
+                .next()
+                .map(|e| e.vector)
+                .ok_or_else(|| "Embedding-Antwort ohne Vektor".to_owned()),
+            crate::routing::exec::Outcome::Stream(_) => {
+                Err("unerwartete Stream-Antwort".to_owned())
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use aigw_core::ir::{Choice, Message, Part, Role};
+    use axum::http::HeaderValue;
+
+    use super::*;
+
+    fn resp(reason: StopReason, tool: bool) -> ChatResponse {
+        let content = if tool {
+            Content::Parts(vec![Part::new(PartKind::ToolCall {
+                id: "c".into(),
+                name: "f".into(),
+                arguments: "{}".into(),
+            })])
+        } else {
+            Content::Text("x".into())
+        };
+        ChatResponse {
+            choices: vec![Choice {
+                index: 0,
+                message: Message {
+                    role: Role::Assistant,
+                    content,
+                    name: None,
+                    extra: Default::default(),
+                },
+                stop_reason: Some(reason),
+                stop_sequence: None,
+                extra: Default::default(),
+            }],
+            ..ChatResponse::default()
+        }
+    }
+
+    #[test]
+    fn client_control_headers() {
+        let mut h = HeaderMap::new();
+        h.insert("cache-control", HeaderValue::from_static("No-Cache, max-age=0"));
+        h.append("cache-control", HeaderValue::from_static("no-store"));
+        h.insert(CACHE_TTL_HEADER, HeaderValue::from_static(" 120 "));
+        let c = ClientControl::from_headers(&h);
+        assert!(c.no_cache && c.no_store);
+        assert_eq!(c.ttl, Some(120));
+        assert_eq!(ClientControl::from_headers(&HeaderMap::new()), ClientControl::default());
+    }
+
+    #[test]
+    fn storable_rules() {
+        let p = CachePolicy::default();
+        assert_eq!(storable(&resp(StopReason::EndTurn, false), &p), Ok(()));
+        assert_eq!(storable(&resp(StopReason::MaxTokens, false), &p), Ok(()));
+        assert_eq!(
+            storable(&resp(StopReason::ToolUse, true), &p),
+            Err(SkipReason::ToolCalls)
+        );
+        assert_eq!(
+            storable(&resp(StopReason::ContentFilter, false), &p),
+            Err(SkipReason::StopReason)
+        );
+        assert_eq!(
+            storable(&ChatResponse::default(), &p),
+            Err(SkipReason::Incomplete)
+        );
+        let tools = CachePolicy {
+            cache_tool_calls: true,
+            ..CachePolicy::default()
+        };
+        assert_eq!(storable(&resp(StopReason::ToolUse, true), &tools), Ok(()));
+    }
+
+    #[test]
+    fn temperature_rule() {
+        let p = CachePolicy::default();
+        let mut r = ChatRequest::default();
+        assert!(!cacheable_request(&r, &p)); // ohne Angabe: Anbieter-Standard > 0
+        r.sampling.temperature = Some(0.0);
+        assert!(cacheable_request(&r, &p));
+        r.sampling.temperature = Some(0.7);
+        assert!(!cacheable_request(&r, &p));
+        let any = CachePolicy {
+            cache_non_zero_temperature: true,
+            ..CachePolicy::default()
+        };
+        assert!(cacheable_request(&r, &any));
+    }
+}

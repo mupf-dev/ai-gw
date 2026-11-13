@@ -13,6 +13,8 @@ publish.workspace = true
 
 [dependencies]
 aigw-billing.workspace = true
+async-trait.workspace = true
+aigw-cache.workspace = true
 aigw-core.workspace = true
 aigw-counters.workspace = true
 aigw-plugins.workspace = true
