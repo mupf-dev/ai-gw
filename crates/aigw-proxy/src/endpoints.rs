@@ -30,10 +30,13 @@ use crate::ProxyState;
 use crate::limits::TokenEstimate;
 use crate::observe::{ObservedBytes, ObservedStream, estimate_tokens};
 use crate::pipeline::{Pipeline, content_type, ok_with};
+use crate::plugins::{PluginPhase, PluginRun, Pre, response_stream};
 use crate::provider::{BoxFuture, Capability, ChatProvider, EventStream, SpeechStream};
 use crate::request_id::{RequestId, RequestStart};
 use crate::routing::exec::{ChatOp, Operation, Outcome};
 use crate::stream::responses_sse_response;
+use aigw_core::observe::error_type;
+use aigw_plugins::ChunkMode;
 
 type St = State<Arc<ProxyState>>;
 
@@ -472,17 +475,79 @@ async fn responses_inner(
     p.rec.set_request(&req);
     let est = TokenEstimate::of(&req, p.state().limits.default_max_tokens());
     let route = p.route(&auth, &req.model, Capability::Chat, est).await?;
+
+    // Plugin-Kette (AIGW-36) wie im Chat-Pfad: nach der Admission, vor dem Routing.
+    let req_stream = req.is_stream();
+    let mut plugins = PluginRun::new(
+        p.state(),
+        &auth,
+        Some(route.name()),
+        p.request_id(),
+        WireFormat::OpenAiResponses,
+        req_stream,
+    );
+    let span = crate::trace::plugins_span("request", plugins.hooks(PluginPhase::Request));
+    let pre = plugins
+        .run_pre_plugins(req, headers, &mut p.info_mut().plugin_headers)
+        .instrument(span.clone())
+        .await
+        .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?;
+    let mut req = match pre {
+        Pre::Continue(req) => req,
+        Pre::Respond(resp) => {
+            p.rec.set_plugin_response(&resp);
+            if req_stream {
+                return Ok(ResponsesReply::Stream(
+                    response_stream(&resp),
+                    Box::new(echo),
+                ));
+            }
+            return encode(resp, &echo).map(ResponsesReply::Json);
+        }
+    };
+    let buffered = plugins.buffers(&req);
+    if buffered {
+        req.stream = Some(false);
+        req.stream_options = None;
+        p.info_mut().buffered = true;
+    }
+
     let op = ChatOp {
         stream: req.is_stream(),
     };
-    match p.execute(route, &op, req).await? {
-        Outcome::Stream(events) => Ok(ResponsesReply::Stream(events, Box::new(echo))),
-        Outcome::Json(resp) => {
-            p.rec.set_response(&resp);
-            let mut losses = Losses::new();
-            let out = encode_responses_response(resp, &echo, &mut losses)?;
-            losses_log(&losses);
-            Ok(ResponsesReply::Json(out))
+    let resp = match p.execute(route, &op, req).await? {
+        Outcome::Stream(events) => {
+            return Ok(ResponsesReply::Stream(
+                plugins.wrap_stream(events, ChunkMode::Live),
+                Box::new(echo),
+            ));
         }
+        Outcome::Json(resp) => resp,
+    };
+    let resp = if plugins.hooks(PluginPhase::Response) > 0 {
+        let span = crate::trace::plugins_span("response", plugins.hooks(PluginPhase::Response));
+        plugins
+            .run_post_plugins(resp, &mut p.info_mut().plugin_headers)
+            .instrument(span.clone())
+            .await
+            .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?
+    } else {
+        resp
+    };
+    if buffered {
+        let events = plugins.wrap_stream(response_stream(&resp), ChunkMode::Buffered);
+        return Ok(ResponsesReply::Stream(events, Box::new(echo)));
     }
+    p.rec.set_response(&resp);
+    encode(resp, &echo).map(ResponsesReply::Json)
+}
+
+fn encode(
+    resp: aigw_core::ir::ChatResponse,
+    echo: &ResponsesEcho,
+) -> Result<Vec<u8>, UpstreamError> {
+    let mut losses = Losses::new();
+    let out = encode_responses_response(resp, echo, &mut losses)?;
+    losses_log(&losses);
+    Ok(out)
 }

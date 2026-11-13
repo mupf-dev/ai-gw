@@ -11,8 +11,10 @@
 //!
 //! Limits und Budgets (AIGW-30/31) greifen wie im Chat-Pfad mit genau einer Reservierung je
 //! Client-Anfrage ([`Pipeline::route`]; Tokens geschätzt je Endpunkt, abgerechnet mit der
-//! tatsächlichen Usage). Die Plugin-Kette (AIGW-36) gehört an dieselbe Stelle (vor dem
-//! Routing). Ziel ist, dass auch der Chat-Handler über diese Pipeline läuft.
+//! tatsächlichen Usage). Die Plugin-Kette (AIGW-36) arbeitet auf der Chat-IR und läuft daher
+//! für `/v1/responses` (wie im Chat-Pfad nach der Admission); für Embeddings, Bilder und
+//! Audio gibt es noch keine Plugin-Haken. Ziel ist, dass auch der Chat-Handler über diese
+//! Pipeline läuft.
 
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -76,6 +78,16 @@ impl<'a> Pipeline<'a> {
     /// Zustand der Datenebene.
     pub(crate) fn state(&self) -> &ProxyState {
         self.st
+    }
+
+    /// Request-ID.
+    pub(crate) fn request_id(&self) -> &str {
+        &self.rid.0
+    }
+
+    /// Routing-/Plugin-Informationen für die Antwort-Header.
+    pub(crate) fn info_mut(&mut self) -> &mut RouteInfo {
+        &mut self.info
     }
 
     /// Schlüsselprüfung (Architektur §3, Schritt 1).
@@ -248,6 +260,7 @@ fn apply_headers(st: &ProxyState, info: &RouteInfo, res: &mut Response) {
     if let Some(h) = &info.ratelimit {
         h.apply(ErrorFormat::OpenAi, res.headers_mut(), SystemTime::now());
     }
+    info.apply_plugins(res);
 }
 
 /// `Content-Type` eines Requests (leer, wenn nicht gesetzt).

@@ -158,7 +158,9 @@ OpenAI-Format inkl. Rate-Limit-Header, Request-Log, OpenTelemetry-Spans mit
 `gen_ai.operation.name` `embeddings`/`image_generation`/`audio_transcription`/`audio_speech`/
 `chat`) und dasselbe Routing wie Chat. Geschätzter Token-Bedarf für die Reservierung:
 Embeddings Eingabetext / 4, Bilder Prompt / 4, Sprachausgabe Text / 4, Transkription 0
-(Anfrage-Limits greifen), Responses wie Chat (Eingabe / 4 + `max_output_tokens`). Die Modellgruppe
+(Anfrage-Limits greifen), Responses wie Chat (Eingabe / 4 + `max_output_tokens`). Die
+Plugin-Kette (AIGW-36) läuft für `/v1/responses` wie im Chat-Pfad (Pre-, Post-, Stream-Haken,
+gepufferter Modus); Embeddings, Bilder und Audio haben noch keine Plugin-Haken. Die Modellgruppe
 muss die Art der Anfrage in `settings.capabilities` freigeben (siehe
 [10-routing.md](10-routing.md) §2a), sonst `400 unsupported_capability`.
 

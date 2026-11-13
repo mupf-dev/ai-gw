@@ -113,9 +113,9 @@ pub(crate) struct RouteInfo {
     /// Rate-Limit-Header (AIGW-30), bei Ablehnung und – falls eingeschaltet – bei Erfolg.
     pub(crate) ratelimit: Option<RateHeaders>,
     /// Antwort-Header aus Plugins (AIGW-36), zuletzt angewendet.
-    plugin_headers: ResponseHeaders,
+    pub(crate) plugin_headers: ResponseHeaders,
     /// Antwort wegen Ausgabe-Plugins gepuffert.
-    buffered: bool,
+    pub(crate) buffered: bool,
 }
 
 impl RouteInfo {
@@ -140,7 +140,7 @@ impl RouteInfo {
         }
     }
 
-    fn apply_plugins(&self, res: &mut Response) {
+    pub(crate) fn apply_plugins(&self, res: &mut Response) {
         if self.buffered {
             res.headers_mut()
                 .insert(BUFFERED_HEADER, HeaderValue::from_static("plugins"));
