@@ -225,7 +225,7 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 147. [x] clientIp nur admin/auditor (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 
 ## AIGW-61 Webhook (angehängt)
-148. [ ] Webhook failMode Standard closed + UI-Anzeige (Empf. ja)
+148. [x] failMode: B content-safety closed, webhook open (je Bindung überschreibbar), UI-Anzeige + Metrik/Alarm (Umsetzung nötig) – gilt auch für 166
 149. [x] Eigene Ressource Secret/WebhookSecret statt ProviderCredential (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 150. [x] EventSubscription als Ressource zusätzlich zur Startkonfig (Empf. später)  → Empfehlung übernommen (2026-11-13)
 151. [x] Dedup höchstens-einmal; Outbox später für kritische Ereignisse (Empf. ja)  → Empfehlung übernommen (2026-11-13)
@@ -243,7 +243,7 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 - AIGW-37-Folgen: SICHERHEIT – Meta-Schlüssel aigw.* (Pseudonym-Map) nie an externe Plugins/Webhook senden; Registry::validate in Admin-API + config validate; guardrails-Spalte im request_log; runtime-smoke Guardrails
 
 ## AIGW-37/38 Guardrails (angehängt)
-160. [ ] Ausgabe-Ablehnung 400 statt 200+content_filter (Empf. 400, Option später)
+160. [x] Ausgabe-Ablehnung: B wie Azure – 200 + finish_reason content_filter / stop_reason refusal + Header x-aigw-guardrail; Eingabe bleibt 400; je Bindung auf 400 umstellbar (Umsetzung nötig)
 161. [x] Guardrail-Zähler in request_log (JSON-Spalte) (Empf. ja, Folgeticket)  → Empfehlung übernommen (2026-11-13)
 162. [x] aigw.*-Meta für externe Plugins ausblenden (Empf. ja – Sicherheit)  → Empfehlung übernommen (2026-11-13)
 163. [x] Satzmodus sentenceOnError vorerst (Empf. ja)  → Empfehlung übernommen (2026-11-13)
@@ -305,3 +305,7 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 - F103: check.sh: AIGW_TEST_OTELCOL=docker startet otel/opentelemetry-collector-contrib:<feste Version>, Export von Traces/Logs prüfen (Collector-Debug-Exporter/Datei)
 - F106: Budget-Reservierung vor Upstream (geschätzte Kosten aus Prompt-Tokens+max_tokens×Preis), Abgleich nach Usage; Budget.enforcement strict|soft (Std. strict); Redis exakt, sonst Abgleich-Takt
 - F113: admin.auth.audit_required (Std. true): Login/Logout scheitert, wenn Audit-Eintrag nicht geschrieben werden kann (gleiche Transaktion wie Session)
+167b. [x] Antwort-Haken: A Zwiebelprinzip – Antwort-/Stream-Haken in umgekehrter Reihenfolge (Umsetzung nötig, Sicherheit)
+- F148: Standard-failMode je Plugin-Art (content-safety closed, webhook open), UI zeigt failMode, Metrik aigw_plugin_failmode_triggered_total{plugin,mode}
+- F160: Ausgabe-Guardrails beenden mit content_filter/refusal (200, auch Stream sauber), Header x-aigw-guardrail; Bindung outputRejectMode: finish|error
+- F167b: Plugin-Kette: on_response/on_chunk/on_stream_end in umgekehrter order (Zwiebel), Test pii→webhook sieht nur Pseudonyme
