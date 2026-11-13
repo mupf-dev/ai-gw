@@ -331,6 +331,36 @@ setzen/entfernen, Werte nie lesbar), Löschen (409 nennt Verweise). `/mcp`: MCP-
 `/guardrails`: Plugin-Bindungen aller Ebenen mit Formular für die Steuerfelder (`inherit`, `locked`, `failMode`,
 `timeoutMs`, `outputRejectMode`, F117) und die Plugin-Konfiguration als JSON.
 
+**Editoren (AIGW-52).** `/guardrails` hat zwei Reiter. *Bindungen*: Formular mit strukturierten Feldern je Plugin
+(F214) für `pii` (Standardaktion/-richtung, „alle Kategorien“ oder Auswahl je Kategorie mit Aktion/Richtung,
+Allowlist, Entropie, Stream-Fenster), `prompt-filter` (Rollen, Wortliste, Regex-Regeln, Injection, Grenzen),
+`content-safety` (Anbieter, Endpunkt bzw. Modellgruppe, Schwellen, Richtung, Ausgabeprüfung) und `webhook` (URL,
+Phasen, Signatur, Header-Allowlist, Größen); die übrigen (`header`, `request-transform`, `cache`) als JSON. Das
+Formular arbeitet auf dem Konfigurationsobjekt – unbekannte Schlüssel bleiben erhalten, „JSON bearbeiten“ zeigt alles.
+Geheimnisse nur als **Verweis** (Secret bzw. Anbieter-Zugangsdaten aus Auswahllisten, nie Werte). Der Standard-
+Fehlermodus und das Standard-Zeitlimit je Plugin-Art kommen aus `GET /plugins` (F148). **Testlauf**: die
+ungespeicherte Konfiguration läuft über `POST /plugin-bindings:test` auf einem Beispieltext (Eingabe oder Ausgabe);
+angezeigt werden Ergebnis (unverändert, verändert, gefiltert, abgelehnt mit Status/Code), der Text danach und die
+Treffer je Kategorie – nur für lokale Plugins (`pii`, `prompt-filter`), externe Dienste werden nie aufgerufen.
+*Kette*: wirksame Kette für Organisation/Team/Key/Modellgruppe nach den Regeln aus 12-plugins.md §4 (Reihenfolge,
+`override`/`disable`, `locked`) als Schichten; Anfrage 1 → n, Antwort/Stream n → 1 (Zwiebelprinzip, F167b), entfallene
+und wirkungslose Bindungen werden genannt. Die Vorschau rechnet im Browser aus den sichtbaren Bindungen.
+
+`/mcp` hat die Reiter *Server* (registrieren, bearbeiten, löschen: Transport, URL bzw. Programmpfad, aktiv, Anmeldung
+per Secret oder Anbieter-Zugangsdaten mit Feld/Header bzw. Umgebungsvariable, Zeitlimit, nicht geheime Header bzw.
+Argumente/Umgebung für stdio; unbekannte `settings` bleiben erhalten) und *Freigaben* (Server, Team oder API-Key,
+Tool-Muster mit `*`/`?` und `!`-Ausschluss). Schreibaktionen erscheinen nach RBAC (Server: globaler Admin; Freigaben im
+Bereich des Teams), entscheidend bleibt der Server.
+
+**Feldgenaue Fehler.** Die Admin-API stellt bei Validierungsfehlern das Feld der Meldung voran (`scope.target: …`,
+`url: …`, `settings.headers.x: …`, `tools: …`); `problemField` in `lib/admin/errors.svelte.ts` zerlegt das, und
+`handleError(…, { field })` zeigt die Meldung am betroffenen Feld statt im Formularkopf. Meldungen der Plugin-Registry
+(`Plugin-Bindung (pii): …`) landen beim Steuerfeld (`timeoutMs`, `failMode` …) bzw. bei der Konfiguration.
+
+| PII-Formular mit Testlauf | Kettenvorschau | MCP-Freigaben |
+|---|---|---|
+| ![](ux/echt-guardrails-pii-hell-desktop.png) | ![](ux/echt-plugin-kette-hell-desktop.png) | ![](ux/echt-mcp-freigaben-hell-desktop.png) |
+
 **Diagramme (F18).** LayerChart 2.9 nur per dynamic import auf Übersicht und Nutzung (`lib/charts/CostTreemap.svelte`
 mit `layerchart/hierarchy` + `d3-hierarchy`, `lib/charts/StackedArea.svelte`); Rechtecke/Flächen als SVG mit
 Token-Klassen, Achsen über die `lc-*`-Klassen in `app.css` (die Tailwind-Klassen von `@layerstack` sind bewusst nicht
@@ -354,9 +384,9 @@ eingebunden). uPlot bleibt für einfache Zeitreihen.
 | Teams & Nutzer | `/teams`, `/teams/{name}`, `/organizations/{name}` | Organisationen, Teams (Detailseiten), Nutzer, Rollen, Einladungen | **echt** |
 | Admin-API-Keys | `/admin-keys` | Zugänge für Automatisierung mit Rollen und Ablauf | **echt** |
 | Limits & Budgets | `/limits` | Budgetverbrauch je Org/Team/Key, Hinweise zu ungenauen Limits; Prognose folgt | **echt** (Budgets) |
-| Guardrails & Plugins | `/guardrails` | Plugin-Bindungen je Ebene mit Steuerfeldern und wirksamem Fehlermodus; Testlauf folgt | **echt** (Bindungen) |
+| Guardrails & Plugins | `/guardrails` | Plugin-Bindungen je Ebene mit Steuerfeldern, wirksamem Fehlermodus, Formularen je Plugin, Testlauf und Kettenvorschau | **echt** (AIGW-52) |
 | Cache | `/cache` | Exakt/semantisch, Trefferquote, Ersparnis, TTL-Regeln, Vektorindex, gezieltes Leeren | geplant |
-| MCP-Server | `/mcp` | MCP-Server mit Verbindungszustand; Tools/Freigaben folgen | **echt** (Status) |
+| MCP-Server | `/mcp` | MCP-Server registrieren/bearbeiten (Anmeldung per Secret-Verweis), Verbindungszustand, Freigaben je Team/Key mit Tool-Mustern | **echt** (AIGW-52) |
 | Logs | `/logs` | Request-Explorer mit Filtern, Detail-Sheet (Versuche, Guardrails, Trace-Link, Payload) | **echt** (AIGW-77) |
 | Audit | `/audit` | Änderungsprotokoll mit Diff, Filter, NDJSON-Export, Kettenprüfung | **echt** (AIGW-77) |
 | Einstellungen | `/settings` | Anmeldung/Rollen, Nur-YAML-Hinweis, GitOps Export/Apply, Datenquelle, Darstellung, Über | **echt** |

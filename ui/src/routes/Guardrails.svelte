@@ -5,13 +5,19 @@
   // (Ebene, Plugin); Anlegen/Bearbeiten mit den Steuerfeldern (F117: inherit, locked, failMode, timeoutMs,
   // outputRejectMode) und der Plugin-Konfiguration als JSON (der Server prüft mit der Plugin-Registry, 422).
   // Angezeigt wird der wirksame Fehlermodus (F148) samt Herkunft.
-  import { DropdownMenu } from 'bits-ui';
+  // AIGW-52: strukturierte Formulare je Plugin (pii, prompt-filter, content-safety, webhook; F214) mit JSON-Ansicht,
+  // Testlauf mit Vorschau (POST /plugin-bindings:test), Kettenvorschau je Kontext (Zwiebelprinzip),
+  // Standard-Fehlermodus je Plugin-Art aus GET /plugins, Backend-Fehler am betroffenen Feld.
+  import { DropdownMenu, Tabs } from 'bits-ui';
   import { untrack } from 'svelte';
-  import { listPage } from '../lib/api/client';
-  import { NAME_HINT, NAME_RE, pluginBindingsRes, type PluginBinding, type S } from '../lib/api/resources';
+  import { ApiError, listPage } from '../lib/api/client';
+  import { credentials, modelGroups, NAME_HINT, NAME_RE, pluginBindingsRes, pluginCatalog, secrets, type PluginBinding, type S } from '../lib/api/resources';
   import AsyncState from '../lib/admin/AsyncState.svelte';
   import ConfirmDialog from '../lib/admin/ConfirmDialog.svelte';
-  import { formErrorOf, handleError } from '../lib/admin/errors.svelte';
+  import { formErrorOf, handleError, Loader } from '../lib/admin/errors.svelte';
+  import ChainView from '../lib/admin/plugins/ChainView.svelte';
+  import PluginConfigForm, { STRUCTURED } from '../lib/admin/plugins/PluginConfigForm.svelte';
+  import PluginTest from '../lib/admin/plugins/PluginTest.svelte';
   import FormDialog from '../lib/admin/FormDialog.svelte';
   import { Paged } from '../lib/admin/paged.svelte';
   import { catalog, orgOfTeam } from '../lib/context.svelte';
@@ -27,7 +33,7 @@
   import Input from '../lib/ui/Input.svelte';
   import PageHeader from '../lib/ui/PageHeader.svelte';
   import Select from '../lib/ui/Select.svelte';
-  import { btn, cx, menuItem, menuSeparator, popover, textarea } from '../lib/ui/styles';
+  import { btn, cx, menuItem, menuSeparator, popover, tabsList, tabsTrigger, textarea } from '../lib/ui/styles';
 
   let level = $state('');
   let plugin = $state('');
@@ -50,7 +56,29 @@
     { value: 'api-key', label: 'Key' },
     { value: 'model-group', label: 'Modellgruppe' },
   ];
-  const PLUGINS = ['pii', 'prompt-filter', 'content-safety', 'webhook', 'header', 'request-transform'];
+  // Plugin-Katalog (Standard-Fehlermodus je Plugin-Art, F148); ohne Antwort die bekannten eingebauten Plugins.
+  const plugins = new Loader(() => pluginCatalog());
+  const FALLBACK = ['cache', 'content-safety', 'header', 'pii', 'prompt-filter', 'request-transform', 'webhook'];
+  const PLUGINS = $derived(plugins.data?.map((p) => p.name) ?? FALLBACK);
+  const infoOf = (name: string) => plugins.data?.find((p) => p.name === name);
+  const testable = (name: string) => infoOf(name)?.testable ?? (name === 'pii' || name === 'prompt-filter');
+
+  // Alle sichtbaren Bindungen für die Kettenvorschau.
+  let tab = $state('bindings');
+  const all = new Loader(() => (tab === 'chain' ? pluginBindingsRes.list() : Promise.resolve([] as PluginBinding[])));
+  $effect(() => {
+    if (tab === 'chain') untrack(() => void all.reload());
+  });
+  // Verweise für die Formulare (nur Namen – Werte sind nie lesbar).
+  let refs = $state<{ secrets: string[]; credentials: string[]; groups: string[] }>({ secrets: [], credentials: [], groups: [] });
+  let refsLoaded = false;
+  async function loadRefs() {
+    if (refsLoaded) return;
+    refsLoaded = true;
+    const names = async (p: Promise<{ metadata: { name: string } }[]>) => (await p.catch(() => [])).map((x) => x.metadata.name);
+    const [s, c, g] = await Promise.all([names(secrets.list()), names(credentials.list()), names(modelGroups.list())]);
+    refs = { secrets: s, credentials: c, groups: g };
+  }
 
   // Schreiben je Ebene (F183): global/Modellgruppe globaler Admin, Organisation/Team im jeweiligen Bereich.
   function writableScope(s: S['Scope']): boolean {
@@ -73,9 +101,38 @@
     failMode: '',
     timeoutMs: '',
     outputRejectMode: '',
-    config: '{}',
   });
+  /** Plugin-Konfiguration (strukturiertes Formular arbeitet direkt darauf). */
+  let cfg = $state<Record<string, unknown>>({});
+  /** JSON-Ansicht (Pflicht für Plugins ohne Formular). */
+  let jsonMode = $state(false);
+  let cfgText = $state('{}');
+  function toJson() {
+    cfgText = JSON.stringify(cfg, null, 2);
+    jsonMode = true;
+  }
+  function fromJson(): boolean {
+    const v = parseCfg();
+    if (!v) {
+      errors = { ...errors, config: 'Kein gültiges JSON-Objekt.' };
+      return false;
+    }
+    cfg = v;
+    jsonMode = false;
+    return true;
+  }
+  function parseCfg(): Record<string, unknown> | null {
+    if (!showJson) return $state.snapshot(cfg);
+    try {
+      const v = JSON.parse(cfgText || '{}');
+      return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+    } catch {
+      return null;
+    }
+  }
   let f = $state(blank());
+  const structured = $derived(STRUCTURED.has(f.plugin.trim()));
+  const showJson = $derived(jsonMode || !structured);
   let dlgOpen = $state(false);
   let editName = $state<string | null>(null);
   let etag = $state<string | null>(null);
@@ -92,7 +149,11 @@
     formError = null;
     errors = {};
     f = blank();
+    cfg = {};
+    cfgText = '{}';
+    jsonMode = false;
     dlgOpen = true;
+    void loadRefs();
     if (!name) return;
     loading = true;
     try {
@@ -112,8 +173,9 @@
         failMode: s.failMode ?? '',
         timeoutMs: s.timeoutMs == null ? '' : String(s.timeoutMs),
         outputRejectMode: s.outputRejectMode ?? '',
-        config: JSON.stringify(s.config ?? {}, null, 2),
       };
+      cfg = structuredClone(s.config ?? {}) as Record<string, unknown>;
+      cfgText = JSON.stringify(cfg, null, 2);
     } catch (e) {
       handleError(e, { action: 'Bindung laden' });
       dlgOpen = false;
@@ -130,14 +192,8 @@
     if (!Number.isInteger(order)) e.order = 'Ganze Zahl.';
     const timeout = f.timeoutMs.trim() ? Number(f.timeoutMs) : null;
     if (timeout !== null && (!Number.isInteger(timeout) || timeout < 1)) e.timeoutMs = 'Ganze Zahl ≥ 1 (Millisekunden).';
-    let config: Record<string, unknown> = {};
-    try {
-      const v = JSON.parse(f.config || '{}');
-      if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error();
-      config = v;
-    } catch {
-      e.config = 'Kein gültiges JSON-Objekt.';
-    }
+    const config = parseCfg() ?? {};
+    if (!parseCfg()) e.config = 'Kein gültiges JSON-Objekt.';
     errors = e;
     formError = null;
     if (Object.keys(e).length) return;
@@ -162,11 +218,42 @@
       dlgOpen = false;
       toast('success', 'Plugin-Bindung gespeichert', name);
       void list.reload();
+      if (tab === 'chain') void all.reload();
     } catch (err) {
-      handleError(err, { action: 'Bindung speichern', form: (m) => (formError = m), reload: () => editName && openForm(editName) });
+      if (registryError(err)) return;
+      handleError(err, { action: 'Bindung speichern', form: (m) => (formError = m), reload: () => editName && openForm(editName), field: fieldError });
     } finally {
       busy = false;
     }
+  }
+
+  /** Backend-Fehler am Feld (Präfix „feld: …“ bzw. „Plugin-Bindung (x): …“ der Registry-Prüfung). */
+  const FIELDS: Record<string, string> = {
+    'metadata.name': 'name',
+    name: 'name',
+    plugin: 'plugin',
+    'scope.target': 'target',
+    'scope.level': 'target',
+    order: 'order',
+    timeoutMs: 'timeoutMs',
+    failMode: 'failMode',
+    inherit: 'inherit',
+    outputRejectMode: 'outputRejectMode',
+  };
+  function fieldError(field: string, message: string): boolean {
+    const k = FIELDS[field] ?? (field.startsWith('config') ? 'config' : null);
+    if (!k) return false;
+    errors = { ...errors, [k]: message };
+    return true;
+  }
+  /** Meldungen der Registry-Prüfung (`Plugin-Bindung (pii): …`): Steuerfeld oder Konfiguration. */
+  function registryError(err: unknown): boolean {
+    if (!(err instanceof ApiError) || err.status !== 422 || !err.detail?.startsWith('Plugin-Bindung (')) return false;
+    const msg = err.detail.replace(/^Plugin-Bindung \([^)]*\): /, '');
+    const ctl = ['timeoutMs', 'failMode', 'outputRejectMode', 'inherit', 'locked'].find((k) => msg.includes(k));
+    errors = { ...errors, [ctl ?? 'config']: msg };
+    formError = 'Bitte die markierten Felder prüfen.';
+    return true;
   }
 
   let del = $state<string | null>(null);
@@ -178,6 +265,7 @@
       await pluginBindingsRes.remove(del, tag);
       toast('success', 'Plugin-Bindung gelöscht', del);
       void list.reload();
+      if (tab === 'chain') void all.reload();
       return null;
     } catch (e) {
       return formErrorOf(e, 'Bindung löschen');
@@ -239,6 +327,12 @@
   {/snippet}
 </PageHeader>
 
+<Tabs.Root bind:value={tab}>
+  <Tabs.List class={cx(tabsList, 'mb-4')}>
+    <Tabs.Trigger value="bindings" class={tabsTrigger} data-testid="tab-bindings">Bindungen</Tabs.Trigger>
+    <Tabs.Trigger value="chain" class={tabsTrigger} data-testid="tab-chain">Kette</Tabs.Trigger>
+  </Tabs.List>
+  <Tabs.Content value="bindings">
 <Card flush>
   <AsyncState loader={list}>
     {#snippet children(rows)}
@@ -266,6 +360,15 @@
     {/snippet}
   </AsyncState>
 </Card>
+  </Tabs.Content>
+  <Tabs.Content value="chain">
+    <Card>
+      <AsyncState loader={all}>
+        {#snippet children(rows)}<ChainView bindings={rows} onedit={(n) => openForm(n)} />{/snippet}
+      </AsyncState>
+    </Card>
+  </Tabs.Content>
+</Tabs.Root>
 
 <FormDialog bind:open={dlgOpen} title={editName ? `Bindung „${editName}“ bearbeiten` : 'Plugin-Bindung anlegen'} size="lg" {busy} {loading} error={formError} submitLabel={editName ? 'Speichern' : 'Anlegen'} onsubmit={submit} testid="binding-form">
   {#if !editName}
@@ -274,9 +377,19 @@
     </Field>
   {/if}
   <Field label="Plugin" required error={errors.plugin}>
-    {#snippet children({ id, describedby, invalid })}<Input {id} bind:value={f.plugin} aria-describedby={describedby} aria-invalid={invalid || undefined} list="plugin-names" autocomplete="off" />{/snippet}
+    {#snippet children({ id, describedby, invalid })}<Select
+        {id}
+        bind:value={f.plugin}
+        onchange={() => {
+          // Andere Plugin-Art: Konfiguration passt nicht mehr.
+          cfg = {};
+          cfgText = '{}';
+        }}
+        items={PLUGINS.map((p) => ({ value: p, label: p }))}
+        {describedby}
+        {invalid}
+      />{/snippet}
   </Field>
-  <datalist id="plugin-names">{#each PLUGINS as p (p)}<option value={p}></option>{/each}</datalist>
   <Field label="Ebene">
     {#snippet children({ id })}<Select {id} bind:value={f.level} items={LEVELS} />{/snippet}
   </Field>
@@ -292,24 +405,38 @@
   <Field label="Aktiv">
     {#snippet children({ id })}<Select {id} value={f.enabled ? 'true' : 'false'} onchange={(v) => (f.enabled = v === 'true')} items={[{ value: 'true', label: 'an' }, { value: 'false', label: 'aus' }]} />{/snippet}
   </Field>
-  <Field label="Fehlermodus" hint="bei Laufzeitfehler/Timeout: closed = ablehnen, open = überspringen (F148)">
-    {#snippet children({ id })}<Select {id} bind:value={f.failMode} items={[{ value: '', label: 'Standard des Plugins' }, { value: 'closed', label: 'closed – ablehnen' }, { value: 'open', label: 'open – überspringen' }]} />{/snippet}
+  <Field label="Fehlermodus" error={errors.failMode} hint="bei Laufzeitfehler/Timeout: closed = ablehnen, open = überspringen (F148)">
+    {#snippet children({ id })}<Select {id} bind:value={f.failMode} items={[{ value: '', label: `Standard des Plugins${infoOf(f.plugin) ? ` (${infoOf(f.plugin)?.defaultFailMode})` : ''}` }, { value: 'closed', label: 'closed – ablehnen' }, { value: 'open', label: 'open – überspringen' }]} />{/snippet}
   </Field>
-  <Field label="Zeitlimit (ms)" optional error={errors.timeoutMs}>
+  <Field label="Zeitlimit (ms)" optional error={errors.timeoutMs} hint={infoOf(f.plugin) ? `Standard ${infoOf(f.plugin)?.defaultTimeoutMs} ms` : undefined}>
     {#snippet children({ id, describedby, invalid })}<Input {id} bind:value={f.timeoutMs} inputmode="numeric" placeholder="Standard" aria-describedby={describedby} aria-invalid={invalid || undefined} />{/snippet}
   </Field>
-  <Field label="Ausgabe-Ablehnung" hint="finish: 200 mit content_filter/refusal · error: 400 (F160)">
+  <Field label="Ausgabe-Ablehnung" error={errors.outputRejectMode} hint="finish: 200 mit content_filter/refusal · error: 400 (F160)">
     {#snippet children({ id })}<Select {id} bind:value={f.outputRejectMode} items={[{ value: '', label: 'Standard (finish)' }, { value: 'finish', label: 'finish' }, { value: 'error', label: 'error' }]} />{/snippet}
   </Field>
-  <Field label="Vererbung" hint="wie Bindungen darunterliegender Ebenen wirken (F117)">
+  <Field label="Vererbung" error={errors.inherit} hint="wie Bindungen darunterliegender Ebenen wirken (F117)">
     {#snippet children({ id })}<Select {id} bind:value={f.inherit} items={[{ value: '', label: 'Standard' }, { value: 'append', label: 'append – ergänzen' }, { value: 'override', label: 'override – ersetzen' }, { value: 'disable', label: 'disable – abschalten' }]} />{/snippet}
   </Field>
   <Field label="Gesperrt" hint="untere Ebenen dürfen die Bindung nicht ändern/abschalten">
     {#snippet children({ id })}<Select {id} value={f.locked ? 'true' : 'false'} onchange={(v) => (f.locked = v === 'true')} items={[{ value: 'false', label: 'nein' }, { value: 'true', label: 'ja' }]} />{/snippet}
   </Field>
-  <Field label="Konfiguration (JSON)" error={errors.config} hint="Schema je Plugin; der Server prüft mit der Plugin-Registry (422)." class="sm:col-span-2">
-    {#snippet children({ id, describedby, invalid })}<textarea {id} class={[textarea, 'min-h-32']} bind:value={f.config} aria-describedby={describedby} aria-invalid={invalid || undefined} spellcheck="false"></textarea>{/snippet}
-  </Field>
+  <div class="flex items-center gap-2 border-t border-line pt-4 sm:col-span-2">
+    <h3 class="text-sm font-medium">Konfiguration</h3>
+    {#if structured}
+      <Button size="sm" variant="ghost" class="ml-auto" icon={showJson ? 'sliders' : 'file-text'} onclick={() => (showJson ? fromJson() : toJson())} data-testid="config-mode">{showJson ? 'Formular' : 'JSON bearbeiten'}</Button>
+    {/if}
+  </div>
+  {#if showJson}
+    <Field label="Konfiguration (JSON)" error={errors.config} hint="Schema je Plugin; der Server prüft mit der Plugin-Registry (422)." class="sm:col-span-2">
+      {#snippet children({ id, describedby, invalid })}<textarea {id} class={[textarea, 'min-h-32 font-mono']} bind:value={cfgText} aria-describedby={describedby} aria-invalid={invalid || undefined} spellcheck="false" data-testid="config-json"></textarea>{/snippet}
+    </Field>
+  {:else}
+    <PluginConfigForm plugin={f.plugin} bind:config={cfg} secrets={refs.secrets} credentials={refs.credentials} modelGroups={refs.groups} />
+    {#if errors.config}<p class="text-sm text-danger-fg sm:col-span-2" role="alert" data-testid="config-error">{errors.config}</p>{/if}
+  {/if}
+  {#if testable(f.plugin)}
+    <PluginTest plugin={f.plugin} config={parseCfg} outputRejectMode={f.outputRejectMode} />
+  {/if}
 </FormDialog>
 
 <ConfirmDialog bind:open={delOpen} title="Plugin-Bindung löschen?" confirmLabel="Löschen" onconfirm={runDelete}>

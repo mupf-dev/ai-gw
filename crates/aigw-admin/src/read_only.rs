@@ -6,7 +6,8 @@
 //! Schreibende Anfragen (alles außer `GET`/`HEAD`/`OPTIONS`) an die Admin-API werden mit
 //! `403 read-only` abgelehnt – bevor Anmeldung und Berechtigung geprüft werden. Ausgenommen ist
 //! `POST /admin/api/v1/config:apply`: das ist der GitOps-Weg selbst (z. B. aus einer
-//! CI-Pipeline). Die CLI (`aigw config apply`) schreibt direkt in die Datenbank und ist nicht
+//! CI-Pipeline) – sowie der Testlauf `POST /admin/api/v1/plugin-bindings:test`, der nichts
+//! schreibt. Die CLI (`aigw config apply`) schreibt direkt in die Datenbank und ist nicht
 //! betroffen.
 
 use axum::Router;
@@ -16,6 +17,7 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse as _, Response};
 
 use crate::gitops::APPLY_PATH;
+use crate::plugins::TEST_PATH;
 use crate::problem::Problem;
 
 /// Präfix der Admin-API.
@@ -36,10 +38,14 @@ fn is_write(method: &Method) -> bool {
     !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
 }
 
-/// Middleware: lehnt schreibende Admin-Anfragen ab (außer GitOps-Apply).
+/// Middleware: lehnt schreibende Admin-Anfragen ab (außer GitOps-Apply und Plugin-Testlauf).
 pub async fn reject_writes(req: Request, next: Next) -> Response {
     let path = req.uri().path();
-    if is_write(req.method()) && path.starts_with(API_PREFIX) && path != APPLY_PATH {
+    if is_write(req.method())
+        && path.starts_with(API_PREFIX)
+        && path != APPLY_PATH
+        && path != TEST_PATH
+    {
         return problem().at(path.to_owned()).into_response();
     }
     next.run(req).await

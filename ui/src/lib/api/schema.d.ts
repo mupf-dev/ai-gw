@@ -511,6 +511,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/plugin-bindings:test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Testlauf einer Plugin-Konfiguration auf einem Beispieltext (nur lokale Plugins). */
+        post: operations["test_plugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Registrierte Plugins. */
+        get: operations["plugin_catalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/prices": {
         parameters: {
             query?: never;
@@ -1925,16 +1959,91 @@ export interface components {
              */
             timeoutMs?: number | null;
         };
+        /** @description Antwort von `GET /plugins`. */
+        PluginCatalog: {
+            /** @description Plugins (nach Name sortiert). */
+            items: components["schemas"]["PluginInfo"][];
+        };
         /**
          * @description Verhalten bei Fehlern eines Plugins.
          * @enum {string}
          */
         PluginFailMode: "open" | "closed";
+        /** @description Ein registriertes Plugin. */
+        PluginInfo: {
+            /**
+             * @description Standard-Fehlermodus der Plugin-Art (F148): `open` oder `closed`.
+             * @example closed
+             */
+            defaultFailMode: string;
+            /**
+             * Format: int64
+             * @description Standard-Zeitlimit asynchroner Haken (Millisekunden).
+             */
+            defaultTimeoutMs: number;
+            /** @description Name, unter dem Bindungen das Plugin ansprechen. */
+            name: string;
+            /** @description Testlauf (`POST /plugin-bindings:test`) möglich? */
+            testable: boolean;
+        };
         /**
          * @description Verhältnis einer Plugin-Bindung zu Bindungen desselben Plugins auf äußeren Ebenen.
          * @enum {string}
          */
         PluginInherit: "append" | "override" | "disable";
+        /** @description Erkennung eines Guardrails (nur Zähler, nie Inhalte). */
+        PluginTestHit: {
+            /** @description Ausgeführte Aktion (`mask`, `reject`, `flag` …). */
+            action: string;
+            /** @description Kategorie (z. B. `email`, `injection`). */
+            category: string;
+            /**
+             * Format: int32
+             * @description Anzahl.
+             */
+            count: number;
+        };
+        /**
+         * @description Ergebnis eines Testlaufs.
+         * @enum {string}
+         */
+        PluginTestOutcome: "pass" | "modified" | "filtered" | "rejected";
+        /**
+         * @description Phase des Testlaufs.
+         * @enum {string}
+         */
+        PluginTestPhase: "request" | "response";
+        /** @description Anfrage an `POST /plugin-bindings:test`. */
+        PluginTestRequest: {
+            /** @description Plugin-Konfiguration wie in `PluginBinding.spec.config`. */
+            config?: Record<string, never>;
+            /** @description Ausgabe-Ablehnung (`finish` | `error`, Standard `finish`). */
+            outputRejectMode?: string | null;
+            /** @description Phase (Standard `request`). */
+            phase?: components["schemas"]["PluginTestPhase"];
+            /** @description Plugin (z. B. `pii`). */
+            plugin: string;
+            /** @description Beispieltext (höchstens 32 KiB). */
+            text: string;
+        };
+        /** @description Antwort von `POST /plugin-bindings:test`. */
+        PluginTestResult: {
+            /** @description Fehlercode der Ablehnung (z. B. `pii_detected`). */
+            code?: string | null;
+            /** @description Erkennungen. */
+            hits: components["schemas"]["PluginTestHit"][];
+            /** @description Meldung der Ablehnung. */
+            message?: string | null;
+            /** @description Ergebnis. */
+            outcome: components["schemas"]["PluginTestOutcome"];
+            /**
+             * Format: int32
+             * @description HTTP-Status der Ablehnung (bei `rejected`).
+             */
+            status?: number | null;
+            /** @description Text nach dem Plugin (bei `pass`/`modified`). */
+            text?: string | null;
+        };
         /** @description Ein Punkt einer Zeitreihe. */
         Point: {
             amount?: components["schemas"]["Amount"] | null;
@@ -6393,6 +6502,104 @@ export interface operations {
             };
             /** @description If-Match fehlt (F38) */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    test_plugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Ergebnis */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginTestResult"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Konfiguration oder Plugin nicht testbar */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    plugin_catalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Katalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginCatalog"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

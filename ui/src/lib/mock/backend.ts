@@ -601,7 +601,16 @@ function extra(method: string, parts: string[], q: URLSearchParams): Response | 
   if (a === 'request-logs' && !b) return json(200, { items: [] });
   if (a === 'usage' && b === 'budgets') return json(200, budgetList(q.get('level')));
   if (a === 'usage' && b === 'limit-warnings') return json(200, { counterBackend: 'local', warnings: [] });
-  if (a === 'plugin-bindings' || a === 'secrets' || a === 'mcp-servers') return method === 'GET' && !b ? json(200, { items: [] }) : json(403, { type: 'urn:aigw:problem:forbidden', title: 'Im Mock-Modus nicht verfügbar', status: 403, code: 'forbidden', detail: null });
+  if (a === 'plugins' && !b && method === 'GET')
+    return json(200, {
+      items: ['cache', 'content-safety', 'header', 'pii', 'prompt-filter', 'request-transform', 'webhook'].map((name) => ({
+        name,
+        defaultFailMode: name === 'webhook' ? 'open' : 'closed',
+        defaultTimeoutMs: name === 'webhook' ? 200 : name === 'content-safety' ? 3000 : 1000,
+        testable: name === 'pii' || name === 'prompt-filter',
+      })),
+    });
+  if (a === 'plugin-bindings' || a === 'secrets' || a === 'mcp-servers' || a === 'mcp-grants' || a === 'plugin-bindings:test') return method === 'GET' && !b ? json(200, { items: [] }) : json(403, { type: 'urn:aigw:problem:forbidden', title: 'Im Mock-Modus nicht verfügbar', status: 403, code: 'forbidden', detail: null });
   if (a === 'mcp-servers:status') return json(200, { gatewayEnabled: true, items: [] });
   if (a === 'users' && b && c === 'invitation') {
     const [s, body] = invitation(method, b);

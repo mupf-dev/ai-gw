@@ -55,6 +55,7 @@ dependencies = [
  "aigw-core",
  "aigw-mcp",
  "aigw-outbound",
+ "aigw-plugins",
  "aigw-proxy",
  "aigw-store",
  "aws-lc-rs",

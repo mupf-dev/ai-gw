@@ -320,3 +320,62 @@ fn with_if_match(req: axum::http::request::Builder) -> axum::http::request::Buil
         req
     }
 }
+
+/// AIGW-52: Plugin-Katalog und Testlauf (nur lokale Plugins, schreibt nichts).
+#[tokio::test]
+async fn catalog_and_test_run() {
+    let (app, store) = app().await;
+    let (s, v) = call(&app, Method::GET, "/admin/api/v1/plugins", None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let items = v["items"].as_array().unwrap();
+    let get = |n: &str| items.iter().find(|i| i["name"] == n).unwrap().clone();
+    assert_eq!(get("webhook")["defaultFailMode"], "open");
+    assert_eq!(get("content-safety")["defaultFailMode"], "closed");
+    assert_eq!(get("pii")["testable"], true);
+    assert_eq!(get("webhook")["testable"], false);
+
+    let version = store.config_version().await.unwrap();
+    let test = "/admin/api/v1/plugin-bindings:test";
+    let (s, v) = call(
+        &app,
+        Method::POST,
+        test,
+        Some(json!({"plugin": "pii", "config": {"action": "mask"}, "text": "an max@example.org"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["outcome"], "modified", "{v}");
+    assert!(
+        !v["text"].as_str().unwrap().contains("max@example.org"),
+        "{v}"
+    );
+    assert_eq!(v["hits"][0]["category"], "email", "{v}");
+
+    let (s, v) = call(
+        &app,
+        Method::POST,
+        test,
+        Some(json!({"plugin": "prompt-filter", "config": {"words": {"terms": ["geheim"]}}, "text": "das ist geheim"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["outcome"], "rejected", "{v}");
+    assert_eq!(v["status"], 400, "{v}");
+
+    // Ungültige Konfiguration → 422 mit Feldpräfix `config:`.
+    let (s, v) = call(
+        &app,
+        Method::POST,
+        test,
+        Some(json!({"plugin": "pii", "config": {"acton": "mask"}, "text": "x"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
+    assert!(v["detail"].as_str().unwrap().starts_with("config: "), "{v}");
+    // Externe Plugins werden nicht ausgeführt.
+    let (s, v) = call(&app, Method::POST, test, Some(json!({"plugin": "webhook", "config": {"url": "https://hooks.example.org"}, "text": "x"}))).await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
+    assert!(v["detail"].as_str().unwrap().starts_with("plugin: "), "{v}");
+    // Nichts geschrieben.
+    assert_eq!(store.config_version().await.unwrap(), version);
+}

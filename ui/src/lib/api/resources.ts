@@ -163,3 +163,13 @@ export type PluginBinding = S['PluginBinding'];
 export const pluginBindingsRes = resource<PluginBinding, S['PluginBindingInput'], { q?: string; plugin?: string; level?: string; target?: string }>(
   'plugin-bindings',
 );
+
+// ------------------------------------------------------------------ AIGW-52: Editoren (Plugins, MCP-Freigaben)
+
+export type McpGrant = S['McpGrant'];
+export const mcpGrants = resource<McpGrant, S['McpGrantInput'], { q?: string; server?: string; team?: string; apiKey?: string }>('mcp-grants');
+export type PluginInfo = S['PluginInfo'];
+/** Registrierte Plugins mit Standard-Fehlermodus/-Zeitlimit (GET /plugins). */
+export const pluginCatalog = async () => (await unwrap<S['PluginCatalog']>(api.GET('/admin/api/v1/plugins'))).items;
+/** Testlauf einer ungespeicherten Plugin-Konfiguration (nur lokale Plugins, schreibt nichts). */
+export const testPlugin = (body: S['PluginTestRequest']) => unwrap<S['PluginTestResult']>(api.POST('/admin/api/v1/plugin-bindings:test', { body }));

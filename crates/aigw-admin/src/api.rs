@@ -49,6 +49,7 @@ use crate::{admin_keys as ak, session as s};
         m::delete_mcp_grant,
         pb::list_plugin_bindings, pb::create_plugin_binding, pb::get_plugin_binding,
         pb::put_plugin_binding, pb::delete_plugin_binding,
+        crate::plugins::plugin_catalog, crate::plugins::test_plugin,
         crate::gitops::export_config, crate::gitops::apply_config,
         s::login, s::callback, s::logout, s::session_info, s::auth_info,
         s::create_invitation, s::get_invitation, s::delete_invitation,

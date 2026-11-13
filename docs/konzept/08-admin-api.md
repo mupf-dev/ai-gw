@@ -35,6 +35,8 @@ Instanz nach ca. 100 ms (Debounce), bei Postgres auf allen Instanzen per `NOTIFY
 | `/provider-credentials`, `/provider-credentials/{name}` | GET, POST · GET, PUT, PATCH, DELETE | Anbieter-Zugangsdaten (Werte nur schreibbar) |
 | `/prices`, `/prices/{name}` | GET, POST · GET, PUT, DELETE | Preisversionen je Anbieter-Modell |
 | `/plugin-bindings`, `/plugin-bindings/{name}` | GET, POST · GET, PUT, DELETE | Plugin-Bindungen; Prüfung mit der Plugin-Registry (422), gelesen mit wirksamem `failMode` (`effective`), siehe [12-plugins.md](12-plugins.md) §3–4 |
+| `/plugins` | GET | Registrierte Plugins mit Standard-`failMode`/-Zeitlimit und `testable` (AIGW-52) |
+| `/plugin-bindings:test` | POST | Testlauf einer ungespeicherten Konfiguration auf einem Beispieltext (`phase` request/response) → `outcome` pass/modified/filtered/rejected, Text, Treffer; nur `pii`/`prompt-filter` (sonst 422), schreibt nichts, auch im Modus „nur YAML“ erlaubt (AIGW-52) |
 | `/admin-api-keys`, `/admin-api-keys/{name}` | GET, POST · GET, PUT, DELETE | Admin-API-Keys (§5.5) |
 | `/session`, `/auth/info` | GET | angemeldeter Principal bzw. Anmeldeverfahren (§5) |
 | `/audit-log` | GET | Audit-Log lesen, filtern, als JSON Lines exportieren (§5.10) |
@@ -306,6 +308,9 @@ Alle Fehler der Admin-API sind Problem Details mit `Content-Type: application/pr
 | 500 | `internal` | interner Fehler – ohne Details nach außen, Ursache im Log |
 
 `instance` (Pfad) wird derzeit nur bei `401` gesetzt.
+
+Validierungsfehler (`400`/`409`/`422`) nennen das betroffene Feld als Präfix von `detail` (`scope.target: unbekanntes
+Team "x"`, `url: …`, `settings.headers.x-foo: …`); die UI zeigt die Meldung damit am Feld an (AIGW-52).
 
 ## 5. Authentifizierung, Sessions, Rollen (AIGW-32)
 

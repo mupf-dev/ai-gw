@@ -19,6 +19,23 @@ export interface HandleOptions {
   form?: (message: string) => void;
   /** Bei 412: neu laden (Konflikt-Dialog). */
   reload?: () => void;
+  /**
+   * Feldgenaue Anzeige (AIGW-52): bekommt Feld und Meldung aus `problemField`; `true` = am Feld angezeigt,
+   * sonst landet der Fehler im Formular.
+   */
+  field?: (field: string, message: string) => boolean;
+}
+
+/**
+ * Feld eines Validierungsfehlers. Die Admin-API stellt das betroffene Feld der Meldung voran
+ * („scope.target: unbekanntes Team …“, „url: …“, „settings.headers.x: …“); ein führendes `spec.`
+ * wird entfernt. Ohne erkennbares Feld `null`.
+ */
+export function problemField(e: unknown): { field: string; message: string } | null {
+  if (!(e instanceof ApiError) || !e.detail || ![400, 409, 422].includes(e.status)) return null;
+  const m = /^([A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+|\[\d+\])*): (.+)$/s.exec(e.detail);
+  if (!m) return null;
+  return { field: m[1].replace(/^spec\./, ''), message: m[2] };
 }
 
 export function problemText(e: unknown): string {
@@ -44,6 +61,11 @@ export function handleError(e: unknown, o: HandleOptions) {
   if (e.status === 403 && e.code === 'read-only') {
     auth.readOnly = true;
     toast('warning', 'Nur-YAML-Modus', 'Änderungen sind nur über GitOps möglich (Einstellungen → GitOps).');
+    return;
+  }
+  const pf = o.field ? problemField(e) : null;
+  if (pf && o.field?.(pf.field, pf.message)) {
+    o.form?.('Bitte die markierten Felder prüfen.');
     return;
   }
   if (o.form && [400, 403, 404, 409, 415, 422].includes(e.status)) {
