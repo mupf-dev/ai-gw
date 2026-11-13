@@ -82,6 +82,14 @@ gitops:
   # Änderungen nur per `aigw config apply` bzw. POST /admin/api/v1/config:apply.
   read_only_admin: false
 
+# Ausgehende Verbindungen (Anbieter, Webhooks, MCP, OIDC, Guardrail-Dienste, OTLP;
+# docs/konzept/06-streaming-und-anbieter.md §4). Je Deployment zusätzlich settings.caFile.
+upstream:
+  # Wurzelzertifikate: webpki (Mozilla, eingebettet) | system (Betriebssystem) | both
+  roots: webpki
+  # zusätzliche CA-Zertifikate (PEM), z. B. eine interne CA
+  # ca_file: /etc/aigw/ca.pem
+
 # Admin-API (docs/konzept/08-admin-api.md).
 admin:
   # Prüfung der Upstream-Endpunkte von Deployments (SSRF-Schutz). Standard: nur https, keine
@@ -121,7 +129,7 @@ admin:
       link_by_email: true        # vorab angelegte Nutzer über bestätigte E-Mail verknüpfen
       end_session: true          # Abmelden auch beim IdP (falls end_session_endpoint)
       # post_logout_redirect_url: "https://gateway.example.org/admin/"
-      # ca_file: /etc/aigw/idp-ca.pem
+      # ca_file: /etc/aigw/idp-ca.pem   # zusätzlich zu upstream.roots/upstream.ca_file
       cache_secs: 3600
       http_timeout_secs: 10
       clock_skew_secs: 60

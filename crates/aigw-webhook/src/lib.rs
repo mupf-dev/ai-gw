@@ -8,10 +8,10 @@
 //! – und weder `aigw-core` (keine HTTP-Abhängigkeiten) noch `aigw-providers` (Anbieter-Adapter)
 //! der richtige Ort ist:
 //!
-//! - [`WebhookClient`]: hyper-util + rustls (aws-lc-rs), Keep-Alive-Pool, **SSRF-Schutz** in
+//! - [`WebhookClient`]: gemeinsamer Outbound-Baustein (`aigw-outbound`), **SSRF-Schutz** in
 //!   zwei Stufen: URL-Prüfung nach [`aigw_core::upstream::UpstreamPolicy::check_endpoint`]
 //!   (Konfiguration) und Prüfung jeder aufgelösten IP-Adresse beim Verbindungsaufbau
-//!   ([`aigw_core::upstream::UpstreamPolicy::ip_allowed`], schützt vor DNS-Rebinding).
+//!   ([`aigw_core::upstream::UpstreamPolicy::resolved_ip_allowed`], schützt vor DNS-Rebinding).
 //!   Keine Weiterleitungen, Größenlimit für Antworten, mTLS als Erweiterungspunkt
 //!   ([`ClientOptions::tls`]).
 //! - [`sign`]: HMAC-SHA256-Signatur `x-aigw-signature: t=<ts>,v1=<hex>` und

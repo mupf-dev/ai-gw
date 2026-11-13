@@ -86,11 +86,19 @@ impl SnapshotRoutes {
         }
     }
 
-    /// Mit allen eingebauten Adaptern und dem Standard-HTTP-Client (Betrieb).
+    /// Mit allen eingebauten Adaptern und dem Standard-HTTP-Client mit strengen SSRF-Regeln.
     pub fn with_defaults() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::with_policy(aigw_core::upstream::UpstreamPolicy::strict())
+    }
+
+    /// Mit allen eingebauten Adaptern und einem HTTP-Client mit den SSRF-Regeln `policy`
+    /// (Betrieb: `admin.allow_*_upstreams`; geprüft auch nach der Namensauflösung, AIGW-72).
+    pub fn with_policy(
+        policy: aigw_core::upstream::UpstreamPolicy,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Ok(Self::new(
             Registry::with_builtin(),
-            UpstreamClient::with_defaults()?,
+            UpstreamClient::with_policy(policy)?,
         ))
     }
 

@@ -413,7 +413,7 @@ async fn env() -> Env {
     let base = format!("http://{up}");
     let v1 = format!("{base}/v1");
     let registry = Registry::with_builtin();
-    let client = UpstreamClient::with_defaults().unwrap();
+    let client = UpstreamClient::unguarded().unwrap();
     let mut routes = StaticRoutes::new();
     let fast = json!({"timeouts": {"firstByteMs": 2000, "idleMs": 1000, "totalMs": 5000}});
 

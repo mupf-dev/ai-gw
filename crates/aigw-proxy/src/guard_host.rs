@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! [`PluginHost`] des Gateways (AIGW-38): Zugangsdaten aus dem aktuellen Snapshot,
-//! HTTP-Aufrufe mit SSRF-Regeln (`aigw_core::upstream`) und Modellaufrufe über das eigene
-//! Routing – ohne Plugin-Kette (keine Rekursion) und ohne Limits des Clients.
+//! HTTP-Aufrufe über den gemeinsamen Outbound-Baustein (AIGW-72: SSRF-Regeln auch nach der
+//! Namensauflösung, keine Weiterleitungen, Größen- und Zeitlimit) und Modellaufrufe über das
+//! eigene Routing – ohne Plugin-Kette (keine Rekursion) und ohne Limits des Clients.
 
 use std::fmt;
-use std::net::IpAddr;
 use std::sync::Arc;
 
 use aigw_core::ir::{ChatRequest, ChatResponse};
@@ -14,8 +14,8 @@ use aigw_core::resource::CredentialData;
 use aigw_core::snapshot::SnapshotHandle;
 use aigw_core::upstream::UpstreamPolicy;
 use aigw_counters::CounterBackend;
+use aigw_outbound::{AddressGuard, FetchLimits, OutboundClient, OutboundOptions};
 use aigw_plugins::{BoxFuture, HttpCall, HttpReply, PluginError, PluginHost};
-use aigw_providers::UpstreamClient;
 use bytes::Bytes;
 
 use crate::routes::ModelRoutes;
@@ -29,7 +29,7 @@ struct Inner {
     counters: Arc<dyn CounterBackend>,
     snapshot: Option<SnapshotHandle>,
     policy: UpstreamPolicy,
-    client: UpstreamClient,
+    client: OutboundClient,
 }
 
 /// Dienste des Gateways für Plugins (günstig klonbar).
@@ -46,13 +46,14 @@ impl fmt::Debug for GatewayHost {
 
 impl GatewayHost {
     /// Host aus Routing, Zähler-Backend (Deployment-Kapazität), Snapshot (Zugangsdaten),
-    /// SSRF-Regeln und HTTP-Client.
+    /// SSRF-Regeln (Prüfung der URL) und HTTP-Client (Prüfung nach der Namensauflösung; sollte
+    /// dieselben Regeln tragen).
     pub fn new(
         routes: Arc<dyn ModelRoutes>,
         counters: Arc<dyn CounterBackend>,
         snapshot: Option<SnapshotHandle>,
         policy: UpstreamPolicy,
-        client: UpstreamClient,
+        client: OutboundClient,
     ) -> Self {
         Self(Arc::new(Inner {
             routes,
@@ -65,44 +66,22 @@ impl GatewayHost {
 }
 
 impl GatewayHost {
-    /// Wie [`GatewayHost::new`] mit eigenem HTTP-Client (Standardeinstellungen).
+    /// Wie [`GatewayHost::new`] mit eigenem HTTP-Client (SSRF-Regeln `policy`, eigener Pool).
     pub fn with_defaults(
         routes: Arc<dyn ModelRoutes>,
         counters: Arc<dyn CounterBackend>,
         snapshot: Option<SnapshotHandle>,
         policy: UpstreamPolicy,
     ) -> Result<Self, String> {
-        let client = UpstreamClient::with_defaults().map_err(|e| e.to_string())?;
+        let client = OutboundClient::builder(AddressGuard::policy(policy.clone()))
+            .options(OutboundOptions {
+                connect_timeout: std::time::Duration::from_secs(5),
+                ..OutboundOptions::default()
+            })
+            .build()
+            .map_err(|e| e.to_string())?;
         Ok(Self::new(routes, counters, snapshot, policy, client))
     }
-}
-
-/// Prüft die aufgelösten Adressen des Ziels (Namen, die auf private Adressen zeigen).
-async fn check_resolved(policy: &UpstreamPolicy, url: &str) -> Result<(), PluginError> {
-    let uri: axum::http::Uri = url.parse().map_err(|_| PluginError::new("ungültige URL"))?;
-    let host = uri
-        .host()
-        .ok_or_else(|| PluginError::new("URL ohne Host"))?
-        .trim_start_matches('[')
-        .trim_end_matches(']');
-    let port = uri.port_u16().unwrap_or(match uri.scheme_str() {
-        Some("http") => 80,
-        _ => 443,
-    });
-    let addrs: Vec<IpAddr> = match host.parse::<IpAddr>() {
-        Ok(ip) => vec![ip],
-        Err(_) => tokio::net::lookup_host((host, port))
-            .await
-            .map_err(|e| PluginError::new(format!("Namensauflösung: {e}")))?
-            .map(|a| a.ip())
-            .collect(),
-    };
-    if addrs.is_empty() || addrs.iter().any(|ip| !policy.ip_allowed(*ip)) {
-        return Err(PluginError::new(format!(
-            "Ziel {host} löst auf eine nicht erlaubte Adresse auf"
-        )));
-    }
-    Ok(())
 }
 
 impl PluginHost for GatewayHost {
@@ -127,30 +106,33 @@ impl PluginHost for GatewayHost {
                 .policy
                 .check_endpoint(&call.url)
                 .map_err(PluginError::new)?;
-            let fut = async {
-                check_resolved(&inner.policy, &call.url).await?;
-                let mut req = axum::http::Request::post(&call.url)
-                    .header(axum::http::header::CONTENT_TYPE, "application/json")
-                    .header(axum::http::header::ACCEPT, "application/json");
-                for (k, v) in &call.headers {
-                    req = req.header(*k, v.as_str());
-                }
-                let req = req
-                    .body(Bytes::from(call.body))
-                    .map_err(|e| PluginError::new(format!("Anfrage ungültig: {e}")))?;
-                let (status, body) = inner
-                    .client
-                    .fetch(req, MAX_REPLY_BYTES)
-                    .await
-                    .map_err(|e| PluginError::new(format!("Dienst nicht erreichbar: {e}")))?;
-                Ok(HttpReply {
-                    status: status.as_u16(),
-                    body: body.to_vec(),
-                })
-            };
-            tokio::time::timeout(call.timeout, fut)
+            let mut req = axum::http::Request::post(&call.url)
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .header(axum::http::header::ACCEPT, "application/json")
+                .header(axum::http::header::USER_AGENT, aigw_outbound::USER_AGENT);
+            for (k, v) in &call.headers {
+                req = req.header(*k, v.as_str());
+            }
+            let req = req
+                .body(Bytes::from(call.body))
+                .map_err(|e| PluginError::new(format!("Anfrage ungültig: {e}")))?;
+            let reply = inner
+                .client
+                .fetch(req, &FetchLimits::new(call.timeout, MAX_REPLY_BYTES))
                 .await
-                .map_err(|_| PluginError::new("Zeitlimit des Dienstes überschritten"))?
+                .map_err(|e| match e {
+                    aigw_outbound::OutboundError::Timeout(_) => {
+                        PluginError::new("Zeitlimit des Dienstes überschritten")
+                    }
+                    aigw_outbound::OutboundError::Blocked(m) => {
+                        PluginError::new(format!("Ziel nicht erlaubt: {m}"))
+                    }
+                    other => PluginError::new(format!("Dienst nicht erreichbar: {other}")),
+                })?;
+            Ok(HttpReply {
+                status: reply.status.as_u16(),
+                body: reply.body.to_vec(),
+            })
         })
     }
 

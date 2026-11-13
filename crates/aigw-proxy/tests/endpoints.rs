@@ -545,7 +545,7 @@ async fn group_capabilities_are_enforced() {
     let up = Upstream::from_deployment(
         &anthropic,
         &Registry::with_builtin(),
-        &UpstreamClient::with_defaults().unwrap(),
+        &UpstreamClient::unguarded().unwrap(),
     )
     .unwrap();
     routes.insert_route("claude-emb", group("claude-emb", emb, Arc::new(up)));
@@ -846,7 +846,7 @@ struct Env {
 async fn env() -> Env {
     let (base, fake) = start_fake().await;
     let registry = Registry::with_builtin();
-    let client = UpstreamClient::with_defaults().unwrap();
+    let client = UpstreamClient::unguarded().unwrap();
     let mut routes = StaticRoutes::new();
     let fast = json!({"timeouts": {"firstByteMs": 2000, "idleMs": 1000, "totalMs": 5000}});
     let mut add = |alias: &str, d: DeploymentCtx| {

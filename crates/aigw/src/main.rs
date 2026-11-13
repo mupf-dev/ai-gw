@@ -130,6 +130,10 @@ fn serve(
 
     let config = aigw_core::Config::load(&config_path)?;
     tracing::info!(config = %config_path.display(), "Konfiguration geladen");
+    // Vertrauensanker aller ausgehenden Verbindungen (upstream.roots/ca_file, AIGW-72); vor
+    // dem Bau des ersten Clients, Fehler (z. B. unlesbare CA-Datei) brechen den Start ab.
+    aigw_outbound::install_default_tls(aigw_outbound::TlsOptions::from_config(&config.upstream))
+        .map_err(|e| format!("upstream: {e}"))?;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -149,8 +153,11 @@ fn serve(
         // Routing aus dem Snapshot (AIGW-24): Neuaufbau bei jeder neuen config_version,
         // Health Checks im Hintergrund; Keys und Modellfreigaben prüft der Snapshot (AIGW-28).
         let routes = std::sync::Arc::new(
-            aigw_proxy::SnapshotRoutes::with_defaults()
-                .map_err(|e| format!("Upstream-Client: {e}"))?,
+            // SSRF-Regeln auch nach der Namensauflösung (AIGW-72).
+            aigw_proxy::SnapshotRoutes::with_policy(aigw_admin::UpstreamPolicy::from_config(
+                &config.admin,
+            )?)
+            .map_err(|e| format!("Upstream-Client: {e}"))?,
         );
         let routes_task = routes.spawn(runtime_state.snapshot.clone());
         // Plugin-Ketten je (Org, Team, Key, Modellgruppe), Neuaufbau je config_version (AIGW-36).

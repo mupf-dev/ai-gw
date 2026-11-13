@@ -8,7 +8,8 @@
 //! - Traces über den echten Proxy (Router + `Upstream` gegen einen Fake-OpenAI-Server):
 //!   Wurzel-Span mit GenAI-Attributen, Kind-Spans auth/plugins/route/upstream, TTFT-Ereignis,
 //!   eingehender `traceparent` (gesampelt und nicht gesampelt) und Weitergabe an den Upstream.
-//! - Logs: Request-Log → `OtlpLogExporter` → `/v1/logs`, Fehlerzählung bei HTTP 500.
+//! - Logs: Request-Log → `OtlpLogExporter` → `/v1/logs`, Fehlerzählung bei HTTP 500,
+//!   Wiederholung bei 429/503 mit `Retry-After` (F102).
 //!
 //! Keine externen Aufrufe. Die Tests nutzen eine Single-Thread-Runtime, damit der
 //! Test-Subscriber (`set_default`, thread-lokal) auch für die Server-Tasks gilt.
@@ -20,7 +21,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use aigw_core::config::{ObserveConfig, OtlpConfig, OtlpTracesConfig};
+use aigw_core::config::{ObserveConfig, OtlpConfig, OtlpRetryConfig, OtlpTracesConfig};
 use aigw_core::ir::Usage;
 use aigw_core::observe::RequestRecord;
 use aigw_core::resource::{
@@ -255,6 +256,8 @@ struct Post {
 struct Collector {
     posts: Mutex<Vec<Post>>,
     fail: std::sync::atomic::AtomicBool,
+    /// Vorgegebene Antworten (Status, `Retry-After`) für die nächsten Aufrufe.
+    script: Mutex<std::collections::VecDeque<(u16, Option<&'static str>)>>,
 }
 
 async fn collect(
@@ -268,6 +271,14 @@ async fn collect(
         headers,
         body,
     });
+    if let Some((status, retry_after)) = c.script.lock().unwrap().pop_front() {
+        let mut resp = (StatusCode::from_u16(status).unwrap(), "nicht jetzt").into_response();
+        if let Some(ra) = retry_after {
+            resp.headers_mut()
+                .insert("retry-after", http::HeaderValue::from_static(ra));
+        }
+        return resp;
+    }
     if c.fail.load(std::sync::atomic::Ordering::SeqCst) {
         return (StatusCode::INTERNAL_SERVER_ERROR, "kaputt").into_response();
     }
@@ -382,7 +393,7 @@ async fn start_gateway() -> (SocketAddr, Arc<Upstream0>) {
     let upstream = Upstream::from_deployment(
         &d,
         &Registry::with_builtin(),
-        &UpstreamClient::with_defaults().unwrap(),
+        &UpstreamClient::unguarded().unwrap(),
     )
     .unwrap();
     let mut routes = StaticRoutes::new();
@@ -510,6 +521,7 @@ async fn traces_through_proxy_with_genai_attributes_and_propagation() {
     assert_eq!(root.s("gen_ai.request.model"), "ok");
     assert_eq!(root.s("gen_ai.response.model"), "up-model");
     assert_eq!(root.s("gen_ai.system"), "openai");
+    assert_eq!(root.s("gen_ai.provider.name"), "openai");
     assert_eq!(root.i("gen_ai.usage.input_tokens"), 11);
     assert_eq!(root.i("gen_ai.usage.output_tokens"), 2);
     assert_eq!(root.i("gen_ai.request.max_tokens"), 50);
@@ -536,6 +548,7 @@ async fn traces_through_proxy_with_genai_attributes_and_propagation() {
     let attempt = children.iter().find(|s| s.name == "chat gpt-up").unwrap();
     assert_eq!(attempt.kind, 3, "CLIENT");
     assert_eq!(attempt.s("gen_ai.system"), "openai");
+    assert_eq!(attempt.s("gen_ai.provider.name"), "openai");
     assert_eq!(attempt.s("gen_ai.request.model"), "gpt-up");
     assert_eq!(attempt.s("server.address"), "127.0.0.1");
     assert_eq!(attempt.i("http.response.status_code"), 200);
@@ -718,6 +731,7 @@ async fn request_log_exported_as_otlp_logs() {
     assert!(uint(ok, 1) > 1_600_000_000_000_000_000);
     assert!(uint(ok, 11) >= uint(ok, 1));
     assert_eq!(a["gen_ai.system"], Attr::S("anthropic".into()));
+    assert_eq!(a["gen_ai.provider.name"], Attr::S("anthropic".into()));
     assert_eq!(a["gen_ai.request.model"], Attr::S("claude".into()));
     assert_eq!(a["gen_ai.usage.input_tokens"], Attr::I(100));
     assert_eq!(a["gen_ai.usage.output_tokens"], Attr::I(20));
@@ -755,4 +769,84 @@ async fn collector_errors_are_counted() {
     let mut out = String::new();
     metrics.render_prometheus(&mut out);
     assert!(out.contains("aigw_otlp_export_errors_total{signal=\"logs\"} 1\n"));
+}
+
+/// Exportiert einen Log-Eintrag über einen frischen Exporter; liefert (Exporter-Metriken,
+/// Export-Fehler des Request-Logs).
+async fn export_one(collector_addr: SocketAddr) -> (Arc<OtlpMetrics>, u64) {
+    let mut cfg = otlp_cfg(collector_addr);
+    cfg.retry = OtlpRetryConfig {
+        max_attempts: 4,
+        initial_backoff_ms: 10,
+        max_backoff_ms: 2_000,
+    };
+    let metrics = Arc::new(OtlpMetrics::default());
+    let exporter = OtlpLogExporter::new(&cfg, Arc::clone(&metrics)).unwrap();
+    let handle = ObserveBuilder::new(ObserveConfig {
+        flush_interval_ms: 20,
+        ..ObserveConfig::default()
+    })
+    .exporter(Arc::new(exporter))
+    .start();
+    let log_metrics = Arc::clone(handle.metrics());
+    handle.observer().record(record(200));
+    assert!(handle.shutdown().await);
+    let errors = log_metrics.snapshot().export_errors;
+    (metrics, errors)
+}
+
+#[tokio::test]
+async fn transient_collector_errors_are_retried_with_retry_after() {
+    let (collector_addr, collector) = start_collector().await;
+    // 503 mit Retry-After 1 s, dann 429 ohne → Backoff, dann Erfolg.
+    collector
+        .script
+        .lock()
+        .unwrap()
+        .extend([(503, Some("1")), (429, None)]);
+    let started = std::time::Instant::now();
+    let (metrics, errors) = export_one(collector_addr).await;
+    assert!(
+        started.elapsed() >= Duration::from_millis(1000),
+        "Retry-After beachtet"
+    );
+    assert_eq!(errors, 0);
+    assert_eq!(metrics.logs_exported(), 1);
+    assert_eq!(collector.posts.lock().unwrap().len(), 3);
+    let mut out = String::new();
+    metrics.render_prometheus(&mut out);
+    assert!(
+        out.contains("aigw_otlp_export_retries_total{signal=\"logs\"} 2\n"),
+        "{out}"
+    );
+    assert!(out.contains("aigw_otlp_export_errors_total{signal=\"logs\"} 0\n"));
+}
+
+#[tokio::test]
+async fn retries_are_bounded() {
+    // Retry-After länger als max_backoff: sofort verwerfen (kein Blockieren des Exports).
+    let (collector_addr, collector) = start_collector().await;
+    collector
+        .script
+        .lock()
+        .unwrap()
+        .push_back((429, Some("3600")));
+    let (metrics, errors) = export_one(collector_addr).await;
+    assert_eq!(errors, 1);
+    assert_eq!(metrics.logs_exported(), 0);
+    assert_eq!(collector.posts.lock().unwrap().len(), 1);
+
+    // Dauerhaft 503: höchstens max_attempts Versuche.
+    let (collector_addr, collector) = start_collector().await;
+    collector.script.lock().unwrap().extend([(503, None); 10]);
+    let (_, errors) = export_one(collector_addr).await;
+    assert_eq!(errors, 1);
+    assert_eq!(collector.posts.lock().unwrap().len(), 4);
+
+    // 400 ist kein vorübergehender Fehler: keine Wiederholung.
+    let (collector_addr, collector) = start_collector().await;
+    collector.script.lock().unwrap().push_back((400, None));
+    let (_, errors) = export_one(collector_addr).await;
+    assert_eq!(errors, 1);
+    assert_eq!(collector.posts.lock().unwrap().len(), 1);
 }

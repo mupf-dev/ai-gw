@@ -18,6 +18,7 @@ aigw-cache.workspace = true
 aigw-core.workspace = true
 aigw-counters.workspace = true
 aigw-mcp.workspace = true
+aigw-outbound.workspace = true
 aigw-plugins.workspace = true
 aigw-providers.workspace = true
 arc-swap.workspace = true

@@ -240,6 +240,10 @@ impl Recorder {
             }
             if let Some(p) = d.provider {
                 self.span.record("gen_ai.system", gen_ai_system(p));
+                self.span.record(
+                    "gen_ai.provider.name",
+                    aigw_core::observe::gen_ai_provider_name(p),
+                );
             }
         }
     }

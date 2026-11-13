@@ -15,6 +15,7 @@ members = [
     "crates/aigw-counters",
     "crates/aigw-mcp",
     "crates/aigw-observe",
+    "crates/aigw-outbound",
     "crates/aigw-pii",
     "crates/aigw-plugins",
     "crates/aigw-providers",
@@ -40,6 +41,7 @@ aigw-core = { path = "crates/aigw-core" }
 aigw-counters = { path = "crates/aigw-counters" }
 aigw-mcp = { path = "crates/aigw-mcp" }
 aigw-observe = { path = "crates/aigw-observe" }
+aigw-outbound = { path = "crates/aigw-outbound" }
 aigw-pii = { path = "crates/aigw-pii" }
 aigw-plugins = { path = "crates/aigw-plugins" }
 aigw-providers = { path = "crates/aigw-providers" }
@@ -73,9 +75,11 @@ hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"
 # Upstream-TLS (AIGW-14): rustls/aws-lc-rs, ALPN h2+http/1.1, Mozilla-Wurzelzertifikate
 # (webpki-roots, unabhängig vom Container-Image).
 hyper-rustls = { version = "0.27.10", default-features = false, features = ["aws-lc-rs", "http1", "http2", "tls12", "webpki-tokio"] }
-# OIDC-Login der Admin-API (AIGW-32): System-CAs für den IdP (zusätzlich zu webpki-roots
-# nicht nötig, eigener rustls-Config), Base64url für JWS/PKCE, URL-Aufbau.
+# System-CAs für `upstream.roots: system|both` (aigw-outbound, AIGW-72); OIDC-Login (AIGW-32):
+# Base64url für JWS/PKCE, URL-Aufbau.
 rustls-native-certs = "0.8.5"
+# Mozilla-Wurzelzertifikate für `upstream.roots: webpki|both` (AIGW-72; ohnehin über hyper-rustls im Baum).
+webpki-roots = "1.0.12"
 base64 = "0.22.1"
 url = "2.5.8"
 # Eigener DNS-Resolver mit SSRF-Filter für ausgehende Webhooks (AIGW-61; ohnehin über hyper-util im Baum).

@@ -224,8 +224,9 @@ config:
 - **SSRF:** `endpoint` wird beim Bau der Bindung mit `aigw_core::upstream::UpstreamPolicy`
   geprüft (nur `https`, keine privaten/lokalen Ziele, keine `user:pass@` – Ausnahmen über
   `admin.allow_insecure_upstreams` / `admin.allow_private_upstreams`), vor jedem Aufruf
-  erneut und zusätzlich nach der Namensauflösung (`ip_allowed`). Restrisiko: DNS-Rebinding
-  zwischen Prüfung und Verbindungsaufbau (der Client löst selbst noch einmal auf).
+  erneut und zusätzlich bei jedem Verbindungsaufbau nach der Namensauflösung (gemeinsamer
+  Outbound-Baustein `aigw-outbound`, AIGW-72: geprüft wird genau die Adresse, mit der
+  verbunden wird – auch bei DNS-Rebinding). Keine Weiterleitungen, Antwort höchstens 256 KiB.
 - **Ausgabe:**
   - `buffered` (Standard): `needs_buffered_output` – gestreamte Anfragen werden gepuffert
     (`x-aigw-buffered: plugins`), Prüfung auf der ganzen Antwort, Ablehnung als normale

@@ -190,6 +190,29 @@ pub fn deployment(upstreams: &UpstreamPolicy, spec: &DeploymentSpec) -> Res {
     {
         return Err("settings.region: für AWS Bedrock Pflicht (z. B. \"eu-central-1\")".into());
     }
+    if let Some(ca) = setting_str(spec, "caFile")? {
+        ca_file(ca)?;
+    }
+    Ok(())
+}
+
+/// `settings.caFile` (F48): absoluter Pfad einer PEM-Datei auf dem Gateway-Host, ohne `..`.
+/// Ob die Datei lesbar ist, zeigt erst der Aufbau der Route (GitOps kann auf einem anderen
+/// Rechner prüfen).
+fn ca_file(path: &str) -> Res {
+    let p = std::path::Path::new(path);
+    if path.is_empty()
+        || path.len() > 4096
+        || path.chars().any(char::is_control)
+        || !p.is_absolute()
+        || p.components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(
+            "settings.caFile: absoluter Pfad einer PEM-Datei ohne \"..\" (z. B. \"/etc/aigw/ca.pem\")"
+                .into(),
+        );
+    }
     Ok(())
 }
 
@@ -407,6 +430,28 @@ mod tests {
     use super::*;
     use crate::resource::{Capacity, Fallback, TokenPrices};
     use serde_json::json;
+
+    #[test]
+    fn ca_file_setting() {
+        let p = UpstreamPolicy::strict();
+        let ok = dep(
+            ProviderKind::OpenAi,
+            None,
+            serde_json::json!({"caFile": "/etc/aigw/ca.pem"}),
+        );
+        assert!(deployment(&p, &ok).is_ok());
+        for bad in [
+            serde_json::json!({"caFile": "ca.pem"}),
+            serde_json::json!({"caFile": "/etc/../root/x"}),
+            serde_json::json!({"caFile": ""}),
+            serde_json::json!({"caFile": 1}),
+        ] {
+            assert!(
+                deployment(&p, &dep(ProviderKind::OpenAi, None, bad.clone())).is_err(),
+                "{bad}"
+            );
+        }
+    }
 
     fn dep(provider: ProviderKind, endpoint: Option<&str>, settings: Value) -> DeploymentSpec {
         DeploymentSpec {

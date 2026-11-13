@@ -3,37 +3,32 @@
 
 //! HTTP-Client für ausgehende Webhooks mit SSRF-Schutz.
 //!
+//! Dünne Hülle um den gemeinsamen Outbound-Baustein [`aigw_outbound::OutboundClient`]
+//! (AIGW-72):
 //! - URL-Prüfung beim Konfigurieren ([`WebhookClient::check_url`], Regeln wie Deployments).
 //! - Eigene Namensauflösung: Jede aufgelöste Adresse wird gegen die Regeln geprüft
 //!   ([`UpstreamPolicy::resolved_ip_allowed`]); bleibt keine übrig, scheitert der
-//!   Verbindungsaufbau. Damit fällt auch ein öffentlicher Name auf, der (per DNS-Rebinding)
-//!   auf eine private Adresse zeigt.
-//! - Keine Weiterleitungen (3xx ist ein Fehler), Antwortgröße begrenzt, Zeitlimit für den
-//!   ganzen Aufruf inklusive Body.
-//! - Eigener Keep-Alive-Pool (getrennt von den Anbieter-Verbindungen), HTTP/2 und HTTP/1.1.
+//!   Verbindungsaufbau ([`WebhookError::Blocked`]). Damit fällt auch ein öffentlicher Name auf,
+//!   der (per DNS-Rebinding) auf eine private Adresse zeigt.
+//! - Keine Weiterleitungen (3xx wird nicht verfolgt, sondern als Antwort zurückgegeben und vom
+//!   Aufrufer als Fehlschlag gewertet), Antwortgröße begrenzt, Zeitlimit für den ganzen Aufruf
+//!   inklusive Body.
+//! - Eigener Keep-Alive-Pool (getrennt von den Anbieter-Verbindungen), HTTP/2 und HTTP/1.1,
+//!   Vertrauensanker aus `upstream.roots`/`upstream.ca_file`.
 //! - mTLS-Erweiterungspunkt: [`ClientOptions::tls`] nimmt eine fertige rustls-Konfiguration
 //!   (z. B. mit `with_client_auth_cert`); eine Konfigurationsoberfläche dafür folgt später.
 
 use std::fmt;
-use std::future::Future;
-use std::io;
-use std::net::SocketAddr;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::Duration;
 
 use aigw_core::resource::SecretString;
 use aigw_core::upstream::UpstreamPolicy;
+use aigw_outbound::{
+    AddressGuard, FetchLimits, OutboundClient, OutboundError, OutboundOptions, Redirects,
+};
 use bytes::Bytes;
 use http::header::{CONTENT_TYPE, HeaderValue, USER_AGENT};
 use http::{HeaderMap, Method, Request, StatusCode, Uri};
-use http_body_util::{BodyExt, Full, Limited};
-use hyper_rustls::HttpsConnector;
-use hyper_util::client::legacy::Client;
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::client::legacy::connect::dns::Name;
-use hyper_util::rt::{TokioExecutor, TokioTimer};
 
 use crate::sign;
 
@@ -53,7 +48,7 @@ pub struct ClientOptions {
     /// Höchstzahl unbenutzter Verbindungen je Ziel.
     pub pool_max_idle_per_host: usize,
     /// Eigene TLS-Konfiguration (mTLS-Client-Zertifikat, eigene CAs). `None` =
-    /// Mozilla-Wurzelzertifikate (webpki-roots), aws-lc-rs.
+    /// Vertrauensanker aus `upstream.roots`/`upstream.ca_file`, aws-lc-rs.
     pub tls: Option<rustls::ClientConfig>,
 }
 
@@ -85,9 +80,12 @@ pub enum WebhookError {
     /// Zeitlimit überschritten.
     #[error("Zeitlimit von {0} ms überschritten")]
     Timeout(u128),
-    /// Verbindung/Übertragung fehlgeschlagen (inkl. SSRF-Ablehnung beim Auflösen).
+    /// Verbindung/Übertragung fehlgeschlagen.
     #[error("Verbindung fehlgeschlagen: {0}")]
     Transport(String),
+    /// Ziel durch die SSRF-Regeln gesperrt (auch nach der Namensauflösung); keine Wiederholung.
+    #[error("Ziel gesperrt: {0}")]
+    Blocked(String),
     /// Antwort größer als erlaubt.
     #[error("Antwort größer als {0} Byte")]
     ResponseTooLarge(usize),
@@ -114,54 +112,10 @@ pub struct WebhookResponse {
     pub body: Bytes,
 }
 
-/// DNS-Auflösung mit SSRF-Filter.
-#[derive(Clone)]
-struct GuardedResolver {
-    policy: Arc<UpstreamPolicy>,
-}
-
-type ResolveFuture =
-    Pin<Box<dyn Future<Output = Result<std::vec::IntoIter<SocketAddr>, io::Error>> + Send>>;
-
-impl tower_service::Service<Name> for GuardedResolver {
-    type Response = std::vec::IntoIter<SocketAddr>;
-    type Error = io::Error;
-    type Future = ResolveFuture;
-
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, name: Name) -> Self::Future {
-        let policy = Arc::clone(&self.policy);
-        Box::pin(async move {
-            let host = name.as_str().to_owned();
-            let all: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
-            let allowed: Vec<SocketAddr> = all
-                .into_iter()
-                .filter(|a| policy.resolved_ip_allowed(&host, a.ip()))
-                .collect();
-            if allowed.is_empty() {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    format!(
-                        "{host}: keine erlaubte Zieladresse (SSRF-Schutz, \
-                         admin.allow_private_upstreams)"
-                    ),
-                ));
-            }
-            Ok(allowed.into_iter())
-        })
-    }
-}
-
-type Inner = Client<HttpsConnector<HttpConnector<GuardedResolver>>, Full<Bytes>>;
-
 /// Webhook-Client (günstig klonbar, alle Klone teilen den Pool).
 #[derive(Clone)]
 pub struct WebhookClient {
-    inner: Inner,
-    policy: Arc<UpstreamPolicy>,
+    inner: OutboundClient,
 }
 
 impl fmt::Debug for WebhookClient {
@@ -172,48 +126,39 @@ impl fmt::Debug for WebhookClient {
 
 impl WebhookClient {
     /// Baut den Client mit den SSRF-Regeln `policy`.
-    pub fn new(policy: UpstreamPolicy, opts: ClientOptions) -> Result<Self, rustls::Error> {
-        let policy = Arc::new(policy);
-        let mut http = HttpConnector::new_with_resolver(GuardedResolver {
-            policy: Arc::clone(&policy),
-        });
-        http.enforce_http(false);
-        http.set_nodelay(true);
-        http.set_connect_timeout(Some(opts.connect_timeout));
-        http.set_keepalive(Some(Duration::from_secs(60)));
-        let builder = hyper_rustls::HttpsConnectorBuilder::new();
-        let builder = match opts.tls {
-            Some(cfg) => builder.with_tls_config(cfg),
-            None => builder
-                .with_provider_and_webpki_roots(rustls::crypto::aws_lc_rs::default_provider())?,
-        };
-        let https = builder
-            .https_or_http()
-            .enable_http1()
-            .enable_http2()
-            .wrap_connector(http);
-        let inner = Client::builder(TokioExecutor::new())
-            .timer(TokioTimer::new())
-            .pool_timer(TokioTimer::new())
-            .pool_idle_timeout(opts.pool_idle_timeout)
-            .pool_max_idle_per_host(opts.pool_max_idle_per_host)
-            .build(https);
-        Ok(Self { inner, policy })
+    pub fn new(policy: UpstreamPolicy, opts: ClientOptions) -> Result<Self, OutboundError> {
+        let mut builder =
+            OutboundClient::builder(AddressGuard::policy(policy)).options(OutboundOptions {
+                connect_timeout: opts.connect_timeout,
+                pool_idle_timeout: opts.pool_idle_timeout,
+                pool_max_idle_per_host: opts.pool_max_idle_per_host,
+                ..OutboundOptions::default()
+            });
+        if let Some(tls) = opts.tls {
+            builder = builder.rustls_config(tls);
+        }
+        Ok(Self {
+            inner: builder.build()?,
+        })
     }
 
     /// Client mit strengen SSRF-Regeln und Standardeinstellungen.
-    pub fn strict() -> Result<Self, rustls::Error> {
+    pub fn strict() -> Result<Self, OutboundError> {
         Self::new(UpstreamPolicy::strict(), ClientOptions::default())
     }
 
     /// SSRF-Regeln.
     pub fn policy(&self) -> &UpstreamPolicy {
-        &self.policy
+        static STRICT: std::sync::OnceLock<UpstreamPolicy> = std::sync::OnceLock::new();
+        self.inner
+            .guard()
+            .upstream_policy()
+            .unwrap_or_else(|| STRICT.get_or_init(UpstreamPolicy::strict))
     }
 
     /// Prüft eine Ziel-URL gegen die SSRF-Regeln (Konfiguration; Fehlertext für den Nutzer).
     pub fn check_url(&self, url: &str) -> Result<Uri, String> {
-        self.policy.check_endpoint(url)?;
+        self.policy().check_endpoint(url)?;
         url.parse::<Uri>()
             .map_err(|_| format!("URL {url:?} ist ungültig"))
     }
@@ -231,14 +176,14 @@ impl WebhookClient {
         let mut req = Request::builder()
             .method(Method::POST)
             .uri(uri.clone())
-            .body(Full::new(body.clone()))
+            .body(body.clone())
             .map_err(|e| WebhookError::Request(e.to_string()))?;
         let h = req.headers_mut();
         *h = headers;
         h.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         h.insert(
             USER_AGENT,
-            HeaderValue::from_static(concat!("ai-gw/", env!("CARGO_PKG_VERSION"))),
+            HeaderValue::from_static(aigw_outbound::USER_AGENT),
         );
         if let Some(secret) = secret {
             let ts = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -248,45 +193,24 @@ impl WebhookClient {
                 HeaderValue::from_str(&v).map_err(|e| WebhookError::Request(e.to_string()))?,
             );
         }
-        let call = async {
-            let res = self
-                .inner
-                .request(req)
-                .await
-                .map_err(|e| WebhookError::Transport(error_chain(&e)))?;
-            let (parts, body) = res.into_parts();
-            let body = Limited::new(body, max_response_bytes)
-                .collect()
-                .await
-                .map_err(|e| {
-                    if e.is::<http_body_util::LengthLimitError>() {
-                        WebhookError::ResponseTooLarge(max_response_bytes)
-                    } else {
-                        WebhookError::Transport(e.to_string())
-                    }
-                })?
-                .to_bytes();
-            Ok(WebhookResponse {
-                status: parts.status,
-                headers: parts.headers,
-                body,
-            })
+        let limits = FetchLimits {
+            timeout,
+            max_body: max_response_bytes,
+            // 3xx wird nicht verfolgt; der Aufrufer wertet es (wie jeden Nicht-2xx-Status) als
+            // Fehlschlag.
+            redirects: Redirects::Return,
         };
-        match tokio::time::timeout(timeout, call).await {
-            Ok(r) => r,
-            Err(_) => Err(WebhookError::Timeout(timeout.as_millis())),
+        match self.inner.fetch(req, &limits).await {
+            Ok(r) => Ok(WebhookResponse {
+                status: r.status,
+                headers: r.headers,
+                body: r.body,
+            }),
+            Err(OutboundError::Timeout(t)) => Err(WebhookError::Timeout(t.as_millis())),
+            Err(OutboundError::TooLarge(n)) => Err(WebhookError::ResponseTooLarge(n)),
+            Err(OutboundError::Blocked(m)) => Err(WebhookError::Blocked(m)),
+            Err(OutboundError::Request(m)) => Err(WebhookError::Request(m)),
+            Err(other) => Err(WebhookError::Transport(other.to_string())),
         }
     }
-}
-
-/// Fehlerkette als Text (hyper-Fehler nennen die Ursache erst in `source()`).
-fn error_chain(e: &(dyn std::error::Error + 'static)) -> String {
-    let mut out = e.to_string();
-    let mut cur = e.source();
-    while let Some(s) = cur {
-        out.push_str(": ");
-        out.push_str(&s.to_string());
-        cur = s.source();
-    }
-    out
 }

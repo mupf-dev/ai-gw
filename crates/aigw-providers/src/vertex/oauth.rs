@@ -27,7 +27,6 @@ use aws_lc_rs::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
 use bytes::Bytes;
 use http::header::{ACCEPT, CONTENT_TYPE};
 use http::{HeaderValue, Method, Uri};
-use http_body_util::BodyExt as _;
 use serde_json::{Value, json};
 use tokio::time::Instant;
 
@@ -290,6 +289,13 @@ impl ServiceAccountTokenSource {
         self.fetch().await
     }
 
+    /// HTTP-Client für den Token-Abruf: der des Deployments (gleiche SSRF-Regeln und
+    /// Vertrauensanker; gesetzt beim ersten `Provider::prepare`), sonst ein Client mit strengen
+    /// SSRF-Regeln.
+    pub fn use_client(&self, client: &UpstreamClient) {
+        let _ = self.client.set(Ok(client.clone()));
+    }
+
     fn client(&self) -> Result<&UpstreamClient, UpstreamError> {
         self.client
             .get_or_init(|| UpstreamClient::with_defaults().map_err(|e| e.to_string()))
@@ -318,23 +324,23 @@ impl ServiceAccountTokenSource {
             .map_err(|e| auth_failure(e.to_string(), Some(500)))?;
         let started = Instant::now();
         let client = self.client()?;
-        let resp = tokio::time::timeout(TOKEN_TIMEOUT, async {
-            let resp = client.send(req).await.map_err(|e| {
-                tracing::warn!(error = %e, url = %self.token_url, "Vertex-Token-Endpunkt nicht erreichbar");
-                auth_failure("Token-Endpunkt nicht erreichbar", None)
-            })?;
-            let status = resp.status();
-            let body = resp
-                .into_body()
-                .collect()
-                .await
-                .map(|b| b.to_bytes())
-                .map_err(|_| auth_failure("Token-Antwort abgebrochen", None))?;
-            Ok::<_, UpstreamError>((status, body))
-        })
-        .await
-        .map_err(|_| auth_failure("Zeitlimit beim Token-Abruf", None))??;
-        let (status, body) = resp;
+        let limits = aigw_outbound::FetchLimits::new(TOKEN_TIMEOUT, MAX_TOKEN_RESPONSE);
+        let reply = client.outbound().fetch(req, &limits).await.map_err(|e| {
+            tracing::warn!(error = %e, url = %self.token_url, "Vertex-Token-Abruf fehlgeschlagen");
+            match e {
+                aigw_outbound::OutboundError::Timeout(_) => {
+                    auth_failure("Zeitlimit beim Token-Abruf", None)
+                }
+                aigw_outbound::OutboundError::TooLarge(_) => {
+                    auth_failure("Token-Antwort zu groß", Some(502))
+                }
+                aigw_outbound::OutboundError::Redirect { .. } => {
+                    auth_failure("Token-Endpunkt leitet weiter (nicht erlaubt)", Some(502))
+                }
+                _ => auth_failure("Token-Endpunkt nicht erreichbar", None),
+            }
+        })?;
+        let (status, body) = (reply.status, reply.body);
         if !status.is_success() {
             // Die Antwort (`error`, `error_description`) nennt nur den Grund, keine Geheimnisse.
             let reason = serde_json::from_slice::<Value>(&body)

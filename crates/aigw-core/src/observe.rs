@@ -433,6 +433,16 @@ pub fn gen_ai_system(provider: ProviderKind) -> &'static str {
     }
 }
 
+/// Wert von `gen_ai.provider.name` (OpenTelemetry GenAI-Semantic-Conventions ab v1.37, löst
+/// `gen_ai.system` ab; beide werden gesetzt, F101). Anbieter ohne festgelegten Wert behalten
+/// ihren Bezeichner.
+pub fn gen_ai_provider_name(provider: ProviderKind) -> &'static str {
+    match provider {
+        ProviderKind::AzureOpenAi => "azure.ai.openai",
+        other => gen_ai_system(other),
+    }
+}
+
 /// Beobachter, der alles verwirft (Standard ohne Request-Log).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoopObserver;

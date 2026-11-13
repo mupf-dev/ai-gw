@@ -4,7 +4,7 @@
 //! Request-Log als OTLP-Logs: ein `LogRecord` je Anfrage (`event_name = "aigw.request"`).
 //!
 //! Attribute nach GenAI- bzw. HTTP-Semantic-Conventions, wo es passende gibt
-//! (`gen_ai.request.model`, `gen_ai.system`, `gen_ai.usage.*`, `http.response.status_code`,
+//! (`gen_ai.request.model`, `gen_ai.system`, `gen_ai.provider.name`, `gen_ai.usage.*`, `http.response.status_code`,
 //! `error.type`, `client.address`), sonst unter `aigw.*`. Der Body ist der (bereits maskierte)
 //! Payload als JSON-Text, wenn `observe.otlp.logs.include_payload` gesetzt ist.
 
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use aigw_core::config::OtlpConfig;
-use aigw_core::observe::gen_ai_system;
+use aigw_core::observe::{gen_ai_provider_name, gen_ai_system};
 use aigw_core::types::ProviderKind;
 
 use super::OtlpMetrics;
@@ -35,7 +35,7 @@ impl OtlpLogExporter {
     /// Exporter nach `cfg` (`observe.otlp`). Benötigt eine Tokio-Runtime beim Export.
     pub fn new(cfg: &OtlpConfig, metrics: Arc<OtlpMetrics>) -> Result<Self, OtlpConfigError> {
         Ok(Self {
-            client: OtlpClient::new(cfg)?,
+            client: OtlpClient::new(cfg, Arc::clone(&metrics))?,
             origin: super::origin(cfg),
             include_payload: cfg.logs.include_payload,
             metrics,
@@ -69,6 +69,10 @@ fn to_log(e: &LogEntry, include_payload: bool, observed: u64) -> LogData {
         a.push(KeyValue::str("aigw.provider", p.clone()));
         if let Some(kind) = ProviderKind::ALL.iter().find(|k| k.as_str() == p) {
             a.push(KeyValue::str("gen_ai.system", gen_ai_system(*kind)));
+            a.push(KeyValue::str(
+                "gen_ai.provider.name",
+                gen_ai_provider_name(*kind),
+            ));
         }
     }
     opt(&mut a, "aigw.provider_model", &l.provider_model);

@@ -21,6 +21,7 @@ dependencies = [
  "aigw-core",
  "aigw-counters",
  "aigw-observe",
+ "aigw-outbound",
  "aigw-plugins",
  "aigw-proxy",
  "aigw-store",
@@ -45,6 +46,7 @@ dependencies = [
  "aigw-billing",
  "aigw-core",
  "aigw-mcp",
+ "aigw-outbound",
  "aigw-proxy",
  "aigw-store",
  "aws-lc-rs",
@@ -54,11 +56,8 @@ dependencies = [
  "futures-util",
  "http-body-util",
  "hyper",
- "hyper-rustls",
  "hyper-util",
  "rust-embed",
- "rustls",
- "rustls-native-certs",
  "serde",
  "serde_json",
  "sqlx",
@@ -145,19 +144,16 @@ name = "aigw-mcp"
 version = "0.1.0"
 dependencies = [
  "aigw-core",
+ "aigw-outbound",
  "aws-lc-rs",
  "bytes",
  "futures-util",
  "http",
  "http-body-util",
  "hyper",
- "hyper-rustls",
- "hyper-util",
- "rustls",
  "serde",
  "serde_json",
  "tokio",
- "tower",
  "tracing",
  "url",
 ]
@@ -167,6 +163,7 @@ name = "aigw-observe"
 version = "0.1.0"
 dependencies = [
  "aigw-core",
+ "aigw-outbound",
  "aigw-pii",
  "aigw-providers",
  "aigw-proxy",
@@ -179,9 +176,7 @@ dependencies = [
  "http",
  "http-body-util",
  "hyper",
- "hyper-rustls",
  "hyper-util",
- "rustls",
  "serde",
  "serde_json",
  "sqlx",
@@ -190,6 +185,27 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "aigw-outbound"
+version = "0.1.0"
+dependencies = [
+ "aigw-core",
+ "axum",
+ "bytes",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "rustls",
+ "rustls-native-certs",
+ "thiserror",
+ "tokio",
+ "tower-service",
+ "tracing",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -226,6 +242,7 @@ name = "aigw-providers"
 version = "0.1.0"
 dependencies = [
  "aigw-core",
+ "aigw-outbound",
  "aws-lc-rs",
  "axum",
  "bytes",
@@ -233,9 +250,6 @@ dependencies = [
  "http",
  "http-body-util",
  "hyper",
- "hyper-rustls",
- "hyper-util",
- "rustls",
  "serde_json",
  "thiserror",
  "tokio",
@@ -251,6 +265,7 @@ dependencies = [
  "aigw-core",
  "aigw-counters",
  "aigw-mcp",
+ "aigw-outbound",
  "aigw-plugins",
  "aigw-providers",
  "aigw-store",
@@ -302,22 +317,18 @@ name = "aigw-webhook"
 version = "0.1.0"
 dependencies = [
  "aigw-core",
+ "aigw-outbound",
  "async-trait",
  "aws-lc-rs",
  "axum",
  "bytes",
  "http",
- "http-body-util",
- "hyper",
- "hyper-rustls",
- "hyper-util",
  "rustls",
  "serde",
  "serde_json",
  "thiserror",
  "time",
  "tokio",
- "tower-service",
  "tracing",
  "uuid",
 ]

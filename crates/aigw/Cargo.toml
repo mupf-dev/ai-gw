@@ -22,6 +22,7 @@ aigw-cache.workspace = true
 aigw-core.workspace = true
 aigw-counters.workspace = true
 aigw-observe.workspace = true
+aigw-outbound.workspace = true
 aigw-plugins.workspace = true
 aigw-proxy.workspace = true
 aigw-store.workspace = true

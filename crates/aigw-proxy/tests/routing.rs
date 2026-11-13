@@ -352,7 +352,7 @@ async fn gateway(routes: Arc<SnapshotRoutes>) -> Env {
 fn new_routes() -> Arc<SnapshotRoutes> {
     Arc::new(SnapshotRoutes::new(
         Registry::with_builtin(),
-        UpstreamClient::with_defaults().unwrap(),
+        UpstreamClient::unguarded().unwrap(),
     ))
 }
 

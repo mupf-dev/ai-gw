@@ -288,7 +288,7 @@ async fn env_with(mode: PayloadMode) -> Env {
     let (up, fake) = start_fake().await;
     let base = format!("http://{up}/v1");
     let registry = Registry::with_builtin();
-    let client = UpstreamClient::with_defaults().unwrap();
+    let client = UpstreamClient::unguarded().unwrap();
     let mut routes = StaticRoutes::new();
     let fast = json!({"timeouts": {"firstByteMs": 2000, "idleMs": 300, "totalMs": 5000}});
     for model in [

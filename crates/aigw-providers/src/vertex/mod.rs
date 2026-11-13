@@ -406,9 +406,12 @@ impl Provider for VertexAdapter {
         &self.provider_model
     }
 
-    fn prepare(&self) -> Option<PrepareFuture<'_>> {
+    fn prepare(&self, client: &crate::UpstreamClient) -> Option<PrepareFuture<'_>> {
         match &self.auth {
-            Auth::ServiceAccount(src) => Some(Box::pin(src.ensure())),
+            Auth::ServiceAccount(src) => {
+                src.use_client(client);
+                Some(Box::pin(src.ensure()))
+            }
             _ => None,
         }
     }

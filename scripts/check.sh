@@ -13,14 +13,20 @@
 #   AIGW_TEST_POSTGRES_URL=postgres://…   Store-Tests zusätzlich gegen Postgres (legt je Lauf
 #                      eine Wegwerf-Datenbank an; der Benutzer braucht CREATEDB)
 #   AIGW_TEST_POSTGRES=docker   startet dafür selbst einen Postgres-17-Container mit pgvector
-#                      (Image AIGW_TEST_POSTGRES_IMAGE, Standard pgvector/pgvector:pg17) und setzt
+#                      (Image AIGW_TEST_POSTGRES_IMAGE, Standard pgvector/pgvector:0.8.7-pg17) und setzt
 #                      zusätzlich AIGW_TEST_PGVECTOR_URL (semantischer Cache, AIGW-40)
 #   AIGW_TEST_PGVECTOR_URL=postgres://…   Cache-Tests gegen Postgres mit Erweiterung `vector`
 #   AIGW_TEST_REDIS_URL=redis://…   Zähler-Tests (aigw-counters) zusätzlich gegen Redis/Valkey
 #   AIGW_TEST_REDIS=docker      startet dafür selbst einen Redis-Stack-Container (Image
-#                      AIGW_TEST_REDIS_IMAGE, Standard redis/redis-stack-server) und setzt
+#                      AIGW_TEST_REDIS_IMAGE, Standard redis/redis-stack-server:7.4.0-v8) und setzt
 #                      zusätzlich AIGW_TEST_REDIS_STACK_URL (Vektorsuche, AIGW-40)
 #   AIGW_TEST_REDIS_STACK_URL=redis://…   Cache-Tests gegen Redis Stack / Valkey Search
+#   AIGW_TEST_OTELCOL=docker    Gegentest des OTLP-Exports gegen den offiziellen OpenTelemetry
+#                      Collector (Image AIGW_TEST_OTELCOL_IMAGE, Standard
+#                      otel/opentelemetry-collector-contrib:0.165.0, file-Exporter); setzt
+#                      AIGW_TEST_OTELCOL_URL und AIGW_TEST_OTELCOL_DIR (Test aigw-observe/tests/otelcol.rs)
+#   AIGW_TEST_OTELCOL_URL=http://…, AIGW_TEST_OTELCOL_DIR=…   eigener Collector (OTLP/HTTP) mit
+#                      file-Exportern nach $DIR/traces.json und $DIR/logs.json
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -45,7 +51,8 @@ step "cargo clippy (-D warnings)"
 cargo clippy --workspace --all-targets "${LOCKED[@]}" -- -D warnings
 
 if [[ "${AIGW_TEST_POSTGRES:-}" == docker && -z "${AIGW_TEST_POSTGRES_URL:-}" ]]; then
-  PG_IMAGE="${AIGW_TEST_POSTGRES_IMAGE:-pgvector/pgvector:pg17}"
+  # Feste Version (F173): reproduzierbare Läufe; Aktualisierung bewusst per Commit.
+  PG_IMAGE="${AIGW_TEST_POSTGRES_IMAGE:-pgvector/pgvector:0.8.7-pg17}"
   step "Postgres 17 für Store-/Cache-Tests starten (Docker $PG_IMAGE, Wegwerf-Container)"
   PG_NAME="aigw-check-pg-$$"
   trap 'docker rm -f "$PG_NAME" >/dev/null 2>&1 || true' EXIT
@@ -64,7 +71,8 @@ if [[ "${AIGW_TEST_POSTGRES:-}" == docker && -z "${AIGW_TEST_POSTGRES_URL:-}" ]]
 fi
 
 if [[ "${AIGW_TEST_REDIS:-}" == docker && -z "${AIGW_TEST_REDIS_URL:-}" ]]; then
-  REDIS_IMAGE="${AIGW_TEST_REDIS_IMAGE:-redis/redis-stack-server}"
+  # Feste Version (F173).
+  REDIS_IMAGE="${AIGW_TEST_REDIS_IMAGE:-redis/redis-stack-server:7.4.0-v8}"
   step "Redis für Zähler-/Cache-Tests starten (Docker $REDIS_IMAGE, Wegwerf-Container)"
   REDIS_NAME="aigw-check-redis-$$"
   # Bestehenden EXIT-Trap (Postgres) erhalten.
@@ -81,7 +89,54 @@ if [[ "${AIGW_TEST_REDIS:-}" == docker && -z "${AIGW_TEST_REDIS_URL:-}" ]]; then
   fi
 fi
 
-step "cargo test${AIGW_TEST_POSTGRES_URL:+ (inkl. Postgres)}${AIGW_TEST_PGVECTOR_URL:+ (inkl. pgvector)}${AIGW_TEST_REDIS_URL:+ (inkl. Redis)}${AIGW_TEST_REDIS_STACK_URL:+ (inkl. Redis Stack)}"
+if [[ "${AIGW_TEST_OTELCOL:-}" == docker && -z "${AIGW_TEST_OTELCOL_URL:-}" ]]; then
+  # Gegentest gegen den offiziellen Collector (F103): OTLP/HTTP-Empfänger, file-Exporter (OTLP-JSON).
+  OTELCOL_IMAGE="${AIGW_TEST_OTELCOL_IMAGE:-otel/opentelemetry-collector-contrib:0.165.0}"
+  step "OpenTelemetry Collector für den OTLP-Gegentest starten (Docker $OTELCOL_IMAGE)"
+  OTELCOL_NAME="aigw-check-otelcol-$$"
+  OTELCOL_DIR=$(mktemp -d)
+  # Der Collector läuft als UID 10001 und schreibt in das eingebundene Verzeichnis.
+  chmod 0777 "$OTELCOL_DIR"
+  cat >"$OTELCOL_DIR/config.yaml" <<'YAML'
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+exporters:
+  file/traces:
+    path: /out/traces.json
+    flush_interval: 100ms
+  file/logs:
+    path: /out/logs.json
+    flush_interval: 100ms
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [file/traces]
+    logs:
+      receivers: [otlp]
+      exporters: [file/logs]
+YAML
+  trap 'docker rm -f "${PG_NAME:-}" "${REDIS_NAME:-}" "$OTELCOL_NAME" >/dev/null 2>&1 || true; rm -rf "$OTELCOL_DIR"' EXIT
+  docker run -d --rm --name "$OTELCOL_NAME" -p 127.0.0.1::4318 \
+    -v "$OTELCOL_DIR:/out" "$OTELCOL_IMAGE" --config=/out/config.yaml >/dev/null
+  OTELCOL_PORT=$(docker port "$OTELCOL_NAME" 4318/tcp | head -1 | sed 's/.*://')
+  # Bereit, sobald der Empfänger antwortet (leerer Export → 200/400, nicht Verbindungsfehler).
+  for _ in $(seq 1 30); do
+    curl -s -o /dev/null -X POST -H 'content-type: application/x-protobuf' \
+      "http://127.0.0.1:${OTELCOL_PORT}/v1/traces" && break
+    sleep 1
+  done
+  export AIGW_TEST_OTELCOL_URL="http://127.0.0.1:${OTELCOL_PORT}"
+  export AIGW_TEST_OTELCOL_DIR="$OTELCOL_DIR"
+fi
+
+step "cargo test${AIGW_TEST_POSTGRES_URL:+ (inkl. Postgres)}${AIGW_TEST_PGVECTOR_URL:+ (inkl. pgvector)}${AIGW_TEST_REDIS_URL:+ (inkl. Redis)}${AIGW_TEST_REDIS_STACK_URL:+ (inkl. Redis Stack)}${AIGW_TEST_OTELCOL_URL:+ (inkl. OTel-Collector)}"
 cargo test --workspace "${LOCKED[@]}"
 
 step "cargo deny check"

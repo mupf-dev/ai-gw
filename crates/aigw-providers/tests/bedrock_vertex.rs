@@ -361,7 +361,7 @@ fn bedrock_upstream(addr: SocketAddr, model: &str) -> Upstream {
         ],
         json!({"region": "eu-central-1"}),
     );
-    let client = UpstreamClient::with_defaults().unwrap();
+    let client = UpstreamClient::unguarded().unwrap();
     let mut up = Upstream::from_deployment(&d, &Registry::with_builtin(), &client).unwrap();
     up = Upstream::new("bedrock", up.provider().clone(), client, fast());
     up
@@ -446,7 +446,7 @@ async fn bedrock_error_classes() {
     let up = Upstream::from_deployment(
         &d,
         &Registry::with_builtin(),
-        &UpstreamClient::with_defaults().unwrap(),
+        &UpstreamClient::unguarded().unwrap(),
     )
     .unwrap();
     let e = up.chat(request(false)).await.unwrap_err();
@@ -656,7 +656,7 @@ impl Google {
         let up = Upstream::new(
             "vertex",
             Arc::new(adapter.clone()),
-            UpstreamClient::with_defaults().unwrap(),
+            UpstreamClient::unguarded().unwrap(),
             fast(),
         );
         (adapter, up)
@@ -673,7 +673,7 @@ impl Google {
         Upstream::from_deployment(
             &d,
             &Registry::with_builtin(),
-            &UpstreamClient::with_defaults().unwrap(),
+            &UpstreamClient::unguarded().unwrap(),
         )
         .unwrap()
     }

@@ -236,7 +236,10 @@ pub trait Plugin: Send + Sync {
 
 - rustls only, TLS 1.2/1.3; optional mTLS zur Datenebene.
 - Geheimnisse: Master-Key nie in der DB; Zugangsdaten verschlüsselt; Logs ohne Header `Authorization`/`api-key`.
-- SSRF-Schutz für alle frei konfigurierbaren Upstream-URLs (Anbieter-Endpunkte, MCP, Webhooks).
+- SSRF-Schutz für alle frei konfigurierbaren Upstream-URLs (Anbieter-Endpunkte, MCP, Webhooks):
+  URL-Prüfung beim Schreiben und Adressprüfung bei jedem Verbindungsaufbau (nach der
+  Namensauflösung, gegen DNS-Rebinding) im gemeinsamen Outbound-Baustein `aigw-outbound`
+  (AIGW-72); keine Weiterleitungen, Größen- und Zeitlimits.
 - Grenzen für Body-Größe, Header und Anzahl gleichzeitiger Verbindungen je Key (Schutz vor Missbrauch).
 - `cargo deny` und `cargo audit` in CI; kein `unsafe` in eigenen Crates außer begründet.
 

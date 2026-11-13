@@ -36,6 +36,8 @@ pub struct OtlpMetrics {
     pub(crate) trace_export_errors: AtomicU64,
     pub(crate) logs_exported: AtomicU64,
     pub(crate) log_export_errors: AtomicU64,
+    pub(crate) trace_export_retries: AtomicU64,
+    pub(crate) log_export_retries: AtomicU64,
 }
 
 impl OtlpMetrics {
@@ -71,12 +73,18 @@ impl OtlpMetrics {
              # HELP aigw_otlp_export_errors_total Fehlgeschlagene OTLP-Exporte je Signal\n\
              # TYPE aigw_otlp_export_errors_total counter\n\
              aigw_otlp_export_errors_total{{signal=\"traces\"}} {}\n\
-             aigw_otlp_export_errors_total{{signal=\"logs\"}} {}",
+             aigw_otlp_export_errors_total{{signal=\"logs\"}} {}\n\
+             # HELP aigw_otlp_export_retries_total Wiederholte OTLP-Exporte je Signal (429/5xx/Verbindung)\n\
+             # TYPE aigw_otlp_export_retries_total counter\n\
+             aigw_otlp_export_retries_total{{signal=\"traces\"}} {}\n\
+             aigw_otlp_export_retries_total{{signal=\"logs\"}} {}",
             r(&self.spans_exported),
             r(&self.spans_dropped),
             r(&self.logs_exported),
             r(&self.trace_export_errors),
             r(&self.log_export_errors),
+            r(&self.trace_export_retries),
+            r(&self.log_export_retries),
         );
     }
 }

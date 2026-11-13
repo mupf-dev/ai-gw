@@ -59,6 +59,7 @@ pub(crate) fn request_span_op(
         otel.status_code = Empty,
         gen_ai.operation.name = operation,
         gen_ai.system = Empty,
+        gen_ai.provider.name = Empty,
         gen_ai.request.model = Empty,
         gen_ai.request.max_tokens = Empty,
         gen_ai.response.model = Empty,

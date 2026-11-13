@@ -221,9 +221,11 @@ ENV: `AIGW_ADMIN__ALLOW_INSECURE_UPSTREAMS=localhost,ollama`. Ein lokaler Ollama
 braucht beide Listen. Ungültige Einträge brechen den Start ab.
 
 **Grenze**: Hostnamen werden beim Schreiben nicht aufgelöst – ein öffentlicher Name, der auf
-eine private Adresse zeigt (oder per DNS-Rebinding später zeigt), fällt hier nicht auf.
-`UpstreamPolicy::ip_allowed(ip)` ist für den HTTP-Client der Anbieter-Adapter gedacht, der
-nach der Namensauflösung prüfen sollte (siehe offene Punkte).
+eine private Adresse zeigt (oder per DNS-Rebinding später zeigt), fällt hier nicht auf. Das
+übernimmt der gemeinsame Outbound-Baustein (`aigw-outbound`, AIGW-72): Alle ausgehenden
+Clients (Anbieter, Webhooks, MCP, Guardrail-Dienste) prüfen bei jedem Verbindungsaufbau die
+aufgelösten Adressen mit `UpstreamPolicy::resolved_ip_allowed` (siehe
+[06-streaming-und-anbieter.md](06-streaming-und-anbieter.md) §4).
 
 ## 3. Konventionen
 
@@ -678,9 +680,6 @@ Anbieterart `mock` (`providerModel` `mock`, `mock-error`, `mock-stream-error`).
   Store-Transaktion verlegen (instanzübergreifend dicht).
 - Paginierung in SQL statt im Speicher, sobald Mengen es erfordern.
 - Persistentes Bootstrap-Token (Hash in der DB) statt Erzeugung je Prozessstart.
-- **SSRF zur Verbindungszeit** (AIGW-65): Die Endpunktprüfung löst keine Namen auf. Der
-  HTTP-Client der Anbieter-Adapter sollte nach der Auflösung `UpstreamPolicy::ip_allowed`
-  anwenden (schützt auch vor DNS-Rebinding).
 - Verweise ohne Fremdschlüssel auf Modellgruppen (`allowedModels` von Teams/Keys,
   `LimitSpec.modelGroup`): Löschen oder Alias-Umbenennen lässt sie derzeit stehen (sie greifen
   dann ins Leere bzw. bei Neuanlage desselben Namens wieder).

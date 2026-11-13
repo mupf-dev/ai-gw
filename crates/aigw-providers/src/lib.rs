@@ -266,8 +266,10 @@ pub trait Provider: Send + Sync + fmt::Debug {
     /// Optionale asynchrone Vorbereitung vor `build_request`, z. B. ein OAuth-Token holen,
     /// wenn (noch) keines im Cache liegt (Vertex). `None` = nichts zu tun (Standard, kein
     /// Overhead im Hot Path). Erneuerungen vor Ablauf laufen im Hintergrund; nur ohne gültiges
-    /// Token wartet die Anfrage (innerhalb ihres Zeitlimits).
-    fn prepare(&self) -> Option<PrepareFuture<'_>> {
+    /// Token wartet die Anfrage (innerhalb ihres Zeitlimits). `client` ist der HTTP-Client des
+    /// Deployments (gleiche SSRF-Regeln und Vertrauensanker wie die Anbieter-Aufrufe).
+    fn prepare(&self, client: &UpstreamClient) -> Option<PrepareFuture<'_>> {
+        let _ = client;
         None
     }
 

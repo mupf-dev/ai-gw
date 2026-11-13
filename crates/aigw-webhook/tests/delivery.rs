@@ -157,7 +157,7 @@ async fn ssrf_guard_at_resolution() {
         .await
         .unwrap_err();
     match e {
-        WebhookError::Transport(m) => assert!(m.contains("SSRF"), "{m}"),
+        WebhookError::Blocked(m) => assert!(m.contains("SSRF"), "{m}"),
         other => panic!("{other:?}"),
     }
     assert_eq!(s.hits.load(Ordering::SeqCst), 0);

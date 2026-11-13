@@ -361,15 +361,65 @@ Seitenverhältnis (1:1, 3:4, 4:3, 9:16, 16:9) abgebildet; `quality`, `style`, `u
 
 ## 4. Upstream-Client und Timeouts
 
-- hyper-util-Client, rustls mit aws-lc-rs und Mozilla-Wurzeln (`webpki-roots`), ALPN `h2` +
-  `http/1.1`, Klartext-HTTP für lokale Server. Pool je Endpunkt (Schema+Host+Port), bis 1024 freie
-  Verbindungen, 90 s Leerlauf, TCP-Keep-Alive 60 s, `TCP_NODELAY`, HTTP/2-Pings alle 30 s,
-  adaptives HTTP/2-Fenster (`ClientConfig`).
+- `UpstreamClient` ist eine Hülle um den gemeinsamen **Outbound-Baustein** (Crate
+  `aigw-outbound`, §4.1): hyper-util-Client, rustls mit aws-lc-rs, ALPN `h2` + `http/1.1`,
+  Klartext-HTTP nur für freigeschaltete lokale Server. Pool je Endpunkt (Schema+Host+Port), bis
+  1024 freie Verbindungen, 90 s Leerlauf, TCP-Keep-Alive 60 s, `TCP_NODELAY`, HTTP/2-Pings alle
+  30 s, adaptives HTTP/2-Fenster (`ClientConfig`).
+- **SSRF nach der Namensauflösung:** Der Betrieb baut den Client mit den Regeln aus
+  `admin.allow_*_upstreams` (`SnapshotRoutes::with_policy`); jede aufgelöste Adresse wird beim
+  Verbindungsaufbau geprüft. Ein Deployment, dessen Name auf eine private Adresse zeigt (auch
+  erst später, per DNS-Rebinding), scheitert mit `502 upstream_address_blocked`
+  (`ErrorClass::Connect`, Fallback greift). `UpstreamClient::with_defaults()` hat strenge Regeln,
+  `UpstreamClient::unguarded()` keine (nur Tests/Benchmarks).
+- **Eigene CA je Deployment:** `settings.caFile` (absoluter Pfad, PEM) ergänzt die globalen
+  Vertrauensanker; das Deployment bekommt einen eigenen Pool. Unlesbare Datei → Deployment wird
+  beim Routenaufbau ausgelassen (Warnung). Die Vertex-Token-Abrufe nutzen den Client des
+  Deployments (gleiche Regeln und CAs).
 - Timeouts (`Timeouts`, je Deployment): Verbindungsaufbau 10 s (global im `ClientConfig`),
   **erstes Byte** = Antwort-Header 120 s (nur Streams; nicht gestreamte Antworten kommen erst
   nach der Generierung), **Pause zwischen Chunks** 120 s, **Gesamtzeit** 600 s.
 - Fehlerantworten werden bis 64 KiB gelesen, nicht gestreamte Antworten bis 64 MiB.
 - Der Datenebenen-Listener setzt `TCP_NODELAY` (sonst verzögert Nagle kleine SSE-Chunks).
+
+### 4.1 Outbound-Baustein (`aigw-outbound`, AIGW-72)
+
+Ein Baustein für **alle** ausgehenden HTTP-Verbindungen (F63). Eigenes Crate statt Modul in
+`aigw-core`, damit `aigw-core` frei von hyper/rustls bleibt (es wird auch von reinen
+Logik-Crates genutzt) und TLS-, Pool- und Resolver-Logik genau einmal existiert.
+
+| Nutzer | Adressfilter (`AddressGuard`) | Limits |
+|---|---|---|
+| Anbieter-Adapter (`UpstreamClient`), Vertex-Token | `admin.allow_*_upstreams` | §4 (`Timeouts`), Fehler 64 KiB, Antwort 64 MiB, Token 64 KiB/30 s |
+| Webhooks (Plugin + Ereignisse) | `admin.allow_*_upstreams` | je Aufruf (`timeoutMs`, `maxResponseBytes`) |
+| MCP-Client | `admin.allow_*_upstreams` | `mcp.*` |
+| Guardrail-Dienste (`content-safety`, `GatewayHost`) | `admin.allow_*_upstreams` | `timeoutMs`, 256 KiB |
+| OIDC-IdP | keiner (Startkonfiguration des Betreibers) | `http_timeout_secs`, 1 MiB |
+| OTLP-Collector | keiner (Startkonfiguration des Betreibers) | `timeout_ms`, 64 KiB, Retry (07 §12.3) |
+
+- **Resolver mit SSRF-Filter:** hyper-util ruft ihn bei jedem neuen Verbindungsaufbau;
+  übrig bleiben nur Adressen mit `UpstreamPolicy::resolved_ip_allowed(host, ip)` (privat nur,
+  wenn Name oder Netz in `allow_private_upstreams` steht; unspezifizierte, Broadcast- und
+  Multicast-Adressen nie). Bleibt keine übrig → `OutboundError::Blocked` (nicht wiederholbar).
+  IP-Literale umgehen die Auflösung und werden vor dem Senden direkt geprüft. Der Resolver
+  ist austauschbar (`Resolve`, Tests: `StaticResolver` simuliert Rebinding).
+- **Keine Weiterleitungen:** 3xx wird nie verfolgt; `fetch` meldet `OutboundError::Redirect`
+  (Webhooks: 3xx als Antwort, der Aufrufer wertet es als Fehlschlag).
+- **Grenzen:** Verbindungsaufbau-Zeitlimit, `FetchLimits` (Gesamtzeit inkl. Body, Größe).
+- **Vertrauensanker (F48):** `upstream.roots: webpki | system | both` (Standard `webpki`,
+  Mozilla-Wurzeln im Binary, unabhängig vom Container-Image) und `upstream.ca_file`
+  (PEM) global; je Deployment zusätzlich `settings.caFile`, für den IdP zusätzlich
+  `admin.auth.oidc.ca_file`. Die globalen Werte setzt `aigw serve` beim Start
+  (`install_default_tls`; unlesbare Datei oder leerer Speicher → Startabbruch). rustls-Konfigurationen
+  werden je Kombination zwischengespeichert; geänderte CA-Dateien (Größe/Zeitstempel) werden beim
+  nächsten Routenaufbau neu gelesen. mTLS zum Upstream: Erweiterungspunkt
+  `OutboundBuilder::rustls_config` (Webhook `ClientOptions::tls`).
+
+```yaml
+upstream:
+  roots: webpki          # webpki | system | both
+  # ca_file: /etc/aigw/ca.pem
+```
 
 ## 5. Streaming
 
@@ -487,6 +537,9 @@ HTTP plus Übersetzung). Optimierungen (Profiling, Allokationen im Encoder, `Byt
 ## 10. Offene Punkte
 
 - Die Fehlerklasse (`ErrorClass`) steht nicht im `RequestRecord` (dort `ErrorKind`).
+- `settings.caFile` liest jede absolute Datei des Gateway-Hosts als PEM (Admin-Recht nötig,
+  Inhalt wird nie ausgegeben); eine Beschränkung auf ein Verzeichnis (wie `gitops.secret_dir`)
+  wäre möglich.
 - `client_ip` füllt der Proxy noch nicht (braucht `ConnectInfo` im Listener).
 - Entra-ID-`TokenSource`.
 - OpenAI-Clients bekommen gestreamtes Reasoning (vLLM/Ollama/Anthropic) nicht zu sehen

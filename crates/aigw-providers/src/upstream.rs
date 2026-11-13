@@ -158,11 +158,19 @@ impl Upstream {
         client: &UpstreamClient,
     ) -> Result<Self, ConfigError> {
         let provider = registry.build(dep)?;
-        let timeouts = Settings::of(dep).timeouts()?;
+        let settings = Settings::of(dep);
+        let timeouts = settings.timeouts()?;
+        // Eigene CA je Deployment (`settings.caFile`, F48): Variante mit eigenem Pool.
+        let client = match settings.str("caFile")? {
+            Some(path) if !path.trim().is_empty() => client
+                .for_ca_file(std::path::Path::new(path.trim()))
+                .map_err(|e| settings.invalid(format!("settings.caFile: {e}")))?,
+            _ => client.clone(),
+        };
         let mut up = Self::new(
             dep.deployment.metadata.name.clone(),
             provider,
-            client.clone(),
+            client,
             timeouts,
         );
         up.info.deployment_id = Some(dep.deployment.id);
@@ -187,7 +195,7 @@ impl Upstream {
 
     /// Asynchrone Vorbereitung des Adapters (z. B. OAuth-Token), begrenzt durch `deadline`.
     async fn prepare(&self, deadline: Instant) -> Result<(), UpstreamError> {
-        let Some(fut) = self.provider.prepare() else {
+        let Some(fut) = self.provider.prepare(&self.client) else {
             return Ok(());
         };
         tokio::time::timeout_at(deadline, fut)
@@ -245,6 +253,7 @@ impl Upstream {
             otel.status_code = Empty,
             gen_ai.operation.name = "chat",
             gen_ai.system = aigw_core::observe::gen_ai_system(info.provider),
+            gen_ai.provider.name = aigw_core::observe::gen_ai_provider_name(info.provider),
             gen_ai.request.model = info.provider_model.as_str(),
             server.address = Empty,
             server.port = Empty,
@@ -293,10 +302,27 @@ impl Upstream {
         }
         match res {
             Err(_) => Err(timeout_error("keine Antwort-Header")),
+            Ok(Err(e)) if e.is_blocked() => {
+                // SSRF-Sperre nach der Namensauflösung (AIGW-72): Konfigurations-/Angriffsfall,
+                // keine Wiederholung am selben Deployment.
+                tracing::warn!(
+                    deployment = %self.info.deployment,
+                    error = %e,
+                    "Upstream-Adresse durch SSRF-Regeln gesperrt"
+                );
+                Err(UpstreamError::new(
+                    ErrorClass::Connect,
+                    ApiError::new(
+                        ErrorKind::BadGateway,
+                        "Anbieter nicht erreichbar (Zieladresse nicht erlaubt)",
+                    )
+                    .with_code("upstream_address_blocked"),
+                ))
+            }
             Ok(Err(e)) => {
                 tracing::warn!(
                     deployment = %self.info.deployment,
-                    error = %error_chain(&e),
+                    error = %e,
                     "Upstream nicht erreichbar"
                 );
                 Err(UpstreamError::new(

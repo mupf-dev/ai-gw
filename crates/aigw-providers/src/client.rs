@@ -1,24 +1,25 @@
 // SPDX-FileCopyrightText: 2026 ai-gw contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Gemeinsamer Upstream-HTTP-Client (Architektur §2, §6).
+//! Gemeinsamer Upstream-HTTP-Client der Anbieter-Adapter (Architektur §2, §6).
 //!
-//! hyper-util-Client mit rustls (aws-lc-rs, Mozilla-Wurzelzertifikate), ALPN `h2` +
+//! Dünne Hülle um [`aigw_outbound::OutboundClient`] (AIGW-72): eigene Namensauflösung mit den
+//! SSRF-Regeln aus `admin.allow_*_upstreams` (auch nach der Auflösung – schützt vor Namen, die
+//! auf private Adressen zeigen, und DNS-Rebinding), keine Weiterleitungen, rustls mit
+//! aws-lc-rs und den Vertrauensankern aus `upstream.roots`/`upstream.ca_file`, ALPN `h2` +
 //! `http/1.1`, TCP-Keep-Alive und `TCP_NODELAY`. Der Verbindungspool ist je Endpunkt
 //! (Schema + Host + Port) getrennt; HTTP/2-Verbindungen werden für parallele Anfragen
-//! gemultiplext und mit Pings offen gehalten. Klartext-HTTP ist für lokale Anbieter (vLLM,
-//! Ollama, Testserver) erlaubt.
+//! gemultiplext und mit Pings offen gehalten. Klartext-HTTP ist für freigeschaltete lokale
+//! Anbieter (vLLM, Ollama) erlaubt. Deployments mit `settings.caFile` erhalten eine Variante
+//! mit eigenem Pool ([`UpstreamClient::for_ca_file`]).
 
 use std::fmt;
+use std::path::Path;
 use std::time::Duration;
 
-use bytes::Bytes;
-use http_body_util::Full;
+use aigw_core::upstream::UpstreamPolicy;
+use aigw_outbound::{AddressGuard, OutboundClient, OutboundError, OutboundOptions};
 use hyper::body::Incoming;
-use hyper_rustls::HttpsConnector;
-use hyper_util::client::legacy::Client;
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::rt::{TokioExecutor, TokioTimer};
 
 use crate::UpstreamRequest;
 
@@ -52,78 +53,88 @@ impl Default for ClientConfig {
     }
 }
 
-type Inner = Client<HttpsConnector<HttpConnector>, Full<Bytes>>;
+impl ClientConfig {
+    fn outbound(&self) -> OutboundOptions {
+        OutboundOptions {
+            connect_timeout: self.connect_timeout,
+            pool_idle_timeout: self.pool_idle_timeout,
+            pool_max_idle_per_host: self.pool_max_idle_per_host,
+            tcp_keepalive: self.tcp_keepalive,
+            http2: true,
+            http2_keep_alive_interval: self.http2_keep_alive_interval,
+            http2_keep_alive_timeout: self.http2_keep_alive_timeout,
+            http2_adaptive_window: true,
+            tls: None,
+        }
+    }
+}
 
 /// Upstream-HTTP-Client (günstig klonbar, alle Klone teilen den Pool).
 #[derive(Clone)]
 pub struct UpstreamClient {
-    inner: Inner,
+    inner: OutboundClient,
 }
 
 impl fmt::Debug for UpstreamClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("UpstreamClient").finish_non_exhaustive()
+        f.debug_struct("UpstreamClient")
+            .field("guard", self.inner.guard())
+            .finish_non_exhaustive()
     }
 }
 
 impl UpstreamClient {
-    /// Baut den Client. Muss innerhalb einer Tokio-Laufzeit benutzt werden.
-    pub fn new(cfg: &ClientConfig) -> Result<Self, rustls::Error> {
-        let mut http = HttpConnector::new();
-        http.enforce_http(false);
-        http.set_nodelay(true);
-        http.set_connect_timeout(Some(cfg.connect_timeout));
-        http.set_keepalive(cfg.tcp_keepalive);
-
-        let https = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_provider_and_webpki_roots(rustls::crypto::aws_lc_rs::default_provider())?
-            .https_or_http()
-            .enable_http1()
-            .enable_http2()
-            .wrap_connector(http);
-
-        let inner = Client::builder(TokioExecutor::new())
-            .timer(TokioTimer::new())
-            .pool_timer(TokioTimer::new())
-            .pool_idle_timeout(cfg.pool_idle_timeout)
-            .pool_max_idle_per_host(cfg.pool_max_idle_per_host)
-            .http2_keep_alive_interval(cfg.http2_keep_alive_interval)
-            .http2_keep_alive_timeout(cfg.http2_keep_alive_timeout)
-            .http2_keep_alive_while_idle(true)
-            .http2_adaptive_window(true)
-            .build(https);
-        Ok(Self { inner })
+    /// Baut den Client mit den SSRF-Regeln `policy` (Betrieb: aus `admin.*`). Muss innerhalb
+    /// einer Tokio-Laufzeit benutzt werden.
+    pub fn new(cfg: &ClientConfig, policy: UpstreamPolicy) -> Result<Self, OutboundError> {
+        Self::with_guard(cfg, AddressGuard::policy(policy))
     }
 
-    /// Client mit Standardeinstellungen.
-    pub fn with_defaults() -> Result<Self, rustls::Error> {
-        Self::new(&ClientConfig::default())
+    /// Baut den Client mit beliebigem Adressfilter.
+    pub fn with_guard(cfg: &ClientConfig, guard: AddressGuard) -> Result<Self, OutboundError> {
+        OutboundClient::builder(guard)
+            .options(cfg.outbound())
+            .build()
+            .map(Self::from_outbound)
     }
 
-    /// Sendet eine Anfrage und liest die Antwort vollständig (höchstens `max_bytes`) – für
-    /// Hilfsaufrufe außerhalb der Anbieter-Adapter (z. B. Content-Safety-Dienste, AIGW-38).
-    /// Die SSRF-Prüfung des Ziels ist Sache des Aufrufers.
-    pub async fn fetch(
-        &self,
-        req: UpstreamRequest,
-        max_bytes: usize,
-    ) -> Result<(http::StatusCode, Bytes), String> {
-        use http_body_util::BodyExt as _;
-        let resp = self.send(req).await.map_err(|e| e.to_string())?;
-        let status = resp.status();
-        let body = http_body_util::Limited::new(resp.into_body(), max_bytes)
-            .collect()
-            .await
-            .map_err(|e| e.to_string())?
-            .to_bytes();
-        Ok((status, body))
+    /// Hülle um einen fertigen [`OutboundClient`] (z. B. mit eigenem Resolver in Tests).
+    pub fn from_outbound(inner: OutboundClient) -> Self {
+        Self { inner }
+    }
+
+    /// Client mit Standardeinstellungen und den SSRF-Regeln `policy`.
+    pub fn with_policy(policy: UpstreamPolicy) -> Result<Self, OutboundError> {
+        Self::new(&ClientConfig::default(), policy)
+    }
+
+    /// Client mit Standardeinstellungen und **strengen** SSRF-Regeln (keine privaten oder
+    /// lokalen Ziele, auch nicht nach der Namensauflösung).
+    pub fn with_defaults() -> Result<Self, OutboundError> {
+        Self::with_policy(UpstreamPolicy::strict())
+    }
+
+    /// Client **ohne** Adressfilter – nur für Tests und Benchmarks gegen lokale Server.
+    pub fn unguarded() -> Result<Self, OutboundError> {
+        Self::with_guard(&ClientConfig::default(), AddressGuard::Trusted)
+    }
+
+    /// Der zugrunde liegende Outbound-Client.
+    pub fn outbound(&self) -> &OutboundClient {
+        &self.inner
+    }
+
+    /// Variante mit zusätzlicher CA-Datei (`settings.caFile` eines Deployments; eigener Pool,
+    /// gleiche SSRF-Regeln).
+    pub fn for_ca_file(&self, path: &Path) -> Result<Self, OutboundError> {
+        self.inner.with_ca_file(path).map(Self::from_outbound)
     }
 
     /// Sendet eine Anfrage; das Ergebnis liegt vor, sobald die Antwort-Header da sind.
     pub(crate) async fn send(
         &self,
         req: UpstreamRequest,
-    ) -> Result<http::Response<Incoming>, hyper_util::client::legacy::Error> {
-        self.inner.request(req.map(Full::new)).await
+    ) -> Result<http::Response<Incoming>, OutboundError> {
+        self.inner.send(req).await
     }
 }

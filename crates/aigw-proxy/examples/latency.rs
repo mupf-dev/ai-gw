@@ -110,7 +110,7 @@ async fn gateway(addr: SocketAddr, up: SocketAddr) {
         },
         credential: None,
     };
-    let client = UpstreamClient::with_defaults().unwrap();
+    let client = UpstreamClient::unguarded().unwrap();
     let mut routes = StaticRoutes::new();
     routes.insert(
         "bench",

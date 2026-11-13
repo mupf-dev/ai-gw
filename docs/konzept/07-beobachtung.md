@@ -200,6 +200,7 @@ observe:
       batch_size: 512
       flush_interval_ms: 1000
     logs: {enabled: false, include_payload: false}
+    retry: {max_attempts: 4, initial_backoff_ms: 500, max_backoff_ms: 5000}   # F102
 ```
 
 ENV wie üblich, z. B. `AIGW_OBSERVE__PAYLOAD=masked`, `AIGW_OBSERVE__RETENTION__PAYLOAD_DAYS=3`,
@@ -296,7 +297,7 @@ Label-Schlüssel braucht und ein `RwLock` nimmt).
 | `aigw_snapshot_build_seconds` | gauge | – | Dauer des letzten Neubaus |
 | `aigw_counter_backend_degraded` | gauge | – | `CounterBackend::health()` über `GatewayMetrics::set_counter_health`; erscheint erst, wenn das Zähler-Backend im Binary verdrahtet ist (Limits) |
 | `aigw_log_*` | counter | – | Request-Log (§7) |
-| `aigw_otlp_spans_exported_total`, `aigw_otlp_spans_dropped_total`, `aigw_otlp_logs_exported_total`, `aigw_otlp_export_errors_total{signal}` | counter | – | OTLP-Export (§12) |
+| `aigw_otlp_spans_exported_total`, `aigw_otlp_spans_dropped_total`, `aigw_otlp_logs_exported_total`, `aigw_otlp_export_errors_total{signal}`, `aigw_otlp_export_retries_total{signal}` | counter | – | OTLP-Export (§12) |
 
 Tokens, Kosten und Abbrüche werden beim Ausgeben über die Statusklassen summiert.
 
@@ -357,7 +358,8 @@ chat {model}               server   je Anfrage (aigw-proxy), bis zum letzten Byt
 
 Attribute des Wurzel-Spans (GenAI-Semantic-Conventions): `gen_ai.operation.name` (`chat`),
 `gen_ai.system` (`openai`, `anthropic`, `az.ai.openai`, `aws.bedrock`, `gcp.vertex_ai`,
-`mistral_ai`, sonst der Anbieter-Bezeichner), `gen_ai.request.model`,
+`mistral_ai`, sonst der Anbieter-Bezeichner) und zusätzlich der Nachfolger
+`gen_ai.provider.name` (F101; gleiche Werte, Azure als `azure.ai.openai`), `gen_ai.request.model`,
 `gen_ai.request.max_tokens`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`,
 `gen_ai.usage.output_tokens`, `http.response.status_code`, `error.type`, dazu
 `aigw.request_id`, `aigw.ingress`, `aigw.model_group`, `aigw.deployment` (zuletzt
@@ -377,8 +379,17 @@ Antwortinhalte in Spans.
   Upstream-Versuchs und dem Sampling-Flag (`aigw_core::observe::current_traceparent`).
 - **Export:** fertige Spans per `try_send` in einen begrenzten Kanal (`queue_capacity`); voll →
   verwerfen + `aigw_otlp_spans_dropped_total`. Ein Task sendet Batches (`batch_size`,
-  spätestens nach `flush_interval_ms`); Fehler werden gezählt und geloggt, nicht wiederholt.
+  spätestens nach `flush_interval_ms`); Fehler werden gezählt und geloggt.
   Beim Herunterfahren wird der Puffer noch exportiert (höchstens 5 s).
+- **Wiederholung (F102, Traces und Logs):** `429`, `502`, `503`, `504`, Verbindungsfehler und
+  Zeitlimit werden mit exponentiellem Backoff (Jitter 50–100 %) wiederholt, höchstens
+  `observe.otlp.retry.max_attempts` (Standard 4) Versuche, Wartezeit
+  `initial_backoff_ms` (500) bis `max_backoff_ms` (5000). `Retry-After` (Sekunden) wird
+  beachtet; verlangt der Collector mehr als `max_backoff_ms` (oder ein HTTP-Datum), wird der
+  Batch verworfen statt den Export (bei Logs: den Request-Log-Writer) zu blockieren. Zähler
+  `aigw_otlp_export_retries_total{signal}`. Andere 4xx/5xx werden nicht wiederholt.
+- **HTTP:** gemeinsamer Outbound-Baustein (`aigw-outbound`, 06 §4.1) mit den Vertrauensankern
+  aus `upstream.*`, ohne Adressfilter (Collector = Startkonfiguration), keine Weiterleitungen.
 
 ### 12.4 Logs
 
@@ -397,6 +408,16 @@ Exportern in `aigw_log_export_errors_total` und zusätzlich in
   (Wurzel- und Kind-Spans, GenAI-Attribute, TTFT-Ereignis, eingehender `traceparent` gesampelt
   und nicht gesampelt, Weitergabe an den Upstream, Fehlerstatus, abgeschaltete Übernahme und
   Weitergabe), Request-Log als OTLP-Logs, Fehlerzählung bei HTTP 500.
+- `crates/aigw-observe/tests/otlp.rs` (F102): 503 mit `Retry-After` + 429 → Erfolg im dritten
+  Versuch; `Retry-After` über `max_backoff_ms` → sofort verworfen; dauerhaft 503 → genau
+  `max_attempts` Versuche; 400 → keine Wiederholung.
+- `crates/aigw-observe/tests/otelcol.rs` (F103): **Gegentest gegen den offiziellen Collector**
+  `otel/opentelemetry-collector-contrib:0.165.0` (`AIGW_TEST_OTELCOL=docker scripts/check.sh`;
+  OTLP/HTTP-Empfänger, file-Exporter als OTLP-JSON). Geprüft wird, was der Collector dekodiert
+  hat: Ressource (`service.name`, `telemetry.sdk.name`), Span-Baum (Trace-ID, Eltern-IDs inkl.
+  übernommenem `traceparent`, Art SERVER/CLIENT, Kind-Spans auth/route/Upstream-Versuch),
+  GenAI-Attribute (`gen_ai.system` + `gen_ai.provider.name`, Usage, Status), Log-Eintrag mit
+  `eventName = aigw.request`, Schweregrad und Attributen. Ohne Schalter übersprungen.
 - `crates/aigw-observe/tests/otel_callsite.rs`: Callsites abgeschaltet, solange inaktiv.
 - `scripts/runtime-smoke.sh`: Binary mit lokalem Fake-Collector (python3) – Traces und Logs
   kommen als Protobuf an; `/metrics` mit Gateway-, Snapshot- und OTLP-Metriken.

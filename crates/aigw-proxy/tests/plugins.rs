@@ -656,7 +656,7 @@ async fn plugin_headers_reach_the_upstream_but_not_credentials() {
     let upstream = Upstream::from_deployment(
         &dep,
         &Registry::with_builtin(),
-        &UpstreamClient::with_defaults().unwrap(),
+        &UpstreamClient::unguarded().unwrap(),
     )
     .unwrap();
     let mut routes = StaticRoutes::new();

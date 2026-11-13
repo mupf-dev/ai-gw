@@ -13,21 +13,17 @@ publish.workspace = true
 
 [dependencies]
 aigw-core.workspace = true
+aigw-outbound.workspace = true
 async-trait.workspace = true
 aws-lc-rs.workspace = true
 bytes.workspace = true
 http.workspace = true
-http-body-util.workspace = true
-hyper.workspace = true
-hyper-rustls.workspace = true
-hyper-util.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
-tower-service.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 

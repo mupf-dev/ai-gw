@@ -11,13 +11,17 @@
 //!   ES256, EdDSA/Ed25519) – keine eigene Kryptografie; `none` und HMAC werden abgelehnt.
 //!   Geprüft werden `iss` (exakt), `aud` (enthält die Client-ID; `azp` falls vorhanden),
 //!   `exp`/`iat`/`nbf` (mit Uhrenabweichung) und `nonce`.
-//! - HTTP über hyper + rustls (aws-lc-rs, System-CAs + optional `ca_file`). `http://` nur für
+//! - HTTP über den gemeinsamen Outbound-Baustein (`aigw-outbound`, AIGW-72): rustls/aws-lc-rs
+//!   mit den Vertrauensankern aus `upstream.roots`/`upstream.ca_file` plus optional
+//!   `admin.auth.oidc.ca_file`, keine Weiterleitungen, Antwort- und Zeitlimit. Der IdP stammt
+//!   aus der Startkonfiguration (Betreiber) – daher ohne SSRF-Adressfilter. `http://` nur für
 //!   Loopback-Adressen (Tests, lokale Entwicklung).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aigw_core::config::OidcConfig;
+use aigw_outbound::{AddressGuard, FetchLimits, OutboundClient, OutboundOptions};
 use aws_lc_rs::signature::{
     ECDSA_P256_SHA256_FIXED, ED25519, RSA_PKCS1_2048_8192_SHA256, RsaPublicKeyComponents,
     UnparsedPublicKey,
@@ -25,13 +29,8 @@ use aws_lc_rs::signature::{
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use bytes::Bytes;
-use http_body_util::{BodyExt as _, Full, Limited};
 use hyper::Request;
 use hyper::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use hyper_rustls::HttpsConnector;
-use hyper_util::client::legacy::Client;
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::rt::TokioExecutor;
 use serde::Deserialize;
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -151,8 +150,6 @@ struct Cached<T> {
     at: Instant,
 }
 
-type HttpClient = Client<HttpsConnector<HttpConnector>, Full<Bytes>>;
-
 /// OIDC-Client einer ai-gw-Instanz.
 pub struct OidcClient {
     issuer: String,
@@ -164,7 +161,7 @@ pub struct OidcClient {
     cache_ttl: Duration,
     timeout: Duration,
     skew: i64,
-    http: HttpClient,
+    http: OutboundClient,
     meta: RwLock<Option<Cached<ProviderMetadata>>>,
     jwks: RwLock<Option<Cached<Jwks>>>,
 }
@@ -177,41 +174,6 @@ impl std::fmt::Debug for OidcClient {
             .field("confidential", &self.client_secret.is_some())
             .finish_non_exhaustive()
     }
-}
-
-fn tls_config(ca_file: Option<&std::path::Path>) -> Result<rustls::ClientConfig, OidcError> {
-    use rustls::pki_types::CertificateDer;
-    use rustls::pki_types::pem::PemObject as _;
-    let mut roots = rustls::RootCertStore::empty();
-    let native = rustls_native_certs::load_native_certs();
-    for e in &native.errors {
-        tracing::debug!(error = %e, "System-CA nicht lesbar");
-    }
-    let (_added, _ignored) = roots.add_parsable_certificates(native.certs);
-    if let Some(path) = ca_file {
-        let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_file_iter(path)
-            .map_err(|e| err(format!("ca_file {}: {e}", path.display())))?
-            .collect::<Result<_, _>>()
-            .map_err(|e| err(format!("ca_file {}: {e}", path.display())))?;
-        if certs.is_empty() {
-            return Err(err(format!(
-                "ca_file {}: keine Zertifikate",
-                path.display()
-            )));
-        }
-        for c in certs {
-            roots
-                .add(c)
-                .map_err(|e| err(format!("ca_file {}: {e}", path.display())))?;
-        }
-    }
-    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-    let cfg = rustls::ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
-        .map_err(|e| err(format!("TLS: {e}")))?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    Ok(cfg)
 }
 
 impl OidcClient {
@@ -244,15 +206,19 @@ impl OidcClient {
                 scopes.push(s.clone());
             }
         }
-        let mut http_conn = HttpConnector::new();
-        http_conn.enforce_http(false);
-        http_conn.set_connect_timeout(Some(Duration::from_secs(cfg.http_timeout_secs.max(1))));
-        let https = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config(cfg.ca_file.as_deref())?)
-            .https_or_http()
-            .enable_http1()
-            .wrap_connector(http_conn);
-        let http = Client::builder(TokioExecutor::new()).build(https);
+        let mut tls = aigw_outbound::default_tls();
+        if let Some(ca) = &cfg.ca_file {
+            tls = tls.with_ca_file(ca);
+        }
+        let http = OutboundClient::builder(AddressGuard::Trusted)
+            .options(OutboundOptions {
+                connect_timeout: Duration::from_secs(cfg.http_timeout_secs.max(1)),
+                pool_max_idle_per_host: 4,
+                tls: Some(tls),
+                ..OutboundOptions::default()
+            })
+            .build()
+            .map_err(|e| err(format!("admin.auth.oidc: {e}")))?;
         Ok(Self {
             issuer: issuer.to_owned(),
             client_id: cfg.client_id.trim().to_owned(),
@@ -279,32 +245,26 @@ impl OidcClient {
         &self.redirect_url
     }
 
-    async fn send(&self, req: Request<Full<Bytes>>) -> Result<(u16, Bytes), OidcError> {
+    async fn send(&self, req: Request<Bytes>) -> Result<(u16, Bytes), OidcError> {
         let uri = req.uri().clone();
-        let fut = async {
-            let res = self
-                .http
-                .request(req)
-                .await
-                .map_err(|e| err(format!("{uri}: {e}")))?;
-            let status = res.status().as_u16();
-            let body = Limited::new(res.into_body(), MAX_BODY)
-                .collect()
-                .await
-                .map_err(|e| err(format!("{uri}: Antwort nicht lesbar: {e}")))?
-                .to_bytes();
-            Ok::<_, OidcError>((status, body))
-        };
-        tokio::time::timeout(self.timeout, fut)
+        let reply = self
+            .http
+            .fetch(req, &FetchLimits::new(self.timeout, MAX_BODY))
             .await
-            .map_err(|_| err(format!("{uri}: Zeitüberschreitung")))?
+            .map_err(|e| match e {
+                aigw_outbound::OutboundError::Timeout(_) => {
+                    err(format!("{uri}: Zeitüberschreitung"))
+                }
+                other => err(format!("{uri}: {other}")),
+            })?;
+        Ok((reply.status.as_u16(), reply.body))
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T, OidcError> {
         check_url(url, "IdP-Endpunkt")?;
         let req = Request::get(url)
             .header(ACCEPT, "application/json")
-            .body(Full::new(Bytes::new()))
+            .body(Bytes::new())
             .map_err(|e| err(format!("{url}: {e}")))?;
         let (status, body) = self.send(req).await?;
         if status != 200 {
@@ -416,7 +376,7 @@ impl OidcClient {
             req = req.header(AUTHORIZATION, format!("Basic {cred}"));
         }
         let req = req
-            .body(Full::new(Bytes::from(body)))
+            .body(Bytes::from(body))
             .map_err(|e| err(format!("Token-Anfrage: {e}")))?;
         let (status, body) = self.send(req).await?;
         let v: Value = serde_json::from_slice(&body)

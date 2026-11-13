@@ -387,7 +387,7 @@ impl TraceActivator {
         cfg: &OtlpConfig,
         metrics: Arc<OtlpMetrics>,
     ) -> Result<TraceExporter, OtlpConfigError> {
-        let client = OtlpClient::new(cfg)?;
+        let client = OtlpClient::new(cfg, Arc::clone(&metrics))?;
         let t = &cfg.traces;
         let (tx, rx) = mpsc::channel(t.queue_capacity.max(1));
         let tracer = Arc::new(Tracer {

@@ -57,6 +57,8 @@ pub struct Config {
     pub cache: CacheConfig,
     /// MCP-Gateway (AIGW-41).
     pub mcp: McpConfig,
+    /// Ausgehende Verbindungen: Wurzelzertifikate und zusätzliche CAs (AIGW-72).
+    pub upstream: UpstreamConfig,
 }
 
 impl Config {
@@ -698,6 +700,35 @@ impl Default for LogConfig {
     }
 }
 
+/// Vertrauensanker für ausgehende TLS-Verbindungen (AIGW-72, F48).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RootsKind {
+    /// Mozilla-Wurzelzertifikate (`webpki-roots`, im Binary eingebettet; unabhängig vom
+    /// Container-Image). Standard.
+    #[default]
+    Webpki,
+    /// Zertifikatsspeicher des Betriebssystems.
+    System,
+    /// Beide.
+    Both,
+}
+
+/// Ausgehende Verbindungen aller Clients (Anbieter, Webhooks, MCP, OIDC, Guardrail-Dienste,
+/// OTLP; AIGW-72, `docs/konzept/06-streaming-und-anbieter.md` §4).
+///
+/// Ein Deployment kann mit `settings.caFile` zusätzlich eine eigene CA-Datei angeben, der
+/// OIDC-Client mit `admin.auth.oidc.ca_file`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UpstreamConfig {
+    /// Wurzelzertifikate: `webpki` (Standard), `system` oder `both`.
+    pub roots: RootsKind,
+    /// Zusätzliche CA-Zertifikate (PEM) für alle ausgehenden Verbindungen, z. B. eine interne CA.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ca_file: Option<PathBuf>,
+}
+
 /// Einstellungen der Admin-API (AIGW-65, `docs/konzept/08-admin-api.md`).
 ///
 /// Endpunkte von Deployments werden gegen SSRF-Grundregeln geprüft: nur `https`, keine
@@ -1000,6 +1031,8 @@ pub struct OtlpConfig {
     pub traces: OtlpTracesConfig,
     /// Request-Log als OTLP-Logs.
     pub logs: OtlpLogsConfig,
+    /// Wiederholung bei `429`/`502`/`503`/`504` und Verbindungsfehlern (F102).
+    pub retry: OtlpRetryConfig,
 }
 
 impl Default for OtlpConfig {
@@ -1011,6 +1044,33 @@ impl Default for OtlpConfig {
             service_name: "aigw".to_owned(),
             traces: OtlpTracesConfig::default(),
             logs: OtlpLogsConfig::default(),
+            retry: OtlpRetryConfig::default(),
+        }
+    }
+}
+
+/// Wiederholung fehlgeschlagener OTLP-Exporte mit exponentiellem Backoff (F102).
+///
+/// Wiederholt werden nur vorübergehende Fehler (`429`, `502`, `503`, `504`, Verbindungsfehler,
+/// Zeitlimit). Ein `Retry-After` des Collectors wird beachtet; verlangt er länger als
+/// `max_backoff_ms`, wird der Batch verworfen (gezählt) statt den Export zu blockieren.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OtlpRetryConfig {
+    /// Höchstzahl der Versuche je Batch inklusive des ersten (1 = keine Wiederholung).
+    pub max_attempts: u32,
+    /// Wartezeit vor der ersten Wiederholung; verdoppelt sich je Versuch (mit Jitter).
+    pub initial_backoff_ms: u64,
+    /// Längste Wartezeit zwischen zwei Versuchen (auch Obergrenze für `Retry-After`).
+    pub max_backoff_ms: u64,
+}
+
+impl Default for OtlpRetryConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: 4,
+            initial_backoff_ms: 500,
+            max_backoff_ms: 5_000,
         }
     }
 }
@@ -1025,6 +1085,7 @@ impl fmt::Debug for OtlpConfig {
             .field("service_name", &self.service_name)
             .field("traces", &self.traces)
             .field("logs", &self.logs)
+            .field("retry", &self.retry)
             .finish()
     }
 }
