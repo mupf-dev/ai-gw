@@ -277,6 +277,8 @@ async fn random_change(store: &Store, keyring: &Keyring, rng: &mut Rng) {
         20 => {
             let meta = ObjectMeta::named(rng.name("p", 6));
             let spec = PriceSpec {
+                per_audio_minute: None,
+                per_million_characters: None,
                 provider: rng.chance(50).then_some(ProviderKind::OpenAi),
                 model: rng.name("m", 3),
                 valid_from: OffsetDateTime::from_unix_timestamp(
@@ -323,6 +325,11 @@ async fn random_change(store: &Store, keyring: &Keyring, rng: &mut Rng) {
             };
             let meta = ObjectMeta::named(rng.name("b", 6));
             let spec = PluginBindingSpec {
+                inherit: None,
+                locked: false,
+                fail_mode: None,
+                timeout_ms: None,
+                output_reject_mode: None,
                 scope,
                 plugin: "header".into(),
                 order: i32::try_from(rng.below(3)).unwrap(),
@@ -354,6 +361,7 @@ async fn random_change(store: &Store, keyring: &Keyring, rng: &mut Rng) {
                 );
             } else {
                 let spec = McpServerSpec {
+                    secret: None,
                     url: format!("https://mcp{}.example/mcp", rng.below(3)),
                     transport: Default::default(),
                     credential: rng.chance(50).then_some(cred),

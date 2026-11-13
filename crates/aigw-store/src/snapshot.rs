@@ -89,12 +89,19 @@ async fn read_all(
         .iter()
         .map(|row| decrypt_row(keyring, row))
         .collect::<Result<Vec<_>, _>>()?;
+    let secrets = store
+        .fetch_rows(ResourceKind::Secret, &[], "", None)
+        .await?
+        .iter()
+        .map(|row| crate::repo::secret::decrypt_row(keyring, row))
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(SnapshotParts {
         version,
         organizations: store.list::<OrganizationSpec>().await?,
         teams: store.list::<TeamSpec>().await?,
         keys,
         credentials,
+        secrets,
         model_groups: store.list::<ModelGroupSpec>().await?,
         deployments: store.list::<DeploymentSpec>().await?,
         prices: store.list::<PriceSpec>().await?,
@@ -250,13 +257,15 @@ async fn read_journal(
 /// gehören nicht zum Snapshot. Der `match` ist erschöpfend: Eine neue Ressourcenart muss hier
 /// (und im Patch) bewusst eingeordnet werden.
 fn snapshot_kind(s: &str) -> Option<ResourceKind> {
-    let kind = ResourceKind::ALL.into_iter().find(|k| k.as_str() == s)?;
+    // F115: Arten im Audit-Log kebab-case (`api-key`); ältere Einträge in YAML-Schreibweise.
+    let kind = ResourceKind::parse_any(s)?;
     match kind {
         ResourceKind::User => None,
         ResourceKind::Organization
         | ResourceKind::Team
         | ResourceKind::ApiKey
         | ResourceKind::ProviderCredential
+        | ResourceKind::Secret
         | ResourceKind::ModelGroup
         | ResourceKind::Deployment
         | ResourceKind::Price
@@ -393,6 +402,21 @@ async fn fetch_patch(
     }
     patch.credentials.extend(
         cred_ids
+            .into_iter()
+            .filter(|id| !found.contains(id))
+            .map(Change::Remove),
+    );
+
+    // Geheimnisse (F149, nur die geänderten entschlüsseln).
+    let secret_ids = changed.of(ResourceKind::Secret);
+    let mut found = HashSet::new();
+    for row in fetch_ids(store, ResourceKind::Secret, &[], "id", &secret_ids).await? {
+        let (info, data) = crate::repo::secret::decrypt_row(keyring, &row)?;
+        found.insert(info.id);
+        patch.secrets.push(Change::Upsert((info, data)));
+    }
+    patch.secrets.extend(
+        secret_ids
             .into_iter()
             .filter(|id| !found.contains(id))
             .map(Change::Remove),

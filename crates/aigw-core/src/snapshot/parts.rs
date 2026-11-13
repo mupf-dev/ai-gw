@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use crate::resource::{
     ApiKey, ApiKeyState, CredentialData, Deployment, Id, McpGrant, McpServer, ModelGroup, Object,
-    Organization, PluginBinding, Price, ProviderCredential, ScopeLevel, Team,
+    Organization, PluginBinding, Price, ProviderCredential, ScopeLevel, Secret, Team,
 };
 
 use super::{DeploymentCtx, KeyCtx, KeyHash, McpServerCtx, ModelGroupCtx, Snapshot};
@@ -42,6 +42,8 @@ pub struct SnapshotParts {
     pub keys: Vec<(KeyHash, ApiKey)>,
     /// Zugangsdaten (Metadaten + entschlüsselte Werte).
     pub credentials: Vec<(ProviderCredential, CredentialData)>,
+    /// Geheimnisse (`Secret`, F149; Metadaten + entschlüsselte Werte).
+    pub secrets: Vec<(Secret, CredentialData)>,
     /// Modellgruppen.
     pub model_groups: Vec<ModelGroup>,
     /// Deployments.
@@ -79,6 +81,8 @@ pub struct SnapshotPatch {
     pub keys: Vec<Change<(KeyHash, ApiKey)>>,
     /// Zugangsdaten.
     pub credentials: Vec<Change<(ProviderCredential, CredentialData)>>,
+    /// Geheimnisse (F149).
+    pub secrets: Vec<Change<(Secret, CredentialData)>>,
     /// Modellgruppen.
     pub model_groups: Vec<Change<ModelGroup>>,
     /// Deployments.
@@ -105,6 +109,7 @@ impl SnapshotPatch {
             + self.teams.len()
             + self.keys.len()
             + self.credentials.len()
+            + self.secrets.len()
             + self.model_groups.len()
             + self.deployments.len()
             + self.prices.len()
@@ -208,13 +213,18 @@ fn deployment_ctx(
     }
 }
 
-fn mcp_ctx(server: McpServer, creds: &HashMap<String, Arc<CredentialData>>) -> McpServerCtx {
-    let credential = server
-        .spec
-        .credential
-        .as_ref()
-        .and_then(|c| creds.get(c))
-        .cloned();
+/// MCP-Server mit aufgelösten Zugangsdaten: bevorzugt ein `Secret` (F149), sonst (älter) eine
+/// `ProviderCredential`.
+fn mcp_ctx(
+    server: McpServer,
+    creds: &HashMap<String, Arc<CredentialData>>,
+    secrets: &HashMap<String, Arc<CredentialData>>,
+) -> McpServerCtx {
+    let credential = match (&server.spec.secret, &server.spec.credential) {
+        (Some(n), _) => secrets.get(n).cloned(),
+        (None, Some(c)) => creds.get(c).cloned(),
+        (None, None) => None,
+    };
     McpServerCtx { server, credential }
 }
 
@@ -262,6 +272,11 @@ impl Snapshot {
             snap.credential_data.insert(name.clone(), Arc::new(data));
             snap.credentials.insert(name, info);
         }
+        for (info, data) in parts.secrets {
+            let name = info.metadata.name.clone();
+            snap.secret_data.insert(name.clone(), Arc::new(data));
+            snap.secrets.insert(name, info);
+        }
 
         let mut deployments: HashMap<String, Vec<DeploymentCtx>> = HashMap::new();
         for d in parts.deployments {
@@ -304,7 +319,7 @@ impl Snapshot {
 
         for s in parts.mcp_servers {
             if s.spec.enabled {
-                let ctx = mcp_ctx(s, &snap.credential_data);
+                let ctx = mcp_ctx(s, &snap.credential_data, &snap.secret_data);
                 snap.mcp_servers
                     .insert(ctx.server.metadata.name.clone(), Arc::new(ctx));
             }
@@ -336,6 +351,17 @@ impl Snapshot {
                 self.credentials.iter().map(|(name, info)| {
                     let data = self
                         .credential_data
+                        .get(name)
+                        .map(|d| (**d).clone())
+                        .unwrap_or_default();
+                    (info.clone(), data)
+                }),
+                |(i, _)| i.id,
+            ),
+            secrets: sorted(
+                self.secrets.iter().map(|(name, info)| {
+                    let data = self
+                        .secret_data
                         .get(name)
                         .map(|d| (**d).clone())
                         .unwrap_or_default();
@@ -445,6 +471,33 @@ impl Snapshot {
                         s.credentials.remove(&name);
                         s.credential_data.remove(&name);
                         changed_creds.insert(name);
+                    }
+                }
+            }
+        }
+
+        // Geheimnisse (F149).
+        s.secrets = self.secrets.clone();
+        s.secret_data = self.secret_data.clone();
+        let mut changed_secrets: HashSet<String> = HashSet::new();
+        for c in patch.secrets {
+            match c {
+                Change::Upsert((info, data)) => {
+                    let name = info.metadata.name.clone();
+                    s.secret_data.insert(name.clone(), Arc::new(data));
+                    s.secrets.insert(name.clone(), info);
+                    changed_secrets.insert(name);
+                }
+                Change::Remove(id) => {
+                    if let Some(name) = s
+                        .secrets
+                        .iter()
+                        .find(|(_, i)| i.id == id)
+                        .map(|(n, _)| n.clone())
+                    {
+                        s.secrets.remove(&name);
+                        s.secret_data.remove(&name);
+                        changed_secrets.insert(name);
                     }
                 }
             }
@@ -595,7 +648,8 @@ impl Snapshot {
 
         // MCP-Server (inkl. neu aufgelöster Zugangsdaten).
         s.mcp_servers = self.mcp_servers.clone();
-        if !patch.mcp_servers.is_empty() || !changed_creds.is_empty() {
+        if !patch.mcp_servers.is_empty() || !changed_creds.is_empty() || !changed_secrets.is_empty()
+        {
             for c in patch.mcp_servers {
                 let id = match &c {
                     Change::Upsert(m) => m.id,
@@ -605,21 +659,28 @@ impl Snapshot {
                 if let Change::Upsert(m) = c
                     && m.spec.enabled
                 {
-                    let ctx = mcp_ctx(m, &s.credential_data);
+                    let ctx = mcp_ctx(m, &s.credential_data, &s.secret_data);
                     s.mcp_servers
                         .insert(ctx.server.metadata.name.clone(), Arc::new(ctx));
                 }
             }
-            if !changed_creds.is_empty() {
+            if !changed_creds.is_empty() || !changed_secrets.is_empty() {
                 for ctx in s.mcp_servers.values_mut() {
-                    if ctx
-                        .server
-                        .spec
+                    let spec = &ctx.server.spec;
+                    if spec
                         .credential
                         .as_ref()
                         .is_some_and(|c| changed_creds.contains(c))
+                        || spec
+                            .secret
+                            .as_ref()
+                            .is_some_and(|c| changed_secrets.contains(c))
                     {
-                        *ctx = Arc::new(mcp_ctx(ctx.server.clone(), &s.credential_data));
+                        *ctx = Arc::new(mcp_ctx(
+                            ctx.server.clone(),
+                            &s.credential_data,
+                            &s.secret_data,
+                        ));
                     }
                 }
             }

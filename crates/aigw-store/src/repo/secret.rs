@@ -44,6 +44,22 @@ fn info_from_row(row: &DbRow) -> Result<(Secret, Sealed), StoreError> {
     Ok((obj, sealed))
 }
 
+/// Entschlüsselt eine Zeile (Snapshot, F149).
+pub(crate) fn decrypt_row(
+    keyring: &Keyring,
+    row: &DbRow,
+) -> Result<(Secret, CredentialData), StoreError> {
+    let (info, sealed) = info_from_row(row)?;
+    let plain = keyring.open(info.id.as_bytes(), &sealed)?;
+    let map: BTreeMap<String, String> = serde_json::from_slice(&plain)?;
+    let data = CredentialData(
+        map.into_iter()
+            .map(|(k, v)| (k, SecretString::new(v)))
+            .collect(),
+    );
+    Ok((info, data))
+}
+
 /// Gelesene Sicht (ohne Werte) aus einer Zeile.
 pub(crate) fn secret_from_row(row: &DbRow) -> Result<Secret, StoreError> {
     Ok(info_from_row(row)?.0)

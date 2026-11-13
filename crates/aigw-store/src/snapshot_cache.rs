@@ -99,6 +99,29 @@ struct CachedCredential {
 }
 
 #[derive(Serialize, Deserialize)]
+struct CachedSecret {
+    info: aigw_core::resource::Secret,
+    /// Klartext – nur innerhalb des verschlüsselten Inhalts.
+    values: BTreeMap<String, String>,
+}
+
+fn plain(data: &CredentialData) -> BTreeMap<String, String> {
+    data.0
+        .iter()
+        .map(|(k, v)| (k.clone(), v.expose().to_owned()))
+        .collect()
+}
+
+fn sealed_data(values: BTreeMap<String, String>) -> CredentialData {
+    CredentialData(
+        values
+            .into_iter()
+            .map(|(k, v)| (k, SecretString::new(v)))
+            .collect(),
+    )
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Body {
     format: u16,
@@ -109,6 +132,9 @@ struct Body {
     teams: Vec<Team>,
     keys: Vec<CachedKey>,
     credentials: Vec<CachedCredential>,
+    /// Geheimnisse (F149; fehlt in älteren Cache-Dateien).
+    #[serde(default)]
+    secrets: Vec<CachedSecret>,
     model_groups: Vec<ModelGroup>,
     deployments: Vec<Deployment>,
     prices: Vec<Price>,
@@ -144,6 +170,14 @@ impl Body {
                         .iter()
                         .map(|(k, v)| (k.clone(), v.expose().to_owned()))
                         .collect(),
+                })
+                .collect(),
+            secrets: p
+                .secrets
+                .into_iter()
+                .map(|(info, data)| CachedSecret {
+                    values: plain(&data),
+                    info,
                 })
                 .collect(),
             model_groups: p.model_groups,
@@ -182,6 +216,11 @@ impl Body {
                     );
                     (c.info, data)
                 })
+                .collect(),
+            secrets: self
+                .secrets
+                .into_iter()
+                .map(|s| (s.info, sealed_data(s.values)))
                 .collect(),
             model_groups: self.model_groups,
             deployments: self.deployments,

@@ -77,6 +77,8 @@ impl SecretSource for Env {
 async fn secrets(store: &Store, raw: &Raw) {
     let (master, master_hex) = MasterKey::generate().unwrap();
     let ring = Keyring::new(master);
+    // Basis für den inkrementellen Neubau (AIGW-75): Secrets laufen über das Journal.
+    let base = load_snapshot(store, &ring).await.unwrap();
     let spec = |v: &str| SecretSpec {
         description: Some("HMAC für hooks".into()),
         data: BTreeMap::from([("value".to_owned(), SecretRef::value(v))]),
@@ -153,6 +155,18 @@ async fn secrets(store: &Store, raw: &Raw) {
     assert_eq!(
         snap.secret_data["hooks"].get("value").unwrap().expose(),
         "hmac-1"
+    );
+    match aigw_store::load_incremental(store, &ring, &base, 1000)
+        .await
+        .unwrap()
+    {
+        aigw_store::Incremental::Built { snapshot, .. } => assert_eq!(*snapshot, snap),
+        other => panic!("inkrementell erwartet: {other:?}"),
+    }
+    // Patch-Weg und Platten-Cache-Form (to_parts/from_parts) behalten Secrets.
+    assert_eq!(
+        aigw_core::snapshot::Snapshot::from_parts(snap.to_parts()),
+        snap
     );
     let gh = &snap.mcp_servers["gh"];
     assert_eq!(gh.server.spec.secret.as_deref(), Some("hooks"));

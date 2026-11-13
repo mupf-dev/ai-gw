@@ -177,6 +177,8 @@ pub struct Snapshot {
     /// Entschlüsselte Zugangsdaten nach Name (nur im RAM; nie ausgeben oder loggen) – für
     /// Plugins mit Credential-Referenz: Webhook-Geheimnisse (AIGW-61), `content-safety` (AIGW-38).
     pub credential_data: HashMap<String, Arc<CredentialData>>,
+    /// Geheimnisse (`Secret`, F149; Metadaten) nach Name.
+    pub secrets: HashMap<String, crate::resource::Secret>,
     /// Entschlüsselte Geheimnisse (`Secret`, F149) nach Name (nur im RAM; nie ausgeben oder
     /// loggen) – für Webhook-Geheimnisse, `content-safety` und MCP-Server.
     pub secret_data: HashMap<String, Arc<CredentialData>>,
