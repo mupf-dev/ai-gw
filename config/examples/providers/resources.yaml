@@ -8,6 +8,7 @@
 #
 # Benötigte Variablen bzw. Dateien:
 #   AIGW_SECRET_OPENAI_API_KEY, AIGW_SECRET_ANTHROPIC_API_KEY, AIGW_SECRET_AZURE_API_KEY,
+#   AIGW_SECRET_AZURE_TENANT_ID, AIGW_SECRET_AZURE_CLIENT_ID, AIGW_SECRET_AZURE_CLIENT_SECRET,
 #   AIGW_SECRET_AWS_ACCESS_KEY_ID, AIGW_SECRET_AWS_SECRET_ACCESS_KEY, AIGW_SECRET_GEMINI_API_KEY,
 #   AIGW_SECRET_MISTRAL_API_KEY, /run/secrets/vertex-service-account.json (Schlüsseldatei)
 #
@@ -68,6 +69,60 @@ spec:
   weight: 1
   settings:
     apiVersion: "2024-10-21"
+
+# --- Azure OpenAI mit Entra ID (Service Principal mit Client-Secret) ---------------------------
+# Alternativ clientCertificate (PEM: Zertifikat + privater RSA-Schlüssel) statt clientSecret.
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata: {name: azure-swedencentral-entra}
+spec:
+  provider: azure-openai
+  data:
+    tenantId: {valueFrom: {env: AIGW_SECRET_AZURE_TENANT_ID}}
+    clientId: {valueFrom: {env: AIGW_SECRET_AZURE_CLIENT_ID}}
+    clientSecret: {valueFrom: {env: AIGW_SECRET_AZURE_CLIENT_SECRET}}
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: gpt-4o-azure-entra}
+spec:
+  modelGroup: gpt-4o
+  provider: azure-openai
+  endpoint: https://acme-swedencentral.openai.azure.com
+  providerModel: gpt-4o-prod
+  credential: azure-swedencentral-entra
+  weight: 1
+  priority: 1
+  settings:
+    apiVersion: "2024-10-21"
+    auth: entraId
+    # Standardwerte; für Sovereign Clouds z. B. https://login.microsoftonline.us und
+    # https://cognitiveservices.azure.us/.default
+    entraAuthority: https://login.microsoftonline.com
+    entraScope: https://cognitiveservices.azure.com/.default
+
+# --- Azure OpenAI mit Managed Identity (ohne gespeicherte Zugangsdaten) ------------------------
+# Token vom Azure-Metadatendienst (IMDS) bzw. App Service (IDENTITY_ENDPOINT). Für Workload
+# Identity (AKS) entraCredential: workloadIdentity – Tenant, Client-ID und Token-Datei kommen
+# aus AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_FEDERATED_TOKEN_FILE.
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: gpt-4o-azure-mi}
+spec:
+  modelGroup: gpt-4o
+  provider: azure-openai
+  endpoint: https://acme-norwayeast.openai.azure.com
+  providerModel: gpt-4o-prod
+  weight: 1
+  priority: 1
+  settings:
+    apiVersion: "2024-10-21"
+    auth: entraId
+    entraCredential: managedIdentity
+    # Benutzerzugewiesene Identität (weglassen = systemzugewiesen)
+    entraClientId: 11111111-2222-3333-4444-555555555555
 
 # --- Anthropic --------------------------------------------------------------------------------
 ---

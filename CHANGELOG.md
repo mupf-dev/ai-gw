@@ -17,7 +17,9 @@ Erste Version: AI-Gateway, Admin-API und Admin-UI in einem Binary.
   `/v1/embeddings`, `/v1/images/generations`, `/v1/audio/*`, `/v1/models`) und Anthropic
   Messages (`/v1/messages`); Übersetzung immer über eine gemeinsame Zwischendarstellung (IR),
   Streaming mit Backpressure, Fehler im Eingangsformat.
-- **Anbieter:** OpenAI, Azure OpenAI (API-Key), Anthropic, AWS Bedrock (SigV4
+- **Anbieter:** OpenAI, Azure OpenAI (API-Key oder Entra ID: Client-Secret,
+  Client-Zertifikat, Workload Identity, Managed Identity; Token-Cache je Credential mit
+  Erneuerung vor Ablauf, Sovereign Clouds über `entraAuthority`/`entraScope`), Anthropic, AWS Bedrock (SigV4
   oder API-Key), Google Gemini API und Vertex AI (Service-Account), Mistral, Ollama, vLLM,
   generisch OpenAI-kompatibel, eingebauter Mock-Anbieter.
 - **Routing:** Modellgruppen mit Aliasen, Strategien (gewichtet, geringste Latenz, geringste
@@ -66,7 +68,6 @@ Erste Version: AI-Gateway, Admin-API und Admin-UI in einem Binary.
 ### Bekannte Einschränkungen
 
 - GitOps-Manifeste: höchstens 1 024 YAML-Dokumente je Datei.
-- Azure OpenAI mit Entra ID (`settings.auth: entraId`) ist noch nicht umgesetzt.
 - Container-Image nur für linux/amd64 gebaut und getestet; arm64 vorbereitet.
 - Lizenz der eingebetteten tiktoken-Rangtabellen (MIT) vor einem öffentlichen Release
   rechtlich bestätigen.

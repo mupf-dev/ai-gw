@@ -100,6 +100,7 @@ export const CREDENTIAL_FIELDS: Record<ProviderKind, { alternatives: { label: st
     alternatives: [
       { label: 'API-Key', fields: ['apiKey'] },
       { label: 'Entra ID (Service Principal)', fields: ['tenantId', 'clientId', 'clientSecret'] },
+      { label: 'Entra ID (Zertifikat)', fields: ['tenantId', 'clientId', 'clientCertificate'] },
     ],
     optional: [],
   },
@@ -124,7 +125,7 @@ export const CREDENTIAL_FIELDS: Record<ProviderKind, { alternatives: { label: st
   'openai-compatible': { alternatives: [], optional: ['apiKey'] },
   mock: { alternatives: [], optional: ['apiKey'] },
 };
-export const LONG_FIELDS = new Set(['serviceAccountJson', 'privateKey']);
+export const LONG_FIELDS = new Set(['serviceAccountJson', 'privateKey', 'clientCertificate']);
 /** Feldnamen: Buchstabe, dann Buchstaben/Ziffern/_ (max. 64). */
 export const FIELD_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 

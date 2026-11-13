@@ -25,6 +25,7 @@ pub mod auth;
 pub mod bedrock;
 mod client;
 mod codec;
+pub mod entra;
 mod errmap;
 pub mod local;
 pub mod mistral;

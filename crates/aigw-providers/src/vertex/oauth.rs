@@ -11,26 +11,20 @@
 //!    konfigurierbar): `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=<jwt>`.
 //! 4. Antwort `{"access_token","expires_in"}` im RAM cachen.
 //!
-//! **Cache:** Ein Token gilt bis `expires_in` − [`SAFETY_MARGIN`]. Ab [`DEFAULT_REFRESH_LEAD`]
-//! vor Ablauf wird im Hintergrund erneuert (die Anfrage nutzt das noch gültige Token); nur ohne
-//! gültiges Token wartet eine Anfrage – parallel wartende Anfragen teilen sich einen Abruf.
+//! **Cache:** [`crate::auth::RefreshingToken`] (gemeinsam mit Entra ID): gültig bis
+//! `expires_in` − Sicherheitsabstand, Erneuerung im Hintergrund vor Ablauf, ein Abruf für alle
+//! wartenden Anfragen.
 
 use std::fmt;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock, RwLock};
-use std::time::Duration;
 
-use aigw_core::ir::{ApiError, ErrorClass, ErrorKind, UpstreamError};
-use aigw_core::resource::SecretString;
+use aigw_core::ir::ErrorClass;
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
-use bytes::Bytes;
-use http::header::{ACCEPT, CONTENT_TYPE};
-use http::{HeaderValue, Method, Uri};
+use http::Uri;
 use serde_json::{Value, json};
-use tokio::time::Instant;
 
-use crate::auth::TokenSource;
+pub use crate::auth::{DEFAULT_REFRESH_LEAD, SAFETY_MARGIN};
+use crate::auth::{FetchFuture, RefreshingToken, TokenFetcher, post_token_form, token_error};
 use crate::client::UpstreamClient;
 use crate::codec::{base64_decode, base64url, unix_now};
 
@@ -38,17 +32,8 @@ use crate::codec::{base64_decode, base64url, unix_now};
 pub const DEFAULT_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 /// Scope für Vertex AI.
 pub const CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
-/// Erneuerung im Hintergrund ab dieser Restlaufzeit.
-pub const DEFAULT_REFRESH_LEAD: Duration = Duration::from_secs(300);
-/// Ein Token mit weniger Restlaufzeit gilt als abgelaufen (Laufzeit der Anfrage, Uhrenversatz);
-/// bei sehr kurzen Laufzeiten höchstens die halbe Laufzeit.
-pub const SAFETY_MARGIN: Duration = Duration::from_secs(30);
 /// Lebensdauer des JWT (Google: höchstens 1 h).
 const JWT_LIFETIME_SECS: u64 = 3600;
-/// Zeitlimit für den Token-Austausch.
-const TOKEN_TIMEOUT: Duration = Duration::from_secs(30);
-/// Größte gelesene Token-Antwort.
-const MAX_TOKEN_RESPONSE: usize = 64 * 1024;
 
 /// Fehler beim Lesen eines Service-Account-Schlüssels.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -174,224 +159,54 @@ impl ServiceAccountKey {
     }
 }
 
-#[derive(Clone)]
-struct Cached {
-    token: SecretString,
-    /// Ab hier ungültig (Ablauf − Sicherheitsabstand).
-    valid_until: Instant,
-}
-
-/// Token-Quelle für einen Service-Account mit Cache und Hintergrund-Erneuerung.
-pub struct ServiceAccountTokenSource {
+/// Abrufer für Service-Account-Tokens (JWT-Bearer-Grant).
+pub struct ServiceAccountFetcher {
     key: ServiceAccountKey,
     token_url: Uri,
     audience: String,
     scope: String,
-    refresh_lead: Duration,
-    cached: RwLock<Option<Cached>>,
-    refresh: tokio::sync::Mutex<()>,
-    background: AtomicBool,
-    fetches: AtomicU64,
-    client: OnceLock<Result<UpstreamClient, String>>,
 }
 
-impl fmt::Debug for ServiceAccountTokenSource {
+impl fmt::Debug for ServiceAccountFetcher {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ServiceAccountTokenSource")
+        f.debug_struct("ServiceAccountFetcher")
             .field("client_email", &self.key.client_email)
             .field("token_url", &self.token_url)
-            .field("fetches", &self.fetches.load(Ordering::Relaxed))
             .finish_non_exhaustive()
     }
 }
 
-fn auth_failure(message: impl Into<String>, status: Option<u16>) -> UpstreamError {
-    // 5xx/Zeitlimit des Token-Endpunkts sind vorübergehend, alles andere ein Konfigurationsfehler.
-    let class = match status {
-        Some(s) if s >= 500 || s == 429 => ErrorClass::ServerError,
-        None => ErrorClass::Connect,
-        _ => ErrorClass::Auth,
-    };
-    let err = UpstreamError::new(
-        class,
-        ApiError::new(ErrorKind::BadGateway, message).with_code("upstream_authentication_error"),
-    );
-    match status {
-        Some(s) => err.with_status(s),
-        None => err,
-    }
-}
+/// Token-Quelle für einen Service-Account mit Cache und Hintergrund-Erneuerung.
+pub type ServiceAccountTokenSource = RefreshingToken<ServiceAccountFetcher>;
 
-impl ServiceAccountTokenSource {
+impl RefreshingToken<ServiceAccountFetcher> {
     /// Neue Token-Quelle. `token_url` ist auch die JWT-Audience.
     pub fn new(key: ServiceAccountKey, token_url: Uri, scope: impl Into<String>) -> Self {
-        Self {
+        Self::with_fetcher(ServiceAccountFetcher {
             key,
             audience: token_url.to_string(),
             token_url,
             scope: scope.into(),
-            refresh_lead: DEFAULT_REFRESH_LEAD,
-            cached: RwLock::new(None),
-            refresh: tokio::sync::Mutex::new(()),
-            background: AtomicBool::new(false),
-            fetches: AtomicU64::new(0),
-            client: OnceLock::new(),
-        }
-    }
-
-    /// Setzt die Vorlaufzeit der Hintergrund-Erneuerung.
-    #[must_use]
-    pub fn with_refresh_lead(mut self, lead: Duration) -> Self {
-        self.refresh_lead = lead;
-        self
-    }
-
-    /// Anzahl der bisherigen Token-Abrufe (Diagnose, Tests).
-    pub fn fetch_count(&self) -> u64 {
-        self.fetches.load(Ordering::Relaxed)
-    }
-
-    fn current(&self) -> Option<Cached> {
-        self.cached.read().ok().and_then(|c| c.clone())
-    }
-
-    /// Sorgt für ein gültiges Token: sofort zurück, wenn eines im Cache liegt (ggf. mit
-    /// Erneuerung im Hintergrund), sonst Abruf (einer für alle wartenden Anfragen).
-    pub async fn ensure(self: &Arc<Self>) -> Result<(), UpstreamError> {
-        let now = Instant::now();
-        if let Some(c) = self.current()
-            && c.valid_until > now
-        {
-            if c.valid_until <= now + self.refresh_lead
-                && !self.background.swap(true, Ordering::AcqRel)
-            {
-                let me = Arc::clone(self);
-                tokio::spawn(async move {
-                    let _guard = me.refresh.lock().await;
-                    let still_due = me
-                        .current()
-                        .is_none_or(|c| c.valid_until <= Instant::now() + me.refresh_lead);
-                    if still_due && let Err(e) = me.fetch().await {
-                        tracing::warn!(error = %e, "Vertex-Token: Erneuerung im Hintergrund fehlgeschlagen");
-                    }
-                    me.background.store(false, Ordering::Release);
-                });
-            }
-            return Ok(());
-        }
-        let _guard = self.refresh.lock().await;
-        if self
-            .current()
-            .is_some_and(|c| c.valid_until > Instant::now())
-        {
-            return Ok(());
-        }
-        self.fetch().await
-    }
-
-    /// HTTP-Client für den Token-Abruf: der des Deployments (gleiche SSRF-Regeln und
-    /// Vertrauensanker; gesetzt beim ersten `Provider::prepare`), sonst ein Client mit strengen
-    /// SSRF-Regeln.
-    pub fn use_client(&self, client: &UpstreamClient) {
-        let _ = self.client.set(Ok(client.clone()));
-    }
-
-    fn client(&self) -> Result<&UpstreamClient, UpstreamError> {
-        self.client
-            .get_or_init(|| UpstreamClient::with_defaults().map_err(|e| e.to_string()))
-            .as_ref()
-            .map_err(|e| auth_failure(format!("HTTP-Client für Token-Abruf: {e}"), Some(500)))
-    }
-
-    async fn fetch(&self) -> Result<(), UpstreamError> {
-        self.fetches.fetch_add(1, Ordering::Relaxed);
-        let jwt = self
-            .key
-            .jwt(&self.scope, &self.audience, unix_now())
-            .map_err(|e| auth_failure(e.to_string(), Some(400)))?;
-        let body = format!(
-            "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={jwt}"
-        );
-        let req = http::Request::builder()
-            .method(Method::POST)
-            .uri(self.token_url.clone())
-            .header(
-                CONTENT_TYPE,
-                HeaderValue::from_static("application/x-www-form-urlencoded"),
-            )
-            .header(ACCEPT, HeaderValue::from_static("application/json"))
-            .body(Bytes::from(body))
-            .map_err(|e| auth_failure(e.to_string(), Some(500)))?;
-        let started = Instant::now();
-        let client = self.client()?;
-        let limits = aigw_outbound::FetchLimits::new(TOKEN_TIMEOUT, MAX_TOKEN_RESPONSE);
-        let reply = client.outbound().fetch(req, &limits).await.map_err(|e| {
-            tracing::warn!(error = %e, url = %self.token_url, "Vertex-Token-Abruf fehlgeschlagen");
-            match e {
-                aigw_outbound::OutboundError::Timeout(_) => {
-                    auth_failure("Zeitlimit beim Token-Abruf", None)
-                }
-                aigw_outbound::OutboundError::TooLarge(_) => {
-                    auth_failure("Token-Antwort zu groß", Some(502))
-                }
-                aigw_outbound::OutboundError::Redirect { .. } => {
-                    auth_failure("Token-Endpunkt leitet weiter (nicht erlaubt)", Some(502))
-                }
-                _ => auth_failure("Token-Endpunkt nicht erreichbar", None),
-            }
-        })?;
-        let (status, body) = (reply.status, reply.body);
-        if !status.is_success() {
-            // Die Antwort (`error`, `error_description`) nennt nur den Grund, keine Geheimnisse.
-            let reason = serde_json::from_slice::<Value>(&body)
-                .ok()
-                .and_then(|v| {
-                    v.get("error_description")
-                        .or_else(|| v.get("error"))
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                })
-                .unwrap_or_default();
-            tracing::warn!(status = status.as_u16(), reason = %reason, "Vertex-Token-Abruf abgelehnt");
-            return Err(auth_failure(
-                format!("Token-Austausch beim Anbieter fehlgeschlagen (HTTP {status})"),
-                Some(status.as_u16()),
-            ));
-        }
-        if body.len() > MAX_TOKEN_RESPONSE {
-            return Err(auth_failure("Token-Antwort zu groß", Some(502)));
-        }
-        let v: Value = serde_json::from_slice(&body)
-            .map_err(|_| auth_failure("Token-Antwort nicht lesbar", Some(502)))?;
-        let token = v
-            .get("access_token")
-            .and_then(Value::as_str)
-            .filter(|t| !t.is_empty())
-            .ok_or_else(|| auth_failure("Token-Antwort ohne access_token", Some(502)))?;
-        let expires_in =
-            Duration::from_secs(v.get("expires_in").and_then(Value::as_u64).unwrap_or(3600));
-        // Sehr kurze Laufzeiten: höchstens die Hälfte als Sicherheitsabstand.
-        let valid_until = started + expires_in - SAFETY_MARGIN.min(expires_in / 2);
-        if let Ok(mut c) = self.cached.write() {
-            *c = Some(Cached {
-                token: SecretString::new(token),
-                valid_until,
-            });
-        }
-        Ok(())
+        })
     }
 }
 
-impl TokenSource for ServiceAccountTokenSource {
-    fn bearer_token(&self) -> Result<SecretString, ApiError> {
-        match self.current() {
-            Some(c) if c.valid_until > Instant::now() => Ok(c.token),
-            _ => Err(ApiError::new(
-                ErrorKind::BadGateway,
-                "kein gültiges Zugriffstoken für den Anbieter",
-            )
-            .with_code("upstream_authentication_error")),
-        }
+impl TokenFetcher for ServiceAccountFetcher {
+    fn label(&self) -> &'static str {
+        "Vertex"
+    }
+
+    fn fetch<'a>(&'a self, client: &'a UpstreamClient) -> FetchFuture<'a> {
+        Box::pin(async move {
+            let jwt = self
+                .key
+                .jwt(&self.scope, &self.audience, unix_now())
+                .map_err(|e| token_error(ErrorClass::Internal, e.to_string(), Some(500)))?;
+            let body = format!(
+                "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={jwt}"
+            );
+            post_token_form(client, &self.token_url, body).await
+        })
     }
 }
 

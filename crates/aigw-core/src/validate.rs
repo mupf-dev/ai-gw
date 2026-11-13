@@ -316,6 +316,7 @@ pub fn deployment(upstreams: &UpstreamPolicy, spec: &DeploymentSpec) -> Res {
     deployment_settings(&spec.settings)?;
     if spec.provider == ProviderKind::AzureOpenAi {
         azure(spec)?;
+        azure_auth(upstreams, spec)?;
     }
     if spec.provider == ProviderKind::Bedrock
         && setting_str(spec, "region")?.is_none_or(str::is_empty)
@@ -384,6 +385,93 @@ fn azure(spec: &DeploymentSpec) -> Res {
     }
 }
 
+/// Arten der Entra-ID-Anmeldung (`settings.entraCredential`, AIGW-82).
+pub const ENTRA_CREDENTIALS: &[&str] = &[
+    "clientSecret",
+    "clientCertificate",
+    "workloadIdentity",
+    "managedIdentity",
+];
+/// Erlaubte Scopes für Workload/Managed Identity (Identität des Gateways selbst).
+pub const ENTRA_AMBIENT_SCOPES: &[&str] = &[
+    "https://cognitiveservices.azure.com/.default",
+    "https://cognitiveservices.azure.us/.default",
+    "https://cognitiveservices.azure.cn/.default",
+];
+
+/// Tenant-/Client-ID (GUID oder Domänenname).
+fn entra_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 256
+        && s != "."
+        && s != ".."
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.' || b == b'_')
+}
+
+/// Azure OpenAI: `settings.auth` (`apiKey`/`entraId`) und die Entra-ID-Einstellungen
+/// (`entraCredential`, `entraAuthority` – nur `https://host`, SSRF-Regeln –, `entraScope`,
+/// `entraTenantId`, `entraClientId`).
+fn azure_auth(upstreams: &UpstreamPolicy, spec: &DeploymentSpec) -> Res {
+    match setting_str(spec, "auth")?.unwrap_or("apiKey") {
+        "apiKey" => return Ok(()),
+        "entraId" => {}
+        other => {
+            return Err(format!(
+                "settings.auth {other:?} unbekannt (apiKey, entraId)"
+            ));
+        }
+    }
+    let method = setting_str(spec, "entraCredential")?;
+    if let Some(m) = method
+        && !ENTRA_CREDENTIALS.contains(&m)
+    {
+        return Err(format!(
+            "settings.entraCredential {m:?} unbekannt ({})",
+            ENTRA_CREDENTIALS.join(", ")
+        ));
+    }
+    let ambient = matches!(method, Some("workloadIdentity" | "managedIdentity"));
+    if let Some(a) = setting_str(spec, "entraAuthority")? {
+        if method == Some("workloadIdentity") {
+            return Err(
+                "settings.entraAuthority: bei workloadIdentity nicht erlaubt (kommt aus \
+                 AZURE_AUTHORITY_HOST)"
+                    .into(),
+            );
+        }
+        let rest = a.strip_prefix("https://").ok_or_else(|| {
+            "settings.entraAuthority: https://host erwartet (z. B. https://login.microsoftonline.us)"
+                .to_owned()
+        })?;
+        if rest.trim_end_matches('/').contains(['/', '?', '#']) {
+            return Err("settings.entraAuthority: nur Schema und Host (ohne Pfad/Abfrage)".into());
+        }
+        upstreams
+            .check_endpoint(a)
+            .map_err(|m| format!("settings.entraAuthority: {m}"))?;
+    }
+    if let Some(scope) = setting_str(spec, "entraScope")? {
+        if scope.is_empty() || scope.len() > 512 || scope.chars().any(char::is_control) {
+            return Err("settings.entraScope: 1–512 Zeichen ohne Steuerzeichen".into());
+        }
+        if ambient && !ENTRA_AMBIENT_SCOPES.contains(&scope) {
+            return Err(format!(
+                "settings.entraScope: bei Workload/Managed Identity nur {}",
+                ENTRA_AMBIENT_SCOPES.join(", ")
+            ));
+        }
+    }
+    for key in ["entraTenantId", "entraClientId"] {
+        if let Some(v) = setting_str(spec, key)?
+            && !entra_id(v)
+        {
+            return Err(format!("settings.{key} ungültig (GUID oder Domänenname)"));
+        }
+    }
+    Ok(())
+}
+
 /// Kompatibilitätsliste Zugangsdaten-Anbieter → weitere Deployment-Anbieter (F65): ein
 /// OpenAI-Key passt auch zu OpenAI-kompatiblen Endpunkten (`openai-compatible`, `vllm`,
 /// `ollama`; dieselbe Bearer-Anmeldung mit `apiKey`). Gleicher Anbieter passt immer.
@@ -434,7 +522,11 @@ pub fn deployment_credential(
 pub fn required_credential_fields(p: ProviderKind) -> &'static [&'static [&'static str]] {
     match p {
         ProviderKind::OpenAi | ProviderKind::Anthropic | ProviderKind::Mistral => &[&["apiKey"]],
-        ProviderKind::AzureOpenAi => &[&["apiKey"], &["tenantId", "clientId", "clientSecret"]],
+        ProviderKind::AzureOpenAi => &[
+            &["apiKey"],
+            &["tenantId", "clientId", "clientSecret"],
+            &["tenantId", "clientId", "clientCertificate"],
+        ],
         ProviderKind::Bedrock => &[&["accessKeyId", "secretAccessKey"], &["apiKey"]],
         ProviderKind::Vertex => &[
             &["serviceAccountJson"],
@@ -740,6 +832,49 @@ mod tests {
         let mut bad = ok.clone();
         bad.provider_model = "a/b".into();
         assert!(azure(&bad).is_err());
+    }
+
+    #[test]
+    fn azure_entra_rules() {
+        let ep = Some("https://x.openai.azure.com");
+        let p = UpstreamPolicy::strict();
+        let check = |settings: Value| azure_auth(&p, &dep(ProviderKind::AzureOpenAi, ep, settings));
+        assert!(check(json!({})).is_ok());
+        assert!(check(json!({"auth": "entraId"})).is_ok());
+        assert!(check(json!({"auth": "magie"})).is_err());
+        assert!(check(json!({"auth": "entraId", "entraCredential": "x"})).is_err());
+        assert!(
+            check(
+                json!({"auth": "entraId", "entraCredential": "managedIdentity",
+                         "entraClientId": "11111111-2222-3333-4444-555555555555"})
+            )
+            .is_ok()
+        );
+        assert!(
+            check(
+                json!({"auth": "entraId", "entraAuthority": "https://login.microsoftonline.us/"})
+            )
+            .is_ok()
+        );
+        for bad in [
+            json!({"auth": "entraId", "entraAuthority": "http://login.microsoftonline.us"}),
+            json!({"auth": "entraId", "entraAuthority": "https://login.example/x"}),
+            json!({"auth": "entraId", "entraAuthority": "https://10.0.0.1"}),
+            json!({"auth": "entraId", "entraCredential": "workloadIdentity",
+                   "entraAuthority": "https://login.microsoftonline.us"}),
+            json!({"auth": "entraId", "entraCredential": "managedIdentity",
+                   "entraScope": "https://management.azure.com/.default"}),
+            json!({"auth": "entraId", "entraTenantId": "../x"}),
+        ] {
+            assert!(check(bad.clone()).is_err(), "{bad}");
+        }
+        assert!(
+            credential_fields(
+                ProviderKind::AzureOpenAi,
+                ["tenantId", "clientId", "clientCertificate"]
+            )
+            .is_ok()
+        );
     }
 
     #[test]

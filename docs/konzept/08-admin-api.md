@@ -172,7 +172,9 @@ POST /admin/api/v1/provider-credentials
   Wert an einen frei wählbaren Endpunkt senden. GitOps löst `valueFrom` auf dem Rechner auf,
   der `aigw config apply` ausführt, und sendet den Wert.
 - Pflichtfelder je Anbieter (eine Alternative vollständig): `openai`, `anthropic`, `mistral`:
-  `apiKey`; `azure-openai`: `apiKey` oder `tenantId` + `clientId` + `clientSecret`; `bedrock`:
+  `apiKey`; `azure-openai`: `apiKey`, `tenantId` + `clientId` + `clientSecret` oder
+  `tenantId` + `clientId` + `clientCertificate` (Managed/Workload Identity ohne Zugangsdaten,
+  siehe 06 §Entra ID); `bedrock`:
   `accessKeyId` + `secretAccessKey` (optional `sessionToken`) oder `apiKey`; `vertex`:
   `serviceAccountJson`, `clientEmail` + `privateKey`, `accessToken` oder `apiKey`; `ollama`,
   `vllm`, `openai-compatible`, `mock`: beliebig. Feldnamen: Buchstabe, dann

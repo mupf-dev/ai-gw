@@ -243,3 +243,39 @@ async fn tls_variants_share_guard_and_report_bad_ca_files() {
         .unwrap_err();
     assert!(err.is_blocked(), "{err}");
 }
+
+/// AIGW-82: Ausnahme für genau einen fest verdrahteten Host (Azure IMDS für Managed Identity) –
+/// alle anderen privaten Ziele bleiben gesperrt, die Basis-Regeln unverändert.
+#[tokio::test]
+async fn exempt_host_allows_only_that_host() {
+    let addr = server().await;
+    let strict = client(AddressGuard::policy(policy(&[])));
+    let exempt = strict.with_exempt_host("127.0.0.1").unwrap();
+    assert!(matches!(exempt.guard(), AddressGuard::Exempt { .. }));
+    // IP-Literal: freigeschaltet.
+    let r = exempt
+        .fetch(get_req(&format!("http://{addr}/ok")), &limits())
+        .await
+        .unwrap();
+    assert_eq!(&r.body[..], b"hallo");
+    // Name, der auf dieselbe private Adresse zeigt: weiterhin gesperrt.
+    let url = format!("http://api.example.com:{}/ok", addr.port());
+    let err = exempt.fetch(get_req(&url), &limits()).await.unwrap_err();
+    assert!(err.is_blocked(), "{err}");
+    // Andere private Adressen: gesperrt.
+    let err = exempt
+        .fetch(get_req("http://10.0.0.1:1/"), &limits())
+        .await
+        .unwrap_err();
+    assert!(err.is_blocked(), "{err}");
+    // Der Ausgangs-Client bleibt streng.
+    let err = strict
+        .fetch(get_req(&format!("http://{addr}/ok")), &limits())
+        .await
+        .unwrap_err();
+    assert!(err.is_blocked(), "{err}");
+    // Freischaltung per Name gilt für den Namen (beliebige aufgelöste Adresse).
+    let by_name = strict.with_exempt_host("API.example.com").unwrap();
+    let r = by_name.fetch(get_req(&url), &limits()).await.unwrap();
+    assert_eq!(r.status, 200);
+}

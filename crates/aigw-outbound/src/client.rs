@@ -335,6 +335,28 @@ impl OutboundClient {
         })
     }
 
+    /// Variante, die zusätzlich genau `host` (Name oder IP-Literal) ansprechen darf – auch wenn
+    /// er auf private/link-lokale Adressen zeigt (eigener Pool, gleiche Vertrauensanker und
+    /// Einstellungen). Nur für fest verdrahtete Ziele aus Code oder Prozessumgebung (Azure
+    /// IMDS für Managed Identity), nie für Ziele aus der Admin-API; die übrigen SSRF-Regeln
+    /// bleiben unverändert.
+    pub fn with_exempt_host(&self, host: &str) -> Result<Self, OutboundError> {
+        let guard = self.guard.exempt(host);
+        let (_, cfg) = self.tls.resolve()?;
+        let options = OutboundOptions {
+            connect_timeout: self.connect,
+            ..self.base.options.clone()
+        };
+        let inner = build_inner(&options, &guard, &self.base.resolver, (*cfg).clone());
+        Ok(Self {
+            inner,
+            guard,
+            tls: self.tls.clone(),
+            connect: self.connect,
+            base: Arc::clone(&self.base),
+        })
+    }
+
     /// Variante mit einer zusätzlichen CA-Datei (z. B. `settings.caFile` eines Deployments).
     pub fn with_ca_file(&self, path: &std::path::Path) -> Result<Self, OutboundError> {
         self.variant(self.base.tls.clone().with_ca_file(path), self.connect)

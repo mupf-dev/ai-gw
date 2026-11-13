@@ -84,6 +84,28 @@ anschließendem Snapshot-Aufbau. Wer ein Feld umbenennt, merkt es dort.
 - **Mock-Anbieter:** `admin.allow_mock: true` ist Standard (Demos, Smoke-Tests). Für
   Produktion `false`, ebenso `admin.ui.mock: false`.
 
+### Azure OpenAI mit Entra ID
+
+Statt eines API-Keys meldet sich das Gateway per Entra ID an (`settings.auth: entraId` am
+Deployment, Details in [06-streaming-und-anbieter.md](../konzept/06-streaming-und-anbieter.md)):
+
+| Variante | Deployment-Einstellungen | Zugangsdaten / Umgebung |
+|---|---|---|
+| Service Principal mit Secret | `auth: entraId` | `tenantId`, `clientId`, `clientSecret` |
+| Service Principal mit Zertifikat | `auth: entraId` | `tenantId`, `clientId`, `clientCertificate` (PEM mit Zertifikat und unverschlüsseltem RSA-Schlüssel) |
+| Workload Identity (AKS) | `auth: entraId`, `entraCredential: workloadIdentity` | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_FEDERATED_TOKEN_FILE`, optional `AZURE_AUTHORITY_HOST` (setzt der AKS-Webhook) |
+| Managed Identity (VM, AKS-Knoten, App Service, Container Apps) | `auth: entraId`, `entraCredential: managedIdentity`, optional `entraClientId` | keine; App Service: `IDENTITY_ENDPOINT`/`IDENTITY_HEADER` |
+
+- Sovereign Clouds: `entraAuthority` (z. B. `https://login.microsoftonline.us`) und
+  `entraScope` (z. B. `https://cognitiveservices.azure.us/.default`).
+- Die Identität braucht auf der Azure-OpenAI-Ressource die Rolle **Cognitive Services OpenAI
+  User**; Workload/Managed Identity erhalten nur Cognitive-Services-Scopes.
+- Den Metadatendienst (`169.254.169.254`) muss man **nicht** in `admin.allow_private_upstreams`
+  freischalten – Managed Identity nimmt genau diesen Host gezielt aus.
+- Fehler beim Token-Abruf: 502 `upstream_authentication_error`; die Ursache (z. B.
+  `AADSTS7000215` = falsches Secret) steht als Warnung im Log.
+- Beispiel: [`config/examples/providers/resources.yaml`](../../config/examples/providers/resources.yaml).
+
 ### Verbindungsgrenzen
 
 Je Listener eine Höchstzahl gleichzeitiger Verbindungen, dazu Lese-Timeouts und

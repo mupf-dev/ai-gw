@@ -101,10 +101,54 @@ vLLM und Mistral nativ; generisch kompatible Server und Ollama bekommen n parall
 entfernt (OpenAI lehnt es sonst ab). Azure-Deployment-Namen werden auf `[A-Za-z0-9._-]` geprüft
 (Pfadsegment).
 
-**Entra ID:** `auth::TokenSource::bearer_token()` ist synchron – Implementierungen halten das
-Token im RAM und erneuern es im Hintergrund (kein Netzwerkzugriff je Anfrage). Eingebaut ist nur
-`StaticToken`; `settings.auth: entraId` wird bis zur Implementierung mit einer klaren
-Fehlermeldung abgelehnt (`OpenAiAdapter::azure_with_token_source` für programmatische Nutzung).
+**Entra ID (AIGW-82):** `settings.auth: entraId` schickt `Authorization: Bearer <token>` statt
+`api-key`. Die Token-Quelle (`aigw_providers::entra`) unterstützt:
+
+| `settings.entraCredential` | Ablauf | Herkunft der Angaben |
+|---|---|---|
+| `clientSecret` (Standard, wenn die Zugangsdaten `clientSecret` enthalten) | OAuth 2.0 Client Credentials | Zugangsdaten `tenantId`, `clientId`, `clientSecret` |
+| `clientCertificate` (Standard bei `clientCertificate`) | Client Credentials mit JWT-Assertion (RS256, Header `x5t` = SHA-1-Fingerabdruck) | Zugangsdaten `tenantId`, `clientId`, `clientCertificate` (PEM: `CERTIFICATE` + `PRIVATE KEY`/`RSA PRIVATE KEY`, unverschlüsselt) |
+| `workloadIdentity` | Client Credentials mit föderiertem Token als `client_assertion` (bei jedem Abruf neu gelesen) | `AZURE_FEDERATED_TOKEN_FILE`; Tenant/Client: Zugangsdaten → `settings.entraTenantId`/`entraClientId` → `AZURE_TENANT_ID`/`AZURE_CLIENT_ID` |
+| `managedIdentity` | IMDS (`http://169.254.169.254/metadata/identity/oauth2/token`, `Metadata: true`) bzw. App Service/Container Apps (`IDENTITY_ENDPOINT` + `IDENTITY_HEADER`) | optional `clientId` (Zugangsdaten oder `settings.entraClientId`) für benutzerzugewiesene Identitäten |
+
+- **Scope** `settings.entraScope`, Standard `https://cognitiveservices.azure.com/.default`
+  (Managed Identity: als `resource` ohne `/.default`). Bei Workload/Managed Identity – der
+  Identität des Gateways selbst – nur die Cognitive-Services-Scopes der Azure-Clouds
+  (`.azure.com`, `.azure.us`, `.azure.cn`), damit sich über die Admin-API keine Tokens für
+  andere Azure-Dienste (ARM, Key Vault) erzeugen lassen.
+- **Authority** `settings.entraAuthority` (nur `https://host`, SSRF-Regeln wie Endpunkte),
+  Standard `https://login.microsoftonline.com`; Sovereign Clouds z. B.
+  `https://login.microsoftonline.us`, `https://login.chinacloudapi.cn`. Bei Workload Identity
+  nur aus `AZURE_AUTHORITY_HOST` – das föderierte Token des Pods geht an keinen per Admin-API
+  gewählten Host.
+- **Cache je Credential:** Deployments mit gleichen Merkmalen (Art, Authority/Endpunkt,
+  Tenant, Client, Scope, Geheimnis) teilen sich eine Token-Quelle (prozessweit, Schlüssel =
+  SHA-256 der Merkmale; gilt über Konfigurationswechsel hinweg, solange ein Deployment sie
+  nutzt). Ein rotiertes Secret ergibt eine neue Quelle.
+- **Cache-Verhalten** (`auth::RefreshingToken`, gemeinsam mit Vertex): gültig bis Ablauf − 30 s
+  (bei kurzen Laufzeiten höchstens die halbe Laufzeit), ab 5 min vor Ablauf Erneuerung im
+  Hintergrund, die Anfrage nutzt das alte Token. Ohne gültiges Token wartet die Anfrage
+  (`Provider::prepare`, begrenzt durch das Gesamt-Zeitlimit); alle gleichzeitig wartenden
+  Anfragen teilen sich **einen** Abruf und dessen Ergebnis, auch einen Fehler (kein Thundering
+  Herd). Nach einer gescheiterten Hintergrund-Erneuerung frühestens nach 5 s erneut.
+- **Fehlerklassen:** Token-Endpunkt 4xx → `auth` (nicht retrybar, Konfiguration prüfen), 429 →
+  `rate_limit`, 5xx sowie IMDS 404/410 → `server_error`, Verbindungsfehler → `connect`,
+  Zeitlimit → `timeout`, unlesbare Antwort → `protocol` – jeweils als 502 mit Code
+  `upstream_authentication_error`. Die Fehlerbeschreibung von Entra (`AADSTS…`) steht nur im
+  Log (Warnung), nie in der Client-Antwort; Tokens und Geheimnisse erscheinen weder in Logs
+  noch in `Debug`-Ausgaben.
+- **HTTP:** alle Abrufe über aigw-outbound mit dem Client des Deployments (`upstream.roots`,
+  SSRF-Regeln, keine Weiterleitungen, 30 s, 64 KiB). Der IMDS ist link-lokal und damit
+  gesperrt; Managed Identity nutzt deshalb eine Client-Variante
+  (`OutboundClient::with_exempt_host`), die **genau** den Host des Metadaten-Endpunkts (fest
+  im Code bzw. `IDENTITY_ENDPOINT` aus der Prozessumgebung) freischaltet. Der Modell-Endpunkt
+  und alle anderen Ziele unterliegen weiter den normalen Regeln.
+- **Restrisiko:** Wer Deployments anlegen darf, kann ein Token der Gateway-Identität (Scope
+  Cognitive Services) an einen beliebigen erlaubten Endpunkt schicken lassen – gleiche
+  Vertrauensstufe wie das Hinterlegen von Zugangsdaten. Die Gateway-Identität sollte daher nur
+  die Rolle „Cognitive Services OpenAI User“ auf den vorgesehenen Ressourcen haben.
+
+`OpenAiAdapter::azure_with_token_source` bleibt für eigene `TokenSource`-Implementierungen.
 
 **Mistral/Magistral (F61):** Reasoning-Modelle liefern `content` als Liste
 (`{"type":"thinking","thinking":[{"type":"text",…}]}` + `{"type":"text",…}`); der Adapter fasst
@@ -556,7 +600,8 @@ Request-Log), Profil, Optimierungen (u. a. mimalloc), Lasttests und Kaltstart:
   Inhalt wird nie ausgegeben); eine Beschränkung auf ein Verzeichnis (wie `gitops.secret_dir`)
   wäre möglich.
 - `client_ip` füllt der Proxy noch nicht (braucht `ConnectInfo` im Listener).
-- Entra-ID-`TokenSource`.
+- Entra ID: verschlüsselte PEM-Schlüssel, `x5c` (Zertifikatskette für Subject-Name/Issuer-
+  Anmeldung), Azure-Arc-Managed-Identity, Weitergabe der Nutzeridentität (On-Behalf-Of).
 - Reasoning in Assistant-Nachrichten des Verlaufs von OpenAI-Clients (`reasoning_content`)
   wird noch nicht zurück in die IR übernommen (Anthropic bräuchte ohnehin die Signatur).
 - Mistral: Reasoning im Verlauf (`thinking`-Blöcke in Assistant-Nachrichten) wird nicht an

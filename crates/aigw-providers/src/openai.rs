@@ -7,14 +7,15 @@
 //! | | OpenAI | Azure OpenAI | kompatibel |
 //! |---|---|---|---|
 //! | URL | `{endpoint}/chat/completions`, Standard `https://api.openai.com/v1` | `{endpoint}/openai/deployments/{providerModel}/chat/completions?api-version=…` bzw. `{endpoint}/openai/v1/chat/completions` (`apiStyle: v1`) | `{endpoint}/chat/completions` |
-//! | Auth | `Authorization: Bearer` (`apiKey`) | `api-key` (`apiKey`); Entra-ID über [`TokenSource`] | `Authorization: Bearer`, optional |
+//! | Auth | `Authorization: Bearer` (`apiKey`) | `api-key` (`apiKey`); `auth: entraId` → Bearer-Token aus [`crate::entra`] | `Authorization: Bearer`, optional |
 //! | Ausgabegrenze | `max_completion_tokens` | ab `api-version` 2024-09-01 bzw. `v1`: `max_completion_tokens`, sonst `max_tokens` | `max_tokens` |
 //!
 //! Profile derselben Implementierung: Ollama, vLLM ([`crate::local`]) und Mistral
 //! ([`crate::mistral`]).
 //!
 //! Einstellungen (`spec.settings`): `organization`, `project` (OpenAI), `apiVersion`,
-//! `apiStyle` (`deployment`/`v1`), `auth` (`apiKey`/`entraId`) (Azure), `maxTokensField`
+//! `apiStyle` (`deployment`/`v1`), `auth` (`apiKey`/`entraId`) mit `entraCredential`,
+//! `entraAuthority`, `entraScope`, `entraTenantId`, `entraClientId` (Azure), `maxTokensField`
 //! (`max_tokens`/`max_completion_tokens`), `streamUsage` (bool), `defaultMaxTokens`,
 //! `safePrompt` (Mistral), `timeouts`.
 
@@ -62,8 +63,10 @@ enum Auth {
     None,
     /// Fester Header (`Authorization: Bearer …` bzw. `api-key: …`), als sensibel markiert.
     Header(HeaderName, HeaderValue),
-    /// Bearer-Token aus einer [`TokenSource`] (Azure Entra ID).
+    /// Bearer-Token aus einer [`TokenSource`] (fremde Quelle, z. B. Tests).
     Token(Arc<dyn TokenSource>),
+    /// Azure Entra ID: Token-Quelle mit Cache, vor der Anfrage per `prepare` gefüllt.
+    Entra(Arc<crate::entra::EntraTokenSource>),
 }
 
 /// Adapter für OpenAI, Azure OpenAI und OpenAI-kompatible Endpunkte.
@@ -201,6 +204,22 @@ impl OpenAiAdapter {
 
     /// Baut den Adapter aus einem Deployment (`openai`, `azure-openai`, `openai-compatible`).
     pub fn from_deployment(dep: &DeploymentCtx) -> Result<Self, ConfigError> {
+        Self::build(dep, None)
+    }
+
+    /// Wie [`Self::from_deployment`], Entra ID (`settings.auth: entraId`) aber mit vorgegebenen
+    /// Umgebungswerten statt denen des Prozesses (Tests, eingebettete Nutzung).
+    pub fn from_deployment_with_entra_env(
+        dep: &DeploymentCtx,
+        env: &crate::entra::EntraEnv,
+    ) -> Result<Self, ConfigError> {
+        Self::build(dep, Some(env))
+    }
+
+    fn build(
+        dep: &DeploymentCtx,
+        entra_env: Option<&crate::entra::EntraEnv>,
+    ) -> Result<Self, ConfigError> {
         let s = Settings::of(dep);
         let spec = &dep.deployment.spec;
         let api_key = dep
@@ -254,11 +273,10 @@ impl OpenAiAdapter {
                             sensitive(key).ok_or_else(header_err)?,
                         )
                     }
-                    "entraId" => {
-                        return Err(s.invalid(
-                            "settings.auth = entraId ist noch nicht umgesetzt (TokenSource fehlt)",
-                        ));
-                    }
+                    "entraId" => Auth::Entra(match entra_env {
+                        Some(env) => crate::entra::token_source_with_env(dep, env)?,
+                        None => crate::entra::token_source(dep)?,
+                    }),
                     other => {
                         return Err(s.invalid(format!(
                             "settings.auth = {other:?} unbekannt (erlaubt: apiKey, entraId)"
@@ -396,6 +414,14 @@ impl OpenAiAdapter {
     pub fn uri(&self) -> &Uri {
         &self.uri
     }
+
+    /// Entra-ID-Token-Quelle (bei `settings.auth: entraId`; Diagnose, Tests).
+    pub fn entra_source(&self) -> Option<&Arc<crate::entra::EntraTokenSource>> {
+        match &self.auth {
+            Auth::Entra(src) => Some(src),
+            _ => None,
+        }
+    }
 }
 
 /// Azure-URL (Chat) und Ausgabegrenzen-Feld je nach `apiStyle`/`apiVersion`.
@@ -479,6 +505,16 @@ impl Provider for OpenAiAdapter {
 
     fn provider_model(&self) -> &str {
         &self.provider_model
+    }
+
+    fn prepare(&self, client: &crate::UpstreamClient) -> Option<crate::PrepareFuture<'_>> {
+        match &self.auth {
+            Auth::Entra(src) => {
+                src.use_client(client);
+                Some(Box::pin(src.ensure()))
+            }
+            _ => None,
+        }
     }
 
     fn build_request(
@@ -713,6 +749,12 @@ impl OpenAiAdapter {
         match &self.auth {
             Auth::None => {}
             Auth::Header(name, value) => builder = builder.header(name, value.clone()),
+            Auth::Entra(src) => {
+                let token = src.bearer_token()?;
+                let value = bearer(token.expose())
+                    .ok_or_else(|| internal("Entra-ID-Token enthält unzulässige Zeichen"))?;
+                builder = builder.header(AUTHORIZATION, value);
+            }
             Auth::Token(src) => {
                 let token = src.bearer_token()?;
                 let value = bearer(token.expose())
@@ -1205,7 +1247,9 @@ mod tests {
             None,
             json!({"auth": "entraId"}),
         );
-        assert!(OpenAiAdapter::from_deployment(&d).is_err());
+        // Ohne Zugangsdaten und ohne entraCredential: klare Fehlermeldung.
+        let e = OpenAiAdapter::from_deployment(&d).unwrap_err();
+        assert!(e.to_string().contains("entraCredential"), "{e}");
         let a = OpenAiAdapter::azure_with_token_source(
             &d,
             Arc::new(StaticToken(SecretString::new("eyJ"))),

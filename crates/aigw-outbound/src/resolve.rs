@@ -86,6 +86,16 @@ pub enum AddressGuard {
     /// Ohne Adressfilter: nur für Ziele aus der Startkonfiguration des Betreibers (OIDC-IdP,
     /// OTLP-Collector) sowie Tests und Benchmarks.
     Trusted,
+    /// Regeln `base`, zusätzlich genau die Hosts `hosts` (Name oder IP-Literal, wie in der URL)
+    /// mit beliebiger Adresse – für fest verdrahtete Ziele aus dem Code bzw. der
+    /// Prozessumgebung, z. B. den Azure-Metadatendienst (IMDS, `169.254.169.254`) für Managed
+    /// Identity. Nie für Ziele aus der Admin-API.
+    Exempt {
+        /// Regeln für alle anderen Ziele.
+        base: Box<AddressGuard>,
+        /// Freigeschaltete Hosts (klein geschrieben, ohne Klammern).
+        hosts: Arc<[String]>,
+    },
 }
 
 impl fmt::Debug for AddressGuard {
@@ -93,6 +103,11 @@ impl fmt::Debug for AddressGuard {
         match self {
             Self::Policy(p) => f.debug_tuple("Policy").field(p).finish(),
             Self::Trusted => f.write_str("Trusted"),
+            Self::Exempt { base, hosts } => f
+                .debug_struct("Exempt")
+                .field("base", base)
+                .field("hosts", hosts)
+                .finish(),
         }
     }
 }
@@ -113,6 +128,7 @@ impl AddressGuard {
         match self {
             Self::Policy(p) => Some(p),
             Self::Trusted => None,
+            Self::Exempt { base, .. } => base.upstream_policy(),
         }
     }
 
@@ -122,6 +138,36 @@ impl AddressGuard {
         match self {
             Self::Policy(p) => p.resolved_ip_allowed(host, ip),
             Self::Trusted => true,
+            Self::Exempt { base, hosts } => {
+                let bare = host.trim_start_matches('[').trim_end_matches(']');
+                hosts.iter().any(|h| h.eq_ignore_ascii_case(bare)) || base.allows(host, ip)
+            }
+        }
+    }
+
+    /// Diese Regeln plus die Ausnahme für genau `host` (siehe [`AddressGuard::Exempt`]).
+    #[must_use]
+    pub fn exempt(&self, host: &str) -> Self {
+        let host = host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_ascii_lowercase();
+        match self {
+            Self::Trusted => Self::Trusted,
+            Self::Exempt { base, hosts } => {
+                let mut all: Vec<String> = hosts.to_vec();
+                if !all.contains(&host) {
+                    all.push(host);
+                }
+                Self::Exempt {
+                    base: base.clone(),
+                    hosts: all.into(),
+                }
+            }
+            Self::Policy(_) => Self::Exempt {
+                base: Box::new(self.clone()),
+                hosts: vec![host].into(),
+            },
         }
     }
 }
