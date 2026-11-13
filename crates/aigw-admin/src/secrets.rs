@@ -360,7 +360,7 @@ pub(crate) async fn get_secret(
     request_body = SecretInput,
     params(
         ("name" = String, Path, description = "Name"),
-        ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
     ),
     responses(
         (status = 200, description = "Ersetzt (ohne Werte)", body = Secret,
@@ -370,6 +370,7 @@ pub(crate) async fn get_secret(
         (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
         (status = 422, description = "Ungültige Eingabe", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []))
@@ -388,10 +389,11 @@ pub(crate) async fn put_secret(
     let keyring = keyring(&st)?;
     let _guard = st.write_lock.lock().await;
     let current = st.store.get_secret(&name).await?;
-    check_if_match(&headers, &etag_of(&Secret::from(current)))?;
+    let updated_at = current.metadata.updated_at;
+    let expect = check_if_match(&headers, &etag_of(&Secret::from(current)), updated_at)?;
     let s = st
         .store
-        .update_secret(p.actor(), keyring, meta, to_store_spec(input.spec))
+        .update_secret(p.actor(), keyring, meta, to_store_spec(input.spec), expect)
         .await?;
     Ok(respond(StatusCode::OK, s))
 }
@@ -402,7 +404,7 @@ pub(crate) async fn put_secret(
     request_body(content = SecretPatch, content_type = "application/merge-patch+json"),
     params(
         ("name" = String, Path, description = "Name"),
-        ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
     ),
     responses(
         (status = 200, description = "Geändert (ohne Werte)", body = Secret,
@@ -412,6 +414,7 @@ pub(crate) async fn put_secret(
         (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
         (status = 422, description = "Ungültige Eingabe", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []))
@@ -442,7 +445,11 @@ pub(crate) async fn patch_secret(
     let keyring = keyring(&st)?;
     let _guard = st.write_lock.lock().await;
     let current = st.store.get_secret(&name).await?;
-    check_if_match(&headers, &etag_of(&Secret::from(current.clone())))?;
+    let expect = check_if_match(
+        &headers,
+        &etag_of(&Secret::from(current.clone())),
+        current.metadata.updated_at,
+    )?;
     let mut fields: std::collections::BTreeSet<&str> =
         current.spec.fields.iter().map(String::as_str).collect();
     for (f, v) in &spec.data {
@@ -471,6 +478,7 @@ pub(crate) async fn patch_secret(
             meta.labels,
             spec.description,
             changes,
+            expect,
         )
         .await?;
     Ok(respond(StatusCode::OK, s))
@@ -481,7 +489,7 @@ pub(crate) async fn patch_secret(
     delete, path = "/admin/api/v1/secrets/{name}", tag = "secrets",
     params(
         ("name" = String, Path, description = "Name"),
-        ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
     ),
     responses(
         (status = 204, description = "Gelöscht"),
@@ -490,6 +498,7 @@ pub(crate) async fn patch_secret(
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
         (status = 409, description = "Wird noch verwendet", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []))
 )]
@@ -502,9 +511,10 @@ pub(crate) async fn delete_secret(
     p.require_on(Permission::Write, &Target::Catalog)?;
     let _guard = st.write_lock.lock().await;
     let current = st.store.get_secret(&name).await?;
-    check_if_match(&headers, &etag_of(&Secret::from(current)))?;
+    let updated_at = current.metadata.updated_at;
+    let expect = check_if_match(&headers, &etag_of(&Secret::from(current)), updated_at)?;
     st.store
-        .delete(p.actor(), core::ResourceKind::Secret, &name)
+        .delete_expect(p.actor(), core::ResourceKind::Secret, &name, expect)
         .await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }

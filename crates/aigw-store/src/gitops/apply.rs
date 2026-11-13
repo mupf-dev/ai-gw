@@ -193,6 +193,7 @@ async fn upsert(
                 meta,
                 &plain,
                 &refs,
+                crate::repo::Expect::Any,
             )
             .await
             .map(drop)

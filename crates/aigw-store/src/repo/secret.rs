@@ -15,7 +15,7 @@ use aigw_core::resource::{
 
 use super::credential::{CredentialRefs, seal_data};
 
-use super::{Action, AdminTx, Row, Val};
+use super::{Action, AdminTx, Expect, Row, Val};
 use crate::crypto::{Keyring, Sealed};
 use crate::db::{DbRow, Q};
 use crate::{Store, StoreError};
@@ -129,6 +129,7 @@ pub(crate) async fn write_secret(
     meta: ObjectMeta,
     spec: &SecretSpec,
     refs: &CredentialRefs,
+    expect: Expect,
 ) -> Result<Secret, StoreError> {
     validate_secret(
         spec.description.as_deref(),
@@ -141,7 +142,7 @@ pub(crate) async fn write_secret(
     let cols = sealed_cols(spec.description.as_deref(), &fields, refs, sealed)?;
     let action = match existing {
         Some(_) => {
-            tx.update_row(KIND, id, &meta, cols).await?;
+            tx.update_row_expect(KIND, id, &meta, cols, expect).await?;
             Action::Update
         }
         None => {
@@ -181,7 +182,16 @@ impl Store {
     ) -> Result<Secret, StoreError> {
         validate_name(&meta.name).map_err(StoreError::Invalid)?;
         let mut tx = AdminTx::begin(self, actor).await?;
-        let s = write_secret(&mut tx, keyring, None, meta, &spec, &refs_of(&spec)).await?;
+        let s = write_secret(
+            &mut tx,
+            keyring,
+            None,
+            meta,
+            &spec,
+            &refs_of(&spec),
+            Expect::Any,
+        )
+        .await?;
         tx.commit().await?;
         self.get_secret(&s.metadata.name).await
     }
@@ -193,6 +203,7 @@ impl Store {
         keyring: &Keyring,
         meta: ObjectMeta,
         spec: SecretSpec,
+        expect: Expect,
     ) -> Result<Secret, StoreError> {
         let before = self.get_secret(&meta.name).await?;
         let before_json = serde_json::to_value(&before)?;
@@ -204,6 +215,7 @@ impl Store {
             meta,
             &spec,
             &refs_of(&spec),
+            expect,
         )
         .await?;
         tx.commit().await?;
@@ -213,6 +225,7 @@ impl Store {
     /// Ändert ein Geheimnis teilweise (Admin-API `PATCH`): `changes` setzt (`Some`) bzw.
     /// entfernt (`None`) Felder; Labels und Beschreibung nur, wenn angegeben
     /// (`description: Some(None)` entfernt sie).
+    #[allow(clippy::too_many_arguments)] // Merge-Patch-Teile + erwarteter Stand (F38)
     pub async fn patch_secret(
         &self,
         actor: &str,
@@ -221,6 +234,7 @@ impl Store {
         labels: Option<BTreeMap<String, String>>,
         description: Option<Option<String>>,
         changes: BTreeMap<String, Option<SecretString>>,
+        expect: Expect,
     ) -> Result<Secret, StoreError> {
         let row = self.fetch_one_row(KIND, NO_REFS, name).await?;
         let (before, sealed) = info_from_row(&row)?;
@@ -254,6 +268,7 @@ impl Store {
             meta,
             &spec,
             &refs,
+            expect,
         )
         .await?;
         tx.commit().await?;

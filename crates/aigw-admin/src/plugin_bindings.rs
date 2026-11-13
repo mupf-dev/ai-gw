@@ -25,9 +25,7 @@
 
 use std::sync::LazyLock;
 
-use aigw_core::resource::{
-    Id, JsonObject, Object, ObjectMeta, PluginBindingSpec, ScopeLevel, TeamSpec,
-};
+use aigw_core::resource::{Id, Object, ObjectMeta, PluginBindingSpec, ScopeLevel, TeamSpec};
 use aigw_core::upstream::UpstreamPolicy;
 use aigw_proxy::PluginRegistry as Registry;
 use aigw_store::{ListFilter, WriteExtras};
@@ -242,12 +240,9 @@ async fn binding_target(st: &AdminState, spec: &PluginBindingSpec) -> Result<Tar
     }
 }
 
-/// `inherit` einer Bindung (`append` Standard).
-fn inherit_of(config: &JsonObject) -> &str {
-    config
-        .get("inherit")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("append")
+/// `inherit` einer Bindung (`append` Standard; Spec-Feld seit F117).
+fn inherit_of(spec: &PluginBindingSpec) -> &'static str {
+    spec.inherit.unwrap_or_default().as_str()
 }
 
 /// F183: Eingeschränkte Rollen dürfen eine auf einer äußeren Ebene gesperrte Bindung desselben
@@ -259,7 +254,7 @@ async fn respect_locked(
     spec: &PluginBindingSpec,
 ) -> Result<(), Problem> {
     if p.can(Permission::Write, &Target::Catalog)
-        || !matches!(inherit_of(&spec.config), "override" | "disable")
+        || !matches!(inherit_of(spec), "override" | "disable")
     {
         return Ok(());
     }
@@ -285,7 +280,7 @@ async fn respect_locked(
         .filter(|b| {
             b.spec.plugin == spec.plugin
                 && b.spec.enabled
-                && b.spec.config.get("locked") == Some(&serde_json::Value::Bool(true))
+                && b.spec.locked
                 && outer.iter().any(|(l, t)| {
                     b.spec.scope.level == *l && (t.is_none() || b.spec.scope.target == *t)
                 })
@@ -299,7 +294,7 @@ async fn respect_locked(
             "Plugin {:?} ist auf einer äußeren Ebene gesperrt (locked: {locked:?}) – \
              inherit: {} ist hier nicht erlaubt",
             spec.plugin,
-            inherit_of(&spec.config)
+            inherit_of(spec)
         )))
     }
 }

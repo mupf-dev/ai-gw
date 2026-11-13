@@ -401,7 +401,7 @@ impl Resource for PluginBindingSpec {
             ("plugin", Col::text(self.plugin.clone())),
             ("position", Col::int(i64::from(self.order))),
             ("enabled", Col::bool(self.enabled)),
-            // Kettensteuerung als eigene Spalten (F117, Migration 0002).
+            // Kettensteuerung als eigene Spalten (F117, Migration 0004).
             ("inherit", Col::opt_text(self.inherit.map(|i| i.as_str()))),
             ("locked", Col::bool(self.locked)),
             (
