@@ -240,6 +240,23 @@ impl<'a> Pipeline<'a> {
         Ok(out)
     }
 
+    /// Wirksame Cache-Richtlinie (Plugin `cache`) für Key und Modellgruppe.
+    pub(crate) fn cache_policy(
+        &self,
+        auth: &AuthContext,
+        route: &GroupRoute,
+    ) -> Option<Arc<aigw_plugins::builtin::cache::CachePolicy>> {
+        crate::plugins::PluginRun::new(
+            self.st,
+            auth,
+            Some(route.name()),
+            &self.rid.0,
+            self.ingress,
+            false,
+        )
+        .cache_policy()
+    }
+
     /// Führt die Anfrage über das Routing aus (Retries, Fallbacks, Breaker).
     pub(crate) async fn execute<O: Operation>(
         &mut self,

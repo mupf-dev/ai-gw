@@ -398,6 +398,16 @@ impl Recorder {
         }
     }
 
+    /// Treffer im Embedding-Cache (F174): wie [`Recorder::set_cache_hit`] ohne Chat-Antwort.
+    pub(crate) fn set_cache_hit_group(&mut self, model_group: &str) {
+        self.cache_hit = true;
+        self.usage = Some(Usage::default());
+        self.usage_final = true;
+        if let Some(r) = self.rec() {
+            r.model_group = Some(model_group.to_owned());
+        }
+    }
+
     /// MCP-Tool-Aufruf (AIGW-41): Server, Tool, Ergebnis; `model_requested` im Request-Log
     /// ist der Name im Namensraum (`<server>__<tool>`).
     pub(crate) fn set_mcp(

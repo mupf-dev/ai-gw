@@ -56,6 +56,18 @@ impl ChatProvider for Counting {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Arc::clone(&self.mock).chat_stream(req)
     }
+
+    fn supports(&self, _cap: aigw_providers::Capability) -> bool {
+        true
+    }
+
+    fn embeddings(
+        self: Arc<Self>,
+        req: aigw_core::ir::embeddings::EmbeddingsRequest,
+    ) -> BoxFuture<Result<aigw_core::ir::embeddings::EmbeddingsResponse, UpstreamError>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Arc::clone(&self.mock).embeddings(req)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -250,6 +262,88 @@ async fn settle() {
 
 // ---------------------------------------------------------------------------------------------
 // Tests
+
+#[tokio::test]
+async fn embeddings_exact_cache() {
+    let s = setup(Some(json!({})), false).await;
+    let body =
+        |input: Value, fmt: &str| json!({"model": "mock", "input": input, "encoding_format": fmt});
+    let a = post(
+        s.addr,
+        "/v1/embeddings",
+        &[],
+        body(json!(["a", "b"]), "float"),
+    )
+    .await;
+    assert_eq!(a.status, StatusCode::OK);
+    assert_eq!(a.cache(), Some("miss"));
+    assert_eq!(s.calls(), 1);
+    assert!(s.records.last().usage.input_tokens > 0);
+    // Gleiche Eingaben: Treffer, kein Upstream, keine Tokens; Ausgabeformat je Anfrage.
+    let b = post(
+        s.addr,
+        "/v1/embeddings",
+        &[],
+        body(json!(["a", "b"]), "float"),
+    )
+    .await;
+    assert_eq!(b.cache(), Some("hit-exact"));
+    assert_eq!(s.calls(), 1);
+    assert_eq!(a.json()["data"], b.json()["data"]);
+    let rec = s.records.last();
+    assert_eq!(rec.cache, Some(CacheOutcome::HitExact));
+    assert_eq!(rec.usage.total_tokens(), 0);
+    let c = post(
+        s.addr,
+        "/v1/embeddings",
+        &[],
+        body(json!(["a", "b"]), "base64"),
+    )
+    .await;
+    assert_eq!(c.cache(), Some("hit-exact"));
+    assert!(c.json()["data"][0]["embedding"].is_string());
+    // Andere Eingabe bzw. Dimension: Miss.
+    let d = post(
+        s.addr,
+        "/v1/embeddings",
+        &[],
+        body(json!(["a", "c"]), "float"),
+    )
+    .await;
+    assert_eq!(d.cache(), Some("miss"));
+    let mut e = body(json!(["a", "b"]), "float");
+    e["dimensions"] = json!(8);
+    let e = post(s.addr, "/v1/embeddings", &[], e).await;
+    assert_eq!(e.cache(), Some("miss"));
+    assert_eq!(s.calls(), 3);
+    // Client-Steuerung: no-cache schlägt nicht nach.
+    let f = post(
+        s.addr,
+        "/v1/embeddings",
+        &[("cache-control", "no-cache")],
+        body(json!(["a", "b"]), "float"),
+    )
+    .await;
+    assert_eq!(f.cache(), Some("bypass"));
+    assert_eq!(s.calls(), 4);
+}
+
+#[tokio::test]
+async fn embeddings_without_binding_are_not_cached() {
+    let s = setup(None, false).await;
+    for _ in 0..2 {
+        let r = post(
+            s.addr,
+            "/v1/embeddings",
+            &[],
+            json!({"model": "mock", "input": "x"}),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::OK);
+        assert_eq!(r.cache(), None);
+    }
+    assert_eq!(s.calls(), 2);
+}
 
 #[tokio::test]
 async fn exact_hit_skips_upstream_and_counts_no_tokens() {

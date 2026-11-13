@@ -201,10 +201,37 @@ async fn embeddings_inner(
             .input_plugins(&auth, &route, &req.model, input, headers)
             .await?;
     }
-    let Outcome::Json(resp) = p.execute(route, &EmbeddingsOp, req).await? else {
-        return Err(unexpected_stream());
+    // Antwort-Cache, exakt (F174): nach den Plugins, vor dem Routing.
+    let step = crate::cache::EmbeddingsStep::begin(
+        p.state().cache.as_ref(),
+        p.cache_policy(&auth, &route),
+        &auth,
+        route.name(),
+        &req,
+        headers,
+    )
+    .await;
+    let (step, hit) = match step {
+        Some((s, hit)) => {
+            p.info_mut().cache = Some(s.outcome());
+            p.rec.set_cache(s.outcome());
+            (Some(s), hit)
+        }
+        None => (None, None),
     };
-    p.rec.set_usage(resp.usage.clone(), resp.usage_estimated);
+    let resp = if let Some(hit) = hit {
+        p.rec.set_cache_hit_group(route.name());
+        hit
+    } else {
+        let Outcome::Json(resp) = p.execute(Arc::clone(&route), &EmbeddingsOp, req).await? else {
+            return Err(unexpected_stream());
+        };
+        p.rec.set_usage(resp.usage.clone(), resp.usage_estimated);
+        if let Some(s) = &step {
+            s.store(&resp);
+        }
+        resp
+    };
     let mut losses = Losses::new();
     let out = embeddings::encode_embeddings_response(resp, format, &mut losses)?;
     losses_log(&losses);

@@ -31,11 +31,12 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use aigw_core::config::{CacheConfig, Config, VectorBackendKind};
+use aigw_core::ir::embeddings::EmbeddingsResponse;
 use aigw_core::ir::{ChatRequest, ChatResponse};
 use async_trait::async_trait;
 use bytes::Bytes;
 
-pub use key::{Hash32, Scope};
+pub use key::{Hash32, Scope, embeddings_key};
 pub use metrics::{CacheMetrics, SkipReason};
 pub use replay::{StreamCollector, chunk_events};
 
@@ -169,6 +170,8 @@ pub enum Lookup {
 pub struct ResponseCache {
     cfg: CacheConfig,
     memory: MemoryLru<Arc<ChatResponse>>,
+    /// Embedding-Antworten (F174, nur exakt; eigenes Budget wie `memory`).
+    embeddings: MemoryLru<Arc<EmbeddingsResponse>>,
     redis: Option<Arc<RedisConn>>,
     vectors: Option<Arc<dyn VectorIndex>>,
     memory_index: Option<Arc<MemoryIndex>>,
@@ -193,6 +196,7 @@ impl ResponseCache {
         Self {
             cfg: cfg.clone(),
             memory: MemoryLru::new(cfg.memory_max_bytes),
+            embeddings: MemoryLru::new(cfg.memory_max_bytes),
             redis: None,
             vectors: None,
             memory_index: None,
@@ -457,9 +461,87 @@ impl ResponseCache {
         }
     }
 
+    /// Embedding-Antwort exakt nachschlagen (F174): RAM, dann Redis.
+    pub async fn lookup_embeddings(&self, key: &Hash32) -> Option<EmbeddingsResponse> {
+        if let Some(r) = self.embeddings.get(key, Instant::now()) {
+            return Some((*r).clone());
+        }
+        let conn = self.redis.as_ref()?;
+        let mut cmd = redis::cmd("GET");
+        cmd.arg(self.embeddings_redis_key(key));
+        match conn.query::<Option<Vec<u8>>>(&cmd).await {
+            Ok(Some(b)) => {
+                let resp: EmbeddingsResponse = serde_json::from_slice(&b).ok()?;
+                let ttl = Duration::from_secs(60.min(self.cfg.max_ttl_secs.max(1)));
+                self.embeddings.insert(
+                    *key,
+                    Arc::new(resp.clone()),
+                    b.len() as u64,
+                    ttl,
+                    Instant::now(),
+                );
+                Some(resp)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                self.metrics.redis_error();
+                tracing::debug!(error = %e, "Cache: Redis nicht verfügbar (Miss)");
+                None
+            }
+        }
+    }
+
+    /// Speichert eine Embedding-Antwort (RAM sofort, Redis im Hintergrund). `false`, wenn sie
+    /// zu groß ist.
+    pub fn store_embeddings(
+        self: &Arc<Self>,
+        key: Hash32,
+        resp: &EmbeddingsResponse,
+        ttl: Duration,
+    ) -> bool {
+        let ttl = ttl.min(Duration::from_secs(self.cfg.max_ttl_secs.max(1)));
+        let Ok(json) = serde_json::to_vec(resp) else {
+            return false;
+        };
+        let size = json.len() as u64;
+        if size > self.cfg.max_entry_bytes || size > self.embeddings.max_entry_bytes() {
+            self.metrics.skipped(SkipReason::TooLarge);
+            return false;
+        }
+        if self
+            .embeddings
+            .insert(key, Arc::new(resp.clone()), size, ttl, Instant::now())
+        {
+            self.metrics.stored_memory();
+        }
+        if let Some(conn) = self.redis.clone() {
+            let this = Arc::clone(self);
+            tokio::spawn(async move {
+                let mut cmd = redis::cmd("SET");
+                cmd.arg(this.embeddings_redis_key(&key))
+                    .arg(json)
+                    .arg("PX")
+                    .arg(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX).max(1));
+                match conn.query::<()>(&cmd).await {
+                    Ok(()) => this.metrics.stored_redis(),
+                    Err(e) => {
+                        this.metrics.redis_error();
+                        tracing::debug!(error = %e, "Cache: Speichern in Redis fehlgeschlagen");
+                    }
+                }
+            });
+        }
+        true
+    }
+
+    fn embeddings_redis_key(&self, key: &Hash32) -> String {
+        format!("{}e:{}", self.cfg.redis_key_prefix, key.to_hex())
+    }
+
     /// Räumt Abgelaufenes auf (RAM-LRU und Vektor-Backend).
     pub async fn sweep(&self) {
         self.memory.purge_expired(Instant::now());
+        self.embeddings.purge_expired(Instant::now());
         if let Some(index) = &self.vectors
             && let Err(e) = index.evict(vector::Evict::Expired).await
         {

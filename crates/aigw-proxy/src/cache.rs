@@ -75,6 +75,81 @@ impl ClientControl {
     }
 }
 
+/// Antwort-Cache für Embeddings (F174): nur exakt (gleiche Eingaben, Dimension, Modellgruppe
+/// und Scope), sonst dieselbe Richtlinie wie für Chat (Plugin `cache`: Scope, TTL,
+/// Client-Steuerung). Gespeichert wird die IR-Antwort; das Ausgabeformat (`float`/`base64`)
+/// wählt jede Anfrage selbst.
+pub(crate) struct EmbeddingsStep {
+    cache: Arc<ResponseCache>,
+    key: aigw_cache::Hash32,
+    ttl: Duration,
+    may_store: bool,
+    outcome: CacheOutcome,
+}
+
+impl EmbeddingsStep {
+    /// Nachschlagen; `None` ohne Cache bzw. ohne Richtlinie. Bei einem Treffer liegt die
+    /// Antwort bei.
+    pub(crate) async fn begin(
+        cache: Option<&Arc<ResponseCache>>,
+        policy: Option<Arc<CachePolicy>>,
+        auth: &AuthContext,
+        model_group: &str,
+        req: &aigw_core::ir::embeddings::EmbeddingsRequest,
+        headers: &HeaderMap,
+    ) -> Option<(Self, Option<aigw_core::ir::embeddings::EmbeddingsResponse>)> {
+        let cache = cache?;
+        if !cache.config().enabled {
+            return None;
+        }
+        let policy = policy?;
+        let ctl = if policy.client_control {
+            ClientControl::from_headers(headers)
+        } else {
+            ClientControl::default()
+        };
+        let ttl_secs = match ctl.ttl {
+            Some(t) => t.min(policy.client_max_ttl_secs),
+            None => policy.ttl_secs,
+        };
+        let may_store = !ctl.no_store && ttl_secs > 0;
+        let key = aigw_cache::embeddings_key(&resolve_scope(policy.scope, auth), model_group, req);
+        let mut step = Self {
+            cache: Arc::clone(cache),
+            key,
+            ttl: Duration::from_secs(ttl_secs),
+            may_store,
+            outcome: CacheOutcome::Bypass,
+        };
+        let mut hit = None;
+        if !ctl.no_cache {
+            hit = cache.lookup_embeddings(&key).await;
+            step.outcome = if hit.is_some() {
+                CacheOutcome::HitExact
+            } else {
+                CacheOutcome::Miss
+            };
+        }
+        if hit.is_none() && !may_store {
+            cache.metrics().skipped(SkipReason::NoStore);
+        }
+        cache.metrics().lookup(step.outcome);
+        Some((step, hit))
+    }
+
+    /// Ergebnis für Header und Request-Log.
+    pub(crate) fn outcome(&self) -> CacheOutcome {
+        self.outcome
+    }
+
+    /// Speichert eine Upstream-Antwort (nach einem Miss).
+    pub(crate) fn store(&self, resp: &aigw_core::ir::embeddings::EmbeddingsResponse) {
+        if self.may_store && self.outcome != CacheOutcome::HitExact && !resp.data.is_empty() {
+            self.cache.store_embeddings(self.key, resp, self.ttl);
+        }
+    }
+}
+
 /// Scope laut Richtlinie, aufgelöst aus Key, Team und Organisation. Fehlt die Ebene (Key ohne
 /// Team), gilt die nächst engere – nie eine weitere.
 fn resolve_scope(policy: CacheScope, auth: &AuthContext) -> Scope {

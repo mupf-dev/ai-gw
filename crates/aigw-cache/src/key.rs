@@ -95,6 +95,7 @@ impl fmt::Debug for Hash32 {
 }
 
 const EXACT_DOMAIN: &[u8] = b"aigw-cache/exact/v1\0";
+const EMBEDDINGS_DOMAIN: &[u8] = b"aigw-cache/embeddings/v1\0";
 const PARTITION_DOMAIN: &[u8] = b"aigw-cache/partition/v1\0";
 
 /// Normalisierte Anfrage als JSON-Wert (siehe Moduldoku).
@@ -202,6 +203,22 @@ fn hash_with(domain: &[u8], scope: &Scope, group: &str, body: &Value) -> Hash32 
 /// Exakter Schlüssel.
 pub fn exact_key(scope: &Scope, model_group: &str, req: &ChatRequest) -> Hash32 {
     hash_with(EXACT_DOMAIN, scope, model_group, &normalized(req))
+}
+
+/// Exakter Schlüssel einer Embedding-Anfrage (F174): Eingaben, Dimension und unbekannte
+/// Felder; ohne Modellname (kanonische Gruppe separat), `user`, Ausgabeformat (die IR-Antwort
+/// wird je Anfrage kodiert) und Ursprungsformat.
+pub fn embeddings_key(
+    scope: &Scope,
+    model_group: &str,
+    req: &aigw_core::ir::embeddings::EmbeddingsRequest,
+) -> Hash32 {
+    let body = serde_json::json!({
+        "input": req.input,
+        "dimensions": req.dimensions,
+        "extra": req.extra,
+    });
+    hash_with(EMBEDDINGS_DOMAIN, scope, model_group, &body)
 }
 
 /// Text der letzten Nachricht, falls sie eine reine Text-Nutzernachricht ist (sonst `None`:
