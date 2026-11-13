@@ -139,6 +139,7 @@ version = "0.1.0"
 dependencies = [
  "aigw-core",
  "aigw-providers",
+ "arc-swap",
  "aws-lc-rs",
  "axum",
  "bytes",
@@ -146,6 +147,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "serde",
  "serde_json",
  "time",
  "tokio",

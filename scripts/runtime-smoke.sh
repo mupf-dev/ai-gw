@@ -7,8 +7,8 @@
 # (Bootstrap-Token, Key anlegen), /v1/* mit und ohne Key, Routing über Snapshot-Routen
 # (Mock-Deployments, Retry auf anderes Deployment, Hot Reload), /metrics und /admin/.
 #
-# Modellgruppen/Deployments legt – bis die Admin-API sie anlegen kann (AIGW-65) – der
-# Seed-Helfer `crates/aigw/examples/seed.rs` direkt in der Wegwerf-Datenbank an.
+# Modellgruppen und Mock-Deployments kommen per GitOps-Apply (`POST
+# /admin/api/v1/config:apply`) in die laufende Instanz.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,15 +16,13 @@ PORT=${AIGW_SMOKE_PORT:-14000}
 CPORT=${AIGW_SMOKE_CONTROL_PORT:-14001}
 LOCKED=()
 [[ -f Cargo.lock ]] && LOCKED=(--locked)
-cargo build --release "${LOCKED[@]}" -p aigw --bin aigw --example seed
+cargo build --release "${LOCKED[@]}" -p aigw
 ls -l target/release/aigw
-SEED=target/release/examples/seed
 
 TMP=$(mktemp -d)
 trap 'kill "${PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
-DB="sqlite://$TMP/aigw.db?mode=rwc"
-printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "%s"\n  reload_poll_secs: 1\n' \
-  "$PORT" "$CPORT" "$DB" >"$TMP/aigw.yaml"
+printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "sqlite://%s/aigw.db?mode=rwc"\n' \
+  "$PORT" "$CPORT" "$TMP" >"$TMP/aigw.yaml"
 # Modellgruppe „mock“: Priorität 0 = absichtlich fehlerhaftes Mock-Deployment, Priorität 1 =
 # Echo → jede Anfrage braucht einen Retry auf das andere Deployment.
 cat >"$TMP/models.yaml" <<'YAML'
@@ -46,7 +44,6 @@ kind: Deployment
 metadata: {name: mock-echo}
 spec: {modelGroup: mock, provider: mock, providerModel: mock, priority: 1}
 YAML
-"$SEED" "$DB" "$TMP/models.yaml"
 # Wegwerf-Master-Key nur für diesen Lauf (ohne Key startet `aigw serve` nicht).
 TOKEN="aigw-admin-smoke-$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
 AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') AIGW_BOOTSTRAP_TOKEN="$TOKEN" \
@@ -77,11 +74,24 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 curl -fsS "$BASE/v1/models" -H "authorization: Bearer $KEY"; echo
+echo "--- POST /admin/api/v1/config:apply (Modellgruppe mock mit zwei Mock-Deployments)"
+apply() {
+  curl -fsS "$CBASE/admin/api/v1/config:apply" -H "authorization: Bearer $TOKEN" \
+    -H 'content-type: application/yaml' --data-binary "@$1" | head -c 300
+  echo
+}
+apply "$TMP/models.yaml"
 echo "--- POST /v1/messages (x-api-key), unbekanntes Modell → 404"
 test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/messages" -H "x-api-key: $KEY" \
   -H 'content-type: application/json' \
   -d '{"model":"unbekannt","max_tokens":64,"messages":[{"role":"user","content":"Hallo"}]}')" = 404
 echo "--- POST /v1/chat/completions über Alias: Retry auf anderes Deployment"
+for _ in $(seq 1 50); do
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/chat/completions" \
+    -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+    -d '{"model":"mock-alias","messages":[{"role":"user","content":"Hallo"}]}')" == 200 ]] && break
+  sleep 0.1
+done
 curl -fsS -D "$TMP/h1.txt" -o "$TMP/b1.json" "$BASE/v1/chat/completions" \
   -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
   -d '{"model":"mock-alias","messages":[{"role":"user","content":"Hallo"}]}'
@@ -95,7 +105,7 @@ curl -fsS -N "$BASE/v1/messages" -H "x-api-key: $KEY" -H 'content-type: applicat
   -d '{"model":"mock","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"Hallo"}]}' \
   >"$TMP/s1.txt"
 grep -q 'message_stop' "$TMP/s1.txt"
-echo "--- Hot Reload: neue Modellgruppe mock-2 per Seed, danach erreichbar"
+echo "--- Hot Reload: neue Modellgruppe mock-2 per Apply, danach erreichbar"
 cat >"$TMP/models2.yaml" <<'YAML'
 apiVersion: aigw/v1alpha1
 kind: ModelGroup
@@ -107,7 +117,7 @@ kind: Deployment
 metadata: {name: mock-2-echo}
 spec: {modelGroup: mock-2, provider: mock, providerModel: mock}
 YAML
-"$SEED" "$DB" "$TMP/models2.yaml"
+apply "$TMP/models2.yaml"
 CODE=000
 for _ in $(seq 1 50); do
   CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/chat/completions" \

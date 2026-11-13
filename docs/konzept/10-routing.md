@@ -225,9 +225,9 @@ Modell, Content-Filter → kein Fallback, Kette über zwei Gruppen), Breaker öf
 schließt nach Probe, Health Checks öffnen/schließen, Hot Reload (neue Routen, Zustand bleibt für
 unveränderte Deployments), Mock-Deployments und nicht unterstützte Anbieter. Unit-Tests für
 Breaker, EWMA, Minutenfenster, Backoff, Auslöser und Policy-Parser.
-`scripts/runtime-smoke.sh` legt per Seed-Helfer (`crates/aigw/examples/seed.rs`, bis AIGW-65
-die Admin-API liefert) eine Modellgruppe mit zwei Mock-Deployments an (Retry auf das zweite,
-Header geprüft) und eine weitere zur Laufzeit (Hot Reload über `reload_poll_secs: 1`).
+`scripts/runtime-smoke.sh` legt per GitOps-Apply (`POST /admin/api/v1/config:apply`, AIGW-33)
+eine Modellgruppe mit zwei Mock-Deployments an (Retry auf das zweite, Header geprüft, auch als
+Anthropic-Stream) und danach eine weitere (Hot Reload der Routen).
 
 ## 10. Offene Punkte
 
