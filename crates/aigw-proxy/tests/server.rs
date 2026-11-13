@@ -491,6 +491,7 @@ impl Authenticator for RequireKey {
         match key {
             Some(k) if k.secret == "sk-test" => Ok(AuthContext {
                 key_id: Some("test".into()),
+                ..AuthContext::default()
             }),
             Some(_) => Err(ApiError::new(
                 ErrorKind::Authentication,

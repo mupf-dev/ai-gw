@@ -100,7 +100,7 @@ async fn chat_inner(
     body: Result<Bytes, BytesRejection>,
     format: ErrorFormat,
 ) -> Result<Response, ApiError> {
-    let _auth = st.auth.authenticate(extract_api_key(headers).as_ref())?;
+    let auth = st.auth.authenticate(extract_api_key(headers).as_ref())?;
     let body = body.map_err(|r| body_error(&r, st.config.max_body_bytes))?;
     let req = match format {
         ErrorFormat::OpenAi => openai::decode_request(&body)?,
@@ -108,6 +108,8 @@ async fn chat_inner(
     };
     drop(body);
     validate(&req)?;
+    // Modellfreigabe (Architektur §3, Schritt 3); die Gruppe nutzt später das Routing.
+    let _group = auth.authorize_model(&req.model)?;
 
     if req.is_stream() {
         let include_usage = req
@@ -138,10 +140,14 @@ pub(crate) async fn models(
     headers: HeaderMap,
 ) -> Response {
     let format = ErrorFormat::detect("/v1/models", &headers);
-    if let Err(e) = st.auth.authenticate(extract_api_key(&headers).as_ref()) {
-        return format.response(&e, Some(&rid.0));
-    }
-    let models = st.provider.models();
+    let auth = match st.auth.authenticate(extract_api_key(&headers).as_ref()) {
+        Ok(a) => a,
+        Err(e) => return format.response(&e, Some(&rid.0)),
+    };
+    // Mit Snapshot: nur die für den Key freigegebenen Modellgruppen.
+    let models = auth
+        .visible_models()
+        .unwrap_or_else(|| st.provider.models());
     let body = match format {
         ErrorFormat::OpenAi => serde_json::to_vec(&openai::encode_models(&models)),
         ErrorFormat::Anthropic => serde_json::to_vec(&anthropic::encode_models(&models)),

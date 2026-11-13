@@ -120,19 +120,53 @@ fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
             ui = aigw_admin::ui::KIND,
             "ai-gw gestartet"
         );
-        // Bis die Anbieter-Adapter (AIGW-15) und die Key-Prüfung (AIGW-28) da sind, bedient
-        // der eingebaute Mock-Anbieter die Datenebene.
-        tracing::warn!("Datenebene nutzt den Mock-Anbieter (echo), keine Schlüsselprüfung");
+        // Bis die Anbieter-Adapter (AIGW-15) da sind, bedient der eingebaute Mock-Anbieter
+        // die Datenebene; Keys und Modellfreigaben prüft der Snapshot (AIGW-28).
+        tracing::warn!("Datenebene nutzt den Mock-Anbieter (echo)");
         let state = aigw_proxy::ProxyState {
             config: aigw_proxy::ProxyConfig::from(&config.server.data),
+            auth: std::sync::Arc::new(aigw_proxy::SnapshotAuthenticator::new(
+                runtime_state.snapshot.clone(),
+            )),
             ..aigw_proxy::ProxyState::mock()
         };
-        let control_extra = observe::metrics_router(runtime_state.observe_metrics.clone());
-        server::run(listeners, state, control_extra, shutdown_signal()).await?;
+        // Steuerebene: Admin-API/-UI (mit Anmeldung, AIGW-28) und /metrics (AIGW-43).
+        let control = aigw_admin::router_with(aigw_admin::AdminState::new(
+            runtime_state.store.clone(),
+            std::sync::Arc::new(bootstrap_token()?),
+        ))
+        .merge(observe::metrics_router(
+            runtime_state.observe_metrics.clone(),
+        ));
+        server::run(listeners, state, control, shutdown_signal()).await?;
         runtime_state.shutdown().await;
         tracing::info!("ai-gw beendet");
         Ok(())
     })
+}
+
+/// Umgebungsvariable mit dem Bootstrap-Admin-Token.
+const BOOTSTRAP_TOKEN_ENV: &str = "AIGW_BOOTSTRAP_TOKEN";
+
+/// Bootstrap-Admin-Token (§15) aus `AIGW_BOOTSTRAP_TOKEN` oder – falls nicht gesetzt – für
+/// diesen Prozess neu erzeugt und einmal geloggt. Abgelöst durch OIDC/Admin-Keys (AIGW-32).
+fn bootstrap_token() -> Result<aigw_admin::BootstrapToken, Box<dyn std::error::Error>> {
+    match std::env::var(BOOTSTRAP_TOKEN_ENV) {
+        Ok(t) if !t.trim().is_empty() => {
+            tracing::info!("Admin-API: Bootstrap-Token aus {BOOTSTRAP_TOKEN_ENV}");
+            Ok(aigw_admin::BootstrapToken::new(&t)
+                .map_err(|e| format!("{BOOTSTRAP_TOKEN_ENV}: {e}"))?)
+        }
+        _ => {
+            let (token, secret) = aigw_admin::BootstrapToken::generate()?;
+            tracing::warn!(
+                token = %secret,
+                "Admin-API: Bootstrap-Token erzeugt (gilt nur für diesen Prozess; \
+                 fest vorgeben über {BOOTSTRAP_TOKEN_ENV})"
+            );
+            Ok(token)
+        }
+    }
 }
 
 /// Wartet auf SIGINT (Strg+C) oder SIGTERM.

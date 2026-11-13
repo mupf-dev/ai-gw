@@ -119,7 +119,9 @@ Kreuzkonvertierung (wird als `Losses` gemeldet):
 - Body-Grenze `server.data.max_body_bytes` (Standard 32 MiB), sonst `413` im Eingangsformat.
 - Jede Antwort trägt `x-aigw-request-id` (UUIDv7); Anthropic-Fehler zusätzlich `request_id`.
 - Auth-Header `Authorization: Bearer`, `api-key`, `x-api-key` werden ausgelesen und an den
-  `Authenticator` übergeben (vorerst `AllowAll`, echte Prüfung mit AIGW-28).
+  `Authenticator` übergeben (im Server `SnapshotAuthenticator`: Keys, Ablauf und
+  Modellfreigaben aus dem Snapshot, siehe [08-admin-api.md](08-admin-api.md) §6; `AllowAll` nur
+  für Tests).
 - Bis AIGW-15 beantwortet der Mock-Anbieter (`echo`) alle Anfragen, auch gestreamt.
 - Getrennte Listener: `server.data.listen` (Standard `127.0.0.1:4000`, `/v1/*` + `/healthz`) und
   `server.control.listen` (Standard `127.0.0.1:4001`, Admin-API/UI + `/healthz`); gleiche Adresse

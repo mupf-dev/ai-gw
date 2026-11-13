@@ -14,15 +14,24 @@ build = "build.rs"
 
 [dependencies]
 aigw-core.workspace = true
+aigw-store.workspace = true
+aws-lc-rs.workspace = true
 axum.workspace = true
+bytes.workspace = true
 rust-embed.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
 utoipa.workspace = true
 
 [dev-dependencies]
+aigw-proxy.workspace = true
 http-body-util.workspace = true
-tokio.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+sqlx.workspace = true
 tower.workspace = true
 
 [lints]

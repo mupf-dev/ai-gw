@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Laufzeitprüfung: baut das Release-Binary (mit eingebetteter UI aus ui/dist, falls gebaut),
-# startet `aigw serve` (Daten- und Steuerebene getrennt) und prüft /healthz, /v1/* (Mock-Anbieter),
-# die Admin-API, /metrics und /admin/.
+# startet `aigw serve` (Daten- und Steuerebene getrennt) und prüft /healthz, die Admin-API
+# (Bootstrap-Token, Key anlegen), /v1/* mit und ohne Key, /metrics und /admin/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -20,7 +20,8 @@ trap 'kill "${PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "sqlite://%s/aigw.db?mode=rwc"\n' \
   "$PORT" "$CPORT" "$TMP" >"$TMP/aigw.yaml"
 # Wegwerf-Master-Key nur für diesen Lauf (ohne Key startet `aigw serve` nicht).
-AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') \
+TOKEN="aigw-admin-smoke-$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
+AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') AIGW_BOOTSTRAP_TOKEN="$TOKEN" \
   target/release/aigw serve --config "$TMP/aigw.yaml" &
 PID=$!
 
@@ -33,12 +34,27 @@ done
 
 echo "--- GET /healthz (Daten)";       curl -fsS "$BASE/healthz"; echo
 echo "--- GET /healthz (Steuerung)";    curl -fsS "$CBASE/healthz"; echo
-echo "--- POST /v1/chat/completions";   curl -fsS "$BASE/v1/chat/completions" \
+echo "--- Admin-API ohne Token → 401"
+test "$(curl -s -o /dev/null -w '%{http_code}' "$CBASE/admin/api/v1/api-keys")" = 401
+echo "--- POST /admin/api/v1/api-keys"
+KEY=$(curl -fsS "$CBASE/admin/api/v1/api-keys" -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{"metadata":{"name":"smoke"},"spec":{}}' |
+  grep -o '"secret":"sk-aigw-[^"]*"' | cut -d'"' -f4)
+test -n "$KEY"
+echo "--- GET /v1/models ohne Key → 401"
+test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/models")" = 401
+echo "--- GET /v1/models mit Key (Hot Reload abwarten)"
+for _ in $(seq 1 50); do
+  curl -fsS "$BASE/v1/models" -H "authorization: Bearer $KEY" >/dev/null 2>&1 && break
+  sleep 0.1
+done
+curl -fsS "$BASE/v1/models" -H "authorization: Bearer $KEY"; echo
+# Modellgruppen lassen sich noch nicht über die Admin-API anlegen (folgt mit dem Routing):
+# ein unbekanntes Modell ergibt für einen unbeschränkten Key 404 model_not_found.
+echo "--- POST /v1/messages (x-api-key), unbekanntes Modell → 404"
+test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/messages" -H "x-api-key: $KEY" \
   -H 'content-type: application/json' \
-  -d '{"model":"mock","messages":[{"role":"user","content":"Hallo"}]}'; echo
-echo "--- POST /v1/messages (Stream)";   curl -fsSN "$BASE/v1/messages" \
-  -H 'content-type: application/json' \
-  -d '{"model":"mock","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"Hallo"}]}'
+  -d '{"model":"mock","max_tokens":64,"messages":[{"role":"user","content":"Hallo"}]}')" = 404
 echo "--- Admin nicht auf Datenebene"
 test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/api/v1/version")" = 404
 echo "--- GET /metrics (Steuerebene)"

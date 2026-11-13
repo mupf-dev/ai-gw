@@ -37,13 +37,22 @@ name = "aigw-admin"
 version = "0.1.0"
 dependencies = [
  "aigw-core",
+ "aigw-proxy",
+ "aigw-store",
+ "aws-lc-rs",
  "axum",
+ "bytes",
  "http-body-util",
+ "hyper",
+ "hyper-util",
  "rust-embed",
  "serde",
  "serde_json",
+ "sqlx",
+ "time",
  "tokio",
  "tower",
+ "tracing",
  "utoipa",
 ]
 
@@ -115,6 +124,7 @@ name = "aigw-proxy"
 version = "0.1.0"
 dependencies = [
  "aigw-core",
+ "aws-lc-rs",
  "axum",
  "bytes",
  "futures-util",
@@ -122,6 +132,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "serde_json",
+ "time",
  "tokio",
  "tower",
  "tracing",

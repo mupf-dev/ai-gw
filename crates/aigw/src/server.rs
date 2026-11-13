@@ -50,10 +50,9 @@ impl Listeners {
     }
 }
 
-/// Router der Steuerebene: Admin-API, Admin-UI, `extra` (z. B. `/metrics`) und optional
-/// `/healthz`.
-fn control_router(with_healthz: bool, extra: Router) -> Router {
-    let r = aigw_admin::router().merge(extra);
+/// Router der Steuerebene (`control` = Admin-API, -UI, `/metrics` …) plus optional `/healthz`.
+fn control_router(control: Router, with_healthz: bool) -> Router {
+    let r = control;
     if with_healthz {
         r.route("/healthz", get(aigw_proxy::healthz))
     } else {
@@ -63,18 +62,19 @@ fn control_router(with_healthz: bool, extra: Router) -> Router {
 
 /// Betreibt die Listener, bis `shutdown` fertig ist; wartet dann auf laufende Anfragen.
 ///
-/// `control_extra` wird in den Router der Steuerebene eingehängt (z. B. `/metrics`).
+/// `control` ist der vollständige Router der Steuerebene (Admin-API/-UI aus
+/// `aigw_admin::router_with(…)`, zusammengeführt mit `/metrics`).
 pub(crate) async fn run(
     listeners: Listeners,
     state: ProxyState,
-    control_extra: Router,
+    control_plane: Router,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
     let data_router = aigw_proxy::router(state);
     match listeners.control {
         None => {
             // `/healthz` liefert bereits der Daten-Router.
-            let app = data_router.merge(control_router(false, control_extra));
+            let app = data_router.merge(control_router(control_plane, false));
             axum::serve(listeners.data, app)
                 .with_graceful_shutdown(shutdown)
                 .await
@@ -91,7 +91,7 @@ pub(crate) async fn run(
             let data = axum::serve(listeners.data, data_router)
                 .with_graceful_shutdown(wait(rx.clone()))
                 .into_future();
-            let ctrl = axum::serve(control, control_router(true, control_extra))
+            let ctrl = axum::serve(control, control_router(control_plane, true))
                 .with_graceful_shutdown(wait(rx))
                 .into_future();
             tokio::try_join!(data, ctrl).map(|_| ())
@@ -144,7 +144,7 @@ mod tests {
         let task = tokio::spawn(run(
             listeners,
             ProxyState::mock(),
-            Router::new(),
+            aigw_admin::router(),
             async move {
                 let _ = rx.await;
             },
@@ -186,7 +186,7 @@ mod tests {
         let task = tokio::spawn(run(
             listeners,
             ProxyState::mock(),
-            Router::new(),
+            aigw_admin::router(),
             async move {
                 let _ = rx.await;
             },

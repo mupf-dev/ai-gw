@@ -11,9 +11,10 @@
 //!
 //! Jede Anfrage wird in die IR übersetzt ([`aigw_core::ir`]), an einen [`ChatProvider`]
 //! übergeben und im Format des Eingangs beantwortet – auch Fehler. Jede Antwort trägt den
-//! Header `x-aigw-request-id` (UUIDv7). Bis die echten Anbieter-Adapter (AIGW-15) und die
-//! Schlüsselprüfung (AIGW-28) da sind, stehen [`mock::MockProvider`] und
-//! [`auth::AllowAll`] als Platzhalter bereit.
+//! Header `x-aigw-request-id` (UUIDv7). Bis die echten Anbieter-Adapter (AIGW-15) da sind,
+//! steht [`mock::MockProvider`] als Platzhalter bereit. Die Schlüsselprüfung übernimmt
+//! [`SnapshotAuthenticator`] (Keys, Ablauf, Modellfreigaben aus dem Snapshot);
+//! [`auth::AllowAll`] lässt alles zu (Tests, Entwicklung).
 
 pub mod auth;
 mod error;
@@ -30,7 +31,9 @@ use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{any, get, post};
 
-pub use auth::{AllowAll, ApiKey, AuthContext, Authenticator, KeySource, extract_api_key};
+pub use auth::{
+    AllowAll, ApiKey, AuthContext, Authenticator, KeySource, SnapshotAuthenticator, extract_api_key,
+};
 pub use error::ErrorFormat;
 pub use provider::{BoxFuture, ChatProvider, EventStream};
 pub use request_id::{REQUEST_ID_HEADER, RequestId};
@@ -80,7 +83,7 @@ impl fmt::Debug for ProxyState {
 }
 
 impl ProxyState {
-    /// Zustand mit eingebautem Mock-Anbieter und ohne Schlüsselprüfung.
+    /// Zustand mit eingebautem Mock-Anbieter und ohne Schlüsselprüfung ([`AllowAll`]).
     pub fn mock() -> Self {
         Self {
             provider: Arc::new(mock::MockProvider::new()),
