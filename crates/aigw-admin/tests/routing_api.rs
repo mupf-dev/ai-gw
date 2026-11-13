@@ -166,6 +166,7 @@ impl Env {
         let policy = UpstreamPolicy::from_config(&AdminConfig {
             allow_insecure_upstreams: vec!["localhost".into()],
             allow_private_upstreams: vec!["localhost".into()],
+            ..AdminConfig::default()
         })
         .unwrap();
         let (token, secret) = BootstrapToken::generate().unwrap();

@@ -7,7 +7,9 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Serialize;
-use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+use utoipa::openapi::security::{
+    ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityRequirement, SecurityScheme,
+};
 use utoipa::{Modify, OpenApi, ToSchema};
 
 use crate::credentials as c;
@@ -15,6 +17,7 @@ use crate::deployments as d;
 use crate::prices as pr;
 use crate::problem::Problem;
 use crate::resources as r;
+use crate::{admin_keys as ak, session as s};
 
 /// OpenAPI-Dokument der Admin-API.
 #[derive(Debug, OpenApi)]
@@ -36,29 +39,36 @@ use crate::resources as r;
         c::patch_credential, c::delete_credential,
         pr::list_prices, pr::create_price, pr::get_price, pr::put_price, pr::delete_price,
         crate::gitops::export_config, crate::gitops::apply_config,
+        s::login, s::callback, s::logout, s::session_info, s::auth_info,
+        ak::list_admin_api_keys, ak::create_admin_api_key, ak::get_admin_api_key,
+        ak::put_admin_api_key, ak::delete_admin_api_key,
     ),
     components(schemas(VersionInfo, Problem)),
-    modifiers(&BearerAuth),
+    modifiers(&SecuritySchemes),
     tags(
         (name = "system", description = "Systeminformationen"),
         (name = "organizations", description = "Organisationen (oberste Mandantenebene)"),
         (name = "teams", description = "Teams mit Modellfreigaben, Limits und Budgets"),
-        (name = "users", description = "Nutzer (Login per OIDC folgt mit AIGW-32)"),
+        (name = "users", description = "Nutzer (Login per OIDC, Rollen)"),
         (name = "api-keys", description = "Virtuelle API-Keys der Datenebene"),
         (name = "model-groups", description = "Modellgruppen (öffentliche Modellnamen, Aliasse, Routing, Fallbacks)"),
         (name = "deployments", description = "Deployments: Anbieter-Modelle hinter Modellgruppen"),
         (name = "provider-credentials", description = "Zugangsdaten der Anbieter (Werte nur schreibbar)"),
         (name = "prices", description = "Preise je Anbieter-Modell, versioniert über validFrom"),
         (name = "gitops", description = "YAML-Export und -Apply aller Ressourcen (aigw/v1alpha1)"),
+        (name = "auth", description = "Anmeldung: OIDC-Login, Session, Abmeldung"),
+        (name = "admin-api-keys", description = "Admin-API-Keys für Automatisierung"),
     )
 )]
 pub struct ApiDoc;
 
-/// Sicherheitsschema `bearer` (vorläufig Bootstrap-Admin-Token, später OIDC/Admin-Keys).
+/// Sicherheitsschemata: `bearer` (Admin-API-Key oder Bootstrap-Token) und `session`
+/// (Cookie aus dem OIDC-Login; schreibende Anfragen zusätzlich mit `X-CSRF-Token`).
+/// Jede Operation, die `bearer` verlangt, akzeptiert alternativ `session`.
 #[derive(Debug)]
-struct BearerAuth;
+struct SecuritySchemes;
 
-impl Modify for BearerAuth {
+impl Modify for SecuritySchemes {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
         let components = openapi.components.get_or_insert_with(Default::default);
         components.add_security_scheme(
@@ -67,11 +77,46 @@ impl Modify for BearerAuth {
                 HttpBuilder::new()
                     .scheme(HttpAuthScheme::Bearer)
                     .description(Some(
-                        "Admin-Token (`Authorization: Bearer …`); vorläufig das Bootstrap-Token",
+                        "`Authorization: Bearer …` mit einem Admin-API-Key (`sk-aigw-admin-…`) \
+                         oder – nur bei der Erstinstallation – dem Bootstrap-Token",
                     ))
                     .build(),
             ),
         );
+        components.add_security_scheme(
+            "session",
+            SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
+                crate::session::SESSION_COOKIE,
+                "Session-Cookie nach dem OIDC-Login (`/admin/auth/login`). Schreibende Anfragen \
+                 (POST/PUT/PATCH/DELETE) brauchen zusätzlich den Header `X-CSRF-Token` mit dem \
+                 Wert `csrfToken` aus `GET /admin/api/v1/session`.",
+            ))),
+        );
+        let session = SecurityRequirement::new("session", Vec::<String>::new());
+        for item in openapi.paths.paths.values_mut() {
+            for op in [
+                &mut item.get,
+                &mut item.put,
+                &mut item.post,
+                &mut item.delete,
+                &mut item.patch,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if let Some(sec) = op.security.as_mut() {
+                    let has_bearer = serde_json::to_value(&*sec)
+                        .ok()
+                        .is_some_and(|v| v.to_string().contains("\"bearer\""));
+                    let has_session = serde_json::to_value(&*sec)
+                        .ok()
+                        .is_some_and(|v| v.to_string().contains("\"session\""));
+                    if has_bearer && !has_session {
+                        sec.push(session.clone());
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -160,5 +205,23 @@ mod tests {
             );
         }
         assert!(json["components"]["securitySchemes"]["bearer"].is_object());
+        assert_eq!(
+            json["components"]["securitySchemes"]["session"]["in"],
+            "cookie"
+        );
+        for p in [
+            "/admin/auth/login",
+            "/admin/auth/callback",
+            "/admin/auth/logout",
+            "/admin/api/v1/session",
+            "/admin/api/v1/auth/info",
+            "/admin/api/v1/admin-api-keys",
+            "/admin/api/v1/admin-api-keys/{name}",
+        ] {
+            assert!(json["paths"][p].is_object(), "Pfad {p} fehlt");
+        }
+        // Ressourcen akzeptieren Bearer und Session.
+        let sec = json["paths"]["/admin/api/v1/teams"]["post"]["security"].to_string();
+        assert!(sec.contains("bearer") && sec.contains("session"), "{sec}");
     }
 }

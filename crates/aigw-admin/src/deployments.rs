@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::AdminState;
-use crate::auth::{Permission, Principal};
+use crate::auth::{Principal, Target};
 use crate::problem::Problem;
 use crate::resources::{
     AdminResource, ApiResult, ListArgs, St, create_impl, delete_impl, get_impl, json_with,
@@ -75,6 +75,10 @@ impl AdminResource for DeploymentSpec {
     type Res = Deployment;
     type Query = DeploymentQuery;
     const COLLECTION: &'static str = "deployments";
+
+    fn target(_name: &str, _spec: &Self) -> Target {
+        Target::Catalog
+    }
 
     fn list_args(q: &Self::Query) -> ListArgs<'_> {
         ListArgs {

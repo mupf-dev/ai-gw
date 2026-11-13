@@ -63,6 +63,11 @@ hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"
 # Upstream-TLS (AIGW-14): rustls/aws-lc-rs, ALPN h2+http/1.1, Mozilla-Wurzelzertifikate
 # (webpki-roots, unabhängig vom Container-Image).
 hyper-rustls = { version = "0.27.10", default-features = false, features = ["aws-lc-rs", "http1", "http2", "tls12", "webpki-tokio"] }
+# OIDC-Login der Admin-API (AIGW-32): System-CAs für den IdP (zusätzlich zu webpki-roots
+# nicht nötig, eigener rustls-Config), Base64url für JWS/PKCE, URL-Aufbau.
+rustls-native-certs = "0.8.5"
+base64 = "0.22.1"
+url = "2.5.8"
 # Mikro-Benchmarks (nur dev).
 divan = "0.1.21"
 

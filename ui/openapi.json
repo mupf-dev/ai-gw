@@ -13,6 +13,379 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/admin/api/v1/admin-api-keys": {
+      "get": {
+        "tags": [
+          "admin-api-keys"
+        ],
+        "summary": "Listet Admin-API-Keys.",
+        "operationId": "list_admin_api_keys",
+        "responses": {
+          "200": {
+            "description": "Alle Admin-API-Keys",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminApiKeyList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin-api-keys"
+        ],
+        "summary": "Legt einen Admin-API-Key an (nur globale `admin`s). Der Klartext steht **nur** hier.",
+        "operationId": "create_admin_api_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminApiKeyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Angelegt (mit Klartext)",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Pfad"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedAdminApiKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name bereits vergeben",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/admin-api-keys/{name}": {
+      "get": {
+        "tags": [
+          "admin-api-keys"
+        ],
+        "summary": "Liest einen Admin-API-Key.",
+        "operationId": "get_admin_api_key",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gefunden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminApiKey"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "admin-api-keys"
+        ],
+        "summary": "Ändert Beschreibung, Rollen und Ablauf eines Admin-API-Keys (nur globale `admin`s).",
+        "operationId": "put_admin_api_key",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminApiKeyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Geändert",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminApiKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin-api-keys"
+        ],
+        "summary": "Löscht (widerruft) einen Admin-API-Key; wirkt sofort.",
+        "operationId": "delete_admin_api_key",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Gelöscht"
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/api-keys": {
       "get": {
         "tags": [
@@ -141,6 +514,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -239,6 +615,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -314,6 +693,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -439,6 +821,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -519,6 +904,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -616,6 +1004,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -713,6 +1104,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -841,8 +1235,32 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
+      }
+    },
+    "/admin/api/v1/auth/info": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Liefert die Anmeldeverfahren und den angemeldeten Principal (für die UI).",
+        "operationId": "auth_info",
+        "responses": {
+          "200": {
+            "description": "Anmeldeverfahren und ggf. Principal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthInfo"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/admin/api/v1/config:apply": {
@@ -957,6 +1375,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -1024,6 +1445,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -1155,6 +1579,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -1252,6 +1679,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -1326,6 +1756,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -1450,6 +1883,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -1539,6 +1975,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -1634,6 +2073,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -1731,6 +2173,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -1805,6 +2250,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -1929,6 +2377,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -2018,6 +2469,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -2113,6 +2567,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -2210,6 +2667,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -2284,6 +2744,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -2408,6 +2871,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -2497,6 +2963,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -2620,6 +3089,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -2717,6 +3189,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -2791,6 +3266,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -2915,6 +3393,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -3004,6 +3485,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -3109,6 +3593,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -3207,6 +3694,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -3282,6 +3772,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -3417,6 +3910,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -3507,6 +4003,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -3642,6 +4141,48 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/session": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Liefert den angemeldeten Principal (Rollen, CSRF-Token).",
+        "operationId": "session_info",
+        "responses": {
+          "200": {
+            "description": "Angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -3746,6 +4287,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -3843,6 +4387,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -3917,6 +4464,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -4041,6 +4591,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -4130,6 +4683,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -4234,6 +4790,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -4331,6 +4890,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -4405,6 +4967,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -4529,6 +5094,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       },
@@ -4618,6 +5186,9 @@
         "security": [
           {
             "bearer": []
+          },
+          {
+            "session": []
           }
         ]
       }
@@ -4642,10 +5213,314 @@
           }
         }
       }
+    },
+    "/admin/auth/callback": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Rücksprung vom IdP: Code tauschen, ID-Token prüfen, Session anlegen.",
+        "operationId": "callback",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "description": "Autorisierungscode.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "`state` aus dem Login.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "description": "Fehlercode des IdP.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error_description",
+            "in": "query",
+            "description": "Fehlerbeschreibung des IdP.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Angemeldet (setzt das Session-Cookie) und weiter zu `returnTo`; bei Fehlern weiter zu `/admin/?auth_error=<code>` (`idp`, `state`, `token`, `no-access`, `internal`)"
+          }
+        }
+      }
+    },
+    "/admin/auth/login": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Startet den OIDC-Login (Weiterleitung zum IdP).",
+        "operationId": "login",
+        "parameters": [
+          {
+            "name": "returnTo",
+            "in": "query",
+            "description": "Ziel nach dem Login (Pfad unter `/admin/`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Weiterleitung zum IdP (setzt das Login-Cookie)"
+          },
+          "404": {
+            "description": "OIDC nicht konfiguriert",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "IdP nicht erreichbar",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Meldet die Session ab (lokal und – falls angeboten – beim IdP).",
+        "operationId": "logout",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "CSRF-Token der Session (Pflicht mit Session-Cookie)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Abgemeldet; Session-Cookie gelöscht",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogoutResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF-Prüfung fehlgeschlagen",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
     }
   },
   "components": {
     "schemas": {
+      "AdminApiKey": {
+        "type": "object",
+        "description": "Admin-API-Key (gelesen; nie Klartext oder Hash).",
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "roles",
+          "createdBy",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Angelegt."
+          },
+          "createdBy": {
+            "type": "string",
+            "description": "Angelegt von."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Beschreibung."
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Ablauf."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID (UUIDv7)."
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Zuletzt benutzt (auf eine Minute genau)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Sichtbares Präfix (12 Zeichen nach `sk-aigw-admin-`)."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoleBinding"
+            },
+            "description": "Rollen."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Zuletzt geändert."
+          }
+        }
+      },
+      "AdminApiKeyInput": {
+        "type": "object",
+        "description": "Eingabe für das Anlegen.",
+        "required": [
+          "name",
+          "roles"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Beschreibung (Zweck, Eigentümer)."
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Ablauf (RFC 3339, in der Zukunft); ohne Angabe unbefristet."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name (a-z, 0-9, `-._`)."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoleBinding"
+            },
+            "description": "Rollen (mindestens eine)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AdminApiKeyList": {
+        "type": "object",
+        "description": "Liste der Admin-API-Keys.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminApiKey"
+            },
+            "description": "Einträge (nach Name sortiert)."
+          }
+        }
+      },
+      "AdminApiKeyUpdate": {
+        "type": "object",
+        "description": "Eingabe für das Ändern (ersetzt Beschreibung, Rollen und Ablauf).",
+        "required": [
+          "roles"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Beschreibung."
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Ablauf (RFC 3339); ohne Angabe unbefristet."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoleBinding"
+            },
+            "description": "Rollen (mindestens eine)."
+          }
+        },
+        "additionalProperties": false
+      },
       "Amount": {
         "type": "string",
         "description": "Geldbetrag in Nano-Einheiten der Abrechnungswährung.",
@@ -4846,6 +5721,37 @@
           }
         }
       },
+      "AuthInfo": {
+        "type": "object",
+        "description": "Anmeldeverfahren und – falls angemeldet – der Principal (ohne Anmeldung abrufbar, immer\n`200`; so prüft die UI beim Start ohne `401` in der Browser-Konsole).",
+        "required": [
+          "oidc"
+        ],
+        "properties": {
+          "loginUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Start des Logins (falls OIDC konfiguriert)."
+          },
+          "oidc": {
+            "type": "boolean",
+            "description": "OIDC-Login konfiguriert."
+          },
+          "session": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SessionInfo",
+                "description": "Angemeldeter Principal (Session-Cookie oder Bearer), sonst leer."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "BTreeMap": {
         "type": "object",
         "additionalProperties": {
@@ -4970,6 +5876,24 @@
           "retain",
           "skip"
         ]
+      },
+      "CreatedAdminApiKey": {
+        "type": "object",
+        "description": "Angelegter Admin-API-Key mit Klartext (nur in dieser Antwort).",
+        "required": [
+          "key",
+          "secret"
+        ],
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/AdminApiKey",
+            "description": "Key."
+          },
+          "secret": {
+            "type": "string",
+            "description": "Klartext `sk-aigw-admin-…` (nur einmal sichtbar)."
+          }
+        }
       },
       "CreatedApiKey": {
         "type": "object",
@@ -5298,6 +6222,19 @@
           "hour",
           "day"
         ]
+      },
+      "LogoutResult": {
+        "type": "object",
+        "description": "Ergebnis der Abmeldung.",
+        "required": [
+          "redirectUrl"
+        ],
+        "properties": {
+          "redirectUrl": {
+            "type": "string",
+            "description": "Hierhin navigieren (Logout beim IdP oder die Admin-UI)."
+          }
+        }
       },
       "ModelGroup": {
         "type": "object",
@@ -6037,6 +6974,61 @@
         "format": "password",
         "description": "Geheimer Klartext (z. B. API-Key eines Anbieters).\n\n`Debug`, `Display` und `Serialize` geben nur [`REDACTED`] aus; der Wert ist ausschließlich\nüber [`SecretString::expose`] erreichbar. Deserialisieren ist erlaubt (Eingabe über die\nAdmin-API)."
       },
+      "SessionInfo": {
+        "type": "object",
+        "description": "Angemeldeter Principal.",
+        "required": [
+          "subject",
+          "method",
+          "roles"
+        ],
+        "properties": {
+          "csrfToken": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "CSRF-Token für schreibende Anfragen (Header `X-CSRF-Token`; nur bei Sessions)."
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Anzeigename."
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "E-Mail."
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Ablauf der Anmeldung."
+          },
+          "method": {
+            "type": "string",
+            "description": "Verfahren: `session`, `admin-api-key`, `bootstrap-token`."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoleBinding"
+            },
+            "description": "Wirksame Rollen."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Kennung im Audit-Log (`user:<name>`, `admin-key:<name>`, `bootstrap-admin`)."
+          }
+        }
+      },
       "Summary": {
         "type": "object",
         "description": "Anzahl je Aktion.",
@@ -6422,7 +7414,13 @@
       "bearer": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Admin-Token (`Authorization: Bearer …`); vorläufig das Bootstrap-Token"
+        "description": "`Authorization: Bearer …` mit einem Admin-API-Key (`sk-aigw-admin-…`) oder – nur bei der Erstinstallation – dem Bootstrap-Token"
+      },
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Secure-aigw-session",
+        "description": "Session-Cookie nach dem OIDC-Login (`/admin/auth/login`). Schreibende Anfragen (POST/PUT/PATCH/DELETE) brauchen zusätzlich den Header `X-CSRF-Token` mit dem Wert `csrfToken` aus `GET /admin/api/v1/session`."
       }
     }
   },
@@ -6441,7 +7439,7 @@
     },
     {
       "name": "users",
-      "description": "Nutzer (Login per OIDC folgt mit AIGW-32)"
+      "description": "Nutzer (Login per OIDC, Rollen)"
     },
     {
       "name": "api-keys",
@@ -6466,6 +7464,14 @@
     {
       "name": "gitops",
       "description": "YAML-Export und -Apply aller Ressourcen (aigw/v1alpha1)"
+    },
+    {
+      "name": "auth",
+      "description": "Anmeldung: OIDC-Login, Session, Abmeldung"
+    },
+    {
+      "name": "admin-api-keys",
+      "description": "Admin-API-Keys für Automatisierung"
     }
   ]
 }

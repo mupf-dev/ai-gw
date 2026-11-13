@@ -16,7 +16,7 @@
 // `#[utoipa::path(params(…))]` erzeugt für IntoParams-Typen qualifizierte Pfade.
 #![allow(unused_qualifications)]
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::future::Future;
 
@@ -39,7 +39,7 @@ use time::OffsetDateTime;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::AdminState;
-use crate::auth::{Permission, Principal};
+use crate::auth::{Permission, Principal, Target};
 use crate::problem::Problem;
 
 pub(crate) type St = State<AdminState>;
@@ -290,26 +290,44 @@ pub(crate) trait AdminResource: PlainResource {
     ) -> impl Future<Output = Result<(), Problem>> + Send + 'a {
         async { Ok(()) }
     }
+
+    /// Geltungsbereich eines Objekts für die Rollenprüfung (AIGW-32).
+    fn target(_name: &str, _spec: &Self) -> Target {
+        Target::Global
+    }
+
+    /// Geltungsbereich beim Anlegen (Standard wie [`AdminResource::target`]).
+    fn create_target(name: &str, spec: &Self) -> Target {
+        Self::target(name, spec)
+    }
 }
 
 pub(crate) async fn list_impl<R: AdminResource>(
     st: &AdminState,
+    p: &Principal,
     q: &R::Query,
 ) -> Result<(Vec<R::Res>, Option<String>), Problem> {
+    // Nur Objekte, die der Principal lesen darf (eingeschränkte Rollen sehen ihren Bereich).
     let items: Vec<Object<R>> = st
         .store
         .list::<R>()
         .await?
         .into_iter()
         .filter(|o| R::filter(o, q))
+        .filter(|o| p.can(Permission::Read, &R::target(&o.metadata.name, &o.spec)))
         .collect();
     let items = R::post_filter(items, q)?;
     let (page, next) = paginate(items, |o| &o.metadata, &R::list_args(q))?;
     Ok((page.into_iter().map(R::Res::from).collect(), next))
 }
 
-pub(crate) async fn get_impl<R: AdminResource>(st: &AdminState, name: &str) -> ApiResult {
+pub(crate) async fn get_impl<R: AdminResource>(
+    st: &AdminState,
+    p: &Principal,
+    name: &str,
+) -> ApiResult {
     let obj: Object<R> = st.store.get(name).await?;
+    p.require_on(Permission::Read, &R::target(&obj.metadata.name, &obj.spec))?;
     let tag = etag_of(&obj);
     Ok(json_with(StatusCode::OK, Some(tag), &R::Res::from(obj)))
 }
@@ -320,12 +338,12 @@ pub(crate) async fn create_impl<R: AdminResource>(
     mut meta: ObjectMeta,
     spec: R,
 ) -> ApiResult {
-    p.require(Permission::Write)?;
     if meta.name.is_empty()
         && let Some(name) = R::default_name(&spec)
     {
         meta.name = name;
     }
+    p.require_on(Permission::Write, &R::create_target(&meta.name, &spec))?;
     check_models(&st.store, spec.allowed_models()).await?;
     let _guard = st.write_lock.lock().await;
     R::check(st, &meta.name, &spec, None).await?;
@@ -346,11 +364,13 @@ pub(crate) async fn put_impl<R: AdminResource>(
     meta: ObjectMeta,
     spec: R,
 ) -> ApiResult {
-    p.require(Permission::Write)?;
     let meta = same_name(name, meta)?;
+    // Neuer Zustand im Geltungsbereich (z. B. Team nicht in fremde Organisation verschieben).
+    p.require_on(Permission::Write, &R::target(name, &spec))?;
     check_models(&st.store, spec.allowed_models()).await?;
     let _guard = st.write_lock.lock().await;
     let current: Object<R> = st.store.get(name).await?;
+    p.require_on(Permission::Write, &R::target(name, &current.spec))?;
     check_if_match(headers, &etag_of(&current))?;
     R::check(st, name, &spec, Some(&current)).await?;
     let obj = st.store.update(p.actor(), meta, spec).await?;
@@ -364,9 +384,9 @@ pub(crate) async fn delete_impl<R: AdminResource>(
     name: &str,
     headers: &HeaderMap,
 ) -> ApiResult {
-    p.require(Permission::Write)?;
     let _guard = st.write_lock.lock().await;
     let current: Object<R> = st.store.get(name).await?;
+    p.require_on(Permission::Write, &R::target(name, &current.spec))?;
     check_if_match(headers, &etag_of(&current))?;
     R::check_delete(st, &current).await?;
     st.store.delete(p.actor(), R::KIND, name).await?;
@@ -443,9 +463,8 @@ macro_rules! plain_resource {
             Extension(p): Extension<Principal>,
             q: Result<Query<$query>, QueryRejection>,
         ) -> ApiResult {
-            p.require(Permission::Read)?;
             let Query(q) = q?;
-            let (items, next_cursor) = list_impl::<$spec>(&st, &q).await?;
+            let (items, next_cursor) = list_impl::<$spec>(&st, &p, &q).await?;
             Ok(json_with(StatusCode::OK, None, &$list { items, next_cursor }))
         }
 
@@ -490,8 +509,7 @@ macro_rules! plain_resource {
             Extension(p): Extension<Principal>,
             Path(name): Path<String>,
         ) -> ApiResult {
-            p.require(Permission::Read)?;
-            get_impl::<$spec>(&st, &name).await
+            get_impl::<$spec>(&st, &p, &name).await
         }
 
         #[doc = concat!("Ersetzt Labels und Spezifikation: ", $what, ".")]
@@ -597,6 +615,14 @@ impl AdminResource for OrganizationSpec {
     type Query = OrganizationQuery;
     const COLLECTION: &'static str = "organizations";
 
+    fn target(name: &str, _spec: &Self) -> Target {
+        Target::Organization(name.to_owned())
+    }
+
+    fn create_target(_name: &str, _spec: &Self) -> Target {
+        Target::Global
+    }
+
     fn list_args(q: &Self::Query) -> ListArgs<'_> {
         ListArgs {
             limit: q.limit,
@@ -663,6 +689,10 @@ impl AdminResource for TeamSpec {
 
     fn allowed_models(&self) -> &[String] {
         &self.allowed_models
+    }
+
+    fn target(name: &str, spec: &Self) -> Target {
+        Target::team(spec.organization.clone(), name)
     }
 }
 
@@ -766,6 +796,10 @@ impl AdminResource for ModelGroupSpec {
     type Res = ModelGroup;
     type Query = ModelGroupQuery;
     const COLLECTION: &'static str = "model-groups";
+
+    fn target(_name: &str, _spec: &Self) -> Target {
+        Target::Catalog
+    }
 
     fn list_args(q: &Self::Query) -> ListArgs<'_> {
         // `q` sucht auch in Aliassen, daher in `filter` statt in `paginate`.
@@ -899,6 +933,29 @@ pub struct RotatedApiKey {
     pub previous_key: ApiKey,
 }
 
+/// Geltungsbereich eines Keys: Objekt im Team (Organisation über das Team); Keys ohne Team
+/// sind global (nur globale Rollen).
+fn key_target_of(team_orgs: &HashMap<String, String>, spec: &ApiKeySpec) -> Target {
+    match &spec.team {
+        Some(t) => Target::in_team(team_orgs.get(t).cloned().unwrap_or_default(), t.clone()),
+        None => Target::Global,
+    }
+}
+
+/// Wie [`key_target_of`], liest das Team aus dem Store (unbekanntes Team -> `422`).
+async fn key_target(store: &Store, spec: &ApiKeySpec) -> Result<Target, Problem> {
+    match &spec.team {
+        Some(t) => match store.get::<TeamSpec>(t).await {
+            Ok(team) => Ok(Target::in_team(team.spec.organization, t.clone())),
+            Err(aigw_store::StoreError::NotFound { .. }) => {
+                Err(Problem::invalid(format!("team: unbekanntes Team {t:?}")))
+            }
+            Err(e) => Err(e.into()),
+        },
+        None => Ok(Target::Global),
+    }
+}
+
 /// Listet API-Keys (nur Präfix, nie Klartext oder Hash).
 #[utoipa::path(
     get, path = "/admin/api/v1/api-keys", tag = "api-keys", params(ApiKeyQuery),
@@ -915,21 +972,22 @@ pub(crate) async fn list_api_keys(
     Extension(p): Extension<Principal>,
     q: Result<Query<ApiKeyQuery>, QueryRejection>,
 ) -> ApiResult {
-    p.require(Permission::Read)?;
     let Query(q) = q?;
-    // Teams der Organisation (nur wenn danach gefiltert wird).
-    let org_teams: Option<HashSet<String>> = match &q.organization {
-        Some(org) => Some(
-            st.store
-                .list::<TeamSpec>()
-                .await?
-                .into_iter()
-                .filter(|t| t.spec.organization == *org)
-                .map(|t| t.metadata.name)
-                .collect(),
-        ),
-        None => None,
-    };
+    // Team -> Organisation (Filter `organization`, Rollenprüfung je Key).
+    let team_orgs: HashMap<String, String> = st
+        .store
+        .list::<TeamSpec>()
+        .await?
+        .into_iter()
+        .map(|t| (t.metadata.name, t.spec.organization))
+        .collect();
+    let org_teams: Option<HashSet<&String>> = q.organization.as_ref().map(|org| {
+        team_orgs
+            .iter()
+            .filter(|(_, o)| *o == org)
+            .map(|(t, _)| t)
+            .collect()
+    });
     let items: Vec<ApiKey> = st
         .store
         .list_api_keys()
@@ -948,6 +1006,7 @@ pub(crate) async fn list_api_keys(
                 && org_teams
                     .as_ref()
                     .is_none_or(|ts| k.spec.team.as_ref().is_some_and(|t| ts.contains(t)))
+                && p.can(Permission::Read, &key_target_of(&team_orgs, &k.spec))
         })
         .collect();
     let args = ListArgs {
@@ -983,8 +1042,11 @@ pub(crate) async fn create_api_key(
     Extension(p): Extension<Principal>,
     body: Result<Json<ApiKeyInput>, JsonRejection>,
 ) -> ApiResult {
-    p.require(Permission::Write)?;
     let Json(input) = body?;
+    p.require_on(
+        Permission::Write,
+        &key_target(&st.store, &input.spec).await?,
+    )?;
     check_models(&st.store, &input.spec.allowed_models).await?;
     let created = st
         .store
@@ -1016,8 +1078,8 @@ pub(crate) async fn get_api_key(
     Extension(p): Extension<Principal>,
     Path(name): Path<String>,
 ) -> ApiResult {
-    p.require(Permission::Read)?;
     let k = st.store.get_api_key(&name).await?;
+    p.require_on(Permission::Read, &key_target(&st.store, &k.spec).await?)?;
     Ok(json_with(StatusCode::OK, Some(key_etag(&k)), &k))
 }
 
@@ -1047,12 +1109,19 @@ pub(crate) async fn put_api_key(
     headers: HeaderMap,
     body: Result<Json<ApiKeyInput>, JsonRejection>,
 ) -> ApiResult {
-    p.require(Permission::Write)?;
     let Json(input) = body?;
     let meta = same_name(&name, input.metadata)?;
+    p.require_on(
+        Permission::Write,
+        &key_target(&st.store, &input.spec).await?,
+    )?;
     check_models(&st.store, &input.spec.allowed_models).await?;
     let _guard = st.write_lock.lock().await;
     let current = st.store.get_api_key(&name).await?;
+    p.require_on(
+        Permission::Write,
+        &key_target(&st.store, &current.spec).await?,
+    )?;
     check_if_match(&headers, &key_etag(&current))?;
     let k = st.store.update_api_key(p.actor(), meta, input.spec).await?;
     Ok(json_with(StatusCode::OK, Some(key_etag(&k)), &k))
@@ -1080,9 +1149,12 @@ pub(crate) async fn delete_api_key(
     Path(name): Path<String>,
     headers: HeaderMap,
 ) -> ApiResult {
-    p.require(Permission::Write)?;
     let _guard = st.write_lock.lock().await;
     let current = st.store.get_api_key(&name).await?;
+    p.require_on(
+        Permission::Write,
+        &key_target(&st.store, &current.spec).await?,
+    )?;
     check_if_match(&headers, &key_etag(&current))?;
     st.store
         .delete(p.actor(), aigw_core::resource::ResourceKind::ApiKey, &name)
@@ -1097,9 +1169,12 @@ async fn set_state(
     headers: &HeaderMap,
     state: ApiKeyState,
 ) -> ApiResult {
-    p.require(Permission::Write)?;
     let _guard = st.write_lock.lock().await;
     let current = st.store.get_api_key(name).await?;
+    p.require_on(
+        Permission::Write,
+        &key_target(&st.store, &current.spec).await?,
+    )?;
     check_if_match(headers, &key_etag(&current))?;
     let k = if current.status.state == state {
         current // idempotent, keine neue Konfigurationsversion
@@ -1210,7 +1285,6 @@ pub(crate) async fn rotate_api_key(
     headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult {
-    p.require(Permission::Write)?;
     let req: RotateApiKeyRequest = if body.iter().all(u8::is_ascii_whitespace) {
         RotateApiKeyRequest::default()
     } else {
@@ -1230,6 +1304,10 @@ pub(crate) async fn rotate_api_key(
 
     let _guard = st.write_lock.lock().await;
     let current = st.store.get_api_key(&name).await?;
+    p.require_on(
+        Permission::Write,
+        &key_target(&st.store, &current.spec).await?,
+    )?;
     check_if_match(&headers, &key_etag(&current))?;
     if current.status.state != ApiKeyState::Active {
         return Err(Problem::conflict(

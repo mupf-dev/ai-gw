@@ -18,19 +18,25 @@ aigw-proxy.workspace = true
 aigw-store.workspace = true
 aws-lc-rs.workspace = true
 axum.workspace = true
+base64.workspace = true
 bytes.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-rustls.workspace = true
+hyper-util.workspace = true
 rust-embed.workspace = true
+rustls.workspace = true
+rustls-native-certs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+url.workspace = true
 utoipa.workspace = true
 
 [dev-dependencies]
-http-body-util.workspace = true
-hyper.workspace = true
-hyper-util.workspace = true
 sqlx.workspace = true
 tower.workspace = true
 

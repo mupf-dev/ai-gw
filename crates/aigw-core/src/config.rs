@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::observe::PayloadMode;
+use crate::resource::Role;
 
 /// Präfix der Umgebungsvariablen für Overrides.
 pub const ENV_PREFIX: &str = "AIGW_";
@@ -42,7 +43,7 @@ pub struct Config {
     pub observe: ObserveConfig,
     /// GitOps (AIGW-33).
     pub gitops: GitopsConfig,
-    /// Admin-API: Regeln für Upstream-Endpunkte (AIGW-65).
+    /// Admin-API: Regeln für Upstream-Endpunkte (AIGW-65), Anmeldung (AIGW-32).
     pub admin: AdminConfig,
 }
 
@@ -364,6 +365,8 @@ pub struct AdminConfig {
     pub allow_insecure_upstreams: Vec<String>,
     /// Private, lokale oder interne Ziele, die trotzdem erlaubt sind.
     pub allow_private_upstreams: Vec<String>,
+    /// Anmeldung an Admin-API und Admin-UI (AIGW-32).
+    pub auth: AdminAuthConfig,
 }
 
 /// Request-Log und Auswertung (AIGW-43, `docs/konzept/07-beobachtung.md`).
@@ -451,6 +454,153 @@ impl Default for JsonlExportConfig {
             include_payload: false,
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Admin-API: Anmeldung (AIGW-32, docs/konzept/08-admin-api.md §5)
+// ---------------------------------------------------------------------------------------------
+
+/// Anmeldung an der Admin-API: OIDC-Login mit Session, Admin-API-Keys, Bootstrap-Token.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AdminAuthConfig {
+    /// Bootstrap-Token für die Erstinstallation: `auto` (Standard; aus, sobald ein OIDC-Admin
+    /// sich angemeldet hat oder ein Admin-API-Key mit Rolle `admin` existiert), `on`, `off`.
+    pub bootstrap: BootstrapMode,
+    /// Sessions nach dem OIDC-Login.
+    pub session: SessionConfig,
+    /// OIDC-Login (Authorization Code + PKCE); ohne `issuer` abgeschaltet.
+    pub oidc: OidcConfig,
+}
+
+/// Verhalten des Bootstrap-Tokens.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BootstrapMode {
+    /// Aktiv, bis ein OIDC-Admin sich angemeldet hat oder ein Admin-API-Key mit Rolle `admin`
+    /// angelegt wurde (danach dauerhaft aus; wieder einschalten nur mit `on`).
+    #[default]
+    Auto,
+    /// Immer aktiv.
+    On,
+    /// Nie aktiv.
+    Off,
+}
+
+/// Sessions der Admin-UI (serverseitig gespeichert, Cookie mit zufälliger Session-ID).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SessionConfig {
+    /// Höchste Lebensdauer einer Session ab Anmeldung (Sekunden, Standard 8 h).
+    pub max_age_secs: u64,
+    /// Abmeldung nach so langer Inaktivität (Sekunden, Standard 30 min).
+    pub idle_timeout_secs: u64,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            max_age_secs: 8 * 3600,
+            idle_timeout_secs: 30 * 60,
+        }
+    }
+}
+
+/// OIDC-Relying-Party (Authorization Code + PKCE, beliebiger IdP).
+///
+/// Das Client-Secret steht nie in dieser Datei: es kommt aus `client_secret_file` oder der
+/// Umgebungsvariable `client_secret_env`; fehlt beides, meldet sich ai-gw als öffentlicher
+/// Client (nur PKCE) an.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OidcConfig {
+    /// Issuer-URL (Discovery über `<issuer>/.well-known/openid-configuration`); leer = aus.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issuer: Option<String>,
+    /// Client-ID bei diesem IdP.
+    pub client_id: String,
+    /// Datei mit dem Client-Secret (vertraulicher Client).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_secret_file: Option<PathBuf>,
+    /// Umgebungsvariable mit dem Client-Secret (wenn keine Datei angegeben ist).
+    pub client_secret_env: String,
+    /// Öffentliche Rücksprung-URL (`https://…/admin/auth/callback`), beim IdP registriert.
+    /// Ihr Ursprung gilt zugleich als erlaubter `Origin` schreibender Anfragen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirect_url: Option<String>,
+    /// Angeforderte Scopes (`openid` wird immer ergänzt).
+    pub scopes: Vec<String>,
+    /// Claim mit den Gruppen des Nutzers; Punkte trennen verschachtelte Objekte
+    /// (z. B. `realm_access.roles`).
+    pub groups_claim: String,
+    /// Zuordnung IdP-Gruppe → Rolle (optional eingeschränkt auf Organisation/Team).
+    pub group_roles: Vec<GroupRoleMapping>,
+    /// Unbekannte Nutzer beim ersten Login anlegen, sofern ihnen über Gruppen eine Rolle
+    /// zugeordnet ist.
+    pub provision_users: bool,
+    /// Beim ersten Login einen vorab angelegten Nutzer ohne OIDC-Subjekt über die (vom IdP
+    /// bestätigte) E-Mail-Adresse verknüpfen.
+    pub link_by_email: bool,
+    /// Abmeldung auch beim IdP (RP-initiated Logout), falls er `end_session_endpoint` anbietet.
+    pub end_session: bool,
+    /// Ziel nach der Abmeldung beim IdP (Standard: Ursprung von `redirect_url` + `/admin/`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_logout_redirect_url: Option<String>,
+    /// Zusätzliche CA-Zertifikate (PEM) für den IdP, z. B. eine interne CA.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ca_file: Option<PathBuf>,
+    /// Gültigkeit von Discovery-Dokument und JWKS im Speicher (Sekunden).
+    pub cache_secs: u64,
+    /// Zeitlimit je Anfrage an den IdP (Sekunden).
+    pub http_timeout_secs: u64,
+    /// Erlaubte Uhrenabweichung bei `exp`/`iat` (Sekunden).
+    pub clock_skew_secs: u64,
+}
+
+impl Default for OidcConfig {
+    fn default() -> Self {
+        Self {
+            issuer: None,
+            client_id: String::new(),
+            client_secret_file: None,
+            client_secret_env: "AIGW_OIDC_CLIENT_SECRET".to_owned(),
+            redirect_url: None,
+            scopes: vec!["openid".into(), "profile".into(), "email".into()],
+            groups_claim: "groups".to_owned(),
+            group_roles: Vec::new(),
+            provision_users: true,
+            link_by_email: true,
+            end_session: true,
+            post_logout_redirect_url: None,
+            ca_file: None,
+            cache_secs: 3600,
+            http_timeout_secs: 10,
+            clock_skew_secs: 60,
+        }
+    }
+}
+
+impl OidcConfig {
+    /// `true`, wenn OIDC-Login konfiguriert ist.
+    pub fn enabled(&self) -> bool {
+        self.issuer.as_deref().is_some_and(|s| !s.trim().is_empty())
+    }
+}
+
+/// Zuordnung einer IdP-Gruppe zu einer Rolle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GroupRoleMapping {
+    /// Gruppenname (bzw. -ID) wie im Claim.
+    pub group: String,
+    /// Rolle.
+    pub role: Role,
+    /// Organisation (Name), falls eingeschränkt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization: Option<String>,
+    /// Team (Name), falls eingeschränkt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<String>,
 }
 
 #[cfg(test)]
@@ -603,6 +753,49 @@ counters:
         assert_eq!(cfg.admin.allow_private_upstreams, ["192.168.0.0/16"]);
         assert_eq!(cfg.admin.allow_insecure_upstreams, ["localhost", "ollama"]);
         assert!(Config::from_yaml("admin:\n  allow_all: true\n").is_err());
+    }
+
+    #[test]
+    fn admin_auth_section() {
+        let cfg = Config::from_yaml_with_env(
+            r#"
+admin:
+  auth:
+    bootstrap: "off"
+    oidc:
+      issuer: "https://idp.example/realms/acme"
+      client_id: aigw
+      redirect_url: "https://gw.example/admin/auth/callback"
+      group_roles:
+        - group: aigw-admins
+          role: admin
+        - group: platform-leads
+          role: team-admin
+          organization: acme
+          team: platform
+"#,
+            env(&[
+                ("AIGW_ADMIN__AUTH__SESSION__IDLE_TIMEOUT_SECS", "60"),
+                ("AIGW_ADMIN__AUTH__OIDC__GROUPS_CLAIM", "realm_access.roles"),
+                (
+                    "AIGW_ADMIN__AUTH__OIDC__CLIENT_SECRET_FILE",
+                    "/run/secrets/oidc",
+                ),
+            ]),
+        )
+        .unwrap();
+        let a = &cfg.admin.auth;
+        assert_eq!(a.bootstrap, BootstrapMode::Off);
+        assert!(a.oidc.enabled());
+        assert_eq!(a.oidc.group_roles.len(), 2);
+        assert_eq!(a.oidc.group_roles[1].role, Role::TeamAdmin);
+        assert_eq!(a.oidc.group_roles[1].team.as_deref(), Some("platform"));
+        assert_eq!(a.session.idle_timeout_secs, 60);
+        assert_eq!(a.session.max_age_secs, 8 * 3600);
+        assert_eq!(a.oidc.groups_claim, "realm_access.roles");
+        assert!(a.oidc.client_secret_file.is_some());
+        assert!(!Config::default().admin.auth.oidc.enabled());
+        assert!(Config::from_yaml("admin:\n  auth:\n    bootstrap: maybe\n").is_err());
     }
 
     #[test]

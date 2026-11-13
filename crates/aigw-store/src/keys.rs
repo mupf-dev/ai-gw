@@ -18,6 +18,9 @@ use crate::StoreError;
 
 /// Präfix aller Keys.
 pub const KEY_PREFIX: &str = "sk-aigw-";
+/// Präfix der Admin-API-Keys (AIGW-32); gleiches Format, eigener Namensraum. Ein Admin-Key
+/// passt nie auf [`parse_prefix`] der Datenebene.
+pub const ADMIN_KEY_PREFIX: &str = "sk-aigw-admin-";
 /// Länge des sichtbaren Präfixes.
 pub const PREFIX_LEN: usize = 12;
 /// Länge des Base62-kodierten 32-Byte-Geheimnisses (⌈256 / log2 62⌉).
@@ -38,6 +41,15 @@ pub struct GeneratedKey {
 
 /// Erzeugt einen neuen API-Key.
 pub fn generate_api_key() -> Result<GeneratedKey, StoreError> {
+    generate_with_prefix(KEY_PREFIX)
+}
+
+/// Erzeugt einen neuen Admin-API-Key (`sk-aigw-admin-<Präfix>-<Geheimnis>`).
+pub fn generate_admin_api_key() -> Result<GeneratedKey, StoreError> {
+    generate_with_prefix(ADMIN_KEY_PREFIX)
+}
+
+fn generate_with_prefix(key_prefix: &str) -> Result<GeneratedKey, StoreError> {
     let rng = SystemRandom::new();
     let fill = |buf: &mut [u8]| {
         rng.fill(buf)
@@ -58,7 +70,7 @@ pub fn generate_api_key() -> Result<GeneratedKey, StoreError> {
 
     let mut raw = [0u8; 32];
     fill(&mut raw)?;
-    let secret = format!("{KEY_PREFIX}{prefix}-{}", base62_fixed(&raw, SECRET_LEN));
+    let secret = format!("{key_prefix}{prefix}-{}", base62_fixed(&raw, SECRET_LEN));
     let hash = hash_api_key(&secret);
     Ok(GeneratedKey {
         secret,
@@ -116,6 +128,18 @@ mod tests {
         assert_eq!(hash_api_key(&k.secret), k.hash);
         let k2 = generate_api_key().unwrap();
         assert_ne!(k.secret, k2.secret);
+    }
+
+    #[test]
+    fn admin_key_format() {
+        let k = generate_admin_api_key().unwrap();
+        assert!(k.secret.starts_with(ADMIN_KEY_PREFIX));
+        assert_eq!(
+            k.secret.len(),
+            ADMIN_KEY_PREFIX.len() + PREFIX_LEN + 1 + SECRET_LEN
+        );
+        // Admin-Keys werden von der Datenebene nie als Key erkannt.
+        assert_eq!(parse_prefix(&k.secret), None);
     }
 
     #[test]

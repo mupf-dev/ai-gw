@@ -144,13 +144,29 @@ fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
             observer: runtime_state.observer.clone(),
             config: aigw_proxy::ProxyConfig::from(&config.server.data),
         };
-        // Steuerebene: Admin-API/-UI (mit Anmeldung, AIGW-28), GitOps (AIGW-33) und
+        // Steuerebene: Admin-API/-UI (Anmeldung: AIGW-28/32), GitOps (AIGW-33) und
         // /metrics (AIGW-43); Modus „nur YAML“ sperrt die Schreibrouten.
-        let auth: std::sync::Arc<dyn aigw_admin::AdminAuthenticator> =
-            std::sync::Arc::new(bootstrap_token()?);
+        let auth_cfg = &config.admin.auth;
+        let bootstrap = bootstrap_token(auth_cfg.bootstrap, &runtime_state.store).await?;
+        let client_secret = if auth_cfg.oidc.enabled() {
+            aigw_admin::session::client_secret(&auth_cfg.oidc)?
+        } else {
+            None
+        };
+        let admin = aigw_admin::AdminState::from_config(
+            runtime_state.store.clone(),
+            auth_cfg,
+            bootstrap,
+            client_secret,
+        )
+        .map_err(|e| format!("admin.auth: {e}"))?;
+        if admin.oidc_enabled() {
+            tracing::info!("Admin-API: OIDC-Login aktiv");
+        }
+        let auth = std::sync::Arc::clone(&admin.auth);
         let upstreams = aigw_admin::UpstreamPolicy::from_config(&config.admin)?;
         let control = aigw_admin::router_with(
-            aigw_admin::AdminState::new(runtime_state.store.clone(), std::sync::Arc::clone(&auth))
+            admin
                 .with_keyring(std::sync::Arc::clone(&runtime_state.keyring))
                 .with_upstream_policy(upstreams.clone()),
         )
@@ -178,13 +194,33 @@ fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
 const BOOTSTRAP_TOKEN_ENV: &str = "AIGW_BOOTSTRAP_TOKEN";
 
 /// Bootstrap-Admin-Token (§15) aus `AIGW_BOOTSTRAP_TOKEN` oder – falls nicht gesetzt – für
-/// diesen Prozess neu erzeugt und einmal geloggt. Abgelöst durch OIDC/Admin-Keys (AIGW-32).
-fn bootstrap_token() -> Result<aigw_admin::BootstrapToken, Box<dyn std::error::Error>> {
+/// diesen Prozess neu erzeugt und einmal geloggt. `None` bei `admin.auth.bootstrap: off` bzw.
+/// (`auto`) wenn es nach dem ersten OIDC-Admin/Admin-API-Key abgeschaltet wurde (AIGW-32).
+async fn bootstrap_token(
+    mode: aigw_core::config::BootstrapMode,
+    store: &aigw_store::Store,
+) -> Result<Option<aigw_admin::BootstrapToken>, Box<dyn std::error::Error>> {
+    use aigw_core::config::BootstrapMode;
+    match mode {
+        BootstrapMode::Off => {
+            tracing::info!("Admin-API: Bootstrap-Token abgeschaltet (admin.auth.bootstrap: off)");
+            return Ok(None);
+        }
+        BootstrapMode::Auto if store.bootstrap_disabled().await? => {
+            tracing::info!(
+                "Admin-API: Bootstrap-Token abgeschaltet (OIDC-Admin bzw. Admin-API-Key vorhanden)"
+            );
+            return Ok(None);
+        }
+        BootstrapMode::Auto | BootstrapMode::On => {}
+    }
     match std::env::var(BOOTSTRAP_TOKEN_ENV) {
         Ok(t) if !t.trim().is_empty() => {
             tracing::info!("Admin-API: Bootstrap-Token aus {BOOTSTRAP_TOKEN_ENV}");
-            Ok(aigw_admin::BootstrapToken::new(&t)
-                .map_err(|e| format!("{BOOTSTRAP_TOKEN_ENV}: {e}"))?)
+            Ok(Some(
+                aigw_admin::BootstrapToken::new(&t)
+                    .map_err(|e| format!("{BOOTSTRAP_TOKEN_ENV}: {e}"))?,
+            ))
         }
         _ => {
             let (token, secret) = aigw_admin::BootstrapToken::generate()?;
@@ -193,7 +229,7 @@ fn bootstrap_token() -> Result<aigw_admin::BootstrapToken, Box<dyn std::error::E
                 "Admin-API: Bootstrap-Token erzeugt (gilt nur für diesen Prozess; \
                  fest vorgeben über {BOOTSTRAP_TOKEN_ENV})"
             );
-            Ok(token)
+            Ok(Some(token))
         }
     }
 }

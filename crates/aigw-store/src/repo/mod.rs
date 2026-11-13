@@ -332,6 +332,21 @@ impl AdminTx {
         before: Option<&B>,
         after: Option<&A>,
     ) -> Result<(), StoreError> {
+        self.audit_kind(action, kind.as_str(), id, name, before, after)
+            .await
+    }
+
+    /// Schreibt einen Audit-Eintrag für eine Art außerhalb von [`ResourceKind`]
+    /// (z. B. `admin-api-key`).
+    pub(crate) async fn audit_kind<B: Serialize, A: Serialize>(
+        &mut self,
+        action: Action,
+        kind: &str,
+        id: Option<Id>,
+        name: &str,
+        before: Option<&B>,
+        after: Option<&A>,
+    ) -> Result<(), StoreError> {
         let before = before.map(serde_json::to_string).transpose()?;
         let after = after.map(serde_json::to_string).transpose()?;
         sqlx::query(
@@ -342,7 +357,7 @@ impl AdminTx {
         .bind(millis(now()))
         .bind(self.actor.clone())
         .bind(action.as_str())
-        .bind(kind.as_str())
+        .bind(kind.to_owned())
         .bind(id.map(|i| i.to_string()))
         .bind(name.to_owned())
         .bind(self.version)

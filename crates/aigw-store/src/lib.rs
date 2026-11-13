@@ -10,6 +10,7 @@
 //! (`migrations/`, nur `TEXT`/`BIGINT`, `$n`-Platzhalter) und damit einem Code-Pfad.
 //! Details: `docs/konzept/02-datenmodell.md`.
 
+pub mod admin_auth;
 pub mod crypto;
 pub mod gitops;
 pub mod keys;
@@ -126,6 +127,13 @@ pub fn migrator() -> Migrator {
             "observe".into(),
             MigrationType::Simple,
             include_str!("../migrations/0002_observe.sql").into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            3,
+            "admin_auth".into(),
+            MigrationType::Simple,
+            include_str!("../migrations/0003_admin_auth.sql").into_sql_str(),
             false,
         ),
     ])

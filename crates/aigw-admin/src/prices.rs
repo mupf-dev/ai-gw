@@ -26,7 +26,7 @@ use time::OffsetDateTime;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::AdminState;
-use crate::auth::{Permission, Principal};
+use crate::auth::{Principal, Target};
 use crate::problem::Problem;
 use crate::resources::{
     AdminResource, ApiResult, ListArgs, St, create_impl, delete_impl, get_impl, json_with,
@@ -80,6 +80,10 @@ impl AdminResource for PriceSpec {
     type Res = Price;
     type Query = PriceQuery;
     const COLLECTION: &'static str = "prices";
+
+    fn target(_name: &str, _spec: &Self) -> Target {
+        Target::Catalog
+    }
 
     fn list_args(q: &Self::Query) -> ListArgs<'_> {
         ListArgs {

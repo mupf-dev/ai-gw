@@ -4,6 +4,43 @@
  */
 
 export interface paths {
+    "/admin/api/v1/admin-api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listet Admin-API-Keys. */
+        get: operations["list_admin_api_keys"];
+        put?: never;
+        /** Legt einen Admin-API-Key an (nur globale `admin`s). Der Klartext steht **nur** hier. */
+        post: operations["create_admin_api_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/admin-api-keys/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Liest einen Admin-API-Key. */
+        get: operations["get_admin_api_key"];
+        /** Ändert Beschreibung, Rollen und Ablauf eines Admin-API-Keys (nur globale `admin`s). */
+        put: operations["put_admin_api_key"];
+        post?: never;
+        /** Löscht (widerruft) einen Admin-API-Key; wirkt sofort. */
+        delete: operations["delete_admin_api_key"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/api-keys": {
         parameters: {
             query?: never;
@@ -89,6 +126,23 @@ export interface paths {
          *     Antwort), der alte läuft nach der Übergangszeit ab.
          */
         post: operations["rotate_api_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/auth/info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Liefert die Anmeldeverfahren und den angemeldeten Principal (für die UI). */
+        get: operations["auth_info"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -301,6 +355,23 @@ export interface paths {
         patch: operations["patch_credential"];
         trace?: never;
     };
+    "/admin/api/v1/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Liefert den angemeldeten Principal (Rollen, CSRF-Token). */
+        get: operations["session_info"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/teams": {
         parameters: {
             query?: never;
@@ -382,10 +453,130 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/auth/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rücksprung vom IdP: Code tauschen, ID-Token prüfen, Session anlegen. */
+        get: operations["callback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Startet den OIDC-Login (Weiterleitung zum IdP). */
+        get: operations["login"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Meldet die Session ab (lokal und – falls angeboten – beim IdP). */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Admin-API-Key (gelesen; nie Klartext oder Hash). */
+        AdminApiKey: {
+            /**
+             * Format: date-time
+             * @description Angelegt.
+             */
+            createdAt: string;
+            /** @description Angelegt von. */
+            createdBy: string;
+            /** @description Beschreibung. */
+            description?: string | null;
+            /**
+             * Format: date-time
+             * @description Ablauf.
+             */
+            expiresAt?: string | null;
+            /**
+             * Format: uuid
+             * @description ID (UUIDv7).
+             */
+            id: string;
+            /**
+             * Format: date-time
+             * @description Zuletzt benutzt (auf eine Minute genau).
+             */
+            lastUsedAt?: string | null;
+            /** @description Name. */
+            name: string;
+            /** @description Sichtbares Präfix (12 Zeichen nach `sk-aigw-admin-`). */
+            prefix: string;
+            /** @description Rollen. */
+            roles: components["schemas"]["RoleBinding"][];
+            /**
+             * Format: date-time
+             * @description Zuletzt geändert.
+             */
+            updatedAt: string;
+        };
+        /** @description Eingabe für das Anlegen. */
+        AdminApiKeyInput: {
+            /** @description Beschreibung (Zweck, Eigentümer). */
+            description?: string | null;
+            /**
+             * Format: date-time
+             * @description Ablauf (RFC 3339, in der Zukunft); ohne Angabe unbefristet.
+             */
+            expiresAt?: string | null;
+            /** @description Name (a-z, 0-9, `-._`). */
+            name: string;
+            /** @description Rollen (mindestens eine). */
+            roles: components["schemas"]["RoleBinding"][];
+        };
+        /** @description Liste der Admin-API-Keys. */
+        AdminApiKeyList: {
+            /** @description Einträge (nach Name sortiert). */
+            items: components["schemas"]["AdminApiKey"][];
+        };
+        /** @description Eingabe für das Ändern (ersetzt Beschreibung, Rollen und Ablauf). */
+        AdminApiKeyUpdate: {
+            /** @description Beschreibung. */
+            description?: string | null;
+            /**
+             * Format: date-time
+             * @description Ablauf (RFC 3339); ohne Angabe unbefristet.
+             */
+            expiresAt?: string | null;
+            /** @description Rollen (mindestens eine). */
+            roles: components["schemas"]["RoleBinding"][];
+        };
         /**
          * @description Geldbetrag in Nano-Einheiten der Abrechnungswährung.
          * @example 2.50
@@ -472,6 +663,17 @@ export interface components {
             /** @description Plan (bei `applied` genau das, was geschrieben wurde). */
             plan: components["schemas"]["Plan"];
         };
+        /**
+         * @description Anmeldeverfahren und – falls angemeldet – der Principal (ohne Anmeldung abrufbar, immer
+         *     `200`; so prüft die UI beim Start ohne `401` in der Browser-Konsole).
+         */
+        AuthInfo: {
+            /** @description Start des Logins (falls OIDC konfiguriert). */
+            loginUrl?: string | null;
+            /** @description OIDC-Login konfiguriert. */
+            oidc: boolean;
+            session?: components["schemas"]["SessionInfo"] | null;
+        };
         BTreeMap: {
             [key: string]: string;
         };
@@ -522,6 +724,13 @@ export interface components {
          * @enum {string}
          */
         ChangeAction: "create" | "update" | "delete" | "unchanged" | "retain" | "skip";
+        /** @description Angelegter Admin-API-Key mit Klartext (nur in dieser Antwort). */
+        CreatedAdminApiKey: {
+            /** @description Key. */
+            key: components["schemas"]["AdminApiKey"];
+            /** @description Klartext `sk-aigw-admin-…` (nur einmal sichtbar). */
+            secret: string;
+        };
         /** @description Ergebnis der Key-Erzeugung: der Klartext wird **nur hier** einmalig herausgegeben. */
         CreatedApiKey: {
             /** @description Gespeicherter Key. */
@@ -650,6 +859,11 @@ export interface components {
          * @enum {string}
          */
         LimitWindow: "second" | "minute" | "hour" | "day";
+        /** @description Ergebnis der Abmeldung. */
+        LogoutResult: {
+            /** @description Hierhin navigieren (Logout beim IdP oder die Admin-UI). */
+            redirectUrl: string;
+        };
         ModelGroup: {
             /**
              * Format: uuid
@@ -930,6 +1144,26 @@ export interface components {
          *     Admin-API).
          */
         SecretString: string;
+        /** @description Angemeldeter Principal. */
+        SessionInfo: {
+            /** @description CSRF-Token für schreibende Anfragen (Header `X-CSRF-Token`; nur bei Sessions). */
+            csrfToken?: string | null;
+            /** @description Anzeigename. */
+            displayName?: string | null;
+            /** @description E-Mail. */
+            email?: string | null;
+            /**
+             * Format: date-time
+             * @description Ablauf der Anmeldung.
+             */
+            expiresAt?: string | null;
+            /** @description Verfahren: `session`, `admin-api-key`, `bootstrap-token`. */
+            method: string;
+            /** @description Wirksame Rollen. */
+            roles: components["schemas"]["RoleBinding"][];
+            /** @description Kennung im Audit-Log (`user:<name>`, `admin-key:<name>`, `bootstrap-admin`). */
+            subject: string;
+        };
         /** @description Anzahl je Aktion. */
         Summary: {
             /** @description Anzulegen. */
@@ -1047,6 +1281,285 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_admin_api_keys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Alle Admin-API-Keys */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminApiKeyList"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_admin_api_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminApiKeyInput"];
+            };
+        };
+        responses: {
+            /** @description Angelegt (mit Klartext) */
+            201: {
+                headers: {
+                    /** @description Pfad */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedAdminApiKey"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Name bereits vergeben */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_admin_api_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gefunden */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminApiKey"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    put_admin_api_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminApiKeyUpdate"];
+            };
+        };
+        responses: {
+            /** @description Geändert */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminApiKey"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_admin_api_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gelöscht */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     list_api_keys: {
         parameters: {
             query?: {
@@ -1593,6 +2106,26 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    auth_info: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Anmeldeverfahren und ggf. Principal */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthInfo"];
                 };
             };
         };
@@ -3524,6 +4057,35 @@ export interface operations {
             };
         };
     };
+    session_info: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Angemeldet */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInfo"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     list_teams: {
         parameters: {
             query?: {
@@ -4216,6 +4778,104 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionInfo"];
+                };
+            };
+        };
+    };
+    callback: {
+        parameters: {
+            query?: {
+                /** @description Autorisierungscode. */
+                code?: string;
+                /** @description `state` aus dem Login. */
+                state?: string;
+                /** @description Fehlercode des IdP. */
+                error?: string;
+                /** @description Fehlerbeschreibung des IdP. */
+                error_description?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Angemeldet (setzt das Session-Cookie) und weiter zu `returnTo`; bei Fehlern weiter zu `/admin/?auth_error=<code>` (`idp`, `state`, `token`, `no-access`, `internal`) */
+            303: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    login: {
+        parameters: {
+            query?: {
+                /** @description Ziel nach dem Login (Pfad unter `/admin/`). */
+                returnTo?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Weiterleitung zum IdP (setzt das Login-Cookie) */
+            303: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description OIDC nicht konfiguriert */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description IdP nicht erreichbar */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description CSRF-Token der Session (Pflicht mit Session-Cookie) */
+                "X-CSRF-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Abgemeldet; Session-Cookie gelöscht */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogoutResult"];
+                };
+            };
+            /** @description CSRF-Prüfung fehlgeschlagen */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };

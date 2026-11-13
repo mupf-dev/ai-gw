@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::AdminState;
-use crate::auth::{Permission, Principal};
+use crate::auth::{Permission, Principal, Target};
 use crate::problem::Problem;
 use crate::resources::{
     ApiResult, BASE, ListArgs, St, check_if_match, created_at, etag_of, json_with, no_store,
@@ -312,7 +312,7 @@ pub(crate) async fn list_credentials(
     Extension(p): Extension<Principal>,
     q: Result<Query<ProviderCredentialQuery>, QueryRejection>,
 ) -> ApiResult {
-    p.require(Permission::Read)?;
+    p.require_on(Permission::Read, &Target::Catalog)?;
     let Query(q) = q?;
     let items: Vec<_> = st
         .store
@@ -356,7 +356,7 @@ pub(crate) async fn create_credential(
     Extension(p): Extension<Principal>,
     body: Result<Json<ProviderCredentialInput>, JsonRejection>,
 ) -> ApiResult {
-    p.require(Permission::Write)?;
+    p.require_on(Permission::Write, &Target::Catalog)?;
     let Json(input) = body.map_err(redacted)?;
     validate_input(&input.spec)?;
     let keyring = keyring(&st)?;
@@ -392,7 +392,7 @@ pub(crate) async fn get_credential(
     Extension(p): Extension<Principal>,
     Path(name): Path<String>,
 ) -> ApiResult {
-    p.require(Permission::Read)?;
+    p.require_on(Permission::Read, &Target::Catalog)?;
     Ok(respond(
         StatusCode::OK,
         st.store.get_credential(&name).await?,
@@ -427,7 +427,7 @@ pub(crate) async fn put_credential(
     headers: HeaderMap,
     body: Result<Json<ProviderCredentialInput>, JsonRejection>,
 ) -> ApiResult {
-    p.require(Permission::Write)?;
+    p.require_on(Permission::Write, &Target::Catalog)?;
     let Json(input) = body.map_err(redacted)?;
     let meta = same_name(&name, input.metadata)?;
     validate_input(&input.spec)?;
@@ -475,7 +475,7 @@ pub(crate) async fn patch_credential(
     headers: HeaderMap,
     body: Result<Json<ProviderCredentialPatch>, JsonRejection>,
 ) -> ApiResult {
-    p.require(Permission::Write)?;
+    p.require_on(Permission::Write, &Target::Catalog)?;
     let Json(patch) = body.map_err(redacted)?;
     let meta = patch.metadata.unwrap_or_default();
     if let Some(n) = &meta.name
@@ -552,7 +552,7 @@ pub(crate) async fn delete_credential(
     Path(name): Path<String>,
     headers: HeaderMap,
 ) -> ApiResult {
-    p.require(Permission::Write)?;
+    p.require_on(Permission::Write, &Target::Catalog)?;
     let _guard = st.write_lock.lock().await;
     let current = st.store.get_credential(&name).await?;
     check_if_match(&headers, &etag_of(&ProviderCredential::from(current)))?;

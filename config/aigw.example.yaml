@@ -79,11 +79,46 @@ gitops:
   # Änderungen nur per `aigw config apply` bzw. POST /admin/api/v1/config:apply.
   read_only_admin: false
 
-# Admin-API: Prüfung der Upstream-Endpunkte von Deployments (SSRF-Schutz,
-# docs/konzept/08-admin-api.md). Standard: nur https, keine privaten/lokalen Ziele.
-# Einträge: Hostname, Muster `*.lan`, IP-Adresse oder CIDR-Bereich.
+# Admin-API (docs/konzept/08-admin-api.md).
 admin:
+  # Prüfung der Upstream-Endpunkte von Deployments (SSRF-Schutz). Standard: nur https, keine
+  # privaten/lokalen Ziele. Einträge: Hostname, Muster `*.lan`, IP-Adresse oder CIDR-Bereich.
   # http:// (ohne TLS) nur für diese Hosts, z. B. ["localhost", "ollama"]
   allow_insecure_upstreams: []
   # private/lokale Ziele (LAN, Loopback, Docker-Dienstnamen), z. B. ["192.168.0.0/16", "ollama"]
   allow_private_upstreams: []
+  # Anmeldung an Admin-API und Admin-UI (§5).
+  auth:
+    # Bootstrap-Token für die Erstinstallation (AIGW_BOOTSTRAP_TOKEN oder Startausgabe):
+    # "auto" = aus, sobald sich ein OIDC-Admin angemeldet hat oder ein Admin-API-Key mit
+    # Rolle admin existiert; "on" = immer; "off" = nie. (Anführungszeichen wegen YAML 1.1.)
+    bootstrap: "auto"
+    session:
+      max_age_secs: 28800        # 8 h ab Anmeldung
+      idle_timeout_secs: 1800    # 30 min ohne Aktivität
+    oidc:
+      # Ohne issuer ist der OIDC-Login aus.
+      # issuer: "https://idp.example.org/realms/acme"
+      # client_id: aigw
+      # Client-Secret nie hier: Datei oder Umgebungsvariable; ohne beides öffentlicher Client (PKCE).
+      # client_secret_file: /run/secrets/aigw-oidc-secret
+      client_secret_env: AIGW_OIDC_CLIENT_SECRET
+      # redirect_url: "https://gateway.example.org/admin/auth/callback"
+      scopes: [openid, profile, email]
+      # Claim mit Gruppen; Punkte für verschachtelte Claims (z. B. realm_access.roles)
+      groups_claim: groups
+      group_roles: []
+      #  - group: aigw-admins
+      #    role: admin
+      #  - group: acme-platform-leads
+      #    role: team-admin
+      #    organization: acme
+      #    team: platform
+      provision_users: true      # Nutzer mit Gruppenrolle beim ersten Login anlegen
+      link_by_email: true        # vorab angelegte Nutzer über bestätigte E-Mail verknüpfen
+      end_session: true          # Abmelden auch beim IdP (falls end_session_endpoint)
+      # post_logout_redirect_url: "https://gateway.example.org/admin/"
+      # ca_file: /etc/aigw/idp-ca.pem
+      cache_secs: 3600
+      http_timeout_secs: 10
+      clock_skew_secs: 60

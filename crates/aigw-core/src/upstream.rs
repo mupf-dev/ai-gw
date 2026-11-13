@@ -358,6 +358,7 @@ mod tests {
         UpstreamPolicy::from_config(&AdminConfig {
             allow_insecure_upstreams: insecure.iter().map(|s| (*s).to_owned()).collect(),
             allow_private_upstreams: private.iter().map(|s| (*s).to_owned()).collect(),
+            ..AdminConfig::default()
         })
         .unwrap()
     }
