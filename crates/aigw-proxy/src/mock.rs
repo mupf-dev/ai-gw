@@ -13,9 +13,19 @@
 //!   Stream nach dem ersten Textstück mit Fehler ab. Als Deployment (Anbieterart `mock`)
 //!   entscheidet `providerModel` statt des angefragten Modellnamens.
 //! - Usage: Eingabe ≈ Zeichen / 4 aller Nachrichten, Ausgabe = Anzahl Wörter.
+//! - Weitere Endpunkte (AIGW-21): Embeddings (deterministische, normierte Vektoren aus einem
+//!   Hash des Textes, Dimension aus `dimensions`, Standard 8), Bilder (1×1-PNG als Base64
+//!   bzw. Data-URL), Transkription (`Mock-Transkript (<n> Bytes)` in allen Formaten, Dauer
+//!   = Bytes / 32 000 s) und Sprachausgabe (WAV mit Stille, 0,1 s je Zeichen, höchstens 2 s,
+//!   in mehreren Stücken gestreamt).
 
 use std::sync::Arc;
 
+use aigw_core::ir::audio::{
+    AudioTask, SpeechRequest, TranscriptFormat, TranscriptionRequest, TranscriptionResponse,
+};
+use aigw_core::ir::embeddings::{Embedding, EmbeddingInput, EmbeddingsRequest, EmbeddingsResponse};
+use aigw_core::ir::images::{GeneratedImage, ImageRequest, ImageResponse, ImageResponseFormat};
 use aigw_core::ir::{
     ApiError, ChatRequest, ChatResponse, Choice, Content, ErrorKind, Message, ModelInfo, Part,
     PartKind, Role, StopReason, StreamEvent, ToolCallStart, ToolChoice, ToolKind, UpstreamError,
@@ -24,9 +34,12 @@ use aigw_core::ir::{
 use aigw_core::resource::Id;
 use aigw_core::snapshot::DeploymentCtx;
 use aigw_core::types::ProviderKind;
+use bytes::Bytes;
 use futures_util::stream;
 
-use crate::provider::{BoxFuture, ChatProvider, Describe, EventStream};
+use crate::provider::{
+    BoxFuture, ByteStream, Capability, ChatProvider, Describe, EventStream, SpeechStream,
+};
 use crate::routes::StaticRoutes;
 
 /// Mock-Anbieter.
@@ -138,7 +151,200 @@ pub fn mock_routes() -> StaticRoutes {
     routes
 }
 
+/// 1×1-PNG (transparent).
+pub const MOCK_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+fn overloaded(behaviour: &str) -> Result<(), UpstreamError> {
+    if behaviour == "mock-error" {
+        return Err(UpstreamError::from(ApiError::new(
+            ErrorKind::Overloaded,
+            "Mock-Anbieter ist (absichtlich) überlastet",
+        )));
+    }
+    Ok(())
+}
+
+/// Deterministischer, normierter Vektor zu einem Text (FNV-1a + xorshift).
+fn mock_vector(text: &str, dims: usize) -> Vec<f32> {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in text.bytes() {
+        h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+    }
+    let mut v: Vec<f32> = (0..dims)
+        .map(|_| {
+            h ^= h << 13;
+            h ^= h >> 7;
+            h ^= h << 17;
+            ((h >> 40) as f32 / (1u64 << 24) as f32) * 2.0 - 1.0
+        })
+        .collect();
+    let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for x in &mut v {
+            *x /= norm;
+        }
+    }
+    v
+}
+
+/// WAV-Kopf (PCM, mono, 8 kHz, 8 Bit) für `samples` Abtastwerte.
+fn wav_header(samples: u32) -> Vec<u8> {
+    let mut h = Vec::with_capacity(44);
+    h.extend_from_slice(b"RIFF");
+    h.extend_from_slice(&(36 + samples).to_le_bytes());
+    h.extend_from_slice(b"WAVEfmt ");
+    h.extend_from_slice(&16u32.to_le_bytes());
+    h.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    h.extend_from_slice(&1u16.to_le_bytes()); // mono
+    h.extend_from_slice(&8000u32.to_le_bytes());
+    h.extend_from_slice(&8000u32.to_le_bytes());
+    h.extend_from_slice(&1u16.to_le_bytes());
+    h.extend_from_slice(&8u16.to_le_bytes());
+    h.extend_from_slice(b"data");
+    h.extend_from_slice(&samples.to_le_bytes());
+    h
+}
+
 impl ChatProvider for MockProvider {
+    fn supports(&self, _cap: Capability) -> bool {
+        true
+    }
+
+    fn embeddings(
+        self: Arc<Self>,
+        req: EmbeddingsRequest,
+    ) -> BoxFuture<Result<EmbeddingsResponse, UpstreamError>> {
+        let behaviour = self
+            .deployment
+            .as_ref()
+            .map_or(req.model.as_str(), |d| d.provider_model.as_str());
+        let result = overloaded(behaviour).map(|()| {
+            let dims = req.dimensions.map_or(8, |d| d.clamp(1, 4096) as usize);
+            let texts: Vec<String> = match &req.input {
+                EmbeddingInput::Text(t) => t.clone(),
+                EmbeddingInput::Tokens(t) => t
+                    .iter()
+                    .map(|v| v.iter().map(u32::to_string).collect::<Vec<_>>().join(" "))
+                    .collect(),
+            };
+            EmbeddingsResponse {
+                model: req.model.clone(),
+                data: texts
+                    .iter()
+                    .zip(0u32..)
+                    .map(|(t, index)| Embedding {
+                        index,
+                        vector: mock_vector(t, dims),
+                    })
+                    .collect(),
+                usage: Usage {
+                    input_tokens: u64::try_from(req.input.byte_len().div_ceil(4))
+                        .unwrap_or(u64::MAX)
+                        .max(1),
+                    ..Usage::default()
+                },
+                usage_estimated: false,
+                extra: Default::default(),
+            }
+        });
+        Box::pin(async move { result })
+    }
+
+    fn images(
+        self: Arc<Self>,
+        req: ImageRequest,
+    ) -> BoxFuture<Result<ImageResponse, UpstreamError>> {
+        let behaviour = self
+            .deployment
+            .as_ref()
+            .map_or(req.model.as_str(), |d| d.provider_model.as_str());
+        let result = overloaded(behaviour).map(|()| {
+            let n = req.count().clamp(1, 10);
+            let url = req.response_format == Some(ImageResponseFormat::Url);
+            let data = (0..n)
+                .map(|_| GeneratedImage {
+                    b64_json: (!url).then(|| MOCK_PNG_BASE64.to_owned()),
+                    url: url.then(|| format!("data:image/png;base64,{MOCK_PNG_BASE64}")),
+                    revised_prompt: Some(format!("Mock: {}", req.prompt)),
+                    media_type: Some("image/png".to_owned()),
+                })
+                .collect();
+            ImageResponse {
+                created: aigw_core::wire::unix_now(),
+                data,
+                usage: Usage {
+                    images: Some(u64::from(n)),
+                    ..Usage::default()
+                },
+                extra: Default::default(),
+                source: None,
+            }
+        });
+        Box::pin(async move { result })
+    }
+
+    fn transcription(
+        self: Arc<Self>,
+        req: TranscriptionRequest,
+    ) -> BoxFuture<Result<TranscriptionResponse, UpstreamError>> {
+        let behaviour = self
+            .deployment
+            .as_ref()
+            .map_or(req.model.as_str(), |d| d.provider_model.as_str());
+        let result = overloaded(behaviour).map(|()| {
+            let text = match req.task {
+                AudioTask::Transcribe => format!("Mock-Transkript ({} Bytes)", req.file.len()),
+                AudioTask::Translate => format!("Mock translation ({} bytes)", req.file.len()),
+            };
+            let secs = req.file.len() as f64 / 32_000.0;
+            let format = req.format();
+            let body = match format {
+                TranscriptFormat::Srt => {
+                    format!("1\n00:00:00,000 --> 00:00:01,000\n{text}\n")
+                }
+                TranscriptFormat::Vtt => {
+                    format!("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\n{text}\n")
+                }
+                _ => text,
+            };
+            let verbose = format == TranscriptFormat::VerboseJson;
+            TranscriptionResponse {
+                text: body,
+                language: verbose.then(|| req.language.clone().unwrap_or_else(|| "german".into())),
+                duration_secs: verbose.then_some(secs),
+                usage: Usage {
+                    audio_ms: Some((secs * 1000.0).round() as u64),
+                    ..Usage::default()
+                },
+                extra: Default::default(),
+                format,
+            }
+        });
+        Box::pin(async move { result })
+    }
+
+    fn speech(
+        self: Arc<Self>,
+        req: SpeechRequest,
+    ) -> BoxFuture<Result<SpeechStream, UpstreamError>> {
+        let behaviour = self
+            .deployment
+            .as_ref()
+            .map_or(req.model.as_str(), |d| d.provider_model.as_str());
+        let result = overloaded(behaviour).map(|()| {
+            // 0,1 s Stille (800 Abtastwerte) je Zeichen, höchstens 2 s.
+            let chunks = req.input.chars().count().clamp(1, 20);
+            let samples = u32::try_from(chunks * 800).unwrap_or(u32::MAX);
+            let mut parts = vec![Ok(Bytes::from(wav_header(samples)))];
+            parts.extend((0..chunks).map(|_| Ok(Bytes::from(vec![128u8; 800]))));
+            SpeechStream {
+                content_type: "audio/wav".to_owned(),
+                body: Box::pin(stream::iter(parts)) as ByteStream,
+            }
+        });
+        Box::pin(async move { result })
+    }
+
     fn describe(&self) -> Describe<'_> {
         match &self.deployment {
             Some(d) => Describe {

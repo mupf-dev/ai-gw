@@ -39,6 +39,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use aigw_core::ir::audio::{
+    SpeechRequest, TranscriptFormat, TranscriptionRequest, TranscriptionResponse,
+};
+use aigw_core::ir::embeddings::{EmbeddingsRequest, EmbeddingsResponse};
+use aigw_core::ir::images::{ImageRequest, ImageResponse};
 use aigw_core::ir::{ApiError, ChatRequest, ChatResponse, StreamEvent, UpstreamError};
 use aigw_core::snapshot::DeploymentCtx;
 use aigw_core::types::ProviderKind;
@@ -48,7 +53,7 @@ use http::{HeaderMap, StatusCode};
 
 pub use client::{ClientConfig, UpstreamClient};
 pub use settings::{GROUP_INHERITED_SETTINGS, with_group_defaults};
-pub use upstream::{EventStream, Timeouts, Upstream, UpstreamInfo};
+pub use upstream::{ByteStream, EventStream, SpeechStream, Timeouts, Upstream, UpstreamInfo};
 
 /// Fertig gebaute Upstream-Anfrage (Body vollständig im Speicher).
 pub type UpstreamRequest = http::Request<Bytes>;
@@ -86,12 +91,137 @@ pub struct Capabilities {
     pub json_schema: bool,
     /// Reasoning-Steuerung (`reasoning_effort`).
     pub reasoning: bool,
-    /// Embeddings (noch nicht umgesetzt).
+    /// Embeddings (`/v1/embeddings`, AIGW-21).
     pub embeddings: bool,
     /// Usage im Stream anforderbar (`stream_options.include_usage`).
     pub stream_usage: bool,
     /// Feld für die Obergrenze der Ausgabe-Tokens.
     pub max_tokens_field: MaxTokensField,
+    /// Bilderzeugung (`/v1/images/generations`, AIGW-21).
+    pub images: bool,
+    /// Transkription/Übersetzung (`/v1/audio/transcriptions|translations`, AIGW-21).
+    pub audio_transcription: bool,
+    /// Sprachausgabe (`/v1/audio/speech`, AIGW-21).
+    pub audio_speech: bool,
+}
+
+impl Capabilities {
+    /// Kann der Adapter Anfragen dieser Art ausführen?
+    pub fn supports(&self, cap: Capability) -> bool {
+        match cap {
+            Capability::Chat => self.chat,
+            Capability::Embeddings => self.embeddings,
+            Capability::Images => self.images,
+            Capability::AudioTranscription => self.audio_transcription,
+            Capability::AudioSpeech => self.audio_speech,
+        }
+    }
+}
+
+/// Art einer Anfrage bzw. Fähigkeit eines Deployments/einer Modellgruppe (AIGW-21).
+///
+/// Die Responses API (`/v1/responses`) läuft über die Chat-IR und braucht [`Capability::Chat`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Capability {
+    /// Chat Completions, Messages, Responses.
+    Chat,
+    /// Embeddings.
+    Embeddings,
+    /// Bilderzeugung.
+    Images,
+    /// Transkription und Übersetzung.
+    AudioTranscription,
+    /// Sprachausgabe.
+    AudioSpeech,
+}
+
+impl Capability {
+    /// Alle Fähigkeiten.
+    pub const ALL: [Self; 5] = [
+        Self::Chat,
+        Self::Embeddings,
+        Self::Images,
+        Self::AudioTranscription,
+        Self::AudioSpeech,
+    ];
+
+    /// Bezeichner in der Konfiguration (`settings.capabilities`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Embeddings => "embeddings",
+            Self::Images => "images",
+            Self::AudioTranscription => "audio-transcription",
+            Self::AudioSpeech => "audio-speech",
+        }
+    }
+
+    /// Aus dem Bezeichner.
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.as_str() == s)
+    }
+
+    fn bit(self) -> u8 {
+        match self {
+            Self::Chat => 1,
+            Self::Embeddings => 2,
+            Self::Images => 4,
+            Self::AudioTranscription => 8,
+            Self::AudioSpeech => 16,
+        }
+    }
+}
+
+impl fmt::Display for Capability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Menge von [`Capability`]s (Bitmaske, `Copy`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct CapabilitySet(u8);
+
+impl CapabilitySet {
+    /// Leer.
+    pub const EMPTY: Self = Self(0);
+    /// Nur Chat (Standard einer Modellgruppe ohne `settings.capabilities`).
+    pub const CHAT: Self = Self(1);
+    /// Alle Fähigkeiten.
+    pub const ALL: Self = Self(31);
+
+    /// Enthält `cap`?
+    pub fn contains(self, cap: Capability) -> bool {
+        self.0 & cap.bit() != 0
+    }
+
+    /// Fügt `cap` hinzu.
+    #[must_use]
+    pub fn with(self, cap: Capability) -> Self {
+        Self(self.0 | cap.bit())
+    }
+
+    /// Enthaltene Fähigkeiten in fester Reihenfolge.
+    pub fn iter(self) -> impl Iterator<Item = Capability> {
+        Capability::ALL
+            .into_iter()
+            .filter(move |c| self.contains(*c))
+    }
+}
+
+impl FromIterator<Capability> for CapabilitySet {
+    fn from_iter<I: IntoIterator<Item = Capability>>(iter: I) -> Self {
+        iter.into_iter().fold(Self::EMPTY, Self::with)
+    }
+}
+
+/// Fehler „Anbieter/Deployment kann diese Art Anfrage nicht“ (400, nicht retrybar).
+pub fn unsupported(kind: ProviderKind, cap: Capability) -> ApiError {
+    ApiError::invalid_request(format!(
+        "Anbieter {} unterstützt {cap} nicht",
+        kind.as_str()
+    ))
+    .with_code("unsupported_capability")
 }
 
 /// Inkrementeller Decoder Upstream-Bytes → IR-Ereignisse.
@@ -139,6 +269,76 @@ pub trait Provider: Send + Sync + fmt::Debug {
     /// Token wartet die Anfrage (innerhalb ihres Zeitlimits).
     fn prepare(&self) -> Option<PrepareFuture<'_>> {
         None
+    }
+
+    // --- Weitere Endpunkte (AIGW-21); Standard: nicht unterstützt -------------------------
+
+    /// Baut die Embedding-Anfrage(n). Mehrere Anfragen, wenn der Anbieter je Aufruf nur eine
+    /// bzw. wenige Eingaben annimmt (z. B. Bedrock Titan); die Antworten werden in
+    /// Reihenfolge zusammengeführt.
+    fn build_embeddings(
+        &self,
+        req: EmbeddingsRequest,
+        losses: &mut Losses,
+    ) -> Result<Vec<UpstreamRequest>, ApiError> {
+        let _ = (req, losses);
+        Err(unsupported(self.kind(), Capability::Embeddings))
+    }
+
+    /// Parst eine Embedding-Antwort (Header z. B. für Token-Zahlen von Bedrock).
+    fn parse_embeddings(
+        &self,
+        headers: &HeaderMap,
+        body: &[u8],
+    ) -> Result<EmbeddingsResponse, ApiError> {
+        let _ = (headers, body);
+        Err(unsupported(self.kind(), Capability::Embeddings))
+    }
+
+    /// Baut die Anfrage zur Bilderzeugung.
+    fn build_images(
+        &self,
+        req: ImageRequest,
+        losses: &mut Losses,
+    ) -> Result<UpstreamRequest, ApiError> {
+        let _ = (req, losses);
+        Err(unsupported(self.kind(), Capability::Images))
+    }
+
+    /// Parst die Antwort der Bilderzeugung.
+    fn parse_images(&self, body: &[u8]) -> Result<ImageResponse, ApiError> {
+        let _ = body;
+        Err(unsupported(self.kind(), Capability::Images))
+    }
+
+    /// Baut die Anfrage einer Transkription/Übersetzung.
+    fn build_transcription(
+        &self,
+        req: TranscriptionRequest,
+        losses: &mut Losses,
+    ) -> Result<UpstreamRequest, ApiError> {
+        let _ = (req, losses);
+        Err(unsupported(self.kind(), Capability::AudioTranscription))
+    }
+
+    /// Parst die Antwort einer Transkription/Übersetzung (`format` = angefragtes Format).
+    fn parse_transcription(
+        &self,
+        format: TranscriptFormat,
+        body: &[u8],
+    ) -> Result<TranscriptionResponse, ApiError> {
+        let _ = (format, body);
+        Err(unsupported(self.kind(), Capability::AudioTranscription))
+    }
+
+    /// Baut die Anfrage der Sprachausgabe (die Antwort sind Audio-Bytes, gestreamt).
+    fn build_speech(
+        &self,
+        req: SpeechRequest,
+        losses: &mut Losses,
+    ) -> Result<UpstreamRequest, ApiError> {
+        let _ = (req, losses);
+        Err(unsupported(self.kind(), Capability::AudioSpeech))
     }
 }
 

@@ -18,6 +18,9 @@ use std::sync::Arc;
 use std::task::{Context, Poll, ready};
 use std::time::Duration;
 
+use aigw_core::ir::audio::{SpeechRequest, TranscriptionRequest, TranscriptionResponse};
+use aigw_core::ir::embeddings::{EmbeddingsRequest, EmbeddingsResponse};
+use aigw_core::ir::images::{ImageRequest, ImageResponse};
 use aigw_core::ir::{
     ApiError, ChatRequest, ChatResponse, ErrorClass, ErrorKind, StreamEvent, UpstreamError,
 };
@@ -26,7 +29,7 @@ use aigw_core::snapshot::DeploymentCtx;
 use aigw_core::types::ProviderKind;
 use aigw_core::wire::Losses;
 use bytes::{Bytes, BytesMut};
-use futures_util::Stream;
+use futures_util::{Stream, StreamExt as _};
 use http_body_util::BodyExt as _;
 use hyper::body::{Body as _, Incoming};
 use tokio::time::{Instant, Sleep};
@@ -39,6 +42,28 @@ use crate::{ConfigError, Provider, Registry, StreamDecoder};
 
 /// Strom von IR-Ereignissen einer gestreamten Antwort.
 pub type EventStream = Pin<Box<dyn Stream<Item = StreamEvent> + Send + 'static>>;
+
+/// Strom roher Antwort-Bytes (Sprachausgabe). Ein `Err` beendet den Strom.
+pub type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, ApiError>> + Send + 'static>>;
+
+/// Antwort der Sprachausgabe: `Content-Type` des Anbieters und die Audio-Bytes als Strom.
+pub struct SpeechStream {
+    /// `Content-Type` (z. B. `audio/mpeg`).
+    pub content_type: String,
+    /// Audio-Bytes.
+    pub body: ByteStream,
+}
+
+impl fmt::Debug for SpeechStream {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SpeechStream")
+            .field("content_type", &self.content_type)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Höchstens so viele Teilanfragen einer Embedding-Anfrage laufen gleichzeitig.
+const EMBEDDING_CONCURRENCY: usize = 8;
 
 /// Zeitlimits je Deployment (`settings.timeouts`, Architektur §6).
 ///
@@ -171,12 +196,8 @@ impl Upstream {
     }
 
     fn build(&self, mut req: ChatRequest) -> Result<crate::UpstreamRequest, UpstreamError> {
-        let mut losses = Losses::new();
         let extra_headers = std::mem::take(&mut req.hints.upstream_headers);
-        let mut http_req = self
-            .provider
-            .build_request(req, &mut losses)
-            .map_err(UpstreamError::from)?;
+        let mut http_req = self.build_with(|p, losses| p.build_request(req, losses))?;
         // Header aus Plugins (AIGW-36); Header des Adapters (Auth, Signatur, Format) haben
         // Vorrang, den Trace-Kontext setzt `send` (AIGW-45) – Plugins nie.
         if !extra_headers.is_empty() {
@@ -193,6 +214,15 @@ impl Upstream {
                 }
             }
         }
+        Ok(http_req)
+    }
+
+    fn build_with<T>(
+        &self,
+        f: impl FnOnce(&dyn Provider, &mut Losses) -> Result<T, ApiError>,
+    ) -> Result<T, UpstreamError> {
+        let mut losses = Losses::new();
+        let http_req = f(self.provider.as_ref(), &mut losses).map_err(UpstreamError::from)?;
         if !losses.is_empty() {
             tracing::debug!(
                 deployment = %self.info.deployment,
@@ -317,36 +347,111 @@ impl Upstream {
         let deadline = Instant::now() + self.timeouts.total;
         self.prepare(deadline).await?;
         let http_req = self.build(req)?;
+        self.unary(http_req, deadline, |p, _, body| p.parse_response(body))
+            .await
+    }
+
+    /// Sendet eine fertige Anfrage, liest die Antwort vollständig und parst sie.
+    async fn unary<T>(
+        &self,
+        http_req: crate::UpstreamRequest,
+        deadline: Instant,
+        parse: impl FnOnce(&dyn Provider, &http::HeaderMap, &[u8]) -> Result<T, ApiError>,
+    ) -> Result<T, UpstreamError> {
         let resp = self.send(http_req, deadline).await?;
-        let body = read_limited(
-            resp.into_body(),
-            deadline,
-            self.timeouts.idle,
-            MAX_RESPONSE_BODY,
-        )
-        .await
-        .map_err(|_| {
-            UpstreamError::new(
-                ErrorClass::Timeout,
-                ApiError::new(
-                    ErrorKind::Timeout,
-                    "Anbieter-Antwort unvollständig (Zeitlimit oder Abbruch)",
-                ),
-            )
-        })?;
-        self.provider.parse_response(&body).map_err(|e| {
-            // Inhaltsfilter in einer 200-Antwort (z. B. Gemini `promptFeedback.blockReason`).
-            if e.code.as_deref() == Some("content_filter") {
-                return UpstreamError::new(ErrorClass::ContentFilter, e);
-            }
-            UpstreamError::new(
-                ErrorClass::Protocol,
-                ApiError::new(
-                    ErrorKind::BadGateway,
-                    format!("Anbieter-Antwort nicht lesbar: {}", e.message),
+        let (parts, body) = resp.into_parts();
+        let body = read_limited(body, deadline, self.timeouts.idle, MAX_RESPONSE_BODY)
+            .await
+            .map_err(|_| {
+                UpstreamError::new(
+                    ErrorClass::Timeout,
+                    ApiError::new(
+                        ErrorKind::Timeout,
+                        "Anbieter-Antwort unvollständig (Zeitlimit oder Abbruch)",
+                    ),
                 )
-                .with_code("upstream_protocol_error"),
-            )
+            })?;
+        parse(self.provider.as_ref(), &parts.headers, &body).map_err(parse_error)
+    }
+
+    /// Embeddings (ggf. mehrere Teilanfragen, z. B. Bedrock Titan: eine je Eingabe).
+    pub async fn embeddings(
+        &self,
+        req: EmbeddingsRequest,
+    ) -> Result<EmbeddingsResponse, UpstreamError> {
+        let deadline = Instant::now() + self.timeouts.total;
+        self.prepare(deadline).await?;
+        let requests = self.build_with(|p, losses| p.build_embeddings(req, losses))?;
+        let parse = |p: &dyn Provider, h: &http::HeaderMap, b: &[u8]| p.parse_embeddings(h, b);
+        let mut parts = futures_util::stream::iter(
+            requests.into_iter().map(|r| self.unary(r, deadline, parse)),
+        )
+        .buffered(EMBEDDING_CONCURRENCY);
+        let mut merged: Option<EmbeddingsResponse> = None;
+        while let Some(part) = parts.next().await {
+            let part = part?;
+            match merged.as_mut() {
+                None => merged = Some(part),
+                Some(m) => {
+                    let offset = u32::try_from(m.data.len()).unwrap_or(u32::MAX);
+                    m.merge(part, offset);
+                }
+            }
+        }
+        merged.ok_or_else(|| {
+            UpstreamError::from(ApiError::new(
+                ErrorKind::Internal,
+                "Adapter erzeugte keine Embedding-Anfrage",
+            ))
+        })
+    }
+
+    /// Bilderzeugung.
+    pub async fn images(&self, req: ImageRequest) -> Result<ImageResponse, UpstreamError> {
+        let deadline = Instant::now() + self.timeouts.total;
+        self.prepare(deadline).await?;
+        let http_req = self.build_with(|p, losses| p.build_images(req, losses))?;
+        self.unary(http_req, deadline, |p, _, body| p.parse_images(body))
+            .await
+    }
+
+    /// Transkription/Übersetzung.
+    pub async fn transcription(
+        &self,
+        req: TranscriptionRequest,
+    ) -> Result<TranscriptionResponse, UpstreamError> {
+        let deadline = Instant::now() + self.timeouts.total;
+        self.prepare(deadline).await?;
+        let format = req.format();
+        let http_req = self.build_with(|p, losses| p.build_transcription(req, losses))?;
+        self.unary(http_req, deadline, |p, _, body| {
+            p.parse_transcription(format, body)
+        })
+        .await
+    }
+
+    /// Sprachausgabe: Fehler bis zu den Antwort-Headern als `Err`, danach werden die
+    /// Audio-Bytes ohne Puffern (mit Backpressure und Zeitlimits) weitergereicht.
+    pub async fn speech(&self, req: SpeechRequest) -> Result<SpeechStream, UpstreamError> {
+        let start = Instant::now();
+        let total = start + self.timeouts.total;
+        let first_byte = total.min(start + self.timeouts.first_byte);
+        self.prepare(first_byte).await?;
+        let http_req = self.build_with(|p, losses| p.build_speech(req, losses))?;
+        let resp = self.send(http_req, first_byte).await?;
+        let content_type = resp
+            .headers()
+            .get(http::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("application/octet-stream")
+            .to_owned();
+        Ok(SpeechStream {
+            content_type,
+            body: Box::pin(UpstreamBytes::new(
+                resp.into_body(),
+                total,
+                self.timeouts.idle,
+            )),
         })
     }
 
@@ -374,6 +479,29 @@ impl Upstream {
             self.timeouts.idle,
         )))
     }
+}
+
+/// Nicht lesbare Erfolgsantwort → Protokollfehler (Inhaltsfilter bleiben Inhaltsfilter).
+fn parse_error(e: ApiError) -> UpstreamError {
+    // Inhaltsfilter in einer 200-Antwort (z. B. Gemini `promptFeedback.blockReason`).
+    if e.code.as_deref() == Some("content_filter") {
+        return UpstreamError::new(ErrorClass::ContentFilter, e);
+    }
+    // Vom Adapter abgelehnte Anfrage (nicht unterstützte Fähigkeit).
+    if e.code.as_deref() == Some("unsupported_capability") {
+        return UpstreamError::from(e);
+    }
+    if e.code.as_deref() == Some("upstream_protocol_error") {
+        return UpstreamError::new(ErrorClass::Protocol, e);
+    }
+    UpstreamError::new(
+        ErrorClass::Protocol,
+        ApiError::new(
+            ErrorKind::BadGateway,
+            format!("Anbieter-Antwort nicht lesbar: {}", e.message),
+        )
+        .with_code("upstream_protocol_error"),
+    )
 }
 
 fn timeout_error(what: &str) -> UpstreamError {
@@ -422,6 +550,72 @@ async fn read_limited(
             }
             Ok(None) => return Ok(buf.freeze()),
             Ok(Some(Err(_))) | Err(_) => return Err(buf.freeze()),
+        }
+    }
+}
+
+/// Roher Byte-Strom über einem Upstream-Body (Zeitlimits wie bei Ereignisströmen).
+struct UpstreamBytes {
+    body: Option<Incoming>,
+    timer: Pin<Box<Sleep>>,
+    total: Instant,
+    idle: Duration,
+}
+
+impl UpstreamBytes {
+    fn new(body: Incoming, total: Instant, idle: Duration) -> Self {
+        let first = total.min(Instant::now() + idle);
+        Self {
+            body: Some(body),
+            timer: Box::pin(tokio::time::sleep_until(first)),
+            total,
+            idle,
+        }
+    }
+}
+
+impl Stream for UpstreamBytes {
+    type Item = Result<Bytes, ApiError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        loop {
+            let Some(body) = this.body.as_mut() else {
+                return Poll::Ready(None);
+            };
+            match Pin::new(body).poll_frame(cx) {
+                Poll::Ready(Some(Ok(frame))) => {
+                    let next = this.total.min(Instant::now() + this.idle);
+                    this.timer.as_mut().reset(next);
+                    if let Ok(data) = frame.into_data()
+                        && !data.is_empty()
+                    {
+                        return Poll::Ready(Some(Ok(data)));
+                    }
+                }
+                Poll::Ready(Some(Err(e))) => {
+                    tracing::debug!(error = %error_chain(&e), "Upstream-Audio abgebrochen");
+                    this.body = None;
+                    return Poll::Ready(Some(Err(ApiError::new(
+                        ErrorKind::BadGateway,
+                        "Verbindung zum Anbieter mitten im Stream abgebrochen",
+                    )
+                    .with_code("upstream_stream_interrupted"))));
+                }
+                Poll::Ready(None) => {
+                    this.body = None;
+                    return Poll::Ready(None);
+                }
+                Poll::Pending => {
+                    ready!(this.timer.as_mut().poll(cx));
+                    this.body = None;
+                    return Poll::Ready(Some(Err(ApiError::new(
+                        ErrorKind::Timeout,
+                        "Zeitlimit beim Anbieter überschritten (Audio-Stream)",
+                    )
+                    .with_code("upstream_timeout"))));
+                }
+            }
         }
     }
 }

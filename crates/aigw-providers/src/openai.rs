@@ -20,12 +20,18 @@
 
 use std::sync::Arc;
 
+use aigw_core::ir::audio::{
+    AudioTask, SpeechRequest, TranscriptFormat, TranscriptionRequest, TranscriptionResponse,
+};
+use aigw_core::ir::embeddings::{EmbeddingsRequest, EmbeddingsResponse, EncodingFormat};
+use aigw_core::ir::images::{ImageRequest, ImageResponse};
 use aigw_core::ir::{
     ApiError, ChatRequest, ChatResponse, ErrorClass, ErrorKind, StreamEvent, UpstreamError,
 };
 use aigw_core::resource::SecretString;
 use aigw_core::snapshot::DeploymentCtx;
 use aigw_core::types::ProviderKind;
+use aigw_core::wire::openai::{audio, embeddings, images};
 use aigw_core::wire::sse::{SseEvent, SseParser};
 use aigw_core::wire::{Losses, WireFormat, openai};
 use bytes::Bytes;
@@ -35,7 +41,9 @@ use serde_json::Value;
 
 use crate::auth::TokenSource;
 use crate::settings::Settings;
-use crate::{Capabilities, ConfigError, MaxTokensField, Provider, StreamDecoder, UpstreamRequest};
+use crate::{
+    Capabilities, Capability, ConfigError, MaxTokensField, Provider, StreamDecoder, UpstreamRequest,
+};
 
 /// Standard-Endpunkt von OpenAI.
 pub const OPENAI_DEFAULT_ENDPOINT: &str = "https://api.openai.com/v1";
@@ -71,6 +79,58 @@ pub struct OpenAiAdapter {
     default_max_tokens: Option<u64>,
     /// Mistral: `settings.safePrompt`.
     safe_prompt: Option<bool>,
+    /// URLs der weiteren Endpunkte (AIGW-21); `None` = nicht unterstützt.
+    ops: Ops,
+}
+
+/// URLs der weiteren Endpunkte eines Deployments (einmal beim Aufbau berechnet).
+#[derive(Debug, Clone, Default)]
+struct Ops {
+    embeddings: Option<Uri>,
+    images: Option<Uri>,
+    transcriptions: Option<Uri>,
+    translations: Option<Uri>,
+    speech: Option<Uri>,
+}
+
+impl Ops {
+    /// Baut die URLs; `url(op)` liefert die vollständige URL einer Operation.
+    fn build(
+        s: &Settings<'_>,
+        caps: &Capabilities,
+        url: impl Fn(&str) -> Result<String, ConfigError>,
+    ) -> Result<Self, ConfigError> {
+        let mut o = Self::default();
+        let get = |enabled: bool, op: &str| -> Result<Option<Uri>, ConfigError> {
+            if enabled {
+                parse_uri(s, &url(op)?).map(Some)
+            } else {
+                Ok(None)
+            }
+        };
+        o.embeddings = get(caps.embeddings, "/embeddings")?;
+        o.images = get(caps.images, "/images/generations")?;
+        o.transcriptions = get(caps.audio_transcription, "/audio/transcriptions")?;
+        o.translations = get(caps.audio_transcription, "/audio/translations")?;
+        o.speech = get(caps.audio_speech, "/audio/speech")?;
+        Ok(o)
+    }
+}
+
+/// Weitere Endpunkte je Anbieterart (Embeddings, Bilder, Audio).
+fn set_op_caps(kind: ProviderKind, c: &mut Capabilities) {
+    let (emb, img, stt, tts) = match kind {
+        ProviderKind::OpenAi | ProviderKind::AzureOpenAi => (true, true, true, true),
+        // Generisch kompatibel (vLLM-, LocalAI-, LiteLLM-Server …).
+        ProviderKind::OpenAiCompatible => (true, false, true, true),
+        ProviderKind::Vllm => (true, false, true, false),
+        ProviderKind::Ollama | ProviderKind::Mistral => (true, false, false, false),
+        _ => (false, false, false, false),
+    };
+    c.embeddings = emb;
+    c.images = img;
+    c.audio_transcription = stt;
+    c.audio_speech = tts;
 }
 
 fn caps(max_tokens_field: MaxTokensField, reasoning: bool) -> Capabilities {
@@ -84,6 +144,9 @@ fn caps(max_tokens_field: MaxTokensField, reasoning: bool) -> Capabilities {
         embeddings: false,
         stream_usage: true,
         max_tokens_field,
+        images: false,
+        audio_transcription: false,
+        audio_speech: false,
     }
 }
 
@@ -150,15 +213,19 @@ impl OpenAiAdapter {
                         headers.push((HeaderName::from_static(header), v));
                     }
                 }
+                let mut c = caps(MaxTokensField::MaxCompletionTokens, true);
+                set_op_caps(ProviderKind::OpenAi, &mut c);
+                let ops = Ops::build(&s, &c, |op| Ok(join(base, op)))?;
                 Self {
                     kind: ProviderKind::OpenAi,
                     uri: parse_uri(&s, &join(base, "/chat/completions"))?,
                     provider_model: spec.provider_model.clone(),
                     auth: Auth::Header(AUTHORIZATION, bearer(key).ok_or_else(header_err)?),
                     headers,
-                    caps: caps(MaxTokensField::MaxCompletionTokens, true),
+                    caps: c,
                     default_max_tokens: None,
                     safe_prompt: None,
+                    ops,
                 }
             }
             ProviderKind::AzureOpenAi => {
@@ -186,15 +253,21 @@ impl OpenAiAdapter {
                     }
                 };
                 let (url, field) = azure_url(&s, endpoint, &spec.provider_model)?;
+                let mut c = caps(field, true);
+                set_op_caps(ProviderKind::AzureOpenAi, &mut c);
+                let ops = Ops::build(&s, &c, |op| {
+                    azure_op_url(&s, endpoint, &spec.provider_model, op).map(|(u, _)| u)
+                })?;
                 Self {
                     kind: ProviderKind::AzureOpenAi,
                     uri: parse_uri(&s, &url)?,
                     provider_model: spec.provider_model.clone(),
                     auth,
                     headers: Vec::new(),
-                    caps: caps(field, true),
+                    caps: c,
                     default_max_tokens: None,
                     safe_prompt: None,
+                    ops,
                 }
             }
             other => {
@@ -228,6 +301,8 @@ impl OpenAiAdapter {
                     ProviderKind::Mistral => c.stream_usage = false,
                     _ => {}
                 }
+                set_op_caps(other, &mut c);
+                let ops = Ops::build(&s, &c, |op| Ok(join(base, op)))?;
                 Self {
                     kind: other,
                     uri: parse_uri(&s, &join(base, "/chat/completions"))?,
@@ -237,6 +312,7 @@ impl OpenAiAdapter {
                     caps: c,
                     default_max_tokens: None,
                     safe_prompt: None,
+                    ops,
                 }
             }
         };
@@ -274,15 +350,21 @@ impl OpenAiAdapter {
             .as_deref()
             .ok_or_else(|| s.missing("endpoint"))?;
         let (url, field) = azure_url(&s, endpoint, &spec.provider_model)?;
+        let mut c = caps(field, true);
+        set_op_caps(ProviderKind::AzureOpenAi, &mut c);
+        let ops = Ops::build(&s, &c, |op| {
+            azure_op_url(&s, endpoint, &spec.provider_model, op).map(|(u, _)| u)
+        })?;
         Ok(Self {
             kind: ProviderKind::AzureOpenAi,
             uri: parse_uri(&s, &url)?,
             provider_model: spec.provider_model.clone(),
             auth: Auth::Token(tokens),
             headers: Vec::new(),
-            caps: caps(field, true),
+            caps: c,
             default_max_tokens: Settings::of(dep).positive_u64("defaultMaxTokens")?,
             safe_prompt: None,
+            ops,
         })
     }
 
@@ -292,11 +374,21 @@ impl OpenAiAdapter {
     }
 }
 
-/// Azure-URL und Ausgabegrenzen-Feld je nach `apiStyle`/`apiVersion`.
+/// Azure-URL (Chat) und Ausgabegrenzen-Feld je nach `apiStyle`/`apiVersion`.
 fn azure_url(
     s: &Settings<'_>,
     endpoint: &str,
     deployment: &str,
+) -> Result<(String, MaxTokensField), ConfigError> {
+    azure_op_url(s, endpoint, deployment, "/chat/completions")
+}
+
+/// Azure-URL einer Operation (`/chat/completions`, `/embeddings`, `/audio/speech` …).
+fn azure_op_url(
+    s: &Settings<'_>,
+    endpoint: &str,
+    deployment: &str,
+    op: &str,
 ) -> Result<(String, MaxTokensField), ConfigError> {
     let version = s.str("apiVersion")?;
     if let Some(v) = version
@@ -323,15 +415,13 @@ fn azure_url(
             Ok((
                 join(
                     endpoint,
-                    &format!(
-                        "/openai/deployments/{deployment}/chat/completions?api-version={version}"
-                    ),
+                    &format!("/openai/deployments/{deployment}{op}?api-version={version}"),
                 ),
                 field,
             ))
         }
         "v1" => {
-            let mut url = join(endpoint, "/openai/v1/chat/completions");
+            let mut url = join(endpoint, &format!("/openai/v1{op}"));
             if let Some(v) = version {
                 url.push_str("?api-version=");
                 url.push_str(v);
@@ -411,34 +501,16 @@ impl Provider for OpenAiAdapter {
             crate::mistral::adjust_request(&mut wire, seed, self.safe_prompt, losses);
         }
         let body = serde_json::to_vec(&wire).map_err(internal)?;
-
-        let mut builder = http::Request::builder()
-            .method(Method::POST)
-            .uri(self.uri.clone())
-            .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
-            .header(
-                ACCEPT,
-                HeaderValue::from_static(if stream {
-                    "text/event-stream"
-                } else {
-                    "application/json"
-                }),
-            )
-            .header(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
-        match &self.auth {
-            Auth::None => {}
-            Auth::Header(name, value) => builder = builder.header(name, value.clone()),
-            Auth::Token(src) => {
-                let token = src.bearer_token()?;
-                let value = bearer(token.expose())
-                    .ok_or_else(|| internal("Token der TokenSource enthält unzulässige Zeichen"))?;
-                builder = builder.header(AUTHORIZATION, value);
-            }
-        }
-        for (name, value) in &self.headers {
-            builder = builder.header(name, value.clone());
-        }
-        builder.body(Bytes::from(body)).map_err(internal)
+        self.post(
+            &self.uri,
+            HeaderValue::from_static("application/json"),
+            if stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+            Bytes::from(body),
+        )
     }
 
     fn parse_response(&self, body: &[u8]) -> Result<ChatResponse, ApiError> {
@@ -467,6 +539,155 @@ impl Provider for OpenAiAdapter {
             ProviderKind::Mistral => crate::mistral::classify_mistral_error(status, headers, body),
             _ => classify_openai_error(status, headers, body),
         }
+    }
+
+    fn build_embeddings(
+        &self,
+        mut req: EmbeddingsRequest,
+        losses: &mut Losses,
+    ) -> Result<Vec<UpstreamRequest>, ApiError> {
+        let uri = self.op(self.ops.embeddings.as_ref(), Capability::Embeddings)?;
+        req.model.clone_from(&self.provider_model);
+        // OpenAI/Azure: Base64 (kleiner auf der Leitung); kompatible Server liefern Zahlen
+        // (nicht jeder kennt `encoding_format`).
+        let upstream_format = match self.kind {
+            ProviderKind::OpenAi | ProviderKind::AzureOpenAi => Some(EncodingFormat::Base64),
+            _ => None,
+        };
+        let mut wire = embeddings::embeddings_request_to_wire(req, upstream_format, losses);
+        if self.kind == ProviderKind::Mistral {
+            // Mistral: `output_dimension`, lehnt unbekannte Felder (`user`) ab.
+            if let Some(d) = wire.dimensions.take() {
+                wire.extra.insert("output_dimension".into(), Value::from(d));
+            }
+            if wire.user.take().is_some() {
+                losses.note("mistral: user verworfen");
+            }
+        }
+        let body = serde_json::to_vec(&wire).map_err(internal)?;
+        Ok(vec![self.post(
+            uri,
+            HeaderValue::from_static("application/json"),
+            "application/json",
+            Bytes::from(body),
+        )?])
+    }
+
+    fn parse_embeddings(
+        &self,
+        _headers: &HeaderMap,
+        body: &[u8],
+    ) -> Result<EmbeddingsResponse, ApiError> {
+        let mut resp = embeddings::decode_embeddings_response(body)?;
+        if resp.model.is_empty() {
+            resp.model.clone_from(&self.provider_model);
+        }
+        Ok(resp)
+    }
+
+    fn build_images(
+        &self,
+        mut req: ImageRequest,
+        losses: &mut Losses,
+    ) -> Result<UpstreamRequest, ApiError> {
+        let uri = self.op(self.ops.images.as_ref(), Capability::Images)?;
+        req.model.clone_from(&self.provider_model);
+        let wire = images::image_request_to_wire(req, losses);
+        let body = serde_json::to_vec(&wire).map_err(internal)?;
+        self.post(
+            uri,
+            HeaderValue::from_static("application/json"),
+            "application/json",
+            Bytes::from(body),
+        )
+    }
+
+    fn parse_images(&self, body: &[u8]) -> Result<ImageResponse, ApiError> {
+        images::decode_image_response(body)
+    }
+
+    fn build_transcription(
+        &self,
+        mut req: TranscriptionRequest,
+        losses: &mut Losses,
+    ) -> Result<UpstreamRequest, ApiError> {
+        let ops = match req.task {
+            AudioTask::Transcribe => self.ops.transcriptions.as_ref(),
+            AudioTask::Translate => self.ops.translations.as_ref(),
+        };
+        let uri = self.op(ops, Capability::AudioTranscription)?;
+        req.model.clone_from(&self.provider_model);
+        let (content_type, body) = audio::transcription_form(&req, losses);
+        let ct = HeaderValue::from_str(&content_type).map_err(internal)?;
+        let accept = if req.format().is_plain_text() {
+            "text/plain"
+        } else {
+            "application/json"
+        };
+        self.post(uri, ct, accept, body)
+    }
+
+    fn parse_transcription(
+        &self,
+        format: TranscriptFormat,
+        body: &[u8],
+    ) -> Result<TranscriptionResponse, ApiError> {
+        audio::decode_transcription_response(body, format)
+    }
+
+    fn build_speech(
+        &self,
+        mut req: SpeechRequest,
+        losses: &mut Losses,
+    ) -> Result<UpstreamRequest, ApiError> {
+        let uri = self.op(self.ops.speech.as_ref(), Capability::AudioSpeech)?;
+        req.model.clone_from(&self.provider_model);
+        let accept = req.media_type();
+        let wire = audio::speech_request_to_wire(req, losses);
+        let body = serde_json::to_vec(&wire).map_err(internal)?;
+        self.post(
+            uri,
+            HeaderValue::from_static("application/json"),
+            accept,
+            Bytes::from(body),
+        )
+    }
+}
+
+impl OpenAiAdapter {
+    /// URL einer weiteren Operation oder „nicht unterstützt“.
+    fn op<'a>(&self, uri: Option<&'a Uri>, cap: Capability) -> Result<&'a Uri, ApiError> {
+        uri.ok_or_else(|| crate::unsupported(self.kind, cap))
+    }
+
+    /// POST mit Auth- und Zusatz-Headern.
+    fn post(
+        &self,
+        uri: &Uri,
+        content_type: HeaderValue,
+        accept: &'static str,
+        body: Bytes,
+    ) -> Result<UpstreamRequest, ApiError> {
+        let mut builder = http::Request::builder()
+            .method(Method::POST)
+            .uri(uri.clone())
+            .header(CONTENT_TYPE, content_type)
+            .header(ACCEPT, HeaderValue::from_static(accept))
+            .header(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
+        match &self.auth {
+            Auth::None => {}
+            Auth::Header(name, value) => builder = builder.header(name, value.clone()),
+            Auth::Token(src) => {
+                let token = src.bearer_token()?;
+                let value = bearer(token.expose())
+                    .ok_or_else(|| internal("Token der TokenSource enthält unzulässige Zeichen"))?;
+                builder = builder.header(AUTHORIZATION, value);
+            }
+        }
+        for (name, value) in &self.headers {
+            builder = builder.header(name, value.clone());
+        }
+        builder.body(body).map_err(internal)
     }
 }
 

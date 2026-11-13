@@ -12,12 +12,15 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use aigw_core::ir::audio::{SpeechRequest, TranscriptionRequest, TranscriptionResponse};
+use aigw_core::ir::embeddings::{EmbeddingsRequest, EmbeddingsResponse};
+use aigw_core::ir::images::{ImageRequest, ImageResponse};
 use aigw_core::ir::{ChatRequest, ChatResponse, UpstreamError};
 use aigw_core::resource::Id;
 use aigw_core::types::ProviderKind;
 use aigw_providers::Upstream;
 
-pub use aigw_providers::EventStream;
+pub use aigw_providers::{ByteStream, Capability, EventStream, SpeechStream};
 
 /// Geboxte Future (`Send`).
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
@@ -52,6 +55,57 @@ pub trait ChatProvider: Send + Sync + 'static {
         self: Arc<Self>,
         req: ChatRequest,
     ) -> BoxFuture<Result<EventStream, UpstreamError>>;
+
+    // --- Weitere Endpunkte (AIGW-21); Standard: nur Chat ----------------------------------
+
+    /// Kann das Deployment Anfragen dieser Art ausführen?
+    fn supports(&self, cap: Capability) -> bool {
+        cap == Capability::Chat
+    }
+
+    /// Embeddings.
+    fn embeddings(
+        self: Arc<Self>,
+        req: EmbeddingsRequest,
+    ) -> BoxFuture<Result<EmbeddingsResponse, UpstreamError>> {
+        let _ = req;
+        unsupported(self.describe().provider, Capability::Embeddings)
+    }
+
+    /// Bilderzeugung.
+    fn images(
+        self: Arc<Self>,
+        req: ImageRequest,
+    ) -> BoxFuture<Result<ImageResponse, UpstreamError>> {
+        let _ = req;
+        unsupported(self.describe().provider, Capability::Images)
+    }
+
+    /// Transkription/Übersetzung.
+    fn transcription(
+        self: Arc<Self>,
+        req: TranscriptionRequest,
+    ) -> BoxFuture<Result<TranscriptionResponse, UpstreamError>> {
+        let _ = req;
+        unsupported(self.describe().provider, Capability::AudioTranscription)
+    }
+
+    /// Sprachausgabe (Audio-Bytes als Strom).
+    fn speech(
+        self: Arc<Self>,
+        req: SpeechRequest,
+    ) -> BoxFuture<Result<SpeechStream, UpstreamError>> {
+        let _ = req;
+        unsupported(self.describe().provider, Capability::AudioSpeech)
+    }
+}
+
+fn unsupported<T: Send + 'static>(
+    kind: Option<ProviderKind>,
+    cap: Capability,
+) -> BoxFuture<Result<T, UpstreamError>> {
+    let err = aigw_providers::unsupported(kind.unwrap_or(ProviderKind::Mock), cap);
+    Box::pin(async move { Err(UpstreamError::from(err)) })
 }
 
 impl ChatProvider for Upstream {
@@ -75,5 +129,37 @@ impl ChatProvider for Upstream {
         req: ChatRequest,
     ) -> BoxFuture<Result<EventStream, UpstreamError>> {
         Box::pin(async move { Upstream::chat_stream(&self, req).await })
+    }
+
+    fn supports(&self, cap: Capability) -> bool {
+        self.provider().capabilities().supports(cap)
+    }
+
+    fn embeddings(
+        self: Arc<Self>,
+        req: EmbeddingsRequest,
+    ) -> BoxFuture<Result<EmbeddingsResponse, UpstreamError>> {
+        Box::pin(async move { Upstream::embeddings(&self, req).await })
+    }
+
+    fn images(
+        self: Arc<Self>,
+        req: ImageRequest,
+    ) -> BoxFuture<Result<ImageResponse, UpstreamError>> {
+        Box::pin(async move { Upstream::images(&self, req).await })
+    }
+
+    fn transcription(
+        self: Arc<Self>,
+        req: TranscriptionRequest,
+    ) -> BoxFuture<Result<TranscriptionResponse, UpstreamError>> {
+        Box::pin(async move { Upstream::transcription(&self, req).await })
+    }
+
+    fn speech(
+        self: Arc<Self>,
+        req: SpeechRequest,
+    ) -> BoxFuture<Result<SpeechStream, UpstreamError>> {
+        Box::pin(async move { Upstream::speech(&self, req).await })
     }
 }

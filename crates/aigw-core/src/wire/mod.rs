@@ -6,12 +6,16 @@
 //! - [`openai`] – Chat Completions (Anfrage, Antwort, Stream-Chunk), Models-Liste, Fehler
 //! - [`anthropic`] – Messages (Anfrage, Antwort, SSE-Ereignisse), Models-Liste, Fehler
 //! - [`sse`] – Server-Sent-Events: Kodierung und inkrementeller Parser
+//! - [`multipart`] – `multipart/form-data` lesen und schreiben (Audio-Uploads, AIGW-21)
+//! - [`base64`] – Base64 (Standard-Alphabet) für Embeddings und Bilder
 //!
 //! Jedes Formatmodul bietet `decode_*` (Bytes → IR) und `encode_*` (IR → Wire-Typ/JSON) sowie
 //! einen zustandsbehafteten Stream-Encoder (IR-Ereignisse → SSE) und -Decoder (SSE-Daten →
 //! IR-Ereignisse).
 
 pub mod anthropic;
+pub mod base64;
+pub mod multipart;
 pub mod openai;
 pub mod sse;
 
@@ -30,6 +34,14 @@ pub enum WireFormat {
     BedrockConverse,
     /// Google Gemini `generateContent` (Gemini API und Vertex AI; nur Zielformat).
     Gemini,
+    /// OpenAI Responses API (`/v1/responses`; Eingangsformat, abgebildet auf die Chat-IR).
+    OpenAiResponses,
+    /// OpenAI Embeddings (`/v1/embeddings`).
+    OpenAiEmbeddings,
+    /// OpenAI Bilder (`/v1/images/generations`).
+    OpenAiImages,
+    /// OpenAI Audio (`/v1/audio/transcriptions`, `/translations`, `/speech`).
+    OpenAiAudio,
 }
 
 /// Deserialisiert ein JSON-Objekt (bereits als Map gelesen) in einen Wire-Typ.

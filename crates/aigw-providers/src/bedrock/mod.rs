@@ -36,11 +36,15 @@ use serde_json::{Map, Value, json};
 
 use crate::codec::{base64, random_id, unix_now, uri_encode};
 use crate::errmap::{
-    class_from_status, internal, looks_like_context_length, retry_after_header, upstream_error,
+    class_from_status, internal, looks_like_context_length, protocol_error, retry_after_header,
+    upstream_error,
 };
 use crate::settings::Settings;
-use crate::{Capabilities, ConfigError, MaxTokensField, Provider, StreamDecoder, UpstreamRequest};
+use crate::{
+    Capabilities, Capability, ConfigError, MaxTokensField, Provider, StreamDecoder, UpstreamRequest,
+};
 use aigw_core::ir::UpstreamError;
+use aigw_core::ir::embeddings::{Embedding, EmbeddingInput, EmbeddingsRequest, EmbeddingsResponse};
 
 pub use sigv4::{AwsCredentials, AwsCredentialsProvider, StaticCredentials};
 pub use stream::BedrockStreamDecoder;
@@ -70,6 +74,46 @@ pub struct BedrockAdapter {
     additional_fields: Option<Map<String, Value>>,
     guardrail: Option<Map<String, Value>>,
     caps: Capabilities,
+    /// Embedding-Modell (AIGW-21): Familie, `InvokeModel`-URL und `input_type` (Cohere).
+    embedding: Option<(EmbeddingFamily, Uri)>,
+    input_type: Option<String>,
+}
+
+/// Familie eines Embedding-Modells auf Bedrock (bestimmt den `InvokeModel`-Body).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmbeddingFamily {
+    /// Amazon Titan Text Embeddings (eine Eingabe je Aufruf).
+    Titan,
+    /// Cohere Embed (bis zu 96 Eingaben je Aufruf).
+    Cohere,
+}
+
+/// Höchstens so viele Texte je Cohere-Aufruf.
+const COHERE_BATCH: usize = 96;
+/// Höchstens so viele Eingaben je Anfrage an Titan (je Eingabe ein Aufruf).
+const TITAN_MAX_INPUTS: usize = 256;
+
+/// Embedding-Familie aus `settings.embeddingFormat` bzw. der Modell-ID.
+fn embedding_family(model: &str, s: &Settings<'_>) -> Result<Option<EmbeddingFamily>, ConfigError> {
+    match s.str("embeddingFormat")? {
+        Some("titan") => return Ok(Some(EmbeddingFamily::Titan)),
+        Some("cohere") => return Ok(Some(EmbeddingFamily::Cohere)),
+        Some(other) => {
+            return Err(s.invalid(format!(
+                "settings.embeddingFormat = {other:?} unbekannt (titan, cohere)"
+            )));
+        }
+        None => {}
+    }
+    Ok(
+        if model.contains("titan-embed-text") || model.contains("titan-embed-g1-text") {
+            Some(EmbeddingFamily::Titan)
+        } else if model.contains("cohere.embed") {
+            Some(EmbeddingFamily::Cohere)
+        } else {
+            None
+        },
+    )
 }
 
 fn parse_uri(s: &Settings<'_>, url: &str) -> Result<Uri, ConfigError> {
@@ -152,7 +196,15 @@ impl BedrockAdapter {
         let model = uri_encode(&spec.provider_model, false);
         let uri = parse_uri(&s, &format!("{base}/model/{model}/converse"))?;
         let stream_uri = parse_uri(&s, &format!("{base}/model/{model}/converse-stream"))?;
+        let embedding_family = embedding_family(&spec.provider_model, &s)?;
+        let embedding = match embedding_family {
+            Some(f) => Some((f, parse_uri(&s, &format!("{base}/model/{model}/invoke"))?)),
+            None => None,
+        };
+        let input_type = s.str("inputType")?.map(str::to_owned);
         Ok(Self {
+            embedding,
+            input_type,
             provider_model: spec.provider_model.clone(),
             region: region.to_owned(),
             uri,
@@ -167,7 +219,10 @@ impl BedrockAdapter {
                 vision: true,
                 json_schema: false,
                 reasoning: true,
-                embeddings: false,
+                embeddings: embedding_family.is_some(),
+                images: false,
+                audio_transcription: false,
+                audio_speech: false,
                 stream_usage: true,
                 max_tokens_field: MaxTokensField::MaxTokens,
             },
@@ -177,6 +232,40 @@ impl BedrockAdapter {
     /// Ziel-URL (nicht gestreamt).
     pub fn uri(&self) -> &Uri {
         &self.uri
+    }
+
+    /// Signierte (bzw. per API-Key authentifizierte) POST-Anfrage.
+    fn signed(
+        &self,
+        uri: &Uri,
+        accept: &'static str,
+        body: Vec<u8>,
+    ) -> Result<UpstreamRequest, ApiError> {
+        let mut http_req = http::Request::builder()
+            .method(Method::POST)
+            .uri(uri.clone())
+            .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+            .header(ACCEPT, HeaderValue::from_static(accept))
+            .header(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE))
+            .body(Bytes::from(body))
+            .map_err(internal)?;
+        match &self.auth {
+            Auth::Bearer(v) => {
+                http_req.headers_mut().insert(AUTHORIZATION, v.clone());
+            }
+            Auth::SigV4(p) => {
+                let creds = p.credentials()?;
+                sigv4::sign_request(
+                    &mut http_req,
+                    &creds,
+                    &self.region,
+                    SIGNING_SERVICE,
+                    unix_now(),
+                )
+                .map_err(internal)?;
+            }
+        }
+        Ok(http_req)
     }
 
     /// Ziel-URL (gestreamt).
@@ -239,38 +328,145 @@ impl Provider for BedrockAdapter {
         let body = self.converse_body(req, losses)?;
         let body = serde_json::to_vec(&body).map_err(internal)?;
         let uri = if stream { &self.stream_uri } else { &self.uri };
-        let mut http_req = http::Request::builder()
-            .method(Method::POST)
-            .uri(uri.clone())
-            .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
-            .header(
-                ACCEPT,
-                HeaderValue::from_static(if stream {
-                    "application/vnd.amazon.eventstream"
-                } else {
-                    "application/json"
-                }),
+        self.signed(
+            uri,
+            if stream {
+                "application/vnd.amazon.eventstream"
+            } else {
+                "application/json"
+            },
+            body,
+        )
+    }
+
+    fn build_embeddings(
+        &self,
+        req: EmbeddingsRequest,
+        losses: &mut Losses,
+    ) -> Result<Vec<UpstreamRequest>, ApiError> {
+        let Some((family, uri)) = &self.embedding else {
+            return Err(crate::unsupported(
+                ProviderKind::Bedrock,
+                Capability::Embeddings,
+            ));
+        };
+        let EmbeddingInput::Text(texts) = req.input else {
+            return Err(ApiError::invalid_request(
+                "Bedrock-Embeddings brauchen Text-Eingaben (keine Token-IDs)",
             )
-            .header(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE))
-            .body(Bytes::from(body))
-            .map_err(internal)?;
-        match &self.auth {
-            Auth::Bearer(v) => {
-                http_req.headers_mut().insert(AUTHORIZATION, v.clone());
+            .with_param("input"));
+        };
+        if req.user.is_some() {
+            losses.note("bedrock embeddings: user verworfen");
+        }
+        let mut extra = req.extra;
+        // `input_type` (Cohere) wird auch aus Anfragen anderer Formate übernommen.
+        let input_type = match extra.remove("input_type") {
+            Some(Value::String(t)) => Some(t),
+            _ => self.input_type.clone(),
+        };
+        losses.extra("bedrock embeddings", &extra);
+        let mut out = Vec::new();
+        match family {
+            EmbeddingFamily::Titan => {
+                if texts.len() > TITAN_MAX_INPUTS {
+                    return Err(ApiError::invalid_request(format!(
+                        "Titan-Embeddings: höchstens {TITAN_MAX_INPUTS} Eingaben je Anfrage"
+                    ))
+                    .with_param("input"));
+                }
+                for t in texts {
+                    let mut body = json!({ "inputText": t });
+                    if let (Some(d), Some(o)) = (req.dimensions, body.as_object_mut()) {
+                        o.insert("dimensions".into(), Value::from(d));
+                    }
+                    let body = serde_json::to_vec(&body).map_err(internal)?;
+                    out.push(self.signed(uri, "application/json", body)?);
+                }
             }
-            Auth::SigV4(p) => {
-                let creds = p.credentials()?;
-                sigv4::sign_request(
-                    &mut http_req,
-                    &creds,
-                    &self.region,
-                    SIGNING_SERVICE,
-                    unix_now(),
-                )
-                .map_err(internal)?;
+            EmbeddingFamily::Cohere => {
+                for chunk in texts.chunks(COHERE_BATCH) {
+                    let mut body = json!({
+                        "texts": chunk,
+                        "input_type": input_type.as_deref().unwrap_or("search_document"),
+                        "embedding_types": ["float"],
+                    });
+                    if let (Some(d), Some(o)) = (req.dimensions, body.as_object_mut()) {
+                        o.insert("output_dimension".into(), Value::from(d));
+                    }
+                    let body = serde_json::to_vec(&body).map_err(internal)?;
+                    out.push(self.signed(uri, "application/json", body)?);
+                }
             }
         }
-        Ok(http_req)
+        Ok(out)
+    }
+
+    fn parse_embeddings(
+        &self,
+        headers: &HeaderMap,
+        body: &[u8],
+    ) -> Result<EmbeddingsResponse, ApiError> {
+        let v: Value = serde_json::from_slice(body).map_err(protocol_error)?;
+        let floats = |v: &Value| -> Option<Vec<f32>> {
+            v.as_array()?
+                .iter()
+                .map(|x| x.as_f64().map(|f| f as f32))
+                .collect()
+        };
+        let header_tokens = headers
+            .get("x-amzn-bedrock-input-token-count")
+            .and_then(|h| h.to_str().ok())
+            .and_then(|h| h.trim().parse::<u64>().ok());
+        let (vectors, tokens) = match self.embedding.as_ref().map(|(f, _)| *f) {
+            Some(EmbeddingFamily::Titan) => {
+                let e = v
+                    .get("embedding")
+                    .or_else(|| v.pointer("/embeddingsByType/float"))
+                    .and_then(floats)
+                    .ok_or_else(|| protocol_error("Titan-Antwort ohne embedding"))?;
+                let tokens = v
+                    .get("inputTextTokenCount")
+                    .and_then(Value::as_u64)
+                    .or(header_tokens);
+                (vec![e], tokens)
+            }
+            Some(EmbeddingFamily::Cohere) => {
+                let list = match v.get("embeddings") {
+                    Some(Value::Object(o)) => o.get("float"),
+                    other => other,
+                }
+                .and_then(Value::as_array)
+                .ok_or_else(|| protocol_error("Cohere-Antwort ohne embeddings"))?;
+                let vectors = list
+                    .iter()
+                    .map(floats)
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or_else(|| protocol_error("Cohere-Vektor ungültig"))?;
+                (vectors, header_tokens)
+            }
+            None => {
+                return Err(crate::unsupported(
+                    ProviderKind::Bedrock,
+                    Capability::Embeddings,
+                ));
+            }
+        };
+        let data = vectors
+            .into_iter()
+            .zip(0u32..)
+            .map(|(vector, index)| Embedding { index, vector })
+            .collect();
+        Ok(EmbeddingsResponse {
+            model: self.provider_model.clone(),
+            data,
+            usage_estimated: tokens.is_none(),
+            usage: Usage {
+                input_tokens: tokens.unwrap_or(0),
+                ..Usage::default()
+            },
+            extra: Map::new(),
+        })
     }
 
     fn parse_response(&self, body: &[u8]) -> Result<ChatResponse, ApiError> {
@@ -745,8 +941,7 @@ pub(crate) fn usage(u: &Value) -> Usage {
         output_tokens: n("outputTokens").unwrap_or(0),
         cache_read_tokens: cache_read,
         cache_write_tokens: cache_write,
-        reasoning_tokens: None,
-        extra: Map::new(),
+        ..Usage::default()
     }
 }
 

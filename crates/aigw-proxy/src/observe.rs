@@ -31,7 +31,7 @@ use futures_util::Stream;
 use tracing::Span;
 
 use crate::auth::AuthContext;
-use crate::provider::{Describe, EventStream};
+use crate::provider::{ByteStream, Describe, EventStream};
 use crate::request_id::RequestStart;
 
 /// Geschätzte Tokens zu einer Textlänge in Bytes.
@@ -188,6 +188,24 @@ impl Recorder {
                 self.span.record("gen_ai.request.max_tokens", m);
             }
         }
+    }
+
+    /// Anfrage eines anderen Endpunkts (Embeddings, Bilder, Audio; AIGW-21): Modell und
+    /// Textumfang der Eingabe in Bytes (Grundlage einer Schätzung, falls der Anbieter keine
+    /// Usage meldet).
+    pub(crate) fn set_target(&mut self, model: &str, stream: bool, input_bytes: usize) {
+        self.input_bytes = input_bytes;
+        if let Some(r) = self.rec() {
+            r.model_alias = Some(model.to_owned());
+            r.stream = stream;
+        }
+    }
+
+    /// Usage einer Antwort anderer Endpunkte; `estimated` = Anbieter meldete keine Tokens
+    /// (die Eingabe wird dann aus dem Textumfang geschätzt).
+    pub(crate) fn set_usage(&mut self, usage: Usage, estimated: bool) {
+        self.usage = Some(usage);
+        self.usage_final = !estimated;
     }
 
     pub(crate) fn set_deployment(&mut self, d: Describe<'_>) {
@@ -365,6 +383,53 @@ impl Drop for Recorder {
         // Noch nicht abgeschlossen → der Handler bzw. Body-Stream wurde verworfen, weil der
         // Client die Verbindung geschlossen hat.
         self.finish(true);
+    }
+}
+
+/// Byte-Strom (Sprachausgabe), der am Ende (oder beim Verwerfen) den Datensatz abgibt.
+pub(crate) struct ObservedBytes {
+    inner: ByteStream,
+    rec: Recorder,
+    first: bool,
+}
+
+impl ObservedBytes {
+    pub(crate) fn new(inner: ByteStream, rec: Recorder) -> Self {
+        Self {
+            inner,
+            rec,
+            first: true,
+        }
+    }
+}
+
+impl Stream for ObservedBytes {
+    type Item = Result<Bytes, std::io::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        match this.inner.as_mut().poll_next(cx) {
+            Poll::Ready(Some(Ok(b))) => {
+                if std::mem::take(&mut this.first) {
+                    this.rec.first_token();
+                }
+                Poll::Ready(Some(Ok(b)))
+            }
+            Poll::Ready(Some(Err(e))) => {
+                // Mitten im Audio-Strom: Verbindung zum Client abbrechen (kein Fehlerformat
+                // möglich), Fehlerklasse im Request-Log.
+                if let Some(r) = this.rec.rec() {
+                    r.error_kind = Some(e.kind);
+                }
+                this.rec.finish(false);
+                Poll::Ready(Some(Err(std::io::Error::other(e.message))))
+            }
+            Poll::Ready(None) => {
+                this.rec.finish(false);
+                Poll::Ready(None)
+            }
+            Poll::Pending => Poll::Pending,
+        }
     }
 }
 

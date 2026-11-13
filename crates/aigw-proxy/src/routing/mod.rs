@@ -32,7 +32,9 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
+use aigw_core::ir::ApiError;
 use aigw_core::resource::{Capacity, Fallback, RoutingStrategy};
+use aigw_providers::Capability;
 
 use crate::provider::ChatProvider;
 
@@ -265,6 +267,29 @@ impl GroupRoute {
     /// Fallback-Kette.
     pub fn fallbacks(&self) -> &[Fallback] {
         &self.fallbacks
+    }
+
+    /// Nimmt die Gruppe Anfragen dieser Art an (`settings.capabilities`) und kann mindestens
+    /// eines ihrer Deployments sie ausführen? Gruppen ohne nutzbares Deployment gelten als
+    /// fähig (sie antworten dann mit `503`, wie bisher).
+    pub fn supports(&self, cap: Capability) -> bool {
+        self.policy.capabilities.contains(cap)
+            && (self.members.is_empty() || self.members.iter().any(|m| m.provider.supports(cap)))
+    }
+
+    /// Fehler „Gruppe unterstützt diese Art Anfrage nicht“ (400).
+    pub(crate) fn unsupported_error(&self, cap: Capability) -> ApiError {
+        let why = if self.policy.capabilities.contains(cap) {
+            "kein Deployment der Gruppe kann sie ausführen"
+        } else {
+            "nicht in settings.capabilities freigegeben"
+        };
+        ApiError::invalid_request(format!(
+            "Modellgruppe {:?} unterstützt {cap} nicht ({why})",
+            self.name
+        ))
+        .with_param("model")
+        .with_code("unsupported_capability")
     }
 
     /// Wählt ein Deployment: Prioritätsgruppen in Reihenfolge, zuerst nur noch nicht

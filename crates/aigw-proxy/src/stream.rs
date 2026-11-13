@@ -10,6 +10,7 @@
 use std::convert::Infallible;
 
 use aigw_core::ir::StreamEvent;
+use aigw_core::wire::openai::responses::ResponsesStreamEncoder;
 use aigw_core::wire::{anthropic, openai};
 use axum::body::Body;
 use axum::http::{HeaderValue, header};
@@ -23,6 +24,8 @@ use crate::provider::EventStream;
 enum Encoder {
     OpenAi(openai::StreamEncoder),
     Anthropic(anthropic::StreamEncoder),
+    /// OpenAI Responses API (benannte Ereignisse, AIGW-21).
+    Responses(Box<ResponsesStreamEncoder>),
 }
 
 impl Encoder {
@@ -30,6 +33,7 @@ impl Encoder {
         match self {
             Self::OpenAi(e) => e.encode(ev, out),
             Self::Anthropic(e) => e.encode(ev, out),
+            Self::Responses(e) => e.encode(ev, out),
         }
     }
 
@@ -37,6 +41,7 @@ impl Encoder {
         match self {
             Self::OpenAi(e) => e.finish(out),
             Self::Anthropic(e) => e.finish(out),
+            Self::Responses(e) => e.finish(out),
         }
     }
 }
@@ -58,6 +63,18 @@ pub(crate) fn sse_response(
         ErrorFormat::OpenAi => Encoder::OpenAi(openai::StreamEncoder::new(include_usage)),
         ErrorFormat::Anthropic => Encoder::Anthropic(anthropic::StreamEncoder::new()),
     };
+    encode_sse(events, encoder)
+}
+
+/// SSE-Antwort der Responses API (`/v1/responses`, AIGW-21).
+pub(crate) fn responses_sse_response(
+    events: EventStream,
+    encoder: ResponsesStreamEncoder,
+) -> Response {
+    encode_sse(events, Encoder::Responses(Box::new(encoder)))
+}
+
+fn encode_sse(events: EventStream, encoder: Encoder) -> Response {
     let body = futures_util::stream::unfold(
         (events, encoder, false),
         |(mut events, mut enc, done)| async move {

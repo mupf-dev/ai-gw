@@ -1,13 +1,19 @@
 // SPDX-FileCopyrightText: 2026 ai-gw contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! OpenAI Chat Completions: Wire-Typen und Konverter.
+//! OpenAI Chat Completions: Wire-Typen und Konverter; dazu die weiteren OpenAI-Endpunkte
+//! (AIGW-21): [`embeddings`], [`images`], [`audio`] und die Responses API ([`responses`],
+//! abgebildet auf die Chat-IR).
 //!
 //! Inhaltsteile (`content`-Listen) und Tool-Definitionen sind als JSON-Objekte modelliert
 //! und werden in [`convert`] anhand ihres `type` direkt in die IR übersetzt; unbekannte
 //! Typen bleiben als [`PartKind::Opaque`](crate::ir::PartKind::Opaque) erhalten.
 
+pub mod audio;
 mod convert;
+pub mod embeddings;
+pub mod images;
+pub mod responses;
 pub mod stream;
 
 pub use convert::{

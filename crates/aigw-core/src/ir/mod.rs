@@ -16,11 +16,16 @@
 //! - [`StreamEvent`] – inkrementelle Ereignisse einer gestreamten Antwort
 //! - [`ApiError`] – Fehler, die im Format des Eingangs an den Client gehen
 //!
-//! Erweiterbarkeit: Embeddings, Responses-API, Bilder und Audio bekommen später eigene
-//! Anfrage-/Antworttypen neben [`ChatRequest`]; [`PartKind`] und [`MediaSource`] sind bereits
-//! so angelegt, dass sie dort wiederverwendet werden können.
+//! Weitere Endpunkte (AIGW-21) haben eigene Anfrage-/Antworttypen neben [`ChatRequest`]:
+//! [`embeddings`], [`images`] und [`audio`]. Die OpenAI Responses API wird auf
+//! [`ChatRequest`]/[`ChatResponse`] abgebildet (zustandslos, siehe
+//! `wire::openai::responses`); [`Usage`] trägt dafür zusätzlich Bilder, Audio-Dauer und
+//! Zeichen.
 
+pub mod audio;
+pub mod embeddings;
 mod error;
+pub mod images;
 mod stream;
 
 pub use error::{ApiError, ErrorClass, ErrorKind, UpstreamError};
@@ -602,6 +607,15 @@ pub struct Usage {
     /// Davon Reasoning-Tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_tokens: Option<u64>,
+    /// Erzeugte Bilder (`/v1/images/generations`, AIGW-21).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub images: Option<u64>,
+    /// Dauer der verarbeiteten Audio-Eingabe in Millisekunden (Transkription/Übersetzung).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_ms: Option<u64>,
+    /// Zeichen der Text-Eingabe einer Sprachausgabe (`/v1/audio/speech`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub characters: Option<u64>,
     /// Unbekannte, formatspezifische Felder.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub extra: Extra,

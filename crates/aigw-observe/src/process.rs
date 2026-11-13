@@ -60,6 +60,10 @@ pub fn endpoint_name(f: WireFormat) -> &'static str {
         WireFormat::AnthropicMessages => "anthropic-messages",
         WireFormat::BedrockConverse => "bedrock-converse",
         WireFormat::Gemini => "gemini",
+        WireFormat::OpenAiResponses => "openai-responses",
+        WireFormat::OpenAiEmbeddings => "openai-embeddings",
+        WireFormat::OpenAiImages => "openai-images",
+        WireFormat::OpenAiAudio => "openai-audio",
     }
 }
 

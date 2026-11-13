@@ -5,7 +5,8 @@
 # Laufzeitprüfung: baut das Release-Binary (mit eingebetteter UI aus ui/dist, falls gebaut),
 # startet `aigw serve` (Daten- und Steuerebene getrennt) und prüft /healthz, die Admin-API
 # (Bootstrap-Token, Key anlegen), /v1/* mit und ohne Key, Routing über Snapshot-Routen
-# (Mock-Deployments, Retry auf anderes Deployment, Hot Reload), Routing-Ressourcen per REST
+# (Mock-Deployments, Retry auf anderes Deployment, Hot Reload), Responses, Embeddings, Bilder,
+# Audio (AIGW-21, inkl. Fähigkeiten der Modellgruppe), Routing-Ressourcen per REST
 # (Zugangsdaten ohne Geheimwert in der Antwort, Modellgruppe/Deployment/Preis, Alias-Kollision,
 # SSRF-Ablehnung, Freigabe per Key), /metrics, OTLP-Export (gegen einen lokalen Fake-Collector,
 # falls python3 vorhanden) und /admin/.
@@ -70,6 +71,19 @@ apiVersion: aigw/v1alpha1
 kind: Deployment
 metadata: {name: mock-echo}
 spec: {modelGroup: mock, provider: mock, providerModel: mock, priority: 1}
+---
+# AIGW-21: Gruppe für Embeddings, Bilder und Audio (Chat ist hier nicht freigegeben).
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: mock-media}
+spec:
+  settings:
+    capabilities: [embeddings, images, audio-transcription, audio-speech]
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: mock-media-echo}
+spec: {modelGroup: mock-media, provider: mock, providerModel: mock}
 YAML
 # Wegwerf-Master-Key nur für diesen Lauf (ohne Key startet `aigw serve` nicht).
 TOKEN="aigw-admin-smoke-$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
@@ -134,6 +148,34 @@ curl -fsS -N "$BASE/v1/messages" -H "x-api-key: $KEY" -H 'content-type: applicat
   -d '{"model":"mock","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"Hallo"}]}' \
   >"$TMP/s1.txt"
 grep -q 'message_stop' "$TMP/s1.txt"
+echo "--- POST /v1/responses (nicht gestreamt und gestreamt) über Modellgruppe mock"
+curl -fsS "$BASE/v1/responses" -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"model":"mock","input":"Hallo"}' >"$TMP/r1.json"
+grep -q '"object":"response"' "$TMP/r1.json"
+grep -q 'Echo: Hallo' "$TMP/r1.json"
+curl -fsS -N "$BASE/v1/responses" -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"model":"mock","input":"Hallo","stream":true}' >"$TMP/r2.txt"
+grep -q '^event: response.completed' "$TMP/r2.txt"
+echo "--- POST /v1/responses mit previous_response_id → 400 (zustandslos)"
+test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/responses" -H "authorization: Bearer $KEY" \
+  -H 'content-type: application/json' -d '{"model":"mock","input":"x","previous_response_id":"resp_1"}')" = 400
+echo "--- POST /v1/embeddings (mock-media); Chat-Gruppe ohne Fähigkeit → 400"
+curl -fsS "$BASE/v1/embeddings" -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"model":"mock-media","input":["Hallo","Welt"],"dimensions":4}' >"$TMP/e1.json"
+grep -q '"object":"embedding"' "$TMP/e1.json"
+test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/embeddings" -H "authorization: Bearer $KEY" \
+  -H 'content-type: application/json' -d '{"model":"mock","input":"x"}')" = 400
+echo "--- POST /v1/images/generations (mock-media)"
+curl -fsS "$BASE/v1/images/generations" -H "authorization: Bearer $KEY" \
+  -H 'content-type: application/json' -d '{"model":"mock-media","prompt":"Katze"}' | grep -q '"b64_json"'
+echo "--- POST /v1/audio/transcriptions (multipart, mock-media)"
+head -c 32000 /dev/zero >"$TMP/probe.wav"
+curl -fsS "$BASE/v1/audio/transcriptions" -H "authorization: Bearer $KEY" \
+  -F model=mock-media -F "file=@$TMP/probe.wav;type=audio/wav" | grep -q 'Mock-Transkript (32000 Bytes)'
+echo "--- POST /v1/audio/speech (gestreamte Audio-Bytes, mock-media)"
+curl -fsS "$BASE/v1/audio/speech" -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"model":"mock-media","input":"Hallo","voice":"alloy","response_format":"wav"}' -o "$TMP/speech.wav"
+test "$(head -c 4 "$TMP/speech.wav")" = RIFF
 echo "--- Hot Reload: neue Modellgruppe mock-2 per Apply, danach erreichbar"
 cat >"$TMP/models2.yaml" <<'YAML'
 apiVersion: aigw/v1alpha1

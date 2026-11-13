@@ -86,6 +86,29 @@ Start-Config: `server.data.routing_headers: true` (Standard) setzt die Antwort-H
 Smoke-Tests und Demos ohne echte Anbieter; der Mock-Fallback für beliebige Modellnamen im
 Binary entfällt.
 
+## 2a. Fähigkeiten einer Modellgruppe (AIGW-21)
+
+```yaml
+kind: ModelGroup
+metadata: {name: text-embedding}
+spec:
+  settings:
+    capabilities: [embeddings]   # chat, embeddings, images, audio-transcription, audio-speech
+```
+
+Ohne Angabe nimmt eine Gruppe nur **Chat** an (Chat Completions, Messages, Responses). Eine
+Anfrage anderer Art an die Gruppe → `400 unsupported_capability` im Eingangsformat (auch für
+Chat an eine reine Embedding-Gruppe). Zusätzlich muss mindestens ein Deployment die Art
+technisch können (Adapter-`Capabilities`, z. B. Anthropic keine Embeddings); Deployments ohne
+die Fähigkeit werden nie gewählt, Fallback-Gruppen ohne sie übersprungen. Unbekannte Werte
+oder eine leere Liste sind Fehler (Standardwerte + Log, wie bei den übrigen Einstellungen).
+Health Checks (Chat-Ping) laufen nur für Gruppen mit `chat`.
+
+Technisch läuft jede Art über dieselbe Ausführung (`exec::execute_op` mit einer `Operation`:
+`ChatOp`, `EmbeddingsOp`, `ImagesOp`, `TranscriptionOp`, `SpeechOp`); `exec::execute` (Chat)
+ist ein dünner Wrapper. Retries, Backoff, `Retry-After`, Breaker, Fallbacks und RPM/TPM gelten
+für alle Arten gleich (TPM zählt Embedding-Tokens bzw. gemeldete Bild-/Audio-Tokens).
+
 ## 3. Auswahl (AIGW-24)
 
 1. **Prioritätsgruppen:** Deployments mit `priority` 0 vor 1 vor 2 … (z. B. PTU vor PAYG).

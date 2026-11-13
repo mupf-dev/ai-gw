@@ -28,6 +28,9 @@ Endpunkte – Datenebene (`server.data.listen`, Standard `127.0.0.1:4000`):
 
 - `POST /v1/chat/completions`, `POST /v1/messages`, `GET /v1/models` – OpenAI- und
   Anthropic-kompatibel (vorerst Mock-Anbieter `echo`, siehe `docs/konzept/03-ir-und-formate.md`)
+- `POST /v1/responses`, `/v1/embeddings`, `/v1/images/generations`, `/v1/audio/transcriptions`,
+  `/v1/audio/translations`, `/v1/audio/speech` – OpenAI-kompatibel (Responses zustandslos;
+  Modellgruppe braucht `settings.capabilities`, siehe `docs/konzept/03-ir-und-formate.md` §6)
 - `GET /healthz` – Liveness
 
 Steuerebene (`server.control.listen`, Standard `127.0.0.1:4001`; gleiche Adresse → ein Port):

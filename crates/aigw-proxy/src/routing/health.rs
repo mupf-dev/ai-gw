@@ -28,6 +28,15 @@ pub(crate) fn run_due(table: &RouteTable) {
         let Some(cfg) = group.policy().health else {
             continue;
         };
+        // Der Health Check ist ein Chat-Request; reine Embedding-/Bild-/Audio-Gruppen
+        // werden nicht geprüft (AIGW-21).
+        if !group
+            .policy()
+            .capabilities
+            .contains(aigw_providers::Capability::Chat)
+        {
+            continue;
+        }
         let breaker = group.policy().breaker;
         for m in group.members() {
             let last = m.state.last_health_ms.load(Ordering::Acquire);

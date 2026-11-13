@@ -41,13 +41,16 @@ use serde_json::{Map, Value, json};
 use crate::auth::{StaticToken, TokenSource};
 use crate::codec::{base64, base64_decode, base64url, random_id, unix_now};
 use crate::errmap::{
-    class_from_status, internal, looks_like_context_length, retry_after_header, upstream_error,
+    class_from_status, internal, looks_like_context_length, protocol_error, retry_after_header,
+    upstream_error,
 };
 use crate::settings::Settings;
 use crate::{
     Capabilities, ConfigError, MaxTokensField, PrepareFuture, Provider, StreamDecoder,
     UpstreamRequest,
 };
+use aigw_core::ir::embeddings::{Embedding, EmbeddingInput, EmbeddingsRequest, EmbeddingsResponse};
+use aigw_core::ir::images::{GeneratedImage, ImageRequest, ImageResponse, ImageResponseFormat};
 
 pub use oauth::{ServiceAccountKey, ServiceAccountTokenSource};
 pub use stream::GeminiStreamDecoder;
@@ -88,7 +91,20 @@ pub struct VertexAdapter {
     auth: Auth,
     safety_settings: Option<Value>,
     caps: Capabilities,
+    /// Embeddings (`:batchEmbedContents` bzw. Vertex `:predict`) und Imagen (`:predict`),
+    /// AIGW-21.
+    embed_uri: Uri,
+    predict_uri: Uri,
+    embed_batch: usize,
+    task_type: Option<String>,
 }
+
+/// Höchstens so viele Eingaben je `batchEmbedContents` (Gemini API).
+const GEMINI_EMBED_BATCH: usize = 100;
+/// Höchstens so viele Instanzen je `:predict` (Vertex, `text-embedding-*`).
+const VERTEX_EMBED_BATCH: usize = 250;
+/// Höchstens so viele Teilanfragen je Embedding-Anfrage.
+const MAX_EMBED_CALLS: usize = 256;
 
 fn parse_uri(s: &Settings<'_>, url: &str) -> Result<Uri, ConfigError> {
     let uri: Uri = url
@@ -262,7 +278,31 @@ impl VertexAdapter {
             Some(v @ Value::Array(_)) => Some(v.clone()),
             Some(_) => return Err(s.invalid("settings.safetySettings muss eine Liste sein")),
         };
+        let default_batch = match api {
+            GeminiApi::Gemini => GEMINI_EMBED_BATCH,
+            // `gemini-embedding-*` nimmt auf Vertex nur eine Instanz je Aufruf an.
+            GeminiApi::Vertex if spec.provider_model.contains("gemini-embedding") => 1,
+            GeminiApi::Vertex => VERTEX_EMBED_BATCH,
+        };
+        let embed_batch = s
+            .positive_u64("embeddingBatchSize")?
+            .map_or(default_batch, |n| {
+                usize::try_from(n).unwrap_or(default_batch)
+            });
         Ok(Self {
+            embed_uri: parse_uri(
+                &s,
+                &format!(
+                    "{base}:{}",
+                    match api {
+                        GeminiApi::Gemini => "batchEmbedContents",
+                        GeminiApi::Vertex => "predict",
+                    }
+                ),
+            )?,
+            predict_uri: parse_uri(&s, &format!("{base}:predict"))?,
+            embed_batch,
+            task_type: s.str("taskType")?.map(str::to_owned),
             api,
             provider_model: spec.provider_model.clone(),
             uri: parse_uri(&s, &format!("{base}:generateContent"))?,
@@ -276,7 +316,10 @@ impl VertexAdapter {
                 vision: true,
                 json_schema: true,
                 reasoning: true,
-                embeddings: false,
+                embeddings: true,
+                images: true,
+                audio_transcription: false,
+                audio_speech: false,
                 stream_usage: true,
                 max_tokens_field: MaxTokensField::MaxTokens,
             },
@@ -286,6 +329,36 @@ impl VertexAdapter {
     /// Angesprochene API.
     pub fn api(&self) -> GeminiApi {
         self.api
+    }
+
+    /// POST mit Auth-Headern (API-Key bzw. OAuth-Bearer).
+    fn post(
+        &self,
+        uri: &Uri,
+        accept: &'static str,
+        body: Vec<u8>,
+    ) -> Result<UpstreamRequest, ApiError> {
+        let mut builder = http::Request::builder()
+            .method(Method::POST)
+            .uri(uri.clone())
+            .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+            .header(ACCEPT, HeaderValue::from_static(accept))
+            .header(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
+        let token = match &self.auth {
+            Auth::ApiKey(v) => {
+                builder = builder.header(HeaderName::from_static("x-goog-api-key"), v.clone());
+                None
+            }
+            Auth::ServiceAccount(src) => Some(src.bearer_token()?),
+            Auth::Token(src) => Some(src.bearer_token()?),
+        };
+        if let Some(t) = token {
+            let mut v = HeaderValue::from_str(&format!("Bearer {}", t.expose()))
+                .map_err(|_| internal("Token enthält unzulässige Zeichen"))?;
+            v.set_sensitive(true);
+            builder = builder.header(AUTHORIZATION, v);
+        }
+        builder.body(Bytes::from(body)).map_err(internal)
     }
 
     /// Ziel-URL (nicht gestreamt).
@@ -348,34 +421,241 @@ impl Provider for VertexAdapter {
         let stream = req.is_stream();
         let body = self.gemini_body(req, losses)?;
         let body = serde_json::to_vec(&body).map_err(internal)?;
-        let mut builder = http::Request::builder()
-            .method(Method::POST)
-            .uri(if stream { &self.stream_uri } else { &self.uri }.clone())
-            .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
-            .header(
-                ACCEPT,
-                HeaderValue::from_static(if stream {
-                    "text/event-stream"
-                } else {
-                    "application/json"
-                }),
+        self.post(
+            if stream { &self.stream_uri } else { &self.uri },
+            if stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+            body,
+        )
+    }
+
+    fn build_embeddings(
+        &self,
+        req: EmbeddingsRequest,
+        losses: &mut Losses,
+    ) -> Result<Vec<UpstreamRequest>, ApiError> {
+        let EmbeddingInput::Text(texts) = req.input else {
+            return Err(ApiError::invalid_request(
+                "Gemini-Embeddings brauchen Text-Eingaben (keine Token-IDs)",
             )
-            .header(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
-        let token = match &self.auth {
-            Auth::ApiKey(v) => {
-                builder = builder.header(HeaderName::from_static("x-goog-api-key"), v.clone());
-                None
-            }
-            Auth::ServiceAccount(src) => Some(src.bearer_token()?),
-            Auth::Token(src) => Some(src.bearer_token()?),
+            .with_param("input"));
         };
-        if let Some(t) = token {
-            let mut v = HeaderValue::from_str(&format!("Bearer {}", t.expose()))
-                .map_err(|_| internal("Token enthält unzulässige Zeichen"))?;
-            v.set_sensitive(true);
-            builder = builder.header(AUTHORIZATION, v);
+        if req.user.is_some() {
+            losses.note("gemini embeddings: user verworfen");
         }
-        builder.body(Bytes::from(body)).map_err(internal)
+        let mut extra = req.extra;
+        let task_type = match extra
+            .remove("task_type")
+            .or_else(|| extra.remove("taskType"))
+        {
+            Some(Value::String(t)) => Some(t),
+            _ => self.task_type.clone(),
+        };
+        losses.extra("gemini embeddings", &extra);
+        let batch = self.embed_batch.max(1);
+        if texts.len().div_ceil(batch) > MAX_EMBED_CALLS {
+            return Err(ApiError::invalid_request(format!(
+                "zu viele Eingaben (höchstens {} je Anfrage)",
+                MAX_EMBED_CALLS * batch
+            ))
+            .with_param("input"));
+        }
+        let model = format!(
+            "models/{}",
+            self.provider_model
+                .strip_prefix("models/")
+                .unwrap_or(&self.provider_model)
+        );
+        let mut out = Vec::new();
+        for chunk in texts.chunks(batch) {
+            let body = match self.api {
+                GeminiApi::Gemini => {
+                    let requests: Vec<Value> = chunk
+                        .iter()
+                        .map(|t| {
+                            let mut r =
+                                json!({"model": model, "content": {"parts": [{"text": t}]}});
+                            if let Some(o) = r.as_object_mut() {
+                                if let Some(d) = req.dimensions {
+                                    o.insert("outputDimensionality".into(), Value::from(d));
+                                }
+                                if let Some(tt) = &task_type {
+                                    o.insert("taskType".into(), Value::from(tt.as_str()));
+                                }
+                            }
+                            r
+                        })
+                        .collect();
+                    json!({ "requests": requests })
+                }
+                GeminiApi::Vertex => {
+                    let instances: Vec<Value> = chunk
+                        .iter()
+                        .map(|t| {
+                            let mut i = json!({ "content": t });
+                            if let (Some(tt), Some(o)) = (&task_type, i.as_object_mut()) {
+                                o.insert("task_type".into(), Value::from(tt.as_str()));
+                            }
+                            i
+                        })
+                        .collect();
+                    let mut body = json!({ "instances": instances });
+                    if let (Some(d), Some(o)) = (req.dimensions, body.as_object_mut()) {
+                        o.insert("parameters".into(), json!({ "outputDimensionality": d }));
+                    }
+                    body
+                }
+            };
+            let body = serde_json::to_vec(&body).map_err(internal)?;
+            out.push(self.post(&self.embed_uri, "application/json", body)?);
+        }
+        Ok(out)
+    }
+
+    fn parse_embeddings(
+        &self,
+        _headers: &HeaderMap,
+        body: &[u8],
+    ) -> Result<EmbeddingsResponse, ApiError> {
+        let v: Value = serde_json::from_slice(body).map_err(protocol_error)?;
+        let floats = |v: &Value| -> Option<Vec<f32>> {
+            v.as_array()?
+                .iter()
+                .map(|x| x.as_f64().map(|f| f as f32))
+                .collect()
+        };
+        let mut tokens: Option<u64> = None;
+        let vectors: Vec<Vec<f32>> = match self.api {
+            GeminiApi::Gemini => v
+                .get("embeddings")
+                .and_then(Value::as_array)
+                .ok_or_else(|| protocol_error("Antwort ohne embeddings"))?
+                .iter()
+                .map(|e| e.get("values").and_then(floats))
+                .collect::<Option<_>>()
+                .ok_or_else(|| protocol_error("Vektor ungültig"))?,
+            GeminiApi::Vertex => {
+                let preds = v
+                    .get("predictions")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| protocol_error("Antwort ohne predictions"))?;
+                let mut out = Vec::with_capacity(preds.len());
+                for p in preds {
+                    let e = p
+                        .get("embeddings")
+                        .ok_or_else(|| protocol_error("Vorhersage ohne embeddings"))?;
+                    out.push(
+                        e.get("values")
+                            .and_then(floats)
+                            .ok_or_else(|| protocol_error("Vektor ungültig"))?,
+                    );
+                    if let Some(n) = e.pointer("/statistics/token_count").and_then(Value::as_f64) {
+                        tokens = Some(tokens.unwrap_or(0) + n.max(0.0) as u64);
+                    }
+                }
+                out
+            }
+        };
+        // Die Gemini API meldet keine Tokens: grob schätzen (≈ 4 Bytes je Token) – das
+        // Request-Log kennzeichnet die Usage dann als geschätzt.
+        Ok(EmbeddingsResponse {
+            model: self.provider_model.clone(),
+            data: vectors
+                .into_iter()
+                .zip(0u32..)
+                .map(|(vector, index)| Embedding { index, vector })
+                .collect(),
+            usage_estimated: tokens.is_none(),
+            usage: Usage {
+                input_tokens: tokens.unwrap_or(0),
+                ..Usage::default()
+            },
+            extra: Map::new(),
+        })
+    }
+
+    fn build_images(
+        &self,
+        req: ImageRequest,
+        losses: &mut Losses,
+    ) -> Result<UpstreamRequest, ApiError> {
+        let mut parameters = Map::new();
+        parameters.insert("sampleCount".into(), Value::from(req.count()));
+        if let Some(size) = &req.size {
+            match imagen_aspect_ratio(size) {
+                Some(r) => {
+                    parameters.insert("aspectRatio".into(), Value::from(r));
+                }
+                None if size == "auto" => {}
+                None => losses.note(format!("imagen: Größe {size} ohne Entsprechung")),
+            }
+        }
+        if req.response_format == Some(ImageResponseFormat::Url) {
+            losses.note("imagen: liefert nur Base64 (url nicht möglich)");
+        }
+        for (what, present) in [
+            ("quality", req.quality.is_some()),
+            ("style", req.style.is_some()),
+            ("user", req.user.is_some()),
+        ] {
+            if present {
+                losses.note(format!("imagen: {what} verworfen"));
+            }
+        }
+        losses.extra("imagen", &req.extra);
+        let body = json!({
+            "instances": [{ "prompt": req.prompt }],
+            "parameters": parameters,
+        });
+        let body = serde_json::to_vec(&body).map_err(internal)?;
+        self.post(&self.predict_uri, "application/json", body)
+    }
+
+    fn parse_images(&self, body: &[u8]) -> Result<ImageResponse, ApiError> {
+        let v: Value = serde_json::from_slice(body).map_err(protocol_error)?;
+        let preds = v
+            .get("predictions")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut data = Vec::new();
+        let mut filtered = None;
+        for p in preds {
+            match p.get("bytesBase64Encoded").and_then(Value::as_str) {
+                Some(b64) => data.push(GeneratedImage {
+                    b64_json: Some(b64.to_owned()),
+                    url: None,
+                    revised_prompt: p.get("prompt").and_then(Value::as_str).map(str::to_owned),
+                    media_type: p.get("mimeType").and_then(Value::as_str).map(str::to_owned),
+                }),
+                None => {
+                    filtered = p
+                        .get("raiFilteredReason")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                }
+            }
+        }
+        if data.is_empty() {
+            return Err(ApiError::invalid_request(format!(
+                "Imagen hat kein Bild erzeugt{}",
+                filtered.map(|r| format!(" ({r})")).unwrap_or_default()
+            ))
+            .with_code("content_filter"));
+        }
+        Ok(ImageResponse {
+            created: i64::try_from(unix_now()).unwrap_or(0),
+            usage: Usage {
+                images: Some(u64::try_from(data.len()).unwrap_or(u64::MAX)),
+                ..Usage::default()
+            },
+            data,
+            extra: Map::new(),
+            source: Some(WireFormat::Gemini),
+        })
     }
 
     fn parse_response(&self, body: &[u8]) -> Result<ChatResponse, ApiError> {
@@ -412,6 +692,27 @@ pub(crate) fn tool_call_id(base: Option<&str>, signature: Option<&str>) -> Strin
         id.push_str(&base64url(&sig));
     }
     id
+}
+
+/// OpenAI-Bildgröße → Imagen-Seitenverhältnis.
+fn imagen_aspect_ratio(size: &str) -> Option<&'static str> {
+    let (w, h) = size.split_once('x')?;
+    let (w, h): (u32, u32) = (w.trim().parse().ok()?, h.trim().parse().ok()?);
+    if w == 0 || h == 0 {
+        return None;
+    }
+    // Nächstes unterstütztes Verhältnis (1:1, 3:4, 4:3, 9:16, 16:9).
+    let r = f64::from(w) / f64::from(h);
+    [
+        ("1:1", 1.0),
+        ("3:4", 0.75),
+        ("4:3", 4.0 / 3.0),
+        ("9:16", 9.0 / 16.0),
+        ("16:9", 16.0 / 9.0),
+    ]
+    .into_iter()
+    .min_by(|a, b| (a.1 - r).abs().total_cmp(&(b.1 - r).abs()))
+    .map(|(n, _)| n)
 }
 
 /// Trennt eine Tool-Call-ID in (ID, thoughtSignature als Standard-Base64).
@@ -905,7 +1206,7 @@ pub(crate) fn usage(u: &Value) -> Usage {
         cache_read_tokens: n("cachedContentTokenCount"),
         cache_write_tokens: None,
         reasoning_tokens: thoughts,
-        extra: Map::new(),
+        ..Usage::default()
     }
 }
 

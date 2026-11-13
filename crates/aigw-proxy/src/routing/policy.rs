@@ -21,11 +21,14 @@
 //!     intervalSecs: 30
 //!     timeoutMs: 5000
 //!     unhealthyThreshold: 2   # aufeinanderfolgende Fehlschläge → Breaker offen
+//!   capabilities: [chat]      # AIGW-21: chat, embeddings, images, audio-transcription,
+//!                             # audio-speech; ohne Angabe nur chat
 //! ```
 
 use std::time::Duration;
 
 use aigw_core::resource::JsonObject;
+use aigw_providers::{Capability, CapabilitySet};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
@@ -115,7 +118,7 @@ pub struct HealthCheckConfig {
 }
 
 /// Alle Routing-Einstellungen einer Modellgruppe.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GroupPolicy {
     /// Retries.
     pub retry: RetryPolicy,
@@ -123,24 +126,56 @@ pub struct GroupPolicy {
     pub breaker: BreakerConfig,
     /// Health Checks (`None` = aus).
     pub health: Option<HealthCheckConfig>,
+    /// Arten von Anfragen, die die Gruppe annimmt (`settings.capabilities`, AIGW-21;
+    /// Standard nur Chat). Anfragen anderer Art → `400`.
+    pub capabilities: CapabilitySet,
+}
+
+impl Default for GroupPolicy {
+    fn default() -> Self {
+        Self {
+            retry: RetryPolicy::default(),
+            breaker: BreakerConfig::default(),
+            health: None,
+            capabilities: CapabilitySet::CHAT,
+        }
+    }
 }
 
 impl GroupPolicy {
-    /// Ohne Retries, Breaker und Health Checks (feste Routen, Tests).
+    /// Ohne Retries, Breaker und Health Checks, alle Arten von Anfragen (feste Routen,
+    /// Tests, eingebauter Mock).
     pub fn passthrough() -> Self {
         Self {
             retry: RetryPolicy::none(),
             breaker: BreakerConfig::disabled(),
             health: None,
+            capabilities: CapabilitySet::ALL,
         }
     }
 
-    /// Liest `retry`, `circuitBreaker` und `healthCheck` aus den Einstellungen einer
-    /// Modellgruppe. Andere Schlüssel werden ignoriert, unbekannte Felder in diesen drei
-    /// Abschnitten sind Fehler (Tippfehler sollen auffallen). Auch für die Prüfung in der
-    /// Admin-API gedacht.
+    /// Liest `retry`, `circuitBreaker`, `healthCheck` und `capabilities` aus den
+    /// Einstellungen einer Modellgruppe. Andere Schlüssel werden ignoriert, unbekannte Felder
+    /// in diesen Abschnitten sind Fehler (Tippfehler sollen auffallen). Auch für die Prüfung
+    /// in der Admin-API gedacht.
     pub fn from_settings(settings: &JsonObject) -> Result<Self, String> {
         let mut p = Self::default();
+        if let Some(list) = section::<Vec<String>>(settings, "capabilities")? {
+            p.capabilities = list
+                .iter()
+                .map(|c| {
+                    Capability::parse(c).ok_or_else(|| {
+                        format!(
+                            "settings.capabilities: {c:?} unbekannt (chat, embeddings, images, \
+                             audio-transcription, audio-speech)"
+                        )
+                    })
+                })
+                .collect::<Result<_, _>>()?;
+            if p.capabilities == CapabilitySet::EMPTY {
+                return Err("settings.capabilities darf nicht leer sein".into());
+            }
+        }
         if let Some(r) = section::<RawRetry>(settings, "retry")? {
             let d = RetryPolicy::default();
             p.retry = RetryPolicy {
@@ -298,5 +333,34 @@ mod tests {
         }
         let p = GroupPolicy::from_settings(&obj(json!({"healthCheck": {"enabled": false}})));
         assert!(p.unwrap().health.is_none());
+        for bad in [
+            json!({"capabilities": ["chat", "video"]}),
+            json!({"capabilities": []}),
+            json!({"capabilities": "chat"}),
+        ] {
+            assert!(
+                GroupPolicy::from_settings(&obj(bad.clone())).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn capabilities() {
+        let p = GroupPolicy::from_settings(&JsonObject::new()).unwrap();
+        assert!(p.capabilities.contains(Capability::Chat));
+        assert!(!p.capabilities.contains(Capability::Embeddings));
+        let p = GroupPolicy::from_settings(&obj(json!({
+            "capabilities": ["embeddings", "audio-speech"]
+        })))
+        .unwrap();
+        assert!(!p.capabilities.contains(Capability::Chat));
+        assert!(p.capabilities.contains(Capability::Embeddings));
+        assert!(p.capabilities.contains(Capability::AudioSpeech));
+        assert!(
+            GroupPolicy::passthrough()
+                .capabilities
+                .contains(Capability::Images)
+        );
     }
 }

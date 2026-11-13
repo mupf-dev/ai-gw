@@ -17,7 +17,7 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use aigw_core::ir::{
-    ApiError, ChatRequest, ChatResponse, ErrorClass, ErrorKind, StreamEvent, UpstreamError,
+    ApiError, ChatRequest, ChatResponse, ErrorClass, ErrorKind, StreamEvent, UpstreamError, Usage,
 };
 use aigw_core::observe::Attempt;
 use aigw_core::resource::FallbackTrigger;
@@ -28,7 +28,9 @@ use super::breaker::Admit;
 use super::select::rand_below;
 use super::state::now_ms;
 use super::{GroupRoute, Member, RetryPolicy, Scratch};
-use crate::provider::EventStream;
+use aigw_providers::Capability;
+
+use crate::provider::{BoxFuture, ChatProvider, EventStream};
 use crate::routes::ModelRoutes;
 
 /// Längste beachtete Sperre nach `Retry-After`.
@@ -37,12 +39,64 @@ const MAX_COOLDOWN: Duration = Duration::from_secs(300);
 const MAX_GROUPS: usize = 8;
 
 /// Erfolgreiche Antwort.
-pub(crate) enum Outcome {
+pub(crate) enum Outcome<T = ChatResponse> {
     /// Nicht gestreamt.
-    Json(ChatResponse),
+    Json(T),
     /// Stream (erstes Ereignis bereits geprüft).
     Stream(EventStream),
 }
+
+/// Eine Art von Anfrage, die über das Routing (Auswahl, Retries, Fallbacks, Breaker) läuft
+/// (AIGW-21): Chat, Embeddings, Bilder, Audio. Alle teilen dieselbe Ausführung; nur der
+/// eigentliche Aufruf eines Deployments unterscheidet sich.
+pub(crate) trait Operation {
+    /// IR-Anfrage (wird je Versuch geklont, wenn ein zweiter Versuch möglich ist).
+    type Req: Clone + Send + 'static;
+    /// IR-Antwort (nicht gestreamt).
+    type Out: Send + 'static;
+    /// Benötigte Fähigkeit der Modellgruppe und der Deployments.
+    const CAPABILITY: Capability;
+    /// Gestreamte Antwort (Retries nur bis zum ersten Ereignis).
+    fn stream(&self) -> bool {
+        false
+    }
+    /// Ein Versuch gegen ein Deployment.
+    fn call(
+        &self,
+        provider: Arc<dyn ChatProvider>,
+        req: Self::Req,
+    ) -> BoxFuture<Result<Outcome<Self::Out>, UpstreamError>>;
+    /// Verbrauchte Tokens (für TPM-Kapazität).
+    fn tokens(out: &Self::Out) -> u64;
+}
+
+/// Chat (Chat Completions, Messages, Responses).
+pub(crate) struct ChatOp {
+    pub(crate) stream: bool,
+}
+
+impl Operation for ChatOp {
+    type Req = ChatRequest;
+    type Out = ChatResponse;
+    const CAPABILITY: Capability = Capability::Chat;
+
+    fn stream(&self) -> bool {
+        self.stream
+    }
+
+    fn call(
+        &self,
+        provider: Arc<dyn ChatProvider>,
+        req: ChatRequest,
+    ) -> BoxFuture<Result<Outcome, UpstreamError>> {
+        Box::pin(attempt(provider, req, self.stream))
+    }
+
+    fn tokens(out: &ChatResponse) -> u64 {
+        out.usage.as_ref().map_or(0, Usage::total_tokens)
+    }
+}
+
 
 /// Zähler für die Deployment-Kapazität (`capacity.rpm`/`tpm`).
 #[derive(Clone, Copy)]
@@ -111,8 +165,8 @@ async fn reserve_capacity(member: &Member, cap: CapacityCtx<'_>) -> CapacityChec
 }
 
 /// Ergebnis der Ausführung inkl. aller Versuche.
-pub(crate) struct Routed {
-    pub(crate) result: Result<Outcome, UpstreamError>,
+pub(crate) struct Routed<T = ChatResponse> {
+    pub(crate) result: Result<Outcome<T>, UpstreamError>,
     pub(crate) attempts: Vec<Attempt>,
     /// Zuletzt angefragtes Deployment.
     pub(crate) last: Option<Arc<Member>>,
@@ -216,7 +270,30 @@ pub(crate) async fn execute(
     req: ChatRequest,
     cap: CapacityCtx<'_>,
 ) -> Routed {
-    let stream = req.is_stream();
+    let op = ChatOp {
+        stream: req.is_stream(),
+    };
+    execute_op(routes, group, &op, req, cap).await
+}
+
+/// Führt eine Anfrage beliebiger Art über `group` aus – mit Retries und Fallbacks. Nimmt die
+/// Gruppe diese Art nicht an, gibt es sofort `400` (`unsupported_capability`); Deployments
+/// ohne die Fähigkeit werden nie gewählt, Fallback-Gruppen ohne sie übersprungen.
+pub(crate) async fn execute_op<O: Operation>(
+    routes: &dyn ModelRoutes,
+    group: Arc<GroupRoute>,
+    op: &O,
+    req: O::Req,
+    cap: CapacityCtx<'_>,
+) -> Routed<O::Out> {
+    if !group.supports(O::CAPABILITY) {
+        return Routed {
+            result: Err(UpstreamError::from(group.unsupported_error(O::CAPABILITY))),
+            attempts: Vec::new(),
+            last: None,
+            fallback: None,
+        };
+    }
     let budget_end = Instant::now() + group.policy.retry.budget;
     // Kopie je Versuch nur, wenn überhaupt ein zweiter Versuch möglich ist.
     let single_shot = group.policy.retry.max_attempts <= 1 && group.fallbacks.is_empty();
@@ -238,9 +315,9 @@ pub(crate) async fn execute(
     loop {
         match run_group(
             &current,
+            op,
             &mut req,
             single_shot,
-            stream,
             budget_end,
             cap,
             &mut routed,
@@ -256,7 +333,14 @@ pub(crate) async fn execute(
                 let next = if Instant::now() >= budget_end || visited.len() >= MAX_GROUPS {
                     None
                 } else {
-                    find_fallback(routes, &origin, &mut next_fallback, &visited, failure.class)
+                    find_fallback(
+                        routes,
+                        &origin,
+                        &mut next_fallback,
+                        &visited,
+                        failure.class,
+                        O::CAPABILITY,
+                    )
                 };
                 match next {
                     Some(g) => {
@@ -286,6 +370,7 @@ fn find_fallback(
     next: &mut usize,
     visited: &[String],
     class: Option<ErrorClass>,
+    need: Capability,
 ) -> Option<Arc<GroupRoute>> {
     while let Some(f) = origin.fallbacks.get(*next) {
         *next += 1;
@@ -293,7 +378,9 @@ fn find_fallback(
             continue;
         }
         match routes.route(&f.model_group) {
-            Some(g) if !visited.iter().any(|v| *v == g.name) => return Some(g),
+            Some(g) if !visited.iter().any(|v| *v == g.name) && g.supports(need) => {
+                return Some(g);
+            }
             Some(_) => {}
             None => tracing::warn!(
                 model_group = %origin.name,
@@ -306,19 +393,26 @@ fn find_fallback(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn run_group(
+async fn run_group<O: Operation>(
     group: &Arc<GroupRoute>,
-    req: &mut Option<ChatRequest>,
+    op: &O,
+    req: &mut Option<O::Req>,
     single_shot: bool,
-    stream: bool,
     budget_end: Instant,
     cap: CapacityCtx<'_>,
-    routed: &mut Routed,
+    routed: &mut Routed<O::Out>,
     scratch: &mut Scratch,
-) -> Result<Outcome, Failure> {
+) -> Result<Outcome<O::Out>, Failure> {
+    let stream = op.stream();
     let policy = group.policy.retry;
     let mut tried: Vec<usize> = Vec::new();
-    let mut excluded: Vec<usize> = Vec::new();
+    // Deployments ohne die nötige Fähigkeit kommen nie in Frage.
+    let mut excluded: Vec<usize> = group
+        .members
+        .iter()
+        .filter(|m| !m.provider.supports(O::CAPABILITY))
+        .map(|m| m.idx)
+        .collect();
     let mut last_failure: Option<Failure> = None;
     let mut n = 0u32;
     let mut waited = false;
@@ -362,7 +456,7 @@ async fn run_group(
         routed.last = Some(Arc::clone(&member));
         let started = Instant::now();
         let mut active = Active::start(Arc::clone(&member), group, admit, cap, capacity);
-        let result = attempt(&member, attempt_req, stream).await;
+        let result = op.call(Arc::clone(&member.provider), attempt_req).await;
         let elapsed = started.elapsed();
         let desc = member.provider.describe();
         let mut rec = Attempt {
@@ -376,7 +470,7 @@ async fn run_group(
         match result {
             Ok(Outcome::Json(resp)) => {
                 member.state.latency.update(elapsed);
-                active.tokens = resp.usage.as_ref().map_or(0, |u| u.total_tokens());
+                active.tokens = O::tokens(&resp);
                 active.finish(None);
                 routed.attempts.push(rec);
                 return Ok(Outcome::Json(resp));
@@ -435,13 +529,12 @@ async fn run_group(
     }))
 }
 
-/// Ein Versuch; bei Streams wird das erste Ereignis abgewartet.
+/// Ein Chat-Versuch; bei Streams wird das erste Ereignis abgewartet.
 async fn attempt(
-    member: &Arc<Member>,
+    provider: Arc<dyn ChatProvider>,
     req: ChatRequest,
     stream: bool,
 ) -> Result<Outcome, UpstreamError> {
-    let provider = Arc::clone(&member.provider);
     if !stream {
         return provider.chat(req).await.map(Outcome::Json);
     }

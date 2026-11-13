@@ -7,6 +7,9 @@
 //! - `POST /v1/chat/completions` – OpenAI Chat Completions (JSON oder SSE)
 //! - `POST /v1/messages` – Anthropic Messages (JSON oder SSE)
 //! - `GET /v1/models` – Modellliste (Anthropic-Format, wenn `anthropic-version` gesetzt ist)
+//! - `POST /v1/responses` – OpenAI Responses API (zustandslos, über die Chat-IR; AIGW-21)
+//! - `POST /v1/embeddings`, `POST /v1/images/generations`, `POST /v1/audio/transcriptions`,
+//!   `POST /v1/audio/translations`, `POST /v1/audio/speech` (AIGW-21)
 //! - `GET /healthz` – Liveness
 //!
 //! Jede Anfrage wird in die IR übersetzt ([`aigw_core::ir`]), über [`ModelRoutes`] einem
@@ -29,11 +32,13 @@
 //! (Stream-Haken je IR-Ereignis); siehe `docs/konzept/12-plugins.md`.
 
 pub mod auth;
+mod endpoints;
 mod error;
 mod handlers;
 pub mod limits;
 pub mod mock;
 mod observe;
+mod pipeline;
 mod plugins;
 pub mod provider;
 mod request_id;
@@ -60,7 +65,7 @@ pub use request_id::{REQUEST_ID_HEADER, RequestId, RequestStart};
 pub use routes::{ModelRoutes, StaticRoutes};
 pub use routing::{GroupRoute, RoutesTask, SnapshotRoutes};
 
-pub use aigw_core::config::DEFAULT_MAX_BODY_BYTES;
+pub use aigw_core::config::{DEFAULT_MAX_AUDIO_BYTES, DEFAULT_MAX_BODY_BYTES};
 pub use aigw_plugins::PluginChains;
 
 /// Antwort-Header: gewähltes Deployment (Name).
@@ -78,6 +83,9 @@ pub struct ProxyConfig {
     /// Antwort-Header `x-aigw-deployment`, `x-aigw-attempts`, `x-aigw-fallback`
     /// (`server.data.routing_headers`).
     pub routing_headers: bool,
+    /// Maximale Größe eines Audio-Uploads (`/v1/audio/transcriptions|translations`) in Bytes
+    /// (`server.data.max_audio_bytes`, Standard 25 MiB; höchstens `max_body_bytes`).
+    pub max_audio_bytes: usize,
 }
 
 impl Default for ProxyConfig {
@@ -85,6 +93,7 @@ impl Default for ProxyConfig {
         Self {
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             routing_headers: true,
+            max_audio_bytes: DEFAULT_MAX_AUDIO_BYTES,
         }
     }
 }
@@ -94,6 +103,7 @@ impl From<&aigw_core::config::DataListenerConfig> for ProxyConfig {
         Self {
             max_body_bytes: c.max_body_bytes,
             routing_headers: c.routing_headers,
+            max_audio_bytes: c.max_audio_bytes,
         }
     }
 }
@@ -160,6 +170,30 @@ pub fn router(state: ProxyState) -> Router {
         .route(
             "/v1/models",
             get(handlers::models).fallback(handlers::method_not_allowed),
+        )
+        .route(
+            "/v1/responses",
+            post(endpoints::responses).fallback(handlers::method_not_allowed),
+        )
+        .route(
+            "/v1/embeddings",
+            post(endpoints::embeddings).fallback(handlers::method_not_allowed),
+        )
+        .route(
+            "/v1/images/generations",
+            post(endpoints::images_generations).fallback(handlers::method_not_allowed),
+        )
+        .route(
+            "/v1/audio/transcriptions",
+            post(endpoints::audio_transcriptions).fallback(handlers::method_not_allowed),
+        )
+        .route(
+            "/v1/audio/translations",
+            post(endpoints::audio_translations).fallback(handlers::method_not_allowed),
+        )
+        .route(
+            "/v1/audio/speech",
+            post(endpoints::audio_speech).fallback(handlers::method_not_allowed),
         )
         .route("/v1/{*rest}", any(handlers::not_found))
         .route("/healthz", get(healthz))

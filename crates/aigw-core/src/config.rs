@@ -204,6 +204,8 @@ impl ServerConfig {
 
 /// Standardgrenze für Request-Bodies der Datenebene (32 MiB, wie die Anthropic-API).
 pub const DEFAULT_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+/// Standardgrenze für Audio-Uploads (25 MiB, wie bei OpenAI).
+pub const DEFAULT_MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
 
 /// Listener der Datenebene.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -216,6 +218,9 @@ pub struct DataListenerConfig {
     /// Antwort-Header `x-aigw-deployment`, `x-aigw-attempts`, `x-aigw-fallback` setzen
     /// (Standard `true`; abschalten, wenn Clients die Topologie nicht sehen sollen).
     pub routing_headers: bool,
+    /// Maximale Größe eines Audio-Uploads (`/v1/audio/transcriptions|translations`) in Bytes
+    /// (Standard 25 MiB wie bei OpenAI; wirksam höchstens `max_body_bytes`).
+    pub max_audio_bytes: usize,
 }
 
 impl Default for DataListenerConfig {
@@ -224,6 +229,7 @@ impl Default for DataListenerConfig {
             listen: SocketAddr::from(([127, 0, 0, 1], 4000)),
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             routing_headers: true,
+            max_audio_bytes: DEFAULT_MAX_AUDIO_BYTES,
         }
     }
 }

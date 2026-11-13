@@ -41,7 +41,7 @@ fn json_response(status: StatusCode, body: impl Into<Body>) -> Response {
     res
 }
 
-fn body_error(rejection: &BytesRejection, limit: usize) -> ApiError {
+pub(crate) fn body_error(rejection: &BytesRejection, limit: usize) -> ApiError {
     if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
         ApiError::new(
             ErrorKind::RequestTooLarge,
@@ -106,12 +106,12 @@ enum Reply {
 
 /// Routing-Informationen und Plugin-Header für die Antwort.
 #[derive(Default)]
-struct RouteInfo {
-    deployment: Option<String>,
-    attempts: usize,
-    fallback: Option<String>,
+pub(crate) struct RouteInfo {
+    pub(crate) deployment: Option<String>,
+    pub(crate) attempts: usize,
+    pub(crate) fallback: Option<String>,
     /// Rate-Limit-Header (AIGW-30), bei Ablehnung und – falls eingeschaltet – bei Erfolg.
-    ratelimit: Option<RateHeaders>,
+    pub(crate) ratelimit: Option<RateHeaders>,
     /// Antwort-Header aus Plugins (AIGW-36), zuletzt angewendet.
     plugin_headers: ResponseHeaders,
     /// Antwort wegen Ausgabe-Plugins gepuffert.
@@ -119,7 +119,7 @@ struct RouteInfo {
 }
 
 impl RouteInfo {
-    fn apply(&self, res: &mut Response) {
+    pub(crate) fn apply(&self, res: &mut Response) {
         let h = res.headers_mut();
         if let Some(v) = self
             .deployment

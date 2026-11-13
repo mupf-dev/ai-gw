@@ -1,4 +1,4 @@
-# ai-gw – Streaming-Pipeline und Anbieter-Adapter (AIGW-14, AIGW-15, AIGW-16, AIGW-17, AIGW-18, AIGW-19, AIGW-20)
+# ai-gw – Streaming-Pipeline und Anbieter-Adapter (AIGW-14, AIGW-15, AIGW-16, AIGW-17, AIGW-18, AIGW-19, AIGW-20, AIGW-21)
 
 Stand: 2026-11-13 · Status: umgesetzt (OpenAI-Familie, Anthropic, Ollama, vLLM, Mistral, Bedrock, Vertex/Gemini), Grundlage: [01-architektur.md](01-architektur.md) §5–§7,
 [03-ir-und-formate.md](03-ir-und-formate.md)
@@ -53,7 +53,30 @@ Abweichungen von der Skizze in §5, mit Begründung:
   eigener `StreamDecoder` auf Basis von `wire::anthropic::StreamDecoder`, Header `x-api-key`.
 
 `Capabilities`: `chat`, `streaming`, `tools`, `vision`, `json_schema`, `reasoning`, `embeddings`,
-`stream_usage` (unterstützt `stream_options.include_usage`) und `max_tokens_field`.
+`images`, `audio_transcription`, `audio_speech`, `stream_usage` (unterstützt
+`stream_options.include_usage`) und `max_tokens_field`; `Capabilities::supports(Capability)`
+für die Endpunktarten (`Capability::{Chat, Embeddings, Images, AudioTranscription,
+AudioSpeech}`).
+
+**Weitere Endpunkte (AIGW-21)** als Trait-Methoden mit Standard „nicht unterstützt“
+(`400 unsupported_capability`), damit bestehende Adapter unverändert bleiben:
+
+```rust
+fn build_embeddings(&self, req: EmbeddingsRequest, losses) -> Result<Vec<UpstreamRequest>, ApiError>;
+fn parse_embeddings(&self, headers: &HeaderMap, body: &[u8]) -> Result<EmbeddingsResponse, ApiError>;
+fn build_images(&self, req: ImageRequest, losses) -> Result<UpstreamRequest, ApiError>;
+fn parse_images(&self, body: &[u8]) -> Result<ImageResponse, ApiError>;
+fn build_transcription(&self, req: TranscriptionRequest, losses) -> Result<UpstreamRequest, ApiError>;
+fn parse_transcription(&self, format: TranscriptFormat, body: &[u8]) -> Result<TranscriptionResponse, ApiError>;
+fn build_speech(&self, req: SpeechRequest, losses) -> Result<UpstreamRequest, ApiError>;  // Antwort = Byte-Strom
+```
+
+`build_embeddings` darf mehrere Anfragen liefern (Anbieter mit einer bzw. wenigen Eingaben je
+Aufruf); `Upstream::embeddings` führt sie mit höchstens 8 gleichzeitig aus und fügt die
+Antworten in Reihenfolge zusammen (Indizes verschoben, Usage addiert). `Upstream::speech`
+liefert `SpeechStream { content_type, body: ByteStream }` mit denselben Zeitlimits wie Streams
+(erstes Byte, Pause, Gesamtzeit). Im Proxy entsprechen dem die `ChatProvider`-Methoden
+`supports`, `embeddings`, `images`, `transcription`, `speech` (Standard: nur Chat).
 
 ## 3. Adapter der OpenAI-Familie
 
@@ -311,6 +334,31 @@ JWT-Signatur und Claims, Token-Cache, parallele Anfragen = ein Abruf, Erneuerung
 abgelaufenes Token, Token-Ablehnung, Gemini-API-Key, SSE, Safety-Block, `RESOURCE_EXHAUSTED`
 mit `retryDelay`). Der RSA-Schlüssel wird je Lauf erzeugt; keine echten Zugangsdaten.
 
+## 3f. Embeddings, Bilder und Audio je Anbieter (AIGW-21)
+
+| Anbieter | Embeddings | Bilder | Transkription/Übersetzung | Sprachausgabe |
+|---|---|---|---|---|
+| `openai` | `{endpoint}/embeddings`, `encoding_format: base64` | `/images/generations` | `/audio/transcriptions`, `/audio/translations` | `/audio/speech` |
+| `azure-openai` | `{endpoint}/openai/deployments/{dep}/embeddings?api-version=…` (bzw. `/openai/v1/…` mit `apiStyle: v1`), `base64` | `…/images/generations` | `…/audio/transcriptions`, `…/audio/translations` | `…/audio/speech` |
+| `openai-compatible` | `{endpoint}/embeddings` (Zahlen) | – | ja | ja |
+| `vllm` | ja (Zahlen) | – | ja | – |
+| `ollama` | `{endpoint}/embeddings` (Zahlen) | – | – | – |
+| `mistral` | `{endpoint}/embeddings`; `dimensions` → `output_dimension`, `user` entfällt | – | – | – |
+| `bedrock` | `InvokeModel` `{endpoint}/model/{id}/invoke` (SigV4/API-Key): **Titan** (`amazon.titan-embed-text-*`) `{inputText, dimensions}` – eine Anfrage je Eingabe (höchstens 256), Tokens aus `inputTextTokenCount`; **Cohere** (`cohere.embed-*`) `{texts, input_type, embedding_types: [float], output_dimension}` – Stapel zu 96, Tokens aus `x-amzn-bedrock-input-token-count`. Familie aus der Modell-ID oder `settings.embeddingFormat: titan\|cohere`; `input_type` aus der Anfrage (auch von OpenAI-Clients als Zusatzfeld), sonst `settings.inputType`, sonst `search_document` | – | – | – |
+| `vertex` (Gemini API) | `{base}/models/{m}:batchEmbedContents` (`requests[].{model, content.parts[].text, outputDimensionality, taskType}`, Stapel zu 100); keine Token-Zahlen → geschätzt | Imagen `:predict` (siehe unten) | – | – |
+| `vertex` (Vertex AI) | `…/publishers/google/models/{m}:predict` (`instances[].{content, task_type}`, `parameters.outputDimensionality`); Stapel zu 250, `gemini-embedding-*` einzeln; Tokens aus `statistics.token_count` | Imagen `:predict` `{instances: [{prompt}], parameters: {sampleCount, aspectRatio}}` → `predictions[].bytesBase64Encoded` (gefilterte Bilder fallen weg; keines übrig → `content_filter`) | – | – |
+| `anthropic` | – | – | – | – |
+
+`task_type`/`taskType` (Gemini) kommt aus der Anfrage oder `settings.taskType`;
+`settings.embeddingBatchSize` übersteuert die Stapelgröße. Token-Eingaben (Listen von IDs)
+lehnen Bedrock und Gemini mit `400` ab. Imagen: `size` wird auf das nächste
+Seitenverhältnis (1:1, 3:4, 4:3, 9:16, 16:9) abgebildet; `quality`, `style`, `user` und
+`url`-Rückgabe gehen verloren (Verlust-Hinweis). Fehler werden wie bei Chat klassifiziert
+(gleiches `classify_error`), Retries/Fallbacks gelten ebenso.
+
+**Mock (`provider: mock`):** unterstützt alle Endpunkte (deterministische normierte Vektoren,
+1×1-PNG, `Mock-Transkript (<n> Bytes)`, WAV mit Stille) – für Smoke- und E2E-Tests.
+
 ## 4. Upstream-Client und Timeouts
 
 - hyper-util-Client, rustls mit aws-lc-rs und Mozilla-Wurzeln (`webpki-roots`), ALPN `h2` +
@@ -450,3 +498,8 @@ HTTP plus Übersetzung). Optimierungen (Profiling, Allokationen im Encoder, `Byt
   (`response_format`), Application-Inference-Profiles/Prompt-Router nur als Modell-ID getestet.
 - Vertex: Workload Identity/Metadaten-Server als `TokenSource`, Vertex-Express-Modus (API-Key auf
   aiplatform), `cachedContents`, Bild-Ausgabe (`inlineData` in Antworten → `Opaque`).
+- AIGW-21: Bild-Bearbeitung/-Varianten (`/v1/images/edits`, `/variations`), gestreamte
+  Transkription (`stream: true`) und gestreamte Bilder, Bedrock-Bildmodelle (Titan
+  Image/Stability), Google Speech-to-Text/Text-to-Speech, Responses API nativ an OpenAI/Azure
+  durchreichen (mit `store`/`previous_response_id`), Kosten je Bild/Audio-Sekunde in der
+  Abrechnung.

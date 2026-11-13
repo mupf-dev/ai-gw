@@ -1005,6 +1005,9 @@ pub(crate) fn usage_from_wire(u: WireUsage) -> Usage {
         cache_read_tokens: cache_read,
         cache_write_tokens: None,
         reasoning_tokens: reasoning,
+        images: None,
+        audio_ms: None,
+        characters: None,
         extra,
     }
 }
