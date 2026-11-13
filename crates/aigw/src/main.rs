@@ -8,6 +8,7 @@
 //!   Adresse auf einem gemeinsamen Port.
 //! - `aigw openapi` gibt die OpenAPI-Spezifikation der Admin-API aus (für `ui/` → TS-Typen).
 
+mod runtime;
 mod server;
 
 use std::io::{IsTerminal as _, Write as _};
@@ -107,6 +108,7 @@ fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         .enable_all()
         .build()?;
     runtime.block_on(async move {
+        let runtime_state = runtime::Runtime::start(&config).await?;
         let listeners = server::Listeners::bind(&config.server).await?;
         let (data, control) = listeners.local_addrs()?;
         tracing::info!(
@@ -125,6 +127,7 @@ fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
             ..aigw_proxy::ProxyState::mock()
         };
         server::run(listeners, state, shutdown_signal()).await?;
+        runtime_state.shutdown().await;
         tracing::info!("ai-gw beendet");
         Ok(())
     })

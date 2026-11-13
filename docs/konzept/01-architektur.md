@@ -217,6 +217,7 @@ pub trait Plugin: Send + Sync {
 - Jede Admin-Änderung läuft als DB-Transaktion, erhöht `config_version` und schreibt das `audit_log`.
 - Jede Instanz hält `ArcSwap<Snapshot>`. Ein Snapshot ist unveränderlich und enthält vorberechnete Indizes (Key-Hash → KeyCtx, Alias → Modellgruppe, zusammengesetzte Plugin-Ketten). Laufende Anfragen behalten ihren Snapshot.
 - **Aktualisierung:** SQLite in einer Instanz → direkt nach dem Commit. Postgres → `NOTIFY aigw_config, '<version>'` an alle Instanzen, die neu aufbauen (zunächst vollständig, später inkrementell). Zusätzlich wird alle 30 s die Version abgefragt, falls eine Benachrichtigung verloren geht.
+- **Umsetzung (AIGW-10):** `aigw_core::snapshot::SnapshotHandle` (`load()` lock-frei, Versions-Abo per `tokio::sync::watch`), `aigw_store::reload::Reloader`. Auslöser werden 100 ms zusammengefasst (Debounce). Schlägt der Neubau fehl oder ist die Datenbank nicht erreichbar, bleibt der letzte Snapshot aktiv (Q8); erneuter Versuch mit Backoff (0,25 s → 30 s), LISTEN-Verbindung mit Reconnect. Abfrageintervall: `store.reload_poll_secs` (0 = aus).
 - **GitOps:** `aigw config export > aigw.yaml` und `aigw config apply aigw.yaml` (Diff, `--dry-run`, `--prune`). Geheimnisse stehen im YAML nur als Verweis (`env:`, `file:`), nie im Klartext. Der Modus „nur YAML“ (keine Admin-Schreibrechte, UI schreibgeschützt) ist möglich.
 
 ## 15. Admin-API, Authentifizierung, Rollen

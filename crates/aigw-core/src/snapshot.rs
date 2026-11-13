@@ -4,8 +4,11 @@
 //! Unveränderlicher Konfigurations-Snapshot für den Hot Path (§14).
 //!
 //! Wird aus der Datenbank aufgebaut (`aigw_store::load_snapshot`) und enthält vorberechnete
-//! Indizes, damit Auth und Routing ohne DB-Zugriff in O(1) laufen. Die Verteilung per
-//! `ArcSwap` ist nicht Teil dieses Moduls.
+//! Indizes, damit Auth und Routing ohne DB-Zugriff in O(1) laufen. Den jeweils aktuellen
+//! Snapshot hält [`SnapshotHandle`] (`ArcSwap`, lock-frei); neu gebaut wird er vom Reloader in
+//! `aigw_store::reload`.
+
+mod handle;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -18,6 +21,8 @@ use crate::resource::{
     PluginBinding, Price, ProviderCredential, Team,
 };
 use crate::types::ProviderKind;
+
+pub use handle::SnapshotHandle;
 
 /// SHA-256 eines API-Keys (Schlüssel des Key-Index).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

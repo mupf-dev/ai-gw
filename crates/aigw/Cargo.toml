@@ -19,6 +19,7 @@ path = "src/main.rs"
 aigw-admin.workspace = true
 aigw-core.workspace = true
 aigw-proxy.workspace = true
+aigw-store.workspace = true
 axum.workspace = true
 clap.workspace = true
 rustls.workspace = true

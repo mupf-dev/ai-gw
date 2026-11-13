@@ -24,6 +24,9 @@ store:
   # SQLite (Standard) oder postgres://benutzer@host/datenbank
   url: "sqlite://aigw.db?mode=rwc"
   max_connections: 10
+  # Absicherungs-Abfrage der Konfigurationsversion in Sekunden (0 = aus); Änderungen kommen
+  # sonst sofort per Benachrichtigung (SQLite im Prozess, Postgres LISTEN/NOTIFY).
+  reload_poll_secs: 30
 
 counters:
   # local | postgres-sync | redis

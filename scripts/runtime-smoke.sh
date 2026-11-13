@@ -17,9 +17,11 @@ ls -l target/release/aigw
 
 TMP=$(mktemp -d)
 trap 'kill "${PID:-}" 2>/dev/null || true; rm -rf "$TMP"' EXIT
-printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\n' \
-  "$PORT" "$CPORT" >"$TMP/aigw.yaml"
-target/release/aigw serve --config "$TMP/aigw.yaml" &
+printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "sqlite://%s/aigw.db?mode=rwc"\n' \
+  "$PORT" "$CPORT" "$TMP" >"$TMP/aigw.yaml"
+# Wegwerf-Master-Key nur für diesen Lauf (ohne Key startet `aigw serve` nicht).
+AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') \
+  target/release/aigw serve --config "$TMP/aigw.yaml" &
 PID=$!
 
 BASE="http://127.0.0.1:$PORT"   # Datenebene

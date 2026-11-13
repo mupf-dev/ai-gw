@@ -20,6 +20,7 @@ server:
 store:
   url: "sqlite://aigw.db?mode=rwc"   # oder postgres://benutzer@host/db
   max_connections: 10
+  reload_poll_secs: 30               # Absicherungs-Abfrage von config_version (0 = aus), §14
 counters:
   backend: local                     # local | postgres-sync | redis
   # redis_url: "redis://127.0.0.1:6379/0"

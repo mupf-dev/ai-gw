@@ -234,6 +234,9 @@ pub struct StoreConfig {
     pub url: String,
     /// Höchstzahl gleichzeitiger Datenbankverbindungen.
     pub max_connections: u32,
+    /// Abstand (Sekunden) der Absicherungs-Abfrage von `config_version`, falls eine
+    /// Änderungsbenachrichtigung verloren geht (§14). `0` schaltet die Abfrage ab.
+    pub reload_poll_secs: u64,
 }
 
 impl Default for StoreConfig {
@@ -241,6 +244,7 @@ impl Default for StoreConfig {
         Self {
             url: "sqlite://aigw.db?mode=rwc".to_owned(),
             max_connections: 10,
+            reload_poll_secs: 30,
         }
     }
 }

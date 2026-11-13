@@ -232,6 +232,8 @@ pub(crate) struct AdminTx {
     pub(crate) tx: Transaction<'static, Any>,
     pub(crate) version: i64,
     pub(crate) actor: String,
+    /// Für die Änderungsbenachrichtigung nach dem Commit (§14).
+    store: Store,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -295,11 +297,28 @@ impl AdminTx {
             tx,
             version,
             actor: actor.to_owned(),
+            store: store.clone(),
         })
     }
 
-    pub(crate) async fn commit(self) -> Result<i64, StoreError> {
+    /// Schließt die Transaktion ab und meldet die neue Version (§14).
+    ///
+    /// Postgres: `NOTIFY` in derselben Transaktion – die Datenbank stellt sie erst nach dem
+    /// Commit (und nur bei Erfolg) allen lauschenden Instanzen zu. Zusätzlich wird der Reloader
+    /// im eigenen Prozess direkt benachrichtigt (bei SQLite der einzige Weg).
+    pub(crate) async fn commit(mut self) -> Result<i64, StoreError> {
+        if self.store.backend() == crate::Backend::Postgres {
+            // Die Version ist eine Zahl aus der Datenbank – kein Einschleusen möglich.
+            sqlx::query(AssertSqlSafe(format!(
+                "NOTIFY {}, '{}'",
+                crate::reload::NOTIFY_CHANNEL,
+                self.version
+            )))
+            .execute(&mut *self.tx)
+            .await?;
+        }
         self.tx.commit().await?;
+        self.store.notify_committed(self.version);
         Ok(self.version)
     }
 

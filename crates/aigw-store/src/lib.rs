@@ -12,9 +12,11 @@
 
 pub mod crypto;
 pub mod keys;
+pub mod reload;
 pub mod repo;
 mod snapshot;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use aigw_core::config::StoreConfig;
@@ -22,9 +24,11 @@ use aigw_core::resource::ResourceKind;
 use sqlx::any::AnyPoolOptions;
 use sqlx::migrate::{Migration, MigrationType, Migrator};
 use sqlx::{AnyPool, SqlSafeStr as _};
+use tokio::sync::watch;
 
 pub use crypto::{Keyring, MasterKey};
 pub use keys::{generate_api_key, hash_api_key};
+pub use reload::{ReloadMetrics, ReloadOptions, Reloader, ReloaderTask};
 pub use repo::{AuditEntry, PlainResource, Resource};
 pub use snapshot::load_snapshot;
 
@@ -101,6 +105,8 @@ impl Backend {
 pub struct Store {
     pub(crate) pool: AnyPool,
     backend: Backend,
+    /// Zuletzt in diesem Prozess committete `config_version` (Auslöser für den Reloader).
+    commits: Arc<watch::Sender<i64>>,
 }
 
 /// Eingebettete Migrationen (ein Satz für SQLite und Postgres).
@@ -142,7 +148,11 @@ impl Store {
             opts = opts.acquire_timeout(Duration::from_secs(10));
         }
         let pool = opts.connect(&cfg.url).await?;
-        Ok(Self { pool, backend })
+        Ok(Self {
+            pool,
+            backend,
+            commits: Arc::new(watch::Sender::new(0)),
+        })
     }
 
     /// Wendet ausstehende Migrationen an.
@@ -160,6 +170,25 @@ impl Store {
     /// Verwendetes Backend.
     pub fn backend(&self) -> Backend {
         self.backend
+    }
+
+    /// Abonnement auf Commits **dieses Prozesses** (Wert = neue `config_version`).
+    ///
+    /// Alle Klone eines `Store` teilen den Kanal. Änderungen anderer Instanzen kommen über
+    /// [`reload`] (Postgres `LISTEN`, Versionsabfrage).
+    pub fn subscribe_commits(&self) -> watch::Receiver<i64> {
+        self.commits.subscribe()
+    }
+
+    pub(crate) fn notify_committed(&self, version: i64) {
+        self.commits.send_if_modified(|v| {
+            if version > *v {
+                *v = version;
+                true
+            } else {
+                false
+            }
+        });
     }
 
     /// Schließt alle Verbindungen.
