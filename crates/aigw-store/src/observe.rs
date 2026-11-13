@@ -145,6 +145,30 @@ pub struct RequestLogRow {
     /// Chat-Anfrage, die es ausgelöst hat).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_request_id: Option<String>,
+    /// Feine Fehlerklasse (F47, `snake_case` wie `ErrorClass`: `timeout`, `rate_limit` …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_class: Option<String>,
+    /// Trace-ID (32 Hex-Zeichen, F100).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    /// Erkennungen der Guardrail-Plugins (F161; Zähler, nie Inhalte).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub guardrails: Vec<GuardrailRow>,
+}
+
+/// Erkennungen eines Guardrail-Plugins in einer Anfrage (Spalte `request_log.guardrails`,
+/// JSON-Array; F161).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardrailRow {
+    /// Plugin (`pii`, `prompt-filter`, `content-safety` …).
+    pub plugin: String,
+    /// Kategorie (z. B. `email`, `injection`).
+    pub category: String,
+    /// Aktion (`mask`, `redact`, `reject`, `pseudonymize`, `log-only`, `flag`).
+    pub action: String,
+    /// Anzahl der Erkennungen.
+    pub count: u32,
 }
 
 /// Ein Upstream-Versuch einer Anfrage (Spalte `request_log.attempts`, JSON-Array; AIGW-46).
@@ -198,6 +222,9 @@ pub struct RollupKey {
     pub model_group: String,
     /// Deployment-ID oder `''`.
     pub deployment_id: String,
+    /// Fehlerklasse (F47) oder `''` (kein Fehler).
+    #[serde(default)]
+    pub error_class: String,
 }
 
 /// Additive Zähler eines Minuten-Rollups.
@@ -286,7 +313,7 @@ impl RollupCounts {
     }
 }
 
-pub(crate) const REQUEST_LOG_COLUMNS: [&str; 30] = [
+pub(crate) const REQUEST_LOG_COLUMNS: [&str; 33] = [
     "id",
     "at",
     "endpoint",
@@ -317,15 +344,19 @@ pub(crate) const REQUEST_LOG_COLUMNS: [&str; 30] = [
     "attempts",
     "client_request_id",
     "parent_request_id",
+    "error_class",
+    "trace_id",
+    "guardrails",
 ];
 
-pub(crate) const ROLLUP_KEY_COLUMNS: [&str; 6] = [
+pub(crate) const ROLLUP_KEY_COLUMNS: [&str; 7] = [
     "bucket_start",
     "api_key_id",
     "team_id",
     "organization_id",
     "model_group",
     "deployment_id",
+    "error_class",
 ];
 
 pub(crate) const ROLLUP_SCALAR_COLUMNS: [&str; 14] = [
@@ -377,7 +408,7 @@ fn insert_sql(backend: Backend, table: &str, cols: &[&str], rows: usize) -> Stri
 
 impl RequestLogRow {
     /// Werte in Spaltenreihenfolge von [`REQUEST_LOG_COLUMNS`].
-    fn vals(&self) -> Result<[Val; 30], StoreError> {
+    fn vals(&self) -> Result<[Val; 33], StoreError> {
         let id = |s: Option<&str>, what: &str| Val::uuid_text(s, what);
         Ok([
             id(Some(&self.id), "request_log.id")?,
@@ -416,6 +447,13 @@ impl RequestLogRow {
                 self.parent_request_id.as_deref(),
                 "request_log.parent_request_id",
             )?,
+            Val::Text(self.error_class.clone()),
+            Val::Text(self.trace_id.clone()),
+            if self.guardrails.is_empty() {
+                Val::Json(None)
+            } else {
+                Val::Json(Some(serde_json::to_value(&self.guardrails)?))
+            },
         ])
     }
 }
@@ -715,6 +753,7 @@ async fn upsert_rollups(
             q.args.push(Val::text(k.model_group.clone()));
             q.args
                 .push(Val::dim_text(&k.deployment_id, "deployment_id")?);
+            q.args.push(Val::text(k.error_class.clone()));
             q.args.extend(
                 c.scalars()
                     .into_iter()
@@ -770,6 +809,12 @@ pub(crate) fn request_log_from_row(row: &DbRow) -> Result<RequestLogRow, StoreEr
             Some(v) if !v.is_null() => serde_json::from_value(v)?,
             _ => Vec::new(),
         },
+        error_class: row.opt_text("error_class")?,
+        trace_id: row.opt_text("trace_id")?,
+        guardrails: match row.opt_json_value("guardrails")? {
+            Some(v) if !v.is_null() => serde_json::from_value(v)?,
+            _ => Vec::new(),
+        },
     })
 }
 
@@ -781,6 +826,7 @@ fn rollup_from_row(row: &DbRow) -> Result<(RollupKey, RollupCounts), StoreError>
         organization_id: row.dim("organization_id")?,
         model_group: row.dim("model_group")?,
         deployment_id: row.dim("deployment_id")?,
+        error_class: row.dim("error_class")?,
     };
     Ok((key, rollup_counts_from_row(row)?))
 }

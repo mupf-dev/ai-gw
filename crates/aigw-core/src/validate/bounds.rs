@@ -179,12 +179,56 @@ fn metric_str(m: LimitMetric) -> &'static str {
 }
 
 fn window_str(w: LimitWindow) -> &'static str {
-    match w {
-        LimitWindow::Second => "second",
-        LimitWindow::Minute => "minute",
-        LimitWindow::Hour => "hour",
-        LimitWindow::Day => "day",
+    w.as_str()
+}
+
+/// Hinweis zu einem Limit, das mit dem gewählten Zähler-Backend nur ungenau wirkt (F29).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitWarning {
+    /// Art des Objekts (`organization`, `team`, `api-key`, `model-group`).
+    pub kind: String,
+    /// Name des Objekts.
+    pub name: String,
+    /// Feld, z. B. `limits[0]`.
+    pub field: String,
+    /// Kennung des Hinweises (`second-limit-postgres-sync`).
+    pub code: String,
+    /// Verständliche Meldung.
+    pub message: String,
+}
+
+/// Hinweise zu Sekundenlimits bei `counters.backend: postgres-sync` (F29): Die Instanzen
+/// gleichen nur im Abstand `sync_interval_ms` ab, im Cluster kann ein Sekundenlimit daher
+/// mehrfach ausgeschöpft werden. `objects`: (Art, Name, Limits).
+pub fn limit_warnings<'a>(
+    backend: crate::config::CounterBackendKind,
+    objects: impl IntoIterator<Item = (&'a str, &'a str, &'a [LimitSpec])>,
+) -> Vec<LimitWarning> {
+    if backend != crate::config::CounterBackendKind::PostgresSync {
+        return Vec::new();
     }
+    let mut out = Vec::new();
+    for (kind, name, limits) in objects {
+        for (i, l) in limits.iter().enumerate() {
+            if l.window == LimitWindow::Second && l.metric != LimitMetric::Concurrency {
+                out.push(LimitWarning {
+                    kind: kind.to_owned(),
+                    name: name.to_owned(),
+                    field: format!("limits[{i}]"),
+                    code: "second-limit-postgres-sync".to_owned(),
+                    message: format!(
+                        "{} je Sekunde mit counters.backend = postgres-sync: Instanzen gleichen \
+                         nur alle sync_interval_ms ab – im Cluster kann das Limit um ein \
+                         Mehrfaches überschritten werden (redis verwenden oder ein längeres \
+                         Fenster wählen)",
+                        metric_str(l.metric)
+                    ),
+                });
+            }
+        }
+    }
+    out
 }
 
 fn period_str(p: BudgetPeriod) -> &'static str {
@@ -369,6 +413,39 @@ pub fn clamp(
 mod tests {
     use super::*;
     use crate::resource::Amount;
+
+    #[test]
+    fn second_limits_warn_only_with_postgres_sync() {
+        use crate::config::CounterBackendKind as K;
+        let limits = [
+            lim(Requests, 5, LimitWindow::Second, None),
+            lim(Tokens, 500, Minute, None),
+            lim(Concurrency, 2, LimitWindow::Second, None),
+        ];
+        let objs = || [("team", "t1", &limits[..])];
+        assert!(limit_warnings(K::Local, objs()).is_empty());
+        assert!(limit_warnings(K::Redis, objs()).is_empty());
+        let w = limit_warnings(K::PostgresSync, objs());
+        assert_eq!(w.len(), 1);
+        assert_eq!(
+            (w[0].kind.as_str(), w[0].name.as_str(), w[0].field.as_str()),
+            ("team", "t1", "limits[0]")
+        );
+        assert_eq!(w[0].code, "second-limit-postgres-sync");
+        assert!(w[0].message.contains("redis"));
+    }
+
+    #[test]
+    fn limit_window_names() {
+        for w in LimitWindow::ALL {
+            let json = serde_json::to_value(w).unwrap();
+            assert_eq!(json, w.as_str());
+            let back: LimitWindow = serde_json::from_value(json).unwrap();
+            assert_eq!(back, w);
+        }
+        assert!(LimitWindow::CalendarWeek.is_calendar() && !LimitWindow::Days30.is_calendar());
+        assert!(serde_json::from_value::<LimitWindow>(serde_json::json!("month")).is_err());
+    }
 
     fn lim(metric: LimitMetric, limit: u64, window: LimitWindow, group: Option<&str>) -> LimitSpec {
         LimitSpec {

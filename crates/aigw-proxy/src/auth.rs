@@ -181,22 +181,15 @@ impl AuthContext {
         snap.model_group(name).is_some_and(|g| key.allows_model(g))
     }
 
-    /// Reasoning für diesen Key ausblenden? Schalter je Key über das Metadatum
-    /// `aigw.exposeReasoning: "false"` (F10; ergänzt `settings.exposeReasoning` der
-    /// Modellgruppe).
+    /// Reasoning für diesen Key ausblenden? `exposeReasoning: false` an Key, Team oder
+    /// Organisation (das spezifischste gesetzte Feld gilt; F185) – ergänzt
+    /// `settings.exposeReasoning` der Modellgruppe (beide müssen es erlauben).
     pub fn hides_reasoning(&self) -> bool {
-        self.key.as_ref().is_some_and(|k| {
-            k.key
-                .spec
-                .metadata
-                .get(EXPOSE_REASONING_META)
-                .is_some_and(|v| v.trim().eq_ignore_ascii_case("false"))
-        })
+        self.key
+            .as_ref()
+            .is_some_and(|k| k.expose_reasoning() == Some(false))
     }
 }
-
-/// Metadatum eines API-Keys, das Reasoning für OpenAI-Clients abschaltet (`"false"`).
-pub const EXPOSE_REASONING_META: &str = "aigw.exposeReasoning";
 
 /// Schlüsselprüfung. Synchron: die Prüfung läuft im RAM (Hash-Lookup, Q7).
 pub trait Authenticator: Send + Sync + 'static {
@@ -466,6 +459,21 @@ mod tests {
             assert_eq!(e.code.as_deref(), Some("model_not_allowed"));
             assert!(ctx.allows_group("gpt-4o") && !ctx.allows_group("claude"));
             assert!(!ctx.hides_reasoning());
+
+            // F185: exposeReasoning mit Vererbung Key → Team → Organisation.
+            let mut kc = key_ctx(&[], Some(&[]), None);
+            let mut team = (*kc.team.clone().unwrap()).clone();
+            team.spec.expose_reasoning = Some(false);
+            kc.team = Some(Arc::new(team));
+            let rc = auth_with("k", kc.clone())
+                .authenticate_at(Some(&bearer("k")), now)
+                .unwrap();
+            assert!(rc.hides_reasoning(), "Team: false");
+            kc.key.spec.expose_reasoning = Some(true);
+            let rc = auth_with("k", kc)
+                .authenticate_at(Some(&bearer("k")), now)
+                .unwrap();
+            assert!(!rc.hides_reasoning(), "Key überschreibt Team");
             assert_eq!(ctx.visible_models().unwrap().len(), 1);
 
             // Team schränkt ein, Key nicht.

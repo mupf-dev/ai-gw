@@ -165,6 +165,11 @@ const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
         "admin_auth",
         include_str!("../migrations/sqlite/0003_admin_auth.sql"),
     ),
+    (
+        4,
+        "observe",
+        include_str!("../migrations/sqlite/0004_observe.sql"),
+    ),
 ];
 
 /// Migrationssatz für Postgres (`migrations/postgres/`), gleiche Versionen wie SQLite.
@@ -183,6 +188,11 @@ const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
         3,
         "admin_auth",
         include_str!("../migrations/postgres/0003_admin_auth.sql"),
+    ),
+    (
+        4,
+        "observe",
+        include_str!("../migrations/postgres/0004_observe.sql"),
     ),
 ];
 

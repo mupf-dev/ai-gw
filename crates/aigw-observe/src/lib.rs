@@ -98,20 +98,28 @@ impl ObserveBuilder {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
         let mut exporters = self.exporters;
-        if cfg.jsonl.enabled {
-            exporters.push(Arc::new(JsonLinesExporter::new(
-                cfg.jsonl.path.clone(),
-                cfg.jsonl.include_payload,
-            )));
+        let jsonl = cfg.jsonl.enabled.then(|| {
+            Arc::new(
+                JsonLinesExporter::new(cfg.jsonl.path.clone(), cfg.jsonl.include_payload)
+                    .with_rotation(cfg.jsonl.rotate.clone()),
+            )
+        });
+        if let Some(j) = &jsonl {
+            exporters.push(Arc::clone(j) as Arc<dyn LogExporter>);
+        }
+        if !cfg.rollups {
+            tracing::warn!(
+                "observe.rollups: false – keine Rollups, Dashboards und Analytics bleiben leer"
+            );
         }
         let writer = Writer {
             store: self.store.clone(),
             store_request_log: cfg.request_log,
             exporters,
             processor: Processor {
-                payload_mode: cfg.payload,
                 payload_max_bytes: cfg.payload_max_bytes,
                 masker: self.masker.unwrap_or_else(|| Arc::new(PiiMasker::new())),
+                rollups: cfg.rollups,
             },
             metrics: Arc::clone(&metrics),
             batch_size: cfg.batch_size,
@@ -132,6 +140,7 @@ impl ObserveBuilder {
             .then(|| Arc::new(GatewayMetrics::new(&cfg.metrics)));
         ObserveHandle {
             logger: RequestLogger::new(tx, Arc::clone(&metrics), cfg.payload),
+            jsonl,
             gateway,
             metrics,
             shutdown: shutdown_tx,
@@ -146,6 +155,7 @@ impl ObserveBuilder {
 #[derive(Debug)]
 pub struct ObserveHandle {
     logger: RequestLogger,
+    jsonl: Option<Arc<JsonLinesExporter>>,
     gateway: Option<Arc<GatewayMetrics>>,
     metrics: Arc<ObserveMetrics>,
     shutdown: watch::Sender<bool>,
@@ -178,6 +188,25 @@ impl ObserveHandle {
     /// Zähler.
     pub fn metrics(&self) -> &Arc<ObserveMetrics> {
         &self.metrics
+    }
+
+    /// Öffnet die Exportdateien neu (`SIGHUP`, F31): nach einem externen logrotate schreibt
+    /// der JSON-Lines-Exporter in die neue Datei unter dem konfigurierten Pfad.
+    pub fn reopen(&self) {
+        if let Some(j) = &self.jsonl {
+            j.reopen();
+        }
+    }
+
+    /// Wie [`ObserveHandle::reopen`], als eigenständige Funktion (z. B. für einen
+    /// Signal-Task).
+    pub fn reopener(&self) -> impl Fn() + Send + Sync + 'static {
+        let jsonl = self.jsonl.clone();
+        move || {
+            if let Some(j) = &jsonl {
+                j.reopen();
+            }
+        }
     }
 
     /// Graceful Shutdown: nimmt nichts Neues mehr an und schreibt den Puffer vollständig

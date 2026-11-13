@@ -309,6 +309,11 @@ impl RequestObserver for Capture {
     fn record(&self, record: RequestRecord) {
         self.0.lock().unwrap().push(record);
     }
+
+    /// Wie der Request-Logger: `payloadMode` an Key/Team/Organisation, sonst aus (F30).
+    fn payload_mode(&self, key: Option<&KeyCtx>) -> aigw_core::observe::PayloadMode {
+        aigw_core::observe::effective_payload_mode(key, aigw_core::observe::PayloadMode::Off)
+    }
 }
 
 impl Capture {
@@ -686,6 +691,77 @@ async fn client_betas_follow_group_policy() {
     );
 }
 
+/// F30: Payload-Mitschnitt je Key mit Vererbung (Key → Team → Organisation → global aus);
+/// F47: feine Fehlerklasse im Datensatz.
+#[tokio::test]
+async fn payload_mode_per_key_and_error_class() {
+    use aigw_core::observe::PayloadMode;
+    let (base, _) = start_fake().await;
+    let snap = snapshot(
+        vec![group(
+            "g",
+            quick(),
+            &[],
+            vec![dep(
+                "g",
+                ProviderKind::OpenAiCompatible,
+                &base,
+                "echo",
+                json!({}),
+            )],
+        )],
+        vec![
+            key("plain", &[], &[]),
+            {
+                let (s, mut k) = key("orgfull", &[], &[]);
+                k.organization = Some(Arc::new(r::Organization {
+                    id: new_id(),
+                    metadata: ObjectMeta::named("o"),
+                    spec: r::OrganizationSpec {
+                        payload_mode: Some(PayloadMode::Full),
+                        ..r::OrganizationSpec::default()
+                    },
+                }));
+                (s, k)
+            },
+            {
+                let (s, mut k) = key("keyoff", &[], &[]);
+                k.key.spec.payload_mode = Some(PayloadMode::Off);
+                k.team = Some(Arc::new(r::Team {
+                    id: new_id(),
+                    metadata: ObjectMeta::named("t"),
+                    spec: r::TeamSpec {
+                        payload_mode: Some(PayloadMode::Metadata),
+                        ..r::TeamSpec::default()
+                    },
+                }));
+                (s, k)
+            },
+        ],
+    );
+    let gw = gateway(snap).await;
+    gw.chat("sk-plain", msg("g")).await;
+    assert!(gw.capture.last().await.payload.is_none());
+    gw.capture.0.lock().unwrap().clear();
+    gw.chat("sk-orgfull", msg("g")).await;
+    let rec = gw.capture.last().await;
+    let p = rec.payload.expect("Organisation: full");
+    assert_eq!(p.mode, PayloadMode::Full);
+    assert!(!p.request_body.is_empty() && !p.response_body.is_empty());
+    gw.capture.0.lock().unwrap().clear();
+    gw.chat("sk-keyoff", msg("g")).await;
+    assert!(
+        gw.capture.last().await.payload.is_none(),
+        "Key überschreibt Team"
+    );
+    gw.capture.0.lock().unwrap().clear();
+    // F47: unbekanntes Modell → Fehlerklasse im Datensatz
+    let r = gw.chat("sk-plain", msg("gibt-es-nicht")).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let rec = gw.capture.last().await;
+    assert_eq!(rec.error_class, Some(aigw_core::ir::ErrorClass::NotFound));
+}
+
 #[tokio::test]
 async fn reasoning_reaches_openai_clients_unless_disabled() {
     let (base, _) = start_fake().await;
@@ -703,7 +779,24 @@ async fn reasoning_reaches_openai_clients_unless_disabled() {
         ],
         vec![
             key("all", &[], &[]),
-            key("quiet", &[], &[("aigw.exposeReasoning", "false")]),
+            // F185: Spec-Feld statt Metadatum, mit Vererbung von der Organisation.
+            {
+                let (s, mut k) = key("quiet", &[], &[]);
+                k.key.spec.expose_reasoning = Some(false);
+                (s, k)
+            },
+            {
+                let (s, mut k) = key("orgquiet", &[], &[("aigw.exposeReasoning", "true")]);
+                k.organization = Some(Arc::new(r::Organization {
+                    id: new_id(),
+                    metadata: ObjectMeta::named("o"),
+                    spec: r::OrganizationSpec {
+                        expose_reasoning: Some(false),
+                        ..r::OrganizationSpec::default()
+                    },
+                }));
+                (s, k)
+            },
         ],
     );
     let gw = gateway(snap).await;
@@ -717,12 +810,15 @@ async fn reasoning_reaches_openai_clients_unless_disabled() {
             .get("reasoning_content")
             .is_none()
     );
-    let r = gw.chat("sk-quiet", msg("on")).await;
-    assert!(
-        r.json()["choices"][0]["message"]
-            .get("reasoning_content")
-            .is_none()
-    );
+    for k in ["sk-quiet", "sk-orgquiet"] {
+        let r = gw.chat(k, msg("on")).await;
+        assert!(
+            r.json()["choices"][0]["message"]
+                .get("reasoning_content")
+                .is_none(),
+            "{k}"
+        );
+    }
 
     let mut body = msg("on");
     body["stream"] = json!(true);

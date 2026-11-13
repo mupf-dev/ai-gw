@@ -112,6 +112,8 @@ pub(crate) struct LogData {
     pub(crate) body: Option<AnyValue>,
     pub(crate) attributes: Vec<KeyValue>,
     pub(crate) event_name: &'static str,
+    /// Trace-ID der Anfrage (F100, Feld 9 `trace_id`).
+    pub(crate) trace_id: Option<[u8; 16]>,
 }
 
 /// Instrumentierungs-Bereich und Ressource (je Export gleich).
@@ -271,6 +273,9 @@ pub(crate) fn encode_logs(origin: &Origin, logs: &[LogData]) -> Vec<u8> {
                         message(l, 5, |b| any_value(b, body));
                     }
                     key_values(l, 6, &log.attributes);
+                    if let Some(t) = &log.trace_id {
+                        bytes_field(l, 9, t);
+                    }
                     fixed64_field(l, 11, log.observed_unix_nano);
                     bytes_field(l, 12, log.event_name.as_bytes());
                 });

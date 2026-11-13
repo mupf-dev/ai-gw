@@ -18,7 +18,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use aigw_counters::{CounterBackend, Health, LimitCheck, RedisCounters, RedisOptions, Window};
+use aigw_counters::{
+    CounterBackend, CounterError, Health, LimitCheck, RedisCounters, RedisOptions, Window,
+};
+
+/// Tests mit `CLIENT PAUSE` halten den ganzen Server an – nacheinander ausführen, damit der
+/// Verbindungsaufbau des anderen nicht in die Pause fällt.
+static PAUSE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn url() -> Option<String> {
     let url = std::env::var("AIGW_TEST_REDIS_URL").ok();
@@ -140,6 +146,7 @@ async fn many_tasks_two_instances_never_exceed_limit() {
 #[tokio::test]
 async fn falls_back_and_recovers() {
     let Some(url) = url() else { return };
+    let _serial = PAUSE.lock().await;
     let prefix = format!("aigwtest:{}:", uuid::Uuid::now_v7().simple());
     let c = RedisCounters::connect(
         &url,
@@ -171,6 +178,12 @@ async fn falls_back_and_recovers() {
     assert!(r.is_local_fallback());
     assert!(matches!(c.health(), Health::Degraded(_)));
     c.settle(r, 1).await; // lokal gebucht → lokal abgeglichen
+    let r2 = c
+        .reserve(&[LimitCheck::new("k2", Window::Minute, 10, 4)])
+        .await
+        .unwrap();
+    assert!(r2.is_local_fallback());
+    c.settle(r2, 2).await;
 
     // Nach der Pause verbindet der Monitor wieder.
     for _ in 0..50 {
@@ -180,11 +193,173 @@ async fn falls_back_and_recovers() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert!(!c.is_degraded(), "{:?}", c.health());
+    // F28: der lokal gebuchte Verbrauch wird nach der Rückkehr in Redis nachgetragen
+    // ("k2" nur lokal; "k" lief in die Zeitüberschreitung und kann doppelt stehen).
+    c.replay_now().await.unwrap();
+    assert_eq!(c.get("k2", Window::Minute).await, 2);
+    assert!(c.stats().replayed >= 1, "{:?}", c.stats());
+    assert_eq!(c.stats().pending, 0);
     let r = c
         .reserve(&[LimitCheck::new("k", Window::Minute, 10, 3)])
         .await
         .unwrap();
     assert!(!r.is_local_fallback());
+}
+
+/// F28: Abgleiche von Redis-Reservierungen während eines Ausfalls werden zurückgestellt und
+/// nachgetragen, lokal gebuchter Verbrauch ebenso; abgelaufene Buckets werden verworfen.
+#[tokio::test]
+async fn deferred_settles_replayed_after_outage() {
+    let Some(url) = url() else { return };
+    let _serial = PAUSE.lock().await;
+    let prefix = format!("aigwtest:{}:", uuid::Uuid::now_v7().simple());
+    let c = RedisCounters::connect(
+        &url,
+        RedisOptions {
+            key_prefix: prefix,
+            timeout: Duration::from_millis(100),
+            reconnect_interval: Duration::from_millis(100),
+            ..RedisOptions::default()
+        },
+    )
+    .await
+    .unwrap();
+    let hour = |n| [LimitCheck::new("h", Window::Hour, 1_000, n)];
+    // Kurzer fester Zeitraum, der während des Ausfalls endet (Delta wird verworfen).
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let short = Window::period(now - 1_000, now + 300);
+    let sec = |n| [LimitCheck::new("s", short, 1_000, n)];
+    let rh = c.reserve(&hour(100)).await.unwrap();
+    let rs = c.reserve(&sec(100)).await.unwrap();
+    assert!(!rh.is_local_fallback());
+
+    // Pause (kürzer als das Verbindungs-Zeitlimit paralleler Tests), länger als `short`.
+    let admin = redis::Client::open(url.as_str()).unwrap();
+    let mut con = admin.get_multiplexed_async_connection().await.unwrap();
+    let _: () = redis::cmd("CLIENT")
+        .arg("PAUSE")
+        .arg(700)
+        .arg("ALL")
+        .query_async(&mut con)
+        .await
+        .unwrap();
+    // Auslöser des Rückfalls auf eigenem Schlüssel (das Skript kann später doch noch laufen).
+    let t = c
+        .reserve(&[LimitCheck::new("trigger", Window::Hour, 1_000, 1)])
+        .await
+        .unwrap();
+    assert!(t.is_local_fallback() && c.is_degraded());
+    // im Ausfall: lokal gebucht (+5) und zurückgestellte Abgleiche (−60 bzw. −90)
+    let local = c.reserve(&hour(5)).await.unwrap();
+    assert!(local.is_local_fallback());
+    c.settle(rh, 40).await;
+    c.settle(rs, 10).await;
+    assert_eq!(c.lost_settles(), 2);
+    assert!(c.stats().pending >= 2, "{:?}", c.stats());
+
+    // Rückkehr: der Monitor verbindet neu und trägt nach.
+    for _ in 0..80 {
+        let st = c.stats();
+        if !c.is_degraded() && st.pending == 0 && st.replayed >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let st = c.stats();
+    assert!(!c.is_degraded(), "{:?}", c.health());
+    assert_eq!(st.pending, 0, "{st:?}");
+    assert!(
+        st.dropped >= 1,
+        "Delta des abgelaufenen Zeitraums verworfen: {st:?}"
+    );
+    // Stunde: 100 − 60 (zurückgestellt) + 5 (lokal gebucht) = 45
+    assert_eq!(c.get("h", Window::Hour).await, 45);
+}
+
+/// F25: feste Zeiträume (Kalender) in Redis: kein Gleiten, Ablauf nach dem Ende.
+#[tokio::test]
+async fn period_windows_exact_and_expire() {
+    let Some(url) = url() else { return };
+    let (a, b) = pair(&url).await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let start = now - 10_000;
+    let p = Window::period(start, now + 50_000);
+    let key = format!("key:x:requests@calendar-day:{start}");
+    let lim = |n| [LimitCheck::new(&key, p, 10, n)];
+    let r = a.reserve(&lim(6)).await.unwrap();
+    let reset = r.quotas()[0].reset_after;
+    assert!(
+        reset > Duration::from_secs(45) && reset <= Duration::from_secs(51),
+        "{reset:?}"
+    );
+    let rej = b.reserve(&lim(5)).await.unwrap_err();
+    assert!(rej.retry_after.unwrap() > Duration::from_secs(45));
+    assert_eq!(rej.used, 6);
+    a.settle(r, 2).await;
+    assert_eq!(b.get(&key, p).await, 2);
+    b.reserve(&lim(8)).await.unwrap();
+    assert!(a.reserve(&lim(1)).await.is_err());
+    // abgelaufener Zeitraum: 0
+    let old = Window::period(start - 100_000, start - 50_000);
+    assert_eq!(a.get(&key, old).await, 0);
+}
+
+/// F27: Server im Cluster-Modus → klare Fehlermeldung beim Start (Fake-Server, kein Redis
+/// nötig).
+#[tokio::test]
+async fn cluster_mode_is_rejected_at_start() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut s, _)) = listener.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 4096];
+                loop {
+                    let Ok(n) = s.read(&mut buf).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    // Je RESP-Befehl (Zeile `*<n>`) eine Antwort – der Client pipelinet.
+                    let req = String::from_utf8_lossy(&buf[..n]).to_ascii_uppercase();
+                    let mut reply = String::new();
+                    for cmd in req.split("\r\n*").filter(|c| !c.trim().is_empty()) {
+                        if cmd.contains("INFO") {
+                            let body = "# Cluster\r\ncluster_enabled:1\r\n";
+                            reply.push_str(&format!("${}\r\n{body}\r\n", body.len()));
+                        } else {
+                            reply.push_str("+OK\r\n");
+                        }
+                    }
+                    if s.write_all(reply.as_bytes()).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    let err = RedisCounters::connect(
+        &format!("redis://{addr}/0"),
+        RedisOptions {
+            connect_timeout: Duration::from_secs(2),
+            ..RedisOptions::default()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, CounterError::RedisCluster), "{err}");
+    assert!(err.to_string().contains("Cluster"));
 }
 
 #[tokio::test]

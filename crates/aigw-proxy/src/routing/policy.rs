@@ -231,6 +231,11 @@ impl GroupPolicy {
         if let Some(b) = section::<bool>(settings, "exposeReasoning")? {
             p.expose_reasoning = b;
         }
+        // F192: `settings.tokenizer` schon beim Speichern prüfen (sonst erst zur Laufzeit mit
+        // Rückfall auf die automatische Zuordnung).
+        if let Some(t) = section::<String>(settings, "tokenizer")? {
+            aigw_tokenizer::TokenizerSetting::parse(&t)?;
+        }
         if let Some(m) = section::<String>(settings, "responseModel")? {
             p.response_model = match m.as_str() {
                 "upstream" => ResponseModel::Upstream,
@@ -498,6 +503,9 @@ mod tests {
             json!({"betaAllowlist": ["a"]}),
             json!({"clientBetas": "allowlist", "betaAllowlist": ["a b"]}),
             json!({"exposeReasoning": "nein"}),
+            json!({"tokenizer": "o300k"}),
+            json!({"tokenizer": "hf:../etc/passwd"}),
+            json!({"tokenizer": 5}),
             json!({"fallbackIgnoresGrants": 1}),
             json!({"timeouts": {"connectMs": 0}}),
             json!({"timeouts": {"readMs": 10}}),

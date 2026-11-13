@@ -14,8 +14,9 @@
 //!
 //! - Limits je **Key, Team, Organisation** (optional nur für eine Modellgruppe) und je
 //!   **Modellgruppe global**, Metriken `requests`, `tokens`, `input-tokens`, `output-tokens`,
-//!   Fenster Sekunde/Minute/Stunde/Tag (RPM/RPD, TPM/TPD). Alle Ebenen werden mit **einem**
-//!   [`CounterBackend::reserve`] atomar geprüft und gebucht.
+//!   gleitende Fenster Sekunde/Minute/Stunde/Tag/30 Tage (RPM/RPD, TPM/TPD) und
+//!   Kalenderzeiträume Tag/Woche/Monat in `billing.timezone` (F25). Alle Ebenen werden mit
+//!   **einem** [`CounterBackend::reserve`] atomar geprüft und gebucht.
 //! - Token-Reservierung = geschätzte Prompt-Tokens + `max_tokens` (ohne Angabe:
 //!   `limits.default_max_tokens`); abgeglichen wird mit der gemeldeten (bzw. bei Abbruch
 //!   geschätzten) Usage. Die Prompt-Tokens zählt der Tokenizer der Modellgruppe
@@ -54,7 +55,7 @@ use crate::observe::{estimate_tokens, request_bytes};
 
 pub(crate) use headers::RateHeaders;
 pub use plan::Metric;
-use plan::{Planned, plan};
+use plan::{Periods, Planned, plan};
 pub use redis_budget::RedisBudgets;
 use tokens::Tokenizers;
 pub(crate) use tokens::{output_tokens, request_tokens};
@@ -105,6 +106,8 @@ pub struct Limiter {
     default_max_tokens: u64,
     response_headers: bool,
     tokenizers: Tokenizers,
+    /// Kalenderzeiträume der Limits (F25, `billing.timezone`).
+    periods: Periods,
 }
 
 impl fmt::Debug for Limiter {
@@ -132,13 +135,33 @@ impl Limiter {
         cfg: &LimitsConfig,
     ) -> Self {
         Tokenizers::warm_up();
+        // Kalenderzeiträume wie die Budgets (gleiche Zeitzone), ohne Budgets UTC.
+        let periods = Periods::new(
+            budgets
+                .as_ref()
+                .map_or_else(aigw_billing::Calendar::utc, |b| b.calendar().clone()),
+        );
         Self {
             counters,
             budgets,
             default_max_tokens: cfg.default_max_tokens,
             response_headers: cfg.response_headers,
             tokenizers: Tokenizers::new(cfg.tokenizer_dir.as_ref().map(std::path::PathBuf::from)),
+            periods,
         }
+    }
+
+    /// Kalender der Limit-Zeiträume `calendar-day|week|month` (Standard: der der Budgets,
+    /// sonst UTC).
+    #[must_use]
+    pub fn with_calendar(mut self, calendar: aigw_billing::Calendar) -> Self {
+        self.periods = Periods::new(calendar);
+        self
+    }
+
+    /// Zeitzone der Kalenderzeiträume.
+    pub fn timezone(&self) -> &str {
+        self.periods.calendar().timezone()
     }
 
     /// Lokale Zähler (ohne Bereinigungs-Task), ohne Budgets, Standardeinstellungen – für
@@ -223,7 +246,13 @@ impl Limiter {
 
         // Limits aller Ebenen in einem Aufruf.
         let mut planned: Vec<Planned> = Vec::new();
-        plan(key.map(Arc::as_ref), group.map(Arc::as_ref), &mut planned);
+        plan(
+            key.map(Arc::as_ref),
+            group.map(Arc::as_ref),
+            &self.periods,
+            u64::try_from(now_ms).unwrap_or(0),
+            &mut planned,
+        );
         let mut parts = Parts::default();
         let mut quotas = RateHeaders::default();
         if !planned.is_empty() {
@@ -483,7 +512,7 @@ impl Denied {
         let p = planned.get(rej.index);
         let what = p.map_or("Anfragen", |p| p.metric.label());
         let level = p.map_or("", |p| p.level.label());
-        let window = p.map_or("Fenster", |p| plan::window_label(p.window));
+        let window = p.map_or("Fenster", |p| plan::window_label(p.spec_window));
         let msg = if rej.retry_after.is_some() {
             format!(
                 "Rate-Limit erreicht: höchstens {} {what} je {window} ({level})",

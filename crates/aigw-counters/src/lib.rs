@@ -215,6 +215,18 @@ impl fmt::Display for Rejection {
     }
 }
 
+/// Zähler zum Nachtragen nach Ausfällen (Metriken `aigw_counter_replayed_total`,
+/// `aigw_counter_replay_dropped_total`, `aigw_counter_replay_pending`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CounterStats {
+    /// Nach einem Ausfall nachgetragene Deltas (`redis`, F28).
+    pub replayed: u64,
+    /// Verworfene Deltas (Bucket bereits abgelaufen oder Rückstau voll).
+    pub dropped: u64,
+    /// Noch nicht nachgetragene bzw. abgeglichene Deltas (Rückstau).
+    pub pending: u64,
+}
+
 /// Betriebszustand eines Backends.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Health {
@@ -249,6 +261,11 @@ pub trait CounterBackend: Send + Sync + fmt::Debug {
     fn health(&self) -> Health {
         Health::Ok
     }
+
+    /// Nachtragen nach Ausfällen (Standard: nichts).
+    fn stats(&self) -> CounterStats {
+        CounterStats::default()
+    }
 }
 
 /// Fehler beim Aufbau eines Backends.
@@ -266,12 +283,20 @@ pub enum CounterError {
     /// Ungültige Redis-URL o. Ä.
     #[error("Redis: {0}")]
     Redis(String),
+    /// Redis im Cluster-Modus (F27).
+    #[error(
+        "counters.redis_url: Redis läuft im Cluster-Modus (cluster_enabled:1) – nicht unterstützt; \
+         eine Einzelinstanz oder den Sentinel-Primary angeben"
+    )]
+    RedisCluster,
     /// Datenbankfehler.
     #[error(transparent)]
     Db(#[from] sqlx::Error),
 }
 
-/// Laufzeit-Einstellungen der Backends, die (noch) nicht in der Startkonfiguration stehen.
+/// Laufzeit-Einstellungen der Backends. [`from_config`] übernimmt Abgleichintervall,
+/// Redis-Poolgröße und -Zeitlimit aus `counters.*` (F26); der Rest (Uhr, Präfixe …) ist für
+/// Tests und Benchmarks.
 #[derive(Debug, Clone, Default)]
 pub struct CounterOptions {
     /// Einstellungen für `postgres-sync`.
@@ -294,6 +319,11 @@ pub async fn from_config(
     opts: CounterOptions,
 ) -> Result<Arc<dyn CounterBackend>, CounterError> {
     let janitor = opts.janitor_interval.unwrap_or(DEFAULT_JANITOR);
+    let mut opts = opts;
+    let c = &cfg.counters;
+    opts.pg.interval = Duration::from_millis(c.sync_interval_ms.max(1));
+    opts.redis.pool_size = c.redis_pool_size.max(1);
+    opts.redis.timeout = Duration::from_millis(c.redis_timeout_ms.max(1));
     Ok(match cfg.counters.backend {
         CounterBackendKind::Local => {
             let c = Arc::new(LocalCounters::new());

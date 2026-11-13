@@ -7,10 +7,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use aigw_core::observe::{PayloadMode, RequestRecord};
+use aigw_core::observe::RequestRecord;
 use aigw_core::wire::WireFormat;
 use aigw_store::observe::{
-    AttemptRow, PayloadRow, RequestLogRow, RollupCounts, RollupKey, latency_bucket,
+    AttemptRow, GuardrailRow, PayloadRow, RequestLogRow, RollupCounts, RollupKey, latency_bucket,
 };
 
 use crate::mask::{PayloadMasker, build_payload};
@@ -34,9 +34,10 @@ pub(crate) struct Batch {
 /// Bereitet Batches auf (läuft im Writer, außerhalb des Hot Paths).
 #[derive(Debug, Clone)]
 pub(crate) struct Processor {
-    pub(crate) payload_mode: PayloadMode,
     pub(crate) payload_max_bytes: usize,
     pub(crate) masker: Arc<dyn PayloadMasker>,
+    /// Rollups berechnen (`observe.rollups`, F33).
+    pub(crate) rollups: bool,
 }
 
 const MINUTE_MS: i64 = 60_000;
@@ -136,8 +137,19 @@ impl Processor {
                     duration_ms: ms(a.duration),
                 })
                 .collect(),
-            // F191: RequestRecord trägt die auslösende Anfrage noch nicht.
-            parent_request_id: None,
+            parent_request_id: r.parent_request_id.clone(),
+            error_class: r.error_class.map(|c| c.as_str().to_owned()),
+            trace_id: r.trace_id.clone(),
+            guardrails: r
+                .guardrails
+                .iter()
+                .map(|g| GuardrailRow {
+                    plugin: g.plugin.to_owned(),
+                    category: g.category.clone(),
+                    action: g.action.to_owned(),
+                    count: g.count,
+                })
+                .collect(),
         }
     }
 
@@ -150,6 +162,7 @@ impl Processor {
             organization_id: log.organization_id.clone().unwrap_or_default(),
             model_group: log.model_group.clone().unwrap_or_default(),
             deployment_id: log.deployment_id.clone().unwrap_or_default(),
+            error_class: log.error_class.clone().unwrap_or_default(),
         };
         let mut c = RollupCounts {
             requests: 1,
@@ -185,21 +198,20 @@ impl Processor {
         let mut entries = Vec::with_capacity(records.len());
         for r in records {
             let log = Self::log_row(&r);
-            let (key, delta) = Self::rollup(&r, &log);
-            rollups.entry(key).or_default().merge(&delta);
+            if self.rollups {
+                let (key, delta) = Self::rollup(&r, &log);
+                rollups.entry(key).or_default().merge(&delta);
+            }
+            // Modus je Anfrage (F30: Key/Team/Organisation, sonst global).
             let payload = r.payload.as_deref().and_then(|raw| {
-                build_payload(
-                    raw,
-                    self.payload_mode,
-                    self.payload_max_bytes,
-                    self.masker.as_ref(),
+                build_payload(raw, raw.mode, self.payload_max_bytes, self.masker.as_ref()).map(
+                    |payload| PayloadRow {
+                        id: log.id.clone(),
+                        at: log.at,
+                        mode: raw.mode.as_str().to_owned(),
+                        payload,
+                    },
                 )
-                .map(|payload| PayloadRow {
-                    id: log.id.clone(),
-                    at: log.at,
-                    mode: self.payload_mode.as_str().to_owned(),
-                    payload,
-                })
             });
             entries.push(LogEntry { log, payload });
         }
@@ -244,14 +256,15 @@ mod tests {
         b.error_kind = Some(ErrorKind::BadGateway);
         b.payload = Some(Box::new(RawPayload {
             request_body: "mail: a@b.de".into(),
+            mode: aigw_core::observe::PayloadMode::Masked,
             ..RawPayload::default()
         }));
         let c = rec(120_000, 70_000, Some(team)); // nächste Minute
         let d = rec(60_500, 10, None); // anderer Schlüssel
         let p = Processor {
-            payload_mode: PayloadMode::Masked,
             payload_max_bytes: 1024,
             masker: Arc::new(PiiMasker::new()),
+            rollups: true,
         };
         let batch = p.process(vec![a, b, c, d]);
         assert_eq!(batch.entries.len(), 4);
@@ -286,5 +299,54 @@ mod tests {
         assert_eq!(pl.mode, "masked");
         assert_eq!(pl.payload["request"]["body"], "mail: [EMAIL]");
         assert!(batch.entries[0].payload.is_none());
+        assert_eq!(e.log.error_class, None);
+    }
+
+    #[test]
+    fn new_columns_and_rollup_switch() {
+        use aigw_core::ir::ErrorClass;
+        use aigw_core::observe::{GuardrailHit, PayloadMode};
+        let mut a = rec(60_000, 10, None);
+        a.status = 504;
+        a.error_kind = Some(ErrorKind::BadGateway);
+        a.error_class = Some(ErrorClass::Timeout);
+        a.trace_id = Some("4bf92f3577b34da6a3ce929d0e0e4736".into());
+        a.parent_request_id = Some(new_id().to_string());
+        a.guardrails = vec![GuardrailHit {
+            plugin: "pii",
+            category: "email".into(),
+            action: "mask",
+            count: 2,
+        }];
+        // je Anfrage eigener Modus (F30): full ohne Maskierung
+        a.payload = Some(Box::new(RawPayload {
+            request_body: "mail: a@b.de".into(),
+            mode: PayloadMode::Full,
+            ..RawPayload::default()
+        }));
+        let p = Processor {
+            payload_max_bytes: 1024,
+            masker: Arc::new(PiiMasker::new()),
+            rollups: true,
+        };
+        let b = p.process(vec![a.clone()]);
+        let log = &b.entries[0].log;
+        assert_eq!(log.error_class.as_deref(), Some("timeout"));
+        assert_eq!(log.trace_id, a.trace_id);
+        assert_eq!(log.parent_request_id, a.parent_request_id);
+        assert_eq!(log.guardrails.len(), 1);
+        assert_eq!(log.guardrails[0].count, 2);
+        let pl = b.entries[0].payload.as_ref().unwrap();
+        assert_eq!(pl.mode, "full");
+        assert_eq!(pl.payload["request"]["body"], "mail: a@b.de");
+        assert_eq!(b.rollups[0].0.error_class, "timeout");
+        // F33: ohne Rollups
+        let p = Processor {
+            rollups: false,
+            ..p
+        };
+        let b = p.process(vec![a]);
+        assert!(b.rollups.is_empty());
+        assert_eq!(b.entries.len(), 1);
     }
 }

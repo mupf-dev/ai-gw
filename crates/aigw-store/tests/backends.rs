@@ -607,6 +607,7 @@ async fn run(store: Store) {
                 organization_id: org_id.clone(),
                 model_group: "gpt-4o".into(),
                 deployment_id: String::new(),
+                error_class: String::new(),
             },
             counts.clone(),
         ),

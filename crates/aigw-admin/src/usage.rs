@@ -7,6 +7,10 @@
 //!   API-Keys) mit Stand im laufenden Zeitraum. Gefiltert nach Leserecht (`Read`) auf dem
 //!   jeweiligen Ziel: Organisation, Team bzw. Keys im Team (ohne Team: global).
 //!
+//! - `GET /admin/api/v1/usage/limit-warnings` – Hinweise zu Limits, die mit dem gewählten
+//!   Zähler-Backend nur ungenau wirken (F29: Sekundenlimits mit `postgres-sync`); nur Objekte
+//!   mit Leserecht.
+//!
 //! Der Stand kommt aus `budget_usage` (instanzübergreifend). Die Gateways schreiben ihre
 //! Deltas im Abstand `billing.budget_sync_ms` (Standard 1 s), der Wert hinkt daher bis zu
 //! einem Abgleichintervall hinterher. Die Zeiträume rechnet derselbe Kalender wie der Proxy
@@ -19,9 +23,12 @@ use std::fmt;
 use std::sync::Arc;
 
 use aigw_billing::{BudgetKey, BudgetLevel, Calendar};
+use aigw_core::config::CounterBackendKind;
+use aigw_core::resource::ModelGroupSpec;
 use aigw_core::resource::{
     Amount, ApiKeyState, Budget, BudgetPeriod, Id, OrganizationSpec, TeamSpec,
 };
+use aigw_core::validate::bounds::{LimitWarning, limit_warnings};
 use aigw_store::Store;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Extension, Query, State};
@@ -38,6 +45,8 @@ use crate::rbac::Target;
 
 /// Pfad der Budget-Übersicht.
 pub const BUDGETS_PATH: &str = "/admin/api/v1/usage/budgets";
+/// Pfad der Limit-Hinweise (F29).
+pub const LIMIT_WARNINGS_PATH: &str = "/admin/api/v1/usage/limit-warnings";
 
 /// Zustand der Verbrauchs-Routen.
 #[derive(Clone)]
@@ -48,6 +57,8 @@ pub struct UsageState {
     pub calendar: Arc<Calendar>,
     /// Anmeldung (dieselbe wie für die übrige Admin-API).
     pub auth: Arc<dyn AdminAuthenticator>,
+    /// Zähler-Backend (`counters.backend`) für die Limit-Hinweise.
+    pub counters: CounterBackendKind,
 }
 
 impl fmt::Debug for UsageState {
@@ -272,10 +283,86 @@ pub(crate) async fn list_budgets(
     }))
 }
 
+/// Hinweise zu Limits.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitWarnings {
+    /// Gewähltes Zähler-Backend (`local`, `postgres-sync`, `redis`).
+    pub counter_backend: String,
+    /// Hinweise (leer, wenn alles exakt wirkt).
+    pub warnings: Vec<LimitWarning>,
+}
+
+fn backend_name(k: CounterBackendKind) -> &'static str {
+    match k {
+        CounterBackendKind::Local => "local",
+        CounterBackendKind::PostgresSync => "postgres-sync",
+        CounterBackendKind::Redis => "redis",
+    }
+}
+
+/// Hinweise zu Limits, die mit dem Zähler-Backend nur ungenau wirken (F29: Sekundenlimits mit
+/// `postgres-sync` – die Instanzen gleichen nur im Abstand `counters.sync_interval_ms` ab).
+#[utoipa::path(
+    get, path = "/admin/api/v1/usage/limit-warnings", tag = "usage",
+    responses(
+        (status = 200, description = "Hinweise (nur Objekte mit Leserecht)", body = LimitWarnings),
+        (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
+    ),
+    security(("bearer" = []))
+)]
+pub(crate) async fn limit_warnings_list(
+    State(st): State<UsageState>,
+    Extension(p): Extension<Principal>,
+) -> Result<Json<LimitWarnings>, Problem> {
+    let mut warnings = Vec::new();
+    if st.counters == CounterBackendKind::PostgresSync {
+        let read = |t: &Target| p.can(Permission::Read, t);
+        let orgs = st.store.list::<OrganizationSpec>().await?;
+        let teams = st.store.list::<TeamSpec>().await?;
+        let keys = st.store.list_api_keys().await?;
+        let groups = st.store.list::<ModelGroupSpec>().await?;
+        let mut objects: Vec<(&str, &str, &[aigw_core::resource::LimitSpec])> = Vec::new();
+        for o in &orgs {
+            if read(&Target::Organization(o.metadata.name.clone())) {
+                objects.push(("organization", &o.metadata.name, &o.spec.limits));
+            }
+        }
+        for t in &teams {
+            if read(&Target::team(
+                t.spec.organization.clone(),
+                t.metadata.name.clone(),
+            )) {
+                objects.push(("team", &t.metadata.name, &t.spec.limits));
+            }
+        }
+        for k in &keys {
+            let target = match &k.spec.team {
+                Some(t) => Target::in_team(k.spec.organization.clone(), t.clone()),
+                None => Target::InOrganization(k.spec.organization.clone()),
+            };
+            if read(&target) {
+                objects.push(("api-key", &k.metadata.name, &k.spec.limits));
+            }
+        }
+        if read(&Target::Catalog) {
+            for g in &groups {
+                objects.push(("model-group", &g.metadata.name, &g.spec.limits));
+            }
+        }
+        warnings = limit_warnings(st.counters, objects);
+    }
+    Ok(Json(LimitWarnings {
+        counter_backend: backend_name(st.counters).to_owned(),
+        warnings,
+    }))
+}
+
 /// Router der Verbrauchs-Routen (mit Anmeldung).
 pub fn router(state: UsageState) -> Router {
     Router::new()
         .route(BUDGETS_PATH, get(list_budgets))
+        .route(LIMIT_WARNINGS_PATH, get(limit_warnings_list))
         .route_layer(axum::middleware::from_fn_with_state(
             Arc::clone(&state.auth),
             require_principal,

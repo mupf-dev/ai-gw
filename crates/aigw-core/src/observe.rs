@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ir::{ErrorClass, ErrorKind, Usage};
 use crate::resource::{Amount, Id};
+use crate::snapshot::KeyCtx;
 use crate::types::ProviderKind;
 use crate::wire::WireFormat;
 
@@ -42,7 +43,9 @@ pub fn is_sensitive_header(name: &str) -> bool {
 }
 
 /// Umfang des Payload-Loggings.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum PayloadMode {
     /// Kein Payload (Standard); nur die Kennzahlen.
@@ -123,6 +126,8 @@ pub struct RawPayload {
     pub request_body: Bytes,
     /// Antwort-Body an den Client (bei Streams die zusammengesetzten Events bzw. der Text).
     pub response_body: Bytes,
+    /// Wirksamer Modus dieser Anfrage (F30: je Key/Team/Organisation, sonst global).
+    pub mode: PayloadMode,
 }
 
 /// Ein Versuch gegen ein Deployment (Retries und Fallbacks, AIGW-25).
@@ -229,6 +234,9 @@ pub struct RequestRecord {
     pub status: u16,
     /// Fehlerklasse, falls die Anfrage fehlschlug.
     pub error_kind: Option<ErrorKind>,
+    /// Feine Fehlerklasse (F47, z. B. `timeout`, `rate_limit`, `content_filter`); bei
+    /// Upstream-Fehlern die des letzten Versuchs.
+    pub error_class: Option<ErrorClass>,
     /// Verbrauch (vom Anbieter gemeldet oder geschätzt).
     pub usage: Usage,
     /// `true`, wenn `usage` geschätzt wurde (z. B. Client-Abbruch im Stream).
@@ -259,6 +267,12 @@ pub struct RequestRecord {
     pub client_request_id: Option<String>,
     /// Roh-Payload; nur gesetzt, wenn [`RequestObserver::payload_mode`] es verlangt.
     pub payload: Option<Box<RawPayload>>,
+    /// Trace-ID (32 Hex-Zeichen) des Wurzel-Spans, falls Tracing aktiv ist (F100): Verknüpfung
+    /// Request-Log ↔ Trace.
+    pub trace_id: Option<String>,
+    /// Auslösende Anfrage (F191), z. B. die Chat-Anfrage, deren semantischer Cache-Lookup diesen
+    /// Embedding-Aufruf ausgelöst hat.
+    pub parent_request_id: Option<String>,
     /// Alle Versuche in Reihenfolge (leer, wenn kein Deployment angefragt wurde). Der letzte
     /// Versuch ist der, dessen Ergebnis der Client erhielt.
     pub attempts: Vec<Attempt>,
@@ -331,6 +345,7 @@ impl RequestRecord {
             provider_model: None,
             status,
             error_kind: None,
+            error_class: None,
             usage: Usage::default(),
             usage_estimated: false,
             cost: None,
@@ -345,6 +360,8 @@ impl RequestRecord {
             client_ip: None,
             client_request_id: None,
             payload: None,
+            trace_id: None,
+            parent_request_id: None,
             attempts: Vec::new(),
             guardrails: Vec::new(),
             mcp: None,
@@ -369,13 +386,20 @@ pub trait RequestObserver: Send + Sync + fmt::Debug + 'static {
     /// Übergibt die Kennzahlen einer abgeschlossenen Anfrage.
     fn record(&self, record: RequestRecord);
 
-    /// Ob (und wie) der Proxy den Payload mitgeben soll. Bei [`PayloadMode::Off`] lässt der
-    /// Proxy [`RequestRecord::payload`] leer und spart das Mitschneiden der Antwort.
-    ///
-    /// Später je Key/Team (Parameter folgen mit der Policy-Auflösung).
-    fn payload_mode(&self) -> PayloadMode {
+    /// Ob (und wie) der Proxy den Payload für eine Anfrage dieses Keys mitgeben soll (F30:
+    /// `payloadMode` an Key, Team bzw. Organisation, sonst der globale Standard; `None` = ohne
+    /// Key). Bei [`PayloadMode::Off`] lässt der Proxy [`RequestRecord::payload`] leer und spart
+    /// das Mitschneiden der Antwort. Aufgerufen nach der Schlüsselprüfung, einmal je Anfrage.
+    fn payload_mode(&self, key: Option<&KeyCtx>) -> PayloadMode {
+        let _ = key;
         PayloadMode::Off
     }
+}
+
+/// Wirksamer Payload-Modus: das spezifischste `payloadMode` (Key → Team → Organisation), sonst
+/// `default` (F30).
+pub fn effective_payload_mode(key: Option<&KeyCtx>, default: PayloadMode) -> PayloadMode {
+    key.and_then(KeyCtx::payload_mode).unwrap_or(default)
 }
 
 /// `target` der `tracing`-Spans und -Events, die als OpenTelemetry-Traces exportiert werden
@@ -390,6 +414,21 @@ pub const TRACE_TARGET: &str = "aigw::otel";
 
 /// Quelle des `traceparent` für ausgehende Anfragen (gesetzt von `aigw-observe`).
 static TRACEPARENT_SOURCE: OnceLock<fn() -> Option<String>> = OnceLock::new();
+
+/// Quelle der Trace-ID des aktuellen Spans (gesetzt von `aigw-observe`, F100).
+static TRACE_ID_SOURCE: OnceLock<fn() -> Option<String>> = OnceLock::new();
+
+/// Registriert die Quelle für [`current_trace_id`] (einmal je Prozess; `false`, wenn bereits
+/// gesetzt).
+pub fn set_trace_id_source(source: fn() -> Option<String>) -> bool {
+    TRACE_ID_SOURCE.set(source).is_ok()
+}
+
+/// Trace-ID (32 Hex-Zeichen) des aktuellen Spans – auch ohne Sampling und unabhängig von der
+/// Weitergabe an Upstreams; `None`, wenn Tracing aus ist oder kein Span aktiv ist.
+pub fn current_trace_id() -> Option<String> {
+    TRACE_ID_SOURCE.get().and_then(|f| f())
+}
 
 /// Registriert die Quelle für [`current_traceparent`] (einmal je Prozess; `false`, wenn
 /// bereits gesetzt).

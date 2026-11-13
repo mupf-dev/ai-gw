@@ -14,6 +14,11 @@
 //!
 //! Alle Backends verwenden diese Funktionen (bei `redis` rechnet das Lua-Skript dieselbe Formel
 //! für die Entscheidung, die Header-Werte rechnet Rust nach).
+//!
+//! Daneben gibt es **feste Zeiträume** ([`Window::Period`], F25: Kalendertag/-woche/-monat):
+//! ein einziger Bucket `[start, end)` ohne Gleiten; am Ende beginnt der Zähler bei 0. Den
+//! Zeitraum (Zeitzone, Monatslänge, Sommerzeit) berechnet der Aufrufer; Bucket-Nummer ist der
+//! Beginn in Millisekunden.
 
 use std::time::Duration;
 
@@ -33,19 +38,45 @@ pub enum Window {
     Hour,
     /// Tag (24 h, gleitend).
     Day,
-    /// Monat, als **30 Tage** gleitend (kein Kalendermonat).
-    Month,
+    /// 30 × 24 h, gleitend (kein Kalendermonat; Konfiguration `30d`).
+    Days30,
+    /// Fester Zeitraum `[start_ms, end_ms)` ohne Gleiten (Kalendertag/-woche/-monat, F25).
+    /// Der Zähler gilt bis `end_ms` und beginnt mit dem nächsten Zeitraum bei 0.
+    Period {
+        /// Beginn (inklusive, Unix-ms) – zugleich die Bucket-Nummer.
+        start_ms: u64,
+        /// Ende (exklusive, Unix-ms).
+        end_ms: u64,
+    },
 }
 
+/// Index der Map für feste Zeiträume in der lokalen Engine (nach den gleitenden Fenstern).
+pub(crate) const PERIOD_INDEX: usize = 5;
+
 impl Window {
-    /// Alle Fenster in fester Reihenfolge.
-    pub const ALL: [Self; 5] = [
+    /// Alle gleitenden Fenster in fester Reihenfolge.
+    pub const SLIDING: [Self; 5] = [
         Self::Second,
         Self::Minute,
         Self::Hour,
         Self::Day,
-        Self::Month,
+        Self::Days30,
     ];
+
+    /// Fester Zeitraum `[start_ms, end_ms)` (mindestens 1 ms lang).
+    pub const fn period(start_ms: u64, end_ms: u64) -> Self {
+        let end_ms = if end_ms > start_ms {
+            end_ms
+        } else {
+            start_ms + 1
+        };
+        Self::Period { start_ms, end_ms }
+    }
+
+    /// `true` für gleitende Fenster, `false` für feste Zeiträume.
+    pub const fn is_sliding(self) -> bool {
+        !matches!(self, Self::Period { .. })
+    }
 
     /// Länge in Millisekunden.
     pub const fn length_ms(self) -> u64 {
@@ -54,7 +85,11 @@ impl Window {
             Self::Minute => 60_000,
             Self::Hour => 3_600_000,
             Self::Day => DAY_MS,
-            Self::Month => 30 * DAY_MS,
+            Self::Days30 => 30 * DAY_MS,
+            Self::Period { start_ms, end_ms } => {
+                let l = end_ms.saturating_sub(start_ms);
+                if l == 0 { 1 } else { l }
+            }
         }
     }
 
@@ -63,47 +98,142 @@ impl Window {
         Duration::from_millis(self.length_ms())
     }
 
-    /// Kurzzeichen für externe Schlüssel (Postgres-Zeilen, Redis-Schlüssel).
+    /// Kurzzeichen für externe Schlüssel (Postgres-Zeilen, Redis-Schlüssel); `p` für feste
+    /// Zeiträume (Bucket = Beginn, unterscheidet Zeiträume desselben Schlüssels).
     pub const fn code(self) -> &'static str {
         match self {
             Self::Second => "s",
             Self::Minute => "m",
             Self::Hour => "h",
             Self::Day => "d",
-            Self::Month => "mo",
+            Self::Days30 => "30d",
+            Self::Period { .. } => "p",
         }
     }
 
-    /// Kurzzeichen → Fenster (Umkehrung von [`Window::code`]).
+    /// Kurzzeichen → gleitendes Fenster (Umkehrung von [`Window::code`]; feste Zeiträume
+    /// brauchen zusätzlich Beginn und Ende).
     pub fn from_code(code: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|w| w.code() == code)
+        Self::SLIDING.into_iter().find(|w| w.code() == code)
     }
 
-    /// Position in [`Window::ALL`] (für Arrays je Fenster).
+    /// Position der Map je Fenster in der lokalen Engine.
     pub(crate) const fn index(self) -> usize {
         match self {
             Self::Second => 0,
             Self::Minute => 1,
             Self::Hour => 2,
             Self::Day => 3,
-            Self::Month => 4,
+            Self::Days30 => 4,
+            Self::Period { .. } => PERIOD_INDEX,
         }
     }
 
-    /// Bucket-Nummer zum Zeitpunkt `now_ms`.
+    /// Bucket-Nummer zum Zeitpunkt `now_ms` (feste Zeiträume: immer der Beginn).
     pub const fn bucket(self, now_ms: u64) -> u64 {
-        now_ms / self.length_ms()
+        match self {
+            Self::Period { start_ms, .. } => start_ms,
+            _ => now_ms / self.length_ms(),
+        }
+    }
+
+    /// Beginn (Unix-ms) des Buckets `idx`.
+    pub const fn bucket_start(self, idx: u64) -> u64 {
+        match self {
+            Self::Period { .. } => idx,
+            _ => idx.saturating_mul(self.length_ms()),
+        }
+    }
+
+    /// Zählt Bucket `idx` zum Zeitpunkt `now_ms` noch zum Fenster (laufender oder – gleitend –
+    /// voriger Bucket)?
+    pub const fn counts(self, idx: u64, now_ms: u64) -> bool {
+        match self {
+            Self::Period { start_ms, end_ms } => idx == start_ms && now_ms < end_ms,
+            _ => idx.saturating_add(1) >= self.bucket(now_ms),
+        }
+    }
+
+    /// Ende (Unix-ms) eines festen Zeitraums, `u64::MAX` bei gleitenden Fenstern.
+    pub(crate) const fn until(self) -> u64 {
+        match self {
+            Self::Period { end_ms, .. } => end_ms,
+            _ => u64::MAX,
+        }
+    }
+
+    /// Geschätzter Verbrauch (feste Zeiträume: der Zählerstand selbst).
+    pub(crate) fn estimate(self, cur: u64, prev: u64, elapsed: u64) -> u64 {
+        if self.is_sliding() {
+            estimate(cur, prev, elapsed, self.length_ms())
+        } else {
+            cur
+        }
+    }
+
+    /// Wie [`evaluate`] für dieses Fenster.
+    pub(crate) fn evaluate(
+        self,
+        cur: u64,
+        prev: u64,
+        elapsed: u64,
+        limit: u64,
+        amount: u64,
+    ) -> Evaluation {
+        let prev = if self.is_sliding() { prev } else { 0 };
+        evaluate(cur, prev, elapsed, self.length_ms(), limit, amount)
+    }
+
+    /// Wie [`retry_after_ms`]; bei festen Zeiträumen bis zum Ende des Zeitraums.
+    pub(crate) fn retry_after_ms(
+        self,
+        cur: u64,
+        prev: u64,
+        elapsed: u64,
+        limit: u64,
+        amount: u64,
+    ) -> Option<u64> {
+        let len = self.length_ms();
+        if self.is_sliding() {
+            return retry_after_ms(cur, prev, elapsed, len, limit, amount);
+        }
+        if amount > limit {
+            return None;
+        }
+        if cur.saturating_add(amount) <= limit {
+            return Some(0);
+        }
+        Some(len.saturating_sub(elapsed).max(1))
+    }
+
+    /// Wie [`reset_after_ms`]; bei festen Zeiträumen das Ende des Zeitraums (sofern etwas
+    /// gebucht ist).
+    pub(crate) fn reset_after_ms(self, cur: u64, prev: u64, elapsed: u64) -> u64 {
+        let len = self.length_ms();
+        if self.is_sliding() {
+            reset_after_ms(cur, prev, elapsed, len)
+        } else if cur > 0 {
+            len.saturating_sub(elapsed)
+        } else {
+            0
+        }
     }
 }
 
-impl From<LimitWindow> for Window {
-    fn from(w: LimitWindow) -> Self {
-        match w {
+impl Window {
+    /// Gleitendes Fenster eines Limits; `None` für Kalenderzeiträume (die braucht den
+    /// Zeitraum aus Zeitzone und Zeitpunkt, siehe [`Window::period`]).
+    pub fn sliding(w: LimitWindow) -> Option<Self> {
+        Some(match w {
             LimitWindow::Second => Self::Second,
             LimitWindow::Minute => Self::Minute,
             LimitWindow::Hour => Self::Hour,
             LimitWindow::Day => Self::Day,
-        }
+            LimitWindow::Days30 => Self::Days30,
+            LimitWindow::CalendarDay | LimitWindow::CalendarWeek | LimitWindow::CalendarMonth => {
+                return None;
+            }
+        })
     }
 }
 
@@ -196,12 +326,42 @@ mod tests {
 
     #[test]
     fn codes_roundtrip() {
-        for w in Window::ALL {
+        for w in Window::SLIDING {
             assert_eq!(Window::from_code(w.code()), Some(w));
-            assert_eq!(Window::ALL[w.index()], w);
+            assert_eq!(Window::SLIDING[w.index()], w);
+            assert!(w.is_sliding());
         }
         assert_eq!(Window::from_code("x"), None);
-        assert_eq!(Window::Month.length(), Duration::from_secs(30 * 86_400));
+        assert_eq!(Window::from_code("p"), None);
+        assert_eq!(Window::Days30.length(), Duration::from_secs(30 * 86_400));
+        assert_eq!(Window::Days30.code(), "30d");
+    }
+
+    #[test]
+    fn period_window_is_fixed() {
+        let w = Window::period(1_000, 61_000);
+        assert!(!w.is_sliding());
+        assert_eq!(w.length_ms(), 60_000);
+        assert_eq!(w.bucket(30_000), 1_000);
+        assert_eq!(w.bucket_start(1_000), 1_000);
+        assert_eq!(w.index(), PERIOD_INDEX);
+        assert!(w.counts(1_000, 60_999));
+        assert!(!w.counts(1_000, 61_000));
+        assert!(!w.counts(999, 2_000));
+        // kein Gleiten: der „vorige“ Bucket zählt nie
+        assert_eq!(w.estimate(10, 500, 0), 10);
+        assert!(w.evaluate(90, 500, 0, 100, 10).admit);
+        // Wartezeit/Reset = Ende des Zeitraums
+        assert_eq!(w.retry_after_ms(95, 0, 20_000, 100, 10), Some(40_000));
+        assert_eq!(w.retry_after_ms(0, 0, 0, 100, 101), None);
+        assert_eq!(w.retry_after_ms(5, 0, 0, 100, 10), Some(0));
+        assert_eq!(w.reset_after_ms(5, 0, 20_000), 40_000);
+        assert_eq!(w.reset_after_ms(0, 0, 20_000), 0);
+        assert_eq!(Window::period(5, 5).length_ms(), 1);
+        // gleitend: wie die freien Funktionen
+        assert_eq!(Window::Minute.bucket_start(3), 180_000);
+        assert!(Window::Minute.counts(9, 10 * 60_000 + 5));
+        assert!(!Window::Minute.counts(8, 10 * 60_000 + 5));
     }
 
     #[test]
@@ -293,7 +453,9 @@ mod tests {
 
     #[test]
     fn from_limit_window() {
-        assert_eq!(Window::from(LimitWindow::Minute), Window::Minute);
-        assert_eq!(Window::from(LimitWindow::Day), Window::Day);
+        assert_eq!(Window::sliding(LimitWindow::Minute), Some(Window::Minute));
+        assert_eq!(Window::sliding(LimitWindow::Day), Some(Window::Day));
+        assert_eq!(Window::sliding(LimitWindow::Days30), Some(Window::Days30));
+        assert_eq!(Window::sliding(LimitWindow::CalendarMonth), None);
     }
 }

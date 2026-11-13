@@ -537,6 +537,27 @@ async fn semantic_hit_through_the_pipeline() {
     assert_eq!(s.calls(), 2);
 }
 
+/// F191: Der Embedding-Aufruf des semantischen Caches verweist auf die auslösende Anfrage.
+#[tokio::test]
+async fn cache_embedding_record_points_to_parent() {
+    let records = Arc::new(Records::default());
+    let mut st = ProxyState::mock();
+    st.observer = records.clone();
+    let e = aigw_proxy::cache::RoutedEmbedder::for_state(&st);
+    let ctx = aigw_cache::EmbedContext {
+        request_id: "0193a1b2-0000-7000-8000-000000000001".into(),
+        caller: Some(Arc::new(aigw_proxy::AuthContext::default())),
+    };
+    e.embed_for("mock", "Hallo", &ctx).await.unwrap();
+    let r = records.last();
+    assert_eq!(r.cache, Some(CacheOutcome::Embedding));
+    assert_eq!(
+        r.parent_request_id.as_deref(),
+        Some("0193a1b2-0000-7000-8000-000000000001")
+    );
+    assert_eq!(r.client_request_id, None);
+}
+
 #[tokio::test]
 async fn routed_embedder_uses_internal_routing() {
     let st = ProxyState::mock();

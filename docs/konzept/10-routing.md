@@ -95,7 +95,7 @@ Alle Felder prüft `GroupPolicy::from_settings` (damit Admin-API und GitOps beim
 | `fallbackIgnoresGrants` | **false** \| true | Fallbacks ohne Freigabeprüfung (§5, F80) |
 | `responseModel` | **upstream** \| requested | `model` im Antwort-Body: wie vom Anbieter gemeldet oder der angefragte Name (Gruppe/Alias); Header `x-aigw-model` trägt immer das Anbieter-Modell (F49) |
 | `clientBetas` / `betaAllowlist` | **allow-all** \| allowlist \| deny / Liste | `anthropic-beta` der Clients weitergeben, filtern oder verwerfen (F60; die Betas des Deployments bleiben) |
-| `exposeReasoning` | **true** \| false | Reasoning als `reasoning_content` an OpenAI-Clients (F10); je Key zusätzlich über das Metadatum `aigw.exposeReasoning: "false"` |
+| `exposeReasoning` | **true** \| false | Reasoning als `reasoning_content` an OpenAI-Clients (F10); zusätzlich `exposeReasoning: false` an Organisation, Team oder Key (Vererbung, F185) |
 | `timeouts` | `{connectMs, firstByteMs, idleMs, totalMs}` | gilt für alle Deployments ohne eigenen Abschnitt (F44, 06 §3) |
 | `thinkingBudgetPolicy` | **raise-max-tokens** \| cap-budget | Erbwert für Anthropic-Deployments (F59, 06 §3a) |
 | `propagateTraceContext` | true \| false (Standard je Anbieterart) | Erbwert für die Trace-Weitergabe (F98, 07 §12) |

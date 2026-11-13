@@ -156,7 +156,6 @@ impl Recorder {
     ) -> Self {
         let mut record = RequestRecord::new(request_id, ingress, 200);
         record.started_at = start.at;
-        let capture = observer.payload_mode().captures();
         observer.request_started();
         Self {
             observer,
@@ -168,7 +167,8 @@ impl Recorder {
             usage: None,
             usage_final: false,
             stopped: false,
-            payload: capture.then(Box::default),
+            // Erst nach der Schlüsselprüfung bekannt ([`Recorder::set_key`], F30).
+            payload: None,
             streamed_text: None,
             span: Span::none(),
             admission: None,
@@ -177,8 +177,15 @@ impl Recorder {
         }
     }
 
-    /// Wurzel-Span, an dem Ergebnis-Attribute und das TTFT-Ereignis landen.
+    /// Wurzel-Span, an dem Ergebnis-Attribute und das TTFT-Ereignis landen; dessen Trace-ID
+    /// landet im Request-Log (F100).
     pub(crate) fn set_span(&mut self, span: Span) {
+        if !span.is_disabled() {
+            let trace_id = span.in_scope(aigw_core::observe::current_trace_id);
+            if let Some(r) = self.rec() {
+                r.trace_id = trace_id;
+            }
+        }
         self.span = span;
     }
 
@@ -236,8 +243,16 @@ impl Recorder {
         }
     }
 
-    /// Key, Team und Organisation aus der Schlüsselprüfung.
+    /// Key, Team und Organisation aus der Schlüsselprüfung; entscheidet über den
+    /// Payload-Mitschnitt (`payloadMode` an Key/Team/Organisation, sonst global; F30).
     pub(crate) fn set_key(&mut self, auth: &AuthContext) {
+        let mode = self.observer.payload_mode(auth.key.as_deref());
+        self.payload = mode.captures().then(|| {
+            Box::new(RawPayload {
+                mode,
+                ..RawPayload::default()
+            })
+        });
         if let Some(r) = self.rec() {
             r.api_key_id = auth.api_key_id();
             r.team_id = auth.team_id();
@@ -431,6 +446,7 @@ impl Recorder {
         if let Some(r) = self.rec() {
             r.status = status;
             r.error_kind = Some(err.error.kind);
+            r.error_class = Some(err.class);
         }
         // Ohne Antwort wurde nichts erzeugt; Eingabe-Usage wird nicht geschätzt.
         self.input_bytes = 0;
@@ -537,6 +553,14 @@ impl Recorder {
         };
         r.usage = usage;
         r.usage_estimated = estimated;
+        if r.error_class.is_none() && r.is_error() {
+            // F47: feine Klasse – letzter fehlgeschlagener Versuch, sonst aus der Fehlerart.
+            r.error_class = r
+                .attempts
+                .last()
+                .and_then(|a| a.error)
+                .or_else(|| r.error_kind.map(aigw_core::ir::ErrorClass::from_kind));
+        }
         if let Some(a) = self.admission.take() {
             a.complete(&mut r);
         }

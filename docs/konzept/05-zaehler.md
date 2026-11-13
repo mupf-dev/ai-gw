@@ -34,10 +34,17 @@ Verfeinerungen gegenüber der Skizze in §8:
 | `Reservation` | enthält `quotas()` (Limit, Rest, Reset) je Limit, `tightest()` | Werte für `x-ratelimit-limit/remaining/reset-*` ohne zweiten Zugriff |
 | – | `Rejection { index, key, window, limit, used, retry_after }` | `Retry-After`; `retry_after = None`, wenn die Menge größer als das Limit ist (nie erfüllbar → Fehler statt Warten) |
 | – | alle Methoden unfehlbar, `health()` | Ausfall externer Backends führt nie zu Fehlern im Hot Path |
-| – | `Window::Month` | Monatslimits (30 Tage gleitend), siehe offene Fragen |
+| – | `Window::Days30`, `Window::Period { start_ms, end_ms }` | 30 Tage gleitend (`30d`) und feste Kalenderzeiträume (F25) |
+| – | `CounterBackend::stats()` | Nachtragen nach Ausfällen sichtbar machen (F28, Metriken) |
 
-Die Fenster sind `Second`, `Minute`, `Hour`, `Day`, `Month` (= 30 × 24 h). Ein Zähler ist durch
-(Schlüssel, Fenster) bestimmt; derselbe Schlüssel kann in mehreren Fenstern gezählt werden.
+Die gleitenden Fenster sind `Second`, `Minute`, `Hour`, `Day`, `Days30` (= 30 × 24 h,
+Konfiguration `30d`; hieß bis AIGW-76 `Month`). Dazu kommt **`Period`**: ein fester Zeitraum
+`[start, end)` ohne Gleiten (Kalendertag/-woche/-monat, F25) – ein einziger Bucket mit der
+Nummer `start`, Schätzung = Zählerstand, `Retry-After` und Reset = Zeit bis `end`, danach
+zählt er nicht mehr. Den Zeitraum (Zeitzone, Monatslänge, Sommerzeit) berechnet der Aufrufer
+(`aigw-proxy`, `billing.timezone`); der Proxy schreibt Art und Beginn zusätzlich in den
+Schlüssel. Ein Zähler ist durch (Schlüssel, Fenster) bestimmt; derselbe Schlüssel kann in
+mehreren Fenstern gezählt werden.
 Schlüsselschema (Vorschlag für den Proxy): `<ebene>:<id>:<metrik>`, z. B. `team:<uuid>:tokens`.
 
 Auswahl über die Startkonfiguration (`counters.backend`, `aigw_counters::from_config`):
@@ -45,8 +52,13 @@ Auswahl über die Startkonfiguration (`counters.backend`, `aigw_counters::from_c
 ```yaml
 counters:
   backend: local            # local | postgres-sync | redis
-  # redis_url: "redis://redis:6379/0"   # rediss:// für TLS
+  # redis_url: "redis://redis:6379/0"   # rediss:// für TLS; nur Einzelinstanz/Sentinel-Primary
+  sync_interval_ms: 1000    # postgres-sync: Abgleichintervall (F26)
+  redis_pool_size: 4        # redis: multiplexte Verbindungen (F26)
+  redis_timeout_ms: 250     # redis: Zeitlimit je Operation, danach lokaler Rückfall (F26)
 ```
+
+ENV wie üblich, z. B. `AIGW_COUNTERS__SYNC_INTERVAL_MS=2000`, `AIGW_COUNTERS__REDIS_POOL_SIZE=8`.
 
 `postgres-sync` verwendet die Datenbank aus `store.url` (muss Postgres sein, sonst Startfehler).
 
@@ -111,9 +123,14 @@ Korrekturen sättigen bei 0. Eine nie abgeglichene Reservierung bleibt voll gebu
   2. im selben Statement `SUM(value)` der **anderen** Instanzen für alle aktiven Buckets
      (laufend und vorig) zurücklesen und als `remote` setzen.
 - Tabelle `counter_state` aus Migration 0001 (unverändert): `counter_key = "<Fensterkürzel>|<Schlüssel>"`
-  (`s`, `m`, `h`, `d`, `mo`), `window_start = Bucket · L` in ms, `instance_id` = UUIDv7 je
-  Prozessstart (konfigurierbar).
-- Bereinigung: alle 60 s löscht jede Instanz Zeilen, deren Bucket älter als zwei Fensterlängen ist.
+  (`s`, `m`, `h`, `d`, `30d`; feste Zeiträume `p<Ende-ms>`), `window_start = Bucket · L` in ms
+  (feste Zeiträume: Beginn), `instance_id` = UUIDv7 je Prozessstart (konfigurierbar).
+- Bereinigung: alle 60 s löscht jede Instanz Zeilen, deren Bucket älter als zwei Fensterlängen ist
+  (feste Zeiträume: Beginn älter als 32 Tage).
+- **Sekundenlimits** (F29): Weil jede Instanz fremden Verbrauch erst nach dem nächsten Abgleich
+  sieht, warnt das Gateway beim Start, wenn mit `postgres-sync` Sekundenlimits konfiguriert
+  sind; die Admin-API liefert dieselben Hinweise unter `GET /admin/api/v1/usage/limit-warnings`
+  (08 §5.12) für einen UI-Hinweis.
 - Zugriff direkt über einen eigenen `sqlx::PgPool` (2 Verbindungen) statt `aigw_store::Store`:
   Der `Any`-Treiber des Stores kennt keine Arrays, und der Abgleich soll nicht mit der Admin-API um
   Verbindungen konkurrieren. Das Schema bleibt in der Store-Migration.
@@ -137,9 +154,15 @@ Korrekturen sättigen bei 0. Eine nie abgeglichene Reservierung bleibt voll gebu
   Multiplexing (nebenläufige Befehle werden automatisch auf einer Verbindung gepipelint) und
   Wiederverbindung mit; `Script` erledigt `EVALSHA` mit automatischem Nachladen bei `NOSCRIPT`;
   deutlich kleinerer Abhängigkeitsbaum. Cluster/Sentinel bräuchten weitere Features (offen).
-- **Pool:** `pool_size` (Standard 4) multiplexte Verbindungen im Round-Robin.
+- **Pool:** `counters.redis_pool_size` (Standard 4) multiplexte Verbindungen im Round-Robin.
+- **Nur Einzelinstanz bzw. Sentinel-Primary (F27):** Beim Verbinden fragt das Backend
+  `INFO cluster`; meldet der Server `cluster_enabled:1`, bricht der Start mit einer klaren
+  Fehlermeldung ab (`CounterError::RedisCluster`) – ein `reserve` über mehrere Schlüssel
+  bräuchte im Cluster denselben Hash-Slot. Wird der Cluster-Modus erst bei einer späteren
+  Wiederverbindung erkannt, bleibt der lokale Rückfall aktiv (Fehler im Log).
 - **Datenlayout:** ein Hash je Zähler `aigw:c:<Fensterkürzel>:<Schlüssel>`, Feld = Bucket-Nummer,
-  `PEXPIRE` = 2 L + 1 s; ältere Felder werden beim Buchen entfernt.
+  `PEXPIRE` = 2 L + 1 s; ältere Felder werden beim Buchen entfernt. Feste Zeiträume:
+  `aigw:c:p:<Schlüssel>`, Feld = Beginn, Ablauf 60 s nach dem Ende.
 - **Skripte** (`EVALSHA`, beim Verbinden vorgeladen):
   - `reserve`: liest für alle Schlüssel `cur`/`prev`, prüft alle, bucht nur wenn alle passen –
     atomar, da Redis Skripte am Stück ausführt. Liefert Rohwerte; Rest, Reset und Retry-After
@@ -149,15 +172,27 @@ Korrekturen sättigen bei 0. Eine nie abgeglichene Reservierung bleibt voll gebu
   - Zeitbasis ist `TIME` des Redis-Servers: keine Uhrenabweichung zwischen Gateway-Instanzen.
 - **Genauigkeit:** exakt im Cluster (ein Roundtrip je `reserve`, unabhängig von der Zahl der
   Limits). Lua rechnet in Gleitkomma; erst ab ~2⁵³ entstehen Rundungsabweichungen.
-- **Ausfall:** Fehler oder Zeitlimit (Standard 250 ms) → `warn`, `health()` = `Degraded`, alle
-  weiteren Aufrufe zählen sofort in einer lokalen Engine (wie `local`, exakt je Instanz), statt
-  bei jeder Anfrage auf Redis zu warten. Ein Hintergrund-Task prüft im Sekundentakt (`PING` bzw.
-  Neuaufbau) und schaltet zurück (`info`). Lokal gebuchte Reservierungen werden lokal abgeglichen;
-  `settle` für in Redis gebuchte Reservierungen während des Ausfalls geht verloren (gezählt in
-  `lost_settles()`). Ein in die Zeitüberschreitung gelaufenes Skript kann später doch noch
-  ausgeführt werden – dann ist die Menge doppelt gebucht (konservativ). Nach der Rückkehr gelten
-  wieder die Redis-Stände; lokal im Ausfall gebuchter Verbrauch wird nicht nach Redis übertragen.
-  Ist Redis beim Start nicht erreichbar, startet das Backend im Rückfall.
+- **Ausfall:** Fehler oder Zeitlimit (`counters.redis_timeout_ms`, Standard 250 ms) → `warn`,
+  `health()` = `Degraded`, alle weiteren Aufrufe zählen sofort in einer lokalen Engine (wie
+  `local`, exakt je Instanz), statt bei jeder Anfrage auf Redis zu warten. Ein Hintergrund-Task
+  prüft im Sekundentakt (`PING` bzw. Neuaufbau) und schaltet zurück (`info`). Ein in die
+  Zeitüberschreitung gelaufenes Skript kann später doch noch ausgeführt werden – dann ist die
+  Menge doppelt gebucht (konservativ). Ist Redis beim Start nicht erreichbar, startet das
+  Backend im Rückfall.
+- **Nachtragen nach der Rückkehr (F28):** Die lokale Engine schreibt im Rückfall ihre
+  Änderungen je Bucket mit (wie bei `postgres-sync`). Nach der Rückkehr überträgt der
+  Hintergrund-Task sie mit dem `settle`-Skript nach Redis (bis 256 Buckets je Aufruf) –
+  **nur Buckets, die noch zum Fenster zählen**; abgelaufene werden verworfen (lokal geprüft und
+  im Skript mit der Serverzeit). Ebenso wandern Abgleiche (`settle`) von Redis-Reservierungen,
+  die während des Ausfalls anfielen, in diesen Rückstau statt verloren zu gehen
+  (`lost_settles()` zählt sie); lief der Abgleich selbst in die Zeitüberschreitung, wird nur
+  eine positive Korrektur zurückgestellt (eine Freigabe könnte sonst doppelt abziehen). Lokal
+  gebuchte Reservierungen, die erst nach der Rückkehr abgeglichen werden, trägt der Task im
+  nächsten Takt nach. Der Rückstau ist auf `max_backlog` (100 000) Buckets begrenzt (älteste
+  zuerst verworfen) und wird während des Ausfalls laufend um abgelaufene Buckets bereinigt.
+  Metriken (`CounterBackend::stats()` → `/metrics`): `aigw_counter_replayed_total`,
+  `aigw_counter_replay_dropped_total`, `aigw_counter_replay_pending`; dazu
+  `aigw_counter_backend_degraded`.
 - Voraussetzung: Redis ≥ 7 oder Valkey (Skripte mit `TIME` und Schreibzugriffen).
 
 ## 4. Genauigkeit und Ausfall im Überblick
@@ -166,7 +201,7 @@ Korrekturen sättigen bei 0. Eine nie abgeglichene Reservierung bleibt voll gebu
 |---|---|---|---|
 | `local` | lokal | je Instanz exakt, Instanzen unabhängig | – |
 | `postgres-sync` | lokal + fremder Stand | ±`interval` (Standard 1 s) | lokal weiter mit letztem Fremdstand, Deltas werden nachgeholt |
-| `redis` | Redis (Lua, atomar) | exakt | lokaler Rückfall je Instanz, Wiederverbindung im Sekundentakt |
+| `redis` | Redis (Lua, atomar) | exakt | lokaler Rückfall je Instanz, Wiederverbindung im Sekundentakt, Nachtragen laufender Fenster (F28) |
 
 ## 5. Tests und Messwerte
 
@@ -178,7 +213,11 @@ Korrekturen sättigen bei 0. Eine nie abgeglichene Reservierung bleibt voll gebu
   settle, Ausfall (Tabelle umbenannt) mit Rückstau und Nachholen, Bereinigung.
 - `tests/redis.rs` (mit `AIGW_TEST_REDIS_URL` bzw. `AIGW_TEST_REDIS=docker`): zwei Instanzen,
   Atomarität, 64 Tasks auf zwei Instanzen (Limit nie überschritten), Rückfall per `CLIENT PAUSE`
-  und Wiederverbindung. Rückfall ohne Server läuft immer.
+  und Wiederverbindung, Nachtragen lokaler Buchungen und zurückgestellter Abgleiche mit
+  Verwerfen abgelaufener Buckets (F28), feste Zeiträume (F25). Ohne Server laufen immer: Rückfall
+  und die Ablehnung eines Servers im Cluster-Modus (Fake-Server, F27).
+- `tests/postgres.rs` zusätzlich: feste Zeiträume über zwei Instanzen, Zeilenschlüssel
+  `p<Ende>|…`, Bereinigung nach 32 Tagen (F25).
 - Benchmark: `cargo run --release -p aigw-counters --example bench` (mit denselben Variablen für
   Postgres/Redis). Messwerte siehe Abschnitt 6.
 
@@ -205,9 +244,8 @@ docker-proxy, daher höhere Roundtrip-Zeit als im Netz üblich).
 
 ## 7. Offene Punkte
 
-- `LimitWindow` in `aigw_core::resource` kennt (noch) keinen Monat; `Window::Month` ist 30 Tage
-  gleitend, kein Kalendermonat. Budgets nach Kalendermonat laufen über `budget_usage`.
-- Abgleichintervall, Redis-Poolgröße und -Zeitlimit sind `CounterOptions` im Code, noch nicht in
-  der Startkonfiguration.
-- Redis Cluster: Ein `reserve` über mehrere Schlüssel braucht denselben Hash-Slot (Hash-Tags,
-  z. B. `{org}`) oder eine Aufteilung je Slot – derzeit nur Einzelinstanz/Sentinel-Primary.
+- Erledigt mit AIGW-76: Kalenderfenster und `30d` (F25), Einstellungen in der Startkonfiguration
+  (F26), Erkennung des Cluster-Modus (F27), Nachtragen nach Ausfällen (F28), Hinweis zu
+  Sekundenlimits mit `postgres-sync` (F29).
+- Redis Cluster bleibt nicht unterstützt: Ein `reserve` über mehrere Schlüssel bräuchte
+  denselben Hash-Slot (Hash-Tags, z. B. `{org}`) oder eine Aufteilung je Slot.

@@ -402,6 +402,30 @@ echo "--- GET /admin/api/v1/usage/budgets (AIGW-31)"
 curl -fsS "$CBASE/admin/api/v1/usage/budgets?level=api-key" -H "authorization: Bearer $TOKEN" |
   tee "$TMP/budgets.json"; echo
 grep -q '"targetName":"smoke-rl"' "$TMP/budgets.json"
+echo "--- Kalender-Limit (F25): 1 Anfrage je Kalendertag → 429 bis Mitternacht; Limit-Hinweise (F29)"
+CAL=$(curl -fsS "$CBASE/admin/api/v1/api-keys" -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"metadata":{"name":"smoke-cal"},"spec":{"organization":"smoke-org","limits":[{"metric":"requests","limit":1,"window":"calendar-day"}]}}' |
+  grep -o '"secret":"sk-aigw-[^"]*"' | cut -d'"' -f4)
+test -n "$CAL"
+CODE=000
+for _ in $(seq 1 50); do # Hot Reload abwarten
+  CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/chat/completions" \
+    -H "authorization: Bearer $CAL" -H 'content-type: application/json' \
+    -d '{"model":"mock","messages":[{"role":"user","content":"Hallo"}]}')
+  [[ "$CODE" != 401 ]] && break
+  sleep 0.1
+done
+test "$CODE" = 200
+CODE=$(curl -s -D "$TMP/h5.txt" -o /dev/null -w '%{http_code}' "$BASE/v1/chat/completions" \
+  -H "authorization: Bearer $CAL" -H 'content-type: application/json' \
+  -d '{"model":"mock","messages":[{"role":"user","content":"Hallo"}]}')
+test "$CODE" = 429
+grep -qi '^retry-after: [0-9]' "$TMP/h5.txt"
+grep -qi '^x-ratelimit-reset-requests: ' "$TMP/h5.txt"
+curl -fsS "$CBASE/admin/api/v1/usage/limit-warnings" -H "authorization: Bearer $TOKEN" |
+  tee "$TMP/lw.json"; echo
+grep -q '"counterBackend":"local"' "$TMP/lw.json"
 echo "--- MCP-Gateway (AIGW-41): Server per REST (SSRF → 422), /mcp initialize + tools/list"
 adm POST /mcp-servers '{"metadata":{"name":"smoke-meta"},"spec":{"url":"http://169.254.169.254/mcp"}}' >/dev/null
 expect 422

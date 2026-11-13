@@ -41,9 +41,10 @@ nicht – es bekommt fertige Zeilen und Rollup-Deltas.
 - `RequestLogger::record` = `try_send` in einen begrenzten `tokio::mpsc`-Kanal. Kein Lock, keine
   Allokation, kein I/O; im Fehlerfall (voll/geschlossen) ein `Relaxed`-Inkrement von
   `aigw_log_dropped_total`. Gemessen < 1 µs (siehe §8).
-- Payload: `RequestObserver::payload_mode()` sagt dem Proxy, ob er Header/Bodies mitgeben soll.
-  `RawPayload` hält `Bytes` (referenzgezählt, keine Kopie). Filtern, Kürzen und Maskieren
-  passieren erst im Writer.
+- Payload: `RequestObserver::payload_mode(Option<&KeyCtx>)` sagt dem Proxy nach der
+  Schlüsselprüfung, ob (und wie) er Header/Bodies dieser Anfrage mitgeben soll (F30, §5).
+  `RawPayload` hält `Bytes` (referenzgezählt, keine Kopie) und den wirksamen Modus. Filtern,
+  Kürzen und Maskieren passieren erst im Writer.
 - Speicher: Kanal-Kapazität `queue_capacity` (Standard 16 384) × Größe eines Eintrags; Tokio legt
   Blöcke erst bei Bedarf an.
 
@@ -56,7 +57,11 @@ nicht – es bekommt fertige Zeilen und Rollup-Deltas.
 | `ingress` | Eingangsformat (`WireFormat`) | `endpoint` (`openai-chat`, `anthropic-messages`) |
 | `model_alias`, `model_group` | angefordert bzw. aufgelöst | `model_requested`, `model_group` |
 | `deployment_id`, `provider`, `provider_model` | gewähltes Deployment (nach Fallbacks das letzte) | gleichnamig |
-| `status`, `error_kind` | HTTP-Status, Fehlerklasse (`ErrorKind`) | `status`, `error_code` |
+| `status`, `error_kind` | HTTP-Status, Fehlerart (`ErrorKind`) | `status`, `error_code` |
+| `error_class` | feine Fehlerklasse (`ErrorClass`: `timeout`, `rate_limit`, `content_filter` …; F47) – Klasse des abgelehnten Fehlers bzw. des letzten fehlgeschlagenen Versuchs, sonst aus der Fehlerart | `error_class`; Rollup-Schlüssel |
+| `trace_id` | Trace-ID des Wurzel-Spans (F100), auch ohne Sampling; nur bei aktivem Tracing | `trace_id` |
+| `parent_request_id` | auslösende Anfrage (F191): beim Embedding-Aufruf des semantischen Caches die Chat-Anfrage | `parent_request_id` |
+| `guardrails` | Erkennungen der Guardrail-Plugins (Plugin, Kategorie, Aktion, Anzahl; F161) | `guardrails` (JSON) |
 | `usage`, `usage_estimated` | `ir::Usage` (inkl. Cache-Lesen/-Schreiben, Reasoning), geschätzt? | `*_tokens`, `usage_estimated` |
 | `cost` | Platzhalter (`Amount`, bis Kostenberechnung) | `cost` (Nano) |
 | `ttft`, `duration` | Zeit bis erstes Token, Gesamtdauer | `ttft_ms`, `latency_ms` |
@@ -96,7 +101,13 @@ nicht – es bekommt fertige Zeilen und Rollup-Deltas.
 ## 4. Minuten-Rollups
 
 Schlüssel: (`bucket_start` = Minutenbeginn, `api_key_id`, `team_id`, `organization_id`,
-`model_group`, `deployment_id`), fehlende Werte als `''`. Bucket nach `started_at`.
+`model_group`, `deployment_id`, `error_class`), fehlende Werte als `''` (`error_class` `''` =
+kein Fehler; seit Migration 0004, F47). Bucket nach `started_at`. Fehlerklassen vervielfachen
+die Zeilen nur für fehlgeschlagene Anfragen.
+
+**Abschaltbar (F33):** `observe.rollups: false` – der Writer berechnet und schreibt keine
+Rollups (Rohlog, Export und Metriken laufen weiter); Dashboards und Analytics bleiben leer
+(Warnung beim Start; Hinweis in der UI vorgesehen).
 
 Der Writer aggregiert je Batch im Speicher und schreibt je Schlüssel **ein** Delta:
 
@@ -124,7 +135,13 @@ aktualisieren.
 
 ## 5. Payload-Logging und Maskierung
 
-`observe.payload` (global; je Key/Team folgt mit der Policy-Auflösung):
+`observe.payload` ist der Standard; je Organisation, Team und API-Key überschreibbar über das
+Spec-Feld `payloadMode` (F30). Es gilt das spezifischste gesetzte Feld (Key → Team →
+Organisation → `observe.payload`); auch ein „strengerer“ Wert unten gewinnt (z. B. Key `off`
+trotz Organisation `full`). Ausgewertet wird nach der Schlüsselprüfung
+(`RequestObserver::payload_mode(Some(&KeyCtx))`, `aigw_core::observe::effective_payload_mode`);
+Anfragen ohne Key (Fehler vor der Anmeldung) folgen dem globalen Wert. Der Modus reist im
+`RawPayload` mit und steht in `request_payload.mode`.
 
 | Modus | Gespeichert |
 |---|---|
@@ -171,8 +188,17 @@ Datenbanken), damit Sperren kurz bleiben.
   `RequestLogRow` + optional `PayloadRow`. OTLP-Logs (§12.4) und künftig Webhook implementieren
   denselben Trait.
 - `JsonLinesExporter`: eine JSON-Zeile je Anfrage (Felder wie `request_log` in camelCase,
-  optional `payload`), angehängt an `observe.jsonl.path`, Flush je Batch, Schreiben per
-  `spawn_blocking`.
+  inkl. `errorClass`, `traceId`, `parentRequestId`, `guardrails`; optional `payload`),
+  angehängt an `observe.jsonl.path`, Flush je Batch, Schreiben per `spawn_blocking`.
+  **Rotation (F31, `observe.jsonl.rotate`):** beim Tageswechsel (UTC, `daily`) und/oder bevor
+  die Datei `max_size_mb` überschreiten würde, wird sie in `<pfad>.<UTC-Zeitstempel>`
+  umbenannt (z. B. `aigw-requests.jsonl.20261113T000001042Z`), mit `gzip` komprimiert
+  (`….gz`, flate2/miniz_oxide) und eine neue Datei begonnen; von den rotierten Dateien bleiben
+  die `keep` jüngsten (`0` = alle). Nach einem Neustart zählt der Tag der letzten Änderung der
+  bestehenden Datei. **SIGHUP** öffnet die Datei neu (`ObserveHandle::reopen`), z. B. nach
+  einem externen logrotate.
+- OTLP-Logs tragen die Trace-ID im Feld `trace_id` des `LogRecord` (F100) sowie
+  `aigw.error_class`, `aigw.parent_request_id` und `aigw.guardrails` (JSON) als Attribute.
 - Zähler (`ObserveMetrics::render_prometheus`, `GET /metrics` der Steuerebene): `aigw_log_dropped_total`,
   `aigw_log_written_total`, `aigw_log_write_failed_total`, `aigw_log_batches_total`,
   `aigw_log_export_errors_total`, `aigw_log_purged_total`. Gateway-Metriken: §11.
@@ -181,15 +207,20 @@ Datenbanken), damit Sperren kurz bleiben.
 
 ```yaml
 observe:
-  request_log: true          # Rohlog in DB (Rollups immer)
+  request_log: true          # Rohlog in DB
+  rollups: true              # Minuten-/Stunden-Rollups für Dashboards (F33)
   queue_capacity: 16384
   batch_size: 1000
   flush_interval_ms: 500
   shutdown_timeout_ms: 5000
-  payload: "off"             # off | metadata | masked | full  (YAML: "off" quoten)
+  payload: "off"             # off | metadata | masked | full  (YAML: "off" quoten); je Org/Team/Key: payloadMode
   payload_max_bytes: 65536
   retention: {request_log_days: 30, payload_days: 7, rollup_days: 400, sweep_interval_secs: 3600}
-  jsonl: {enabled: false, path: aigw-requests.jsonl, include_payload: false}
+  jsonl:
+    enabled: false
+    path: aigw-requests.jsonl
+    include_payload: false
+    rotate: {daily: false, max_size_mb: 0, keep: 0, gzip: false}   # F31; SIGHUP = neu öffnen
   metrics: {enabled: true, max_model_groups: 200, max_deployments: 500}      # §11
   otlp:                                                                       # §12
     endpoint: ""               # z. B. http://otel-collector:4318 – leer = kein OTLP-Export
@@ -278,7 +309,8 @@ Label-Schlüssel braucht und ein `RwLock` nimmt).
 - **Hot Path:** Hash der Label-Werte (geliehen aus dem Datensatz) → `ArcSwap`-Map
   (`u64` → Einträge mit Vergleich der Rohwerte) → `Relaxed`-Inkremente. Nur die erste Anfrage
   einer neuen Kombination nimmt einen Mutex und veröffentlicht eine neue Map (Copy-on-Write).
-- **Kardinalität:** Labels nur `model_group`, `deployment` (ID), `provider`, `ingress`,
+- **Kardinalität:** Labels nur `model_group`, `deployment` (Name, F99 – aus dem letzten Versuch;
+  eine Umbenennung ergibt eine neue Serie; ohne Versuch die ID), `provider`, `ingress`,
   `status_class` (`1xx` … `5xx`) bzw. `type`/`class`/`result`. **Keine** Key-, Team-, Org- oder
   Nutzer-IDs. `model_group` und `deployment` sind auf `max_model_groups` (200) bzw.
   `max_deployments` (500) unterschiedliche Werte begrenzt; weitere Werte zählen unter `other`.
@@ -306,7 +338,9 @@ Label-Schlüssel braucht und ein `RwLock` nimmt).
 | `aigw_snapshot_reload_total` | counter | result (`ok`, `failed`, `check_failed`) | `ReloadMetrics` |
 | `aigw_snapshot_stale_seconds` | gauge | – | Zeit seit dem ersten fehlgeschlagenen Abgleich (0 = aktuell) |
 | `aigw_snapshot_build_seconds` | gauge | – | Dauer des letzten Neubaus |
-| `aigw_counter_backend_degraded` | gauge | – | `CounterBackend::health()` über `GatewayMetrics::set_counter_health`; erscheint erst, wenn das Zähler-Backend im Binary verdrahtet ist (Limits) |
+| `aigw_counter_backend_degraded` | gauge | – | `CounterBackend::health()` über `GatewayMetrics::set_counter_health` |
+| `aigw_counter_replayed_total`, `aigw_counter_replay_dropped_total` | counter | – | Nachtragen nach einem Ausfall des Zähler-Backends (F28): nachgetragene bzw. verworfene Deltas (`CounterBackend::stats()`) |
+| `aigw_counter_replay_pending` | gauge | – | noch nicht nachgetragene Deltas |
 | `aigw_log_*` | counter | – | Request-Log (§7) |
 | `aigw_otlp_spans_exported_total`, `aigw_otlp_spans_dropped_total`, `aigw_otlp_logs_exported_total`, `aigw_otlp_export_errors_total{signal}`, `aigw_otlp_export_retries_total{signal}` | counter | – | OTLP-Export (§12) |
 
@@ -459,7 +493,12 @@ Lese-API: [08-admin-api.md](08-admin-api.md) §5.11. Hier: Datenbasis, Aggregati
   Zeichen). Ältere Einträge: leer.
 - `request_log.parent_request_id` (F191, AIGW-73: Spalte, Index und Store-Filter
   `LogQuery::parent_request_id`): auslösende Anfrage, z. B. das Embedding des semantischen
-  Caches. Noch ungefüllt – der Writer setzt sie, sobald `RequestRecord` das Feld trägt.
+  Caches (seit AIGW-76 befüllt; Log-Explorer `parentRequestId`, `cache=cache-embedding`).
+- Migration `0004_observe.sql` (AIGW-76, beide Dialekte): `request_log.error_class` (Index
+  `(error_class, at)` nur für gesetzte Werte), `request_log.trace_id` (Index nur für gesetzte
+  Werte), `request_log.guardrails` (JSON) sowie `error_class` als Schlüsselspalte beider
+  Rollup-Tabellen (SQLite: Tabellen neu angelegt und umkopiert, Postgres: Primärschlüssel
+  ersetzt) und `payload_mode`/`expose_reasoning` an Organisation, Team, API-Key.
 - Indizes: `usage_rollup (api_key_id|organization_id, bucket_start)`, je Dimension auf
   `usage_rollup_hour`, `request_log (organization_id|model_group|deployment_id, at)` und
   `request_log (client_request_id)`.
@@ -475,10 +514,16 @@ Schlüssel.
 
 - **Zeitraum:** Standard die letzten 24 h; höchstens 400 Tage. Ränder werden auf Minuten,
   bei Zeitreihen auf `step` ausgerichtet (an der Epoche, d. h. Tage in UTC).
-- **Schrittwahl:** ohne `step` der kleinste aus `1m`, `5m`, `1h`, `1d` mit höchstens 300
-  Punkten (1 h → `1m`, 24 h → `5m`, 7 Tage → `1h`, 30 Tage → `1d`); ein expliziter `step`
-  darf höchstens 1500 Punkte ergeben (sonst `400`). Punkte sind lückenlos (Zähler 0,
-  Quoten/Latenzen `null`).
+- **Schrittwahl:** ohne `step` der kleinste aus `1m`, `5m`, `15m`, `1h`, `1d` mit höchstens
+  200 Punkten (1 h → `1m`, 6 h → `5m`, 24 h → `15m` (F141), 7 Tage → `1h`, 30 Tage → `1d`); ein
+  expliziter `step` darf höchstens 1500 Punkte ergeben (sonst `400`). Punkte sind lückenlos
+  (Zähler 0, Quoten/Latenzen `null`).
+- **Tage in `billing.timezone` (F143):** `1d` beginnt um Mitternacht der Abrechnungszeitzone
+  (wie Budgets und Kalender-Limits; Sommerzeit: 23/25-Stunden-Tage). Abgefragt wird dann in
+  Stunden (bzw. 15/1 Minuten, wenn die Zone keinen vollen Stundenversatz hat) und im Speicher
+  auf die Tagesgrenzen gefaltet; in UTC unverändert direkt in Tagen.
+- **Fehlerklassen (F47):** `groupBy`/`dimension=error_class` und Filter `errorClass` auf
+  Rollups und Rohlog.
 - **Top-N + „other“:** erst Gesamtsummen je Gruppe im Zeitraum (Rang), dann die Zeitreihe mit
   `CASE WHEN spalte IN (…) THEN … ELSE '__other__' END` als Gruppe – die Datenbank liefert
   höchstens N + 1 Gruppen je Bucket, auch bei Tausenden Keys. Rang: summierbare Kennzahlen
@@ -490,8 +535,11 @@ Schlüssel.
   `cost`, `errors`, `error_rate`, `cache_hit_rate` (Treffer im Antwort-Cache / Anfragen),
   `latency_avg`, `latency_p50|p95|p99`, `ttft_p95`.
 - **KPIs** (`summary`): Zeitraum und gleich lange Vorperiode direkt davor; `deltaPercent` =
-  (Wert − Vorwert) / Vorwert · 100, auch für Quoten (relativ, nicht Prozentpunkte); `null`
-  ohne Vorwert.
+  (Wert − Vorwert) / Vorwert · 100, auch für Quoten (relativ); Quoten zusätzlich mit
+  `deltaPoints` = (Wert − Vorwert) · 100 in Prozentpunkten (F144); `null` ohne Vorwert.
+- **Geltungsbereich (F146/F147):** an eine Organisation gebundene Rollen sehen auch Anfragen
+  von Keys ohne Team ihrer Organisation (Filter `team_id IN (…) OR (team_id leer AND
+  organization_id IN (…))`); `clientIp` nur für `admin`/`auditor` (08 §5.11).
 
 ### 13.3 Perzentile aus Histogrammen
 

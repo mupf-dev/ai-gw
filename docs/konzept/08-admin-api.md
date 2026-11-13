@@ -41,6 +41,7 @@ Instanz nach ca. 100 ms (Debounce), bei Postgres auf allen Instanzen per `NOTIFY
 | `/usage/budgets` | GET | Budgetstände ([11-limits-und-budgets.md](11-limits-und-budgets.md)) |
 | `/analytics/timeseries`, `/analytics/summary`, `/analytics/top` | GET | Dashboards: Zeitreihen, KPIs mit Vorperiode, Ranglisten (§5.11, [07-beobachtung.md](07-beobachtung.md) §13) |
 | `/request-logs`, `/request-logs/{id}`, `/request-logs/{id}/payload` | GET | Log-Explorer: Anfragen, Upstream-Versuche, Payload (§5.11) |
+| `/usage/limit-warnings` | GET | Hinweise zu ungenau wirkenden Limits (§5.12, F29) |
 | `/version` | GET | Version (ohne Anmeldung) |
 
 Körper wie in GitOps-YAML ([02-datenmodell.md](02-datenmodell.md) §3), als JSON:
@@ -719,24 +720,40 @@ Aggregation und Messwerte in [07-beobachtung.md](07-beobachtung.md) §13.
 | Principal | sieht |
 |---|---|
 | Leserecht `Global` (`admin`, `viewer`, `auditor` ohne Einschränkung) | alle Anfragen, auch ohne Team (Keys ohne Team, Fehler vor der Anmeldung) |
-| eingeschränkte Rollen | nur Anfragen von Keys in Teams mit Leserecht `InTeam(o, t)` (Org-Rollen: alle Teams der Organisation) |
+| eingeschränkte Rollen | Anfragen von Keys in Teams mit Leserecht `InTeam(o, t)` (Org-Rollen: alle Teams der Organisation) |
+| an eine Organisation gebundene Rollen (`org-admin`, `viewer`/`auditor` mit `organization`, ohne `team`) | zusätzlich Anfragen von Keys **ohne Team** dieser Organisation (F146; seit F3 hat jeder Key eine Organisation) |
 
 - Filter `team`/`key` außerhalb des Bereichs → `403`; `organization`, `modelGroup`,
   `deployment`, `provider` schneiden nur. Unbekannte Namen → `422`.
 - Einzelanfrage außerhalb des Bereichs → `403`, unbekannt/abgelaufen → `404`.
 - **Payload:** eigene Berechtigung `Permission::ReadPayload` – nur `admin` und `auditor` im
-  jeweiligen Bereich (Ziel: das Team der Anfrage, ohne Team global). Andere Rollen erhalten die
-  Metadaten mit `payloadStatus: "forbidden"`; `GET /request-logs/{id}/payload` antwortet `403`.
+  jeweiligen Bereich (Ziel: das Team der Anfrage, ohne Team die Organisation, ganz ohne Key
+  global). Andere Rollen erhalten die Metadaten mit `payloadStatus: "forbidden"`;
+  `GET /request-logs/{id}/payload` antwortet `403`.
+- **Client-Adresse** (`clientIp`) wie Payloads nur für `admin` und `auditor` (F147); andere
+  Rollen sehen das Feld nicht.
+- Teamlose Anfragen einer Organisation prüft die Admin-API über das RBAC-Ziel
+  `InOrganization` (F193; deckt nur org-gebundene und globale Rollen ab).
 
 **Parameter (Auszug):**
 
 | Route | Parameter |
 |---|---|
-| `timeseries` | `metric` (Pflicht), `from`, `to`, `step` (`1m`/`5m`/`1h`/`1d`), `groupBy` (`model_group`, `deployment`, `provider`, `team`, `key`, `org`), `limit` (Top-N 1–20, Standard 5) |
+| `timeseries` | `metric` (Pflicht), `from`, `to`, `step` (`1m`/`5m`/`15m`/`1h`/`1d`; ohne Angabe höchstens 200 Punkte, 24 h → `15m`, F141), `groupBy` (`model_group`, `deployment`, `provider`, `team`, `key`, `org`, `error_class`), `limit` (Top-N 1–20, Standard 5) |
 | `summary` | `from`, `to` |
-| `top` | `dimension` (Pflicht), `metric` (Standard `requests`), `from`, `to`, `limit` (1–100, Standard 10) |
-| alle drei | Filter `modelGroup`, `deployment`, `provider`, `team`, `key`, `organization` (kommagetrennt, Name oder ID) |
-| `request-logs` | `from`, `to`, `status` (`429`, `4xx`, `error`, `success`), `errorCode`, `modelGroup`, `deployment`, `provider`, `team`, `key`, `organization`, `requestId`, `clientRequestId`, `stream`, `cache` (`hit`, `miss`, `none`, `hit-exact`, `hit-semantic`), `limit` (1–500, Standard 50), `cursor` |
+| `top` | `dimension` (Pflicht, auch `error_class`), `metric` (Standard `requests`), `from`, `to`, `limit` (1–100, Standard 10) |
+| alle drei | Filter `modelGroup`, `deployment`, `provider`, `team`, `key`, `organization` (kommagetrennt, Name oder ID), `errorClass` (F47, z. B. `timeout,rate_limit`) |
+| `request-logs` | `from`, `to`, `status` (`429`, `4xx`, `error`, `success`), `errorCode`, `errorClass` (F47), `modelGroup`, `deployment`, `provider`, `team`, `key`, `organization`, `requestId`, `clientRequestId`, `parentRequestId` (F191: Folgeanfragen, z. B. Embeddings des semantischen Caches), `traceId` (F100), `stream`, `cache` (`hit`, `miss`, `none`, `hit-exact`, `hit-semantic`, `bypass`, `cache-embedding`), `limit` (1–500, Standard 50), `cursor` |
+
+- **Tagesschritte** (`1d`, F143) beginnen um Mitternacht in `billing.timezone` (Sommerzeit:
+  23/25-Stunden-Tage); die Antwort nennt die Zone in `timezone`. Andere Schritte sind an der
+  Epoche ausgerichtet.
+- **KPIs** (`summary`): Quoten (`errorRate`, `cacheHitRate`) tragen zusätzlich
+  `deltaPoints` – die Änderung in Prozentpunkten (F144), `deltaPercent` bleibt relativ.
+- Einträge des Log-Explorers tragen `errorClass`, `traceId`, `parentRequestId` und
+  `guardrails` (Zähler je Plugin/Kategorie/Aktion, F161).
+- `timeseries`, `summary` und `top` melden `rollups: false`, wenn `observe.rollups` aus ist
+  (F33) – die Daten fehlen dann, die UI weist darauf hin.
 
 Zeitpunkte RFC 3339; ohne `from`/`to` die letzten 24 h (Log-Explorer: ohne Zeitgrenze).
 Kosten erscheinen als Zahl (`v`, gerundet, für Diagramme) **und** exakt als Dezimaltext
@@ -745,12 +762,22 @@ sortiert wird absteigend nach (`at`, `id`), die Paginierung läuft in SQL.
 
 ```json
 GET /admin/api/v1/analytics/timeseries?metric=cost&groupBy=model_group&from=2026-11-06T00:00:00Z&to=2026-11-13T00:00:00Z
-→ {"metric": "cost", "unit": "currency", "step": "1h", "stepSeconds": 3600, "groupBy": "model_group",
-   "from": "…", "to": "…",
+→ {"metric": "cost", "unit": "currency", "step": "1h", "stepSeconds": 3600, "timezone": "UTC",
+   "groupBy": "model_group", "from": "…", "to": "…",
    "series": [{"key": "gpt-4o", "name": "gpt-4o", "other": false, "total": 812.4, "totalAmount": "812.412345678",
                "points": [{"t": "2026-11-06T00:00:00Z", "v": 3.2, "amount": "3.2"}, …]},
               …, {"key": "__other__", "other": true, …}]}
 ```
+
+### 5.12 Hinweise zu Limits (F29)
+
+`GET /admin/api/v1/usage/limit-warnings` → `{"counterBackend": "postgres-sync", "warnings":
+[{"kind": "team", "name": "platform", "field": "limits[1]", "code":
+"second-limit-postgres-sync", "message": "…"}]}` – Limits, die mit dem gewählten
+Zähler-Backend nur ungenau wirken: Sekundenlimits mit `counters.backend: postgres-sync` (die
+Instanzen gleichen nur im Abstand `counters.sync_interval_ms` ab). Nur Objekte mit Leserecht;
+mit `local`/`redis` leer. Dieselbe Prüfung loggt das Gateway beim Start als Warnung. Grundlage
+für den UI-Hinweis am Limit-Editor.
 
 ## 6. Datenebene: Schlüsselprüfung und Modellfreigaben
 

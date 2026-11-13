@@ -194,6 +194,7 @@ async fn jsonl_export_without_store() {
             "an carol@example.net, Tel 0171 1234567, Key sk-proj-AbCdEf0123456789GhIjKl0123456789"
                 .into(),
         response_body: "ok".into(),
+        mode: PayloadMode::Masked,
     }));
     let id = r.request_id.clone();
     h.logger().record(r);
@@ -263,6 +264,7 @@ async fn rollup_scenario(store: Store) {
         request_body: r#"{"messages":[{"role":"user","content":"IBAN DE89370400440532013000"}]}"#
             .into(),
         response_body: "Danke, dave@example.com".into(),
+        mode: PayloadMode::Masked,
     }));
     let mut r2 = rich(base + 2_000, 600, key, team, org, dep);
     r2.status = 500;

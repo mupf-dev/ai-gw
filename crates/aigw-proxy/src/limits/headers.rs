@@ -91,6 +91,15 @@ impl RateHeaders {
         *self == Self::default()
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_requests_for_test(&mut self, limit: u64, remaining: u64, reset: Duration) {
+        self.requests = Some(Q {
+            limit,
+            remaining,
+            reset,
+        });
+    }
+
     /// Setzt die Header passend zum Eingangsformat.
     pub(crate) fn apply(&self, format: ErrorFormat, h: &mut HeaderMap, now: SystemTime) {
         match format {

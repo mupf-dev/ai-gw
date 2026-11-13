@@ -216,7 +216,7 @@ impl RequestObserver for Capture {
         self.0.lock().unwrap().push(record);
     }
 
-    fn payload_mode(&self) -> PayloadMode {
+    fn payload_mode(&self, _key: Option<&aigw_core::snapshot::KeyCtx>) -> PayloadMode {
         self.1
     }
 }

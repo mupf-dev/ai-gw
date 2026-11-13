@@ -3,6 +3,7 @@
 
 //! Abbildung der Spezifikationen auf Tabellenspalten.
 
+use aigw_core::observe::PayloadMode;
 use aigw_core::resource::{
     Amount, ApiKeySpec, Capacity, DeploymentSpec, McpGrantSpec, McpServerSpec, ModelGroupSpec,
     OrganizationSpec, PluginBindingSpec, PriceSpec, ResourceKind, RoutingStrategy, Scope,
@@ -77,6 +78,11 @@ impl Resource for OrganizationSpec {
             ("limits", Col::json(&self.limits)?),
             ("budget", Col::opt_json(self.budget.as_ref())?),
             ("metadata", Col::json(&self.metadata)?),
+            (
+                "payload_mode",
+                Col::opt_text(self.payload_mode.map(PayloadMode::as_str)),
+            ),
+            ("expose_reasoning", Col::opt_bool(self.expose_reasoning)),
         ])
     }
 
@@ -86,10 +92,22 @@ impl Resource for OrganizationSpec {
             limits: row.json("limits")?,
             budget: row.opt_json("budget")?,
             metadata: row.json("metadata")?,
+            payload_mode: payload_mode(row)?,
+            expose_reasoning: row.opt_bool("expose_reasoning")?,
         })
     }
 }
 impl PlainResource for OrganizationSpec {}
+
+/// Spalte `payload_mode` (F30); unbekannte Werte gelten als beschädigt.
+fn payload_mode(row: &Row<'_>) -> Result<Option<PayloadMode>, StoreError> {
+    row.opt_text("payload_mode")?
+        .map(|s| {
+            serde_json::from_value(serde_json::Value::String(s.clone()))
+                .map_err(|_| StoreError::Corrupt(format!("payload_mode {s:?} unbekannt")))
+        })
+        .transpose()
+}
 
 impl Resource for TeamSpec {
     const KIND: ResourceKind = ResourceKind::Team;
@@ -106,6 +124,11 @@ impl Resource for TeamSpec {
             ("limits", Col::json(&self.limits)?),
             ("budget", Col::opt_json(self.budget.as_ref())?),
             ("metadata", Col::json(&self.metadata)?),
+            (
+                "payload_mode",
+                Col::opt_text(self.payload_mode.map(PayloadMode::as_str)),
+            ),
+            ("expose_reasoning", Col::opt_bool(self.expose_reasoning)),
         ])
     }
 
@@ -117,6 +140,8 @@ impl Resource for TeamSpec {
             limits: row.json("limits")?,
             budget: row.opt_json("budget")?,
             metadata: row.json("metadata")?,
+            payload_mode: payload_mode(row)?,
+            expose_reasoning: row.opt_bool("expose_reasoning")?,
         })
     }
 }
@@ -185,6 +210,11 @@ impl Resource for ApiKeySpec {
             ("limits", Col::json(&self.limits)?),
             ("budget", Col::opt_json(self.budget.as_ref())?),
             ("metadata", Col::json(&self.metadata)?),
+            (
+                "payload_mode",
+                Col::opt_text(self.payload_mode.map(PayloadMode::as_str)),
+            ),
+            ("expose_reasoning", Col::opt_bool(self.expose_reasoning)),
         ])
     }
 
@@ -198,6 +228,8 @@ impl Resource for ApiKeySpec {
             limits: row.json("limits")?,
             budget: row.opt_json("budget")?,
             metadata: row.json("metadata")?,
+            payload_mode: payload_mode(row)?,
+            expose_reasoning: row.opt_bool("expose_reasoning")?,
         })
     }
 }

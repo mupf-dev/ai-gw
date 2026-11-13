@@ -125,23 +125,46 @@ GROUP BY w.counter_key, w.window_start
 const CLEANUP_SQL: &str =
     "DELETE FROM counter_state WHERE counter_key LIKE $1 AND window_start < $2";
 
-/// Zeilenschlüssel in `counter_state`: `<Fensterkürzel>|<Schlüssel>`.
+/// Zeilenschlüssel in `counter_state`: `<Fensterkürzel>|<Schlüssel>`; feste Zeiträume (F25)
+/// als `p<Ende-ms>|<Schlüssel>` (der Beginn steht in `window_start`).
 fn db_key(window: Window, key: &str) -> String {
-    let mut s = String::with_capacity(key.len() + 3);
-    s.push_str(window.code());
+    let mut s = String::with_capacity(key.len() + 16);
+    match window {
+        Window::Period { end_ms, .. } => {
+            s.push('p');
+            s.push_str(&end_ms.to_string());
+        }
+        _ => s.push_str(window.code()),
+    }
     s.push('|');
     s.push_str(key);
     s
 }
 
-fn parse_db_key(s: &str) -> Option<(Window, &str)> {
+/// Umkehrung von [`db_key`] mit `window_start` der Zeile: (Fenster, Schlüssel, Bucket).
+fn parse_db_key(s: &str, window_start: u64) -> Option<(Window, &str, u64)> {
     let (code, key) = s.split_once('|')?;
-    Some((Window::from_code(code)?, key))
+    if let Some(end) = code.strip_prefix('p')
+        && let Ok(end_ms) = end.parse::<u64>()
+    {
+        return Some((Window::period(window_start, end_ms), key, window_start));
+    }
+    let w = Window::from_code(code)?;
+    Some((w, key, window_start / w.length_ms()))
 }
 
 fn window_start(window: Window, bucket: u64) -> Option<i64> {
-    i64::try_from(bucket.checked_mul(window.length_ms())?).ok()
+    let start = if window.is_sliding() {
+        bucket.checked_mul(window.length_ms())?
+    } else {
+        bucket
+    };
+    i64::try_from(start).ok()
 }
+
+/// Zeilen fester Zeiträume (höchstens ein Kalendermonat + Sommerzeit) werden nach dieser Zeit
+/// ab ihrem Beginn gelöscht.
+const PERIOD_RETENTION_MS: u64 = 32 * 86_400_000;
 
 impl PgSyncCounters {
     /// Verbindet sich (verzögert: eine nicht erreichbare Datenbank verhindert den Start
@@ -232,7 +255,7 @@ impl Inner {
             *agg.entry((d.key, d.window, d.bucket)).or_default() += d.delta;
         }
         let before = agg.len();
-        agg.retain(|(_, w, bucket), delta| *delta != 0 && bucket + 1 >= w.bucket(now));
+        agg.retain(|(_, w, bucket), delta| *delta != 0 && w.counts(*bucket, now));
         let mut report = SyncReport {
             dropped: before - agg.len(),
             ..SyncReport::default()
@@ -296,11 +319,10 @@ impl Inner {
         report.written = d_keys.len();
         report.read = rows.len();
         for (db_key, ws, others, _) in rows {
-            let Some((window, key)) = parse_db_key(&db_key) else {
+            let Ok(ws) = u64::try_from(ws) else { continue };
+            let Some((window, key, bucket)) = parse_db_key(&db_key, ws) else {
                 continue;
             };
-            let Ok(ws) = u64::try_from(ws) else { continue };
-            let bucket = ws / window.length_ms();
             self.engine
                 .set_remote(key, window, bucket, u64::try_from(others).unwrap_or(0));
         }
@@ -336,7 +358,7 @@ impl Inner {
         if backlog.len() > self.opts.max_backlog {
             // Älteste Buckets zuerst verwerfen.
             let mut keys: Vec<BacklogKey> = backlog.keys().cloned().collect();
-            keys.sort_by_key(|(_, w, b)| b.saturating_mul(w.length_ms()));
+            keys.sort_by_key(|(_, w, b)| w.bucket_start(*b));
             let excess = backlog.len() - self.opts.max_backlog;
             for k in keys.into_iter().take(excess) {
                 backlog.remove(&k);
@@ -350,12 +372,20 @@ impl Inner {
 
     /// Löscht Zeilen, deren Bucket in keinem Fenster mehr zählt.
     async fn cleanup(&self, now: u64) {
-        for w in Window::ALL {
-            let Some(cutoff) = window_start(w, w.bucket(now).saturating_sub(2)) else {
-                continue;
-            };
+        let mut targets: Vec<(String, i64)> = Window::SLIDING
+            .into_iter()
+            .filter_map(|w| {
+                let cutoff = window_start(w, w.bucket(now).saturating_sub(2))?;
+                Some((format!("{}|%", w.code()), cutoff))
+            })
+            .collect();
+        targets.push((
+            "p%".to_owned(),
+            i64::try_from(now.saturating_sub(PERIOD_RETENTION_MS)).unwrap_or(0),
+        ));
+        for (pattern, cutoff) in targets {
             let res = sqlx::query(CLEANUP_SQL)
-                .bind(format!("{}|%", w.code()))
+                .bind(pattern)
                 .bind(cutoff)
                 .execute(&self.pool)
                 .await;
@@ -385,6 +415,13 @@ impl CounterBackend for PgSyncCounters {
         CounterBackendKind::PostgresSync
     }
 
+    fn stats(&self) -> crate::CounterStats {
+        crate::CounterStats {
+            pending: self.backlog_len() as u64,
+            ..crate::CounterStats::default()
+        }
+    }
+
     fn health(&self) -> Health {
         match &self
             .inner
@@ -405,12 +442,22 @@ mod tests {
 
     #[test]
     fn db_key_roundtrip() {
-        let k = db_key(Window::Month, "team:a|b");
-        assert_eq!(k, "mo|team:a|b");
-        assert_eq!(parse_db_key(&k), Some((Window::Month, "team:a|b")));
-        assert_eq!(parse_db_key("x|y"), None);
-        assert_eq!(parse_db_key("nopipe"), None);
+        let k = db_key(Window::Days30, "team:a|b");
+        assert_eq!(k, "30d|team:a|b");
+        let ws = window_start(Window::Days30, 7).unwrap();
+        assert_eq!(
+            parse_db_key(&k, u64::try_from(ws).unwrap()),
+            Some((Window::Days30, "team:a|b", 7))
+        );
+        assert_eq!(parse_db_key("x|y", 0), None);
+        assert_eq!(parse_db_key("nopipe", 0), None);
         assert_eq!(window_start(Window::Minute, 3), Some(180_000));
-        assert_eq!(window_start(Window::Month, u64::MAX), None);
+        assert_eq!(window_start(Window::Days30, u64::MAX), None);
+        // fester Zeitraum: Ende im Kürzel, Beginn = window_start = Bucket
+        let p = Window::period(1_000, 5_000);
+        let k = db_key(p, "key:x");
+        assert_eq!(k, "p5000|key:x");
+        assert_eq!(window_start(p, 1_000), Some(1_000));
+        assert_eq!(parse_db_key(&k, 1_000), Some((p, "key:x", 1_000)));
     }
 }

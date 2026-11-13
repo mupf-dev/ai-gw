@@ -14,8 +14,14 @@
 //!
 //! Quelle der Kennzahlen sind die Minuten- und Stunden-Rollups (`aigw_store::analytics`), des
 //! Log-Explorers das Rohlog. **Geltungsbereich:** Wer global lesen darf, sieht alles; sonst nur
-//! Anfragen von Keys in Teams, auf die er Leserecht hat (`Target::InTeam`). Anfragen ohne Team
-//! (Keys ohne Team, Fehler vor der Anmeldung) sieht nur eine globale Rolle.
+//! Anfragen von Keys in Teams, auf die er Leserecht hat (`Target::InTeam`), und – mit einer an
+//! die Organisation gebundenen Rolle (`org-admin`, `viewer`/`auditor` mit `organization`) –
+//! Anfragen von Keys ohne Team dieser Organisation (F146; Keys gehören seit F3 immer einer
+//! Organisation). Anfragen ganz ohne Key (Fehler vor der Anmeldung) sieht nur eine globale
+//! Rolle. Die Client-Adresse (`clientIp`) sehen nur `admin` und `auditor` (F147).
+//!
+//! Zeitreihen: Schritte `1m`, `5m`, `15m`, `1h`, `1d` (automatisch höchstens 200 Punkte, z. B.
+//! 24 h → 15 min, F141); Tage beginnen um Mitternacht in `billing.timezone` (F143).
 //!
 //! Filter nehmen Namen oder IDs (kommagetrennt); Ergebnisse tragen beides (ID als `key`,
 //! aufgelöster Name als `name` – fehlt bei gelöschten Objekten).
@@ -27,13 +33,16 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Arc;
 
-use aigw_core::resource::{Amount, DeploymentSpec, OrganizationSpec, TeamSpec};
+use aigw_billing::Calendar;
+use aigw_core::resource::{Amount, BudgetPeriod, DeploymentSpec, OrganizationSpec, TeamSpec};
 use aigw_store::Store;
 use aigw_store::analytics::{
-    CacheFilter, Grouping, KeyFilter, LogQuery, RollupDim, RollupQuery, StatusFilter,
+    CacheFilter, Grouping, KeyFilter, LogQuery, RollupDim, RollupQuery, StatusFilter, Visibility,
     histogram_quantile,
 };
-use aigw_store::observe::{AttemptRow, MINUTE_MS, RequestLogRow, RollupCounts};
+use aigw_store::observe::{
+    AttemptRow, GuardrailRow, HOUR_MS, MINUTE_MS, RequestLogRow, RollupCounts,
+};
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Extension, Path, Query, State};
 use axum::routing::get;
@@ -64,8 +73,8 @@ pub const LOG_PAYLOAD_PATH: &str = "/admin/api/v1/request-logs/{id}/payload";
 
 /// Höchstzahl Punkte je Zeitreihe bei explizitem `step`.
 pub const MAX_POINTS: i64 = 1500;
-/// Zielzahl Punkte bei automatisch gewähltem `step`.
-pub const TARGET_POINTS: i64 = 300;
+/// Zielzahl Punkte bei automatisch gewähltem `step` (24 h → 15 min, 7 Tage → 1 h, F141).
+pub const TARGET_POINTS: i64 = 200;
 /// Längster abfragbarer Zeitraum (Standard-Aufbewahrung der Rollups).
 pub const MAX_RANGE_MS: i64 = 400 * 86_400_000;
 /// Standard-Zeitraum ohne `from` (24 h).
@@ -82,6 +91,11 @@ pub struct AnalyticsState {
     pub store: Store,
     /// Anmeldung (dieselbe wie für die übrige Admin-API).
     pub auth: Arc<dyn AdminAuthenticator>,
+    /// Kalender für Tagesschritte (`billing.timezone`, F143).
+    pub calendar: Arc<Calendar>,
+    /// `observe.rollups` (F33): ohne Rollups bleiben Zeitreihen, KPIs und Ranglisten leer –
+    /// die Antworten sagen es (`rollups: false`), damit die UI darauf hinweisen kann.
+    pub rollups: bool,
 }
 
 impl fmt::Debug for AnalyticsState {
@@ -260,6 +274,8 @@ pub enum Dimension {
     Key,
     /// Organisation.
     Org,
+    /// Fehlerklasse (F47: `timeout`, `rate_limit` …; `""` = erfolgreich).
+    ErrorClass,
 }
 
 impl Dimension {
@@ -270,6 +286,7 @@ impl Dimension {
             Self::Team => RollupDim::Team,
             Self::Key => RollupDim::ApiKey,
             Self::Org => RollupDim::Organization,
+            Self::ErrorClass => RollupDim::ErrorClass,
         }
     }
 }
@@ -283,21 +300,25 @@ pub enum Step {
     /// 5 Minuten.
     #[serde(rename = "5m")]
     M5,
+    /// 15 Minuten.
+    #[serde(rename = "15m")]
+    M15,
     /// 1 Stunde.
     #[serde(rename = "1h")]
     H1,
-    /// 1 Tag (UTC).
+    /// 1 Tag (ab Mitternacht in `billing.timezone`, F143).
     #[serde(rename = "1d")]
     D1,
 }
 
 impl Step {
-    const ALL: [Self; 4] = [Self::M1, Self::M5, Self::H1, Self::D1];
+    const ALL: [Self; 5] = [Self::M1, Self::M5, Self::M15, Self::H1, Self::D1];
 
     fn ms(self) -> i64 {
         match self {
             Self::M1 => MINUTE_MS,
             Self::M5 => 5 * MINUTE_MS,
+            Self::M15 => 15 * MINUTE_MS,
             Self::H1 => 60 * MINUTE_MS,
             Self::D1 => 1440 * MINUTE_MS,
         }
@@ -313,6 +334,7 @@ struct Filters {
     team: Option<String>,
     key: Option<String>,
     organization: Option<String>,
+    error_class: Option<String>,
 }
 
 /// Parameter der Zeitreihe.
@@ -344,6 +366,8 @@ pub(crate) struct TimeseriesQuery {
     key: Option<String>,
     /// Organisationen (Name oder ID).
     organization: Option<String>,
+    /// Fehlerklassen (F47, kommagetrennt, z. B. `timeout,rate_limit`).
+    error_class: Option<String>,
 }
 
 /// Parameter der KPIs.
@@ -367,6 +391,8 @@ pub(crate) struct SummaryQuery {
     key: Option<String>,
     /// Organisationen (Name oder ID).
     organization: Option<String>,
+    /// Fehlerklassen (F47, kommagetrennt, z. B. `timeout,rate_limit`).
+    error_class: Option<String>,
 }
 
 /// Parameter der Rangliste.
@@ -396,6 +422,8 @@ pub(crate) struct TopQuery {
     key: Option<String>,
     /// Organisationen (Name oder ID).
     organization: Option<String>,
+    /// Fehlerklassen (F47, kommagetrennt, z. B. `timeout,rate_limit`).
+    error_class: Option<String>,
 }
 
 /// Parameter des Log-Explorers.
@@ -423,13 +451,20 @@ pub(crate) struct LogListQuery {
     key: Option<String>,
     /// Organisationen (Name oder ID).
     organization: Option<String>,
+    /// Feine Fehlerklassen (F47, kommagetrennt, z. B. `timeout,rate_limit`).
+    error_class: Option<String>,
     /// Genau diese Request-ID.
     request_id: Option<String>,
     /// Genau diese Client-Request-ID (`x-request-id` / `x-client-request-id` des Clients).
     client_request_id: Option<String>,
+    /// Nur Folgeanfragen dieser Anfrage (F191, z. B. Embeddings des semantischen Caches).
+    parent_request_id: Option<String>,
+    /// Genau diese Trace-ID (F100, 32 Hex-Zeichen).
+    trace_id: Option<String>,
     /// Nur Streams (`true`) bzw. keine Streams (`false`).
     stream: Option<bool>,
-    /// Cache: `hit`, `miss`, `none`, `hit-exact`, `hit-semantic`.
+    /// Cache: `hit`, `miss`, `none`, `hit-exact`, `hit-semantic`, `bypass`,
+    /// `cache-embedding` (Embedding-Aufrufe des semantischen Caches, F191).
     cache: Option<String>,
     /// Seitengröße (1–500, Standard 50).
     limit: Option<u32>,
@@ -489,8 +524,13 @@ pub struct Timeseries {
     pub to: String,
     /// Bucket-Breite.
     pub step: Step,
-    /// Bucket-Breite in Sekunden.
+    /// Bucket-Breite in Sekunden (bei `1d` nominal 86 400; Tage mit Zeitumstellung sind
+    /// 23 bzw. 25 Stunden lang).
     pub step_seconds: i64,
+    /// Zeitzone der Tagesgrenzen (`billing.timezone`).
+    pub timezone: String,
+    /// `false`, wenn `observe.rollups` aus ist (F33) – dann gibt es keine Daten.
+    pub rollups: bool,
     /// Gruppierung.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group_by: Option<Dimension>,
@@ -508,6 +548,10 @@ pub struct Kpi {
     pub previous: Option<f64>,
     /// Änderung in Prozent ((Wert − Vorperiode) / Vorperiode · 100); `null` ohne Vorwert.
     pub delta_percent: Option<f64>,
+    /// Nur bei Quoten (`errorRate`, `cacheHitRate`): Änderung in Prozentpunkten
+    /// ((Wert − Vorperiode) · 100, F144); `null` ohne beide Werte.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta_points: Option<f64>,
     /// Kosten exakt (nur `cost`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub amount: Option<Amount>,
@@ -540,6 +584,8 @@ pub struct AnalyticsSummary {
     pub error_rate: Kpi,
     /// Cache-Trefferquote (0–1).
     pub cache_hit_rate: Kpi,
+    /// `false`, wenn `observe.rollups` aus ist (F33) – dann gibt es keine Daten.
+    pub rollups: bool,
 }
 
 /// Eintrag einer Rangliste.
@@ -579,6 +625,8 @@ pub struct TopList {
     pub to: String,
     /// Einträge, absteigend nach Wert (ohne Wert zuletzt).
     pub items: Vec<TopItem>,
+    /// `false`, wenn `observe.rollups` aus ist (F33) – dann gibt es keine Daten.
+    pub rollups: bool,
 }
 
 /// Eine Anfrage im Log-Explorer.
@@ -658,12 +706,24 @@ pub struct RequestLogItem {
     pub stream: bool,
     /// Client-Abbruch.
     pub client_aborted: bool,
-    /// Client-Adresse.
+    /// Client-Adresse (nur für `admin` und `auditor`, F147).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_ip: Option<String>,
     /// Request-ID des Clients (`x-request-id` / `x-client-request-id`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_request_id: Option<String>,
+    /// Feine Fehlerklasse (F47).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_class: Option<String>,
+    /// Trace-ID (F100) – Verknüpfung zum Trace im Tracing-Backend.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    /// Auslösende Anfrage (F191), z. B. bei Embeddings des semantischen Caches.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_request_id: Option<String>,
+    /// Erkennungen der Guardrail-Plugins (F161; Zähler, keine Inhalte).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub guardrails: Vec<GuardrailRow>,
     /// Anzahl Upstream-Versuche (Retries, Fallbacks).
     pub attempt_count: usize,
     /// Payload gespeichert (lesbar nur mit `admin`/`auditor`).
@@ -734,6 +794,7 @@ struct TeamInfo {
 struct KeyInfo {
     name: String,
     team: Option<String>,
+    organization: String,
 }
 
 struct DeploymentInfo {
@@ -781,6 +842,7 @@ impl Directory {
                     KeyInfo {
                         name: k.metadata.name,
                         team: k.spec.team,
+                        organization: k.spec.organization,
                     },
                 )
             })
@@ -814,12 +876,23 @@ impl Directory {
             .map(|(id, _)| id.as_str())
     }
 
-    /// Ziel einer Anfrage für die Rechteprüfung: das Team (über Key bzw. Team-ID), sonst global.
-    fn target_of(&self, team_id: Option<&str>) -> Target {
-        match team_id.and_then(|id| self.teams.get(id)) {
-            Some(t) => Target::in_team(t.organization.clone(), t.name.clone()),
-            None => Target::Global,
+    /// Ziel einer Anfrage für die Rechteprüfung: das Team, ohne Team die Organisation (nur
+    /// an sie gebundene Rollen, F146), ganz ohne Key global.
+    fn target_of(&self, team_id: Option<&str>, org_id: Option<&str>) -> Target {
+        if let Some(t) = team_id.and_then(|id| self.teams.get(id)) {
+            return Target::in_team(t.organization.clone(), t.name.clone());
         }
+        match org_id.and_then(|id| self.orgs.get(id)) {
+            Some(org) if team_id.is_none() => teamless_target(org),
+            _ => Target::Global,
+        }
+    }
+
+    fn org_id_by_name(&self, name: &str) -> Option<&str> {
+        self.orgs
+            .iter()
+            .find(|(_, o)| o.as_str() == name)
+            .map(|(id, _)| id.as_str())
     }
 
     /// Anzeigename eines Gruppenschlüssels.
@@ -832,6 +905,7 @@ impl Directory {
             Dimension::Team => self.teams.get(key).map(|t| t.name.clone()),
             Dimension::Key => self.keys.get(key).map(|k| k.name.clone()),
             Dimension::Org => self.orgs.get(key).cloned(),
+            Dimension::ErrorClass => None,
         }
     }
 
@@ -846,30 +920,48 @@ impl Directory {
     }
 }
 
+/// Ziel „Keys ohne Team einer Organisation“ (F146/F193): deckt nur an die Organisation
+/// gebundene und globale Rollen ab, keine Team-Rollen.
+fn teamless_target(org: &str) -> Target {
+    Target::InOrganization(org.to_owned())
+}
+
 /// Sichtbarer Bereich des Principals.
 enum Scope {
     /// Alles (globale Leserolle).
     All,
-    /// Nur diese Team-IDs.
-    Teams(BTreeSet<String>),
+    /// Diese Team-IDs und teamlose Anfragen dieser Organisations-IDs.
+    Restricted {
+        teams: BTreeSet<String>,
+        teamless_orgs: BTreeSet<String>,
+    },
 }
 
 fn scope_of(p: &Principal, dir: &Directory) -> Scope {
     if p.can(Permission::Read, &Target::Global) {
         return Scope::All;
     }
-    Scope::Teams(
-        dir.teams
-            .iter()
-            .filter(|(_, t)| {
-                p.can(
-                    Permission::Read,
-                    &Target::in_team(t.organization.clone(), t.name.clone()),
-                )
-            })
-            .map(|(id, _)| id.clone())
-            .collect(),
-    )
+    let teams = dir
+        .teams
+        .iter()
+        .filter(|(_, t)| {
+            p.can(
+                Permission::Read,
+                &Target::in_team(t.organization.clone(), t.name.clone()),
+            )
+        })
+        .map(|(id, _)| id.clone())
+        .collect();
+    let teamless_orgs = dir
+        .orgs
+        .iter()
+        .filter(|(_, name)| p.can(Permission::Read, &teamless_target(name)))
+        .map(|(id, _)| id.clone())
+        .collect();
+    Scope::Restricted {
+        teams,
+        teamless_orgs,
+    }
 }
 
 fn split(v: Option<&str>) -> Option<Vec<String>> {
@@ -969,10 +1061,14 @@ fn resolve_filters(
             .collect::<Vec<_>>()
     });
 
-    // Geltungsbereich: ausdrücklich gewählte Teams/Keys außerhalb → 403; sonst schneiden.
-    let teams = match scope {
-        Scope::All => teams,
-        Scope::Teams(allowed) => {
+    // Geltungsbereich: ausdrücklich gewählte Teams/Keys außerhalb → 403; sonst auf den
+    // sichtbaren Bereich (Teams + teamlose Keys der Organisationen) einschränken.
+    let visible = match scope {
+        Scope::All => None,
+        Scope::Restricted {
+            teams: allowed,
+            teamless_orgs,
+        } => {
             if let Some(t) = &teams
                 && t.iter().any(|id| !allowed.contains(id))
             {
@@ -980,9 +1076,11 @@ fn resolve_filters(
             }
             if let Some(k) = &keys {
                 for id in k {
-                    let team = dir.keys.get(id).and_then(|k| k.team.as_deref());
-                    let target = match team.and_then(|t| dir.team_id_by_name(t)) {
-                        Some(tid) => dir.target_of(Some(tid)),
+                    let target = match dir.keys.get(id) {
+                        Some(k) => match k.team.as_deref().and_then(|t| dir.team_id_by_name(t)) {
+                            Some(tid) => dir.target_of(Some(tid), None),
+                            None => dir.target_of(None, dir.org_id_by_name(&k.organization)),
+                        },
                         None => Target::Global,
                     };
                     if !p.can(Permission::Read, &target) {
@@ -990,7 +1088,22 @@ fn resolve_filters(
                     }
                 }
             }
-            intersect(teams, Some(allowed.iter().cloned().collect()))
+            // Organisationen des Bereichs als zusätzliche Bedingung (Indexnutzung, s. o.).
+            let mut orgs: BTreeSet<String> = teamless_orgs.clone();
+            for t in allowed {
+                if let Some(o) = dir
+                    .teams
+                    .get(t)
+                    .and_then(|t| dir.org_id_by_name(&t.organization))
+                {
+                    orgs.insert(o.to_owned());
+                }
+            }
+            Some(Visibility {
+                teams: allowed.iter().cloned().collect(),
+                teamless_orgs: teamless_orgs.iter().cloned().collect(),
+                orgs: orgs.into_iter().collect(),
+            })
         }
     };
     Ok(Resolved {
@@ -1000,6 +1113,8 @@ fn resolve_filters(
             organizations,
             model_groups: split(f.model_group.as_deref()),
             deployments: intersect(deployments, provider_deployments),
+            error_classes: split(f.error_class.as_deref()),
+            visible,
         },
         providers,
     })
@@ -1056,6 +1171,34 @@ fn range(from: Option<&str>, to: Option<&str>) -> Result<(i64, i64), Problem> {
         ));
     }
     Ok((from, to))
+}
+
+/// Bucket-Grenzen einer Zeitreihe: gleichmäßig an der Epoche (`1m` … `1h`, `1d` in UTC) bzw.
+/// Tagesbeginne in der Zeitzone des Kalenders (F143; Sommerzeit: 23/25-Stunden-Tage). Liefert
+/// die Grenzen (n + 1 Werte für n Punkte) und die Bucket-Breite der Abfrage (Teiler aller
+/// Grenzen: Stunde, 15 oder 1 Minute).
+fn bucket_edges(cal: &Calendar, from: i64, to: i64, step: Step) -> (Vec<i64>, i64) {
+    if step != Step::D1 || cal.timezone() == "UTC" {
+        let s = step.ms();
+        let (from, to) = (floor(from, s), ceil(to, s));
+        let edges = (0..=(to - from) / s).map(|i| from + i * s).collect();
+        return (edges, s);
+    }
+    let mut edges = vec![cal.period(BudgetPeriod::Day, from).start_ms];
+    while let Some(&last) = edges.last()
+        && last < to
+    {
+        let next = cal
+            .period(BudgetPeriod::Day, last)
+            .end_ms
+            .unwrap_or(last + 1440 * MINUTE_MS);
+        edges.push(next.max(last + MINUTE_MS));
+    }
+    let query_step = [HOUR_MS, 15 * MINUTE_MS, MINUTE_MS]
+        .into_iter()
+        .find(|s| edges.iter().all(|e| e.rem_euclid(*s) == 0))
+        .unwrap_or(MINUTE_MS);
+    (edges, query_step)
 }
 
 fn pick_step(from: i64, to: i64, step: Option<Step>) -> Result<Step, Problem> {
@@ -1180,8 +1323,11 @@ pub(crate) async fn timeseries(
     let limit = clamp_limit(q.limit, 5, 20)?;
     let (from, to) = range(q.from.as_deref(), q.to.as_deref())?;
     let step = pick_step(from, to, q.step)?;
-    let step_ms = step.ms();
-    let (from, to) = (floor(from, step_ms), ceil(to, step_ms));
+    let (edges, query_step) = bucket_edges(&st.calendar, from, to, step);
+    let (from, to) = (
+        edges.first().copied().unwrap_or(from),
+        edges.last().copied().unwrap_or(to),
+    );
     let filters = Filters {
         model_group: q.model_group,
         deployment: q.deployment,
@@ -1189,6 +1335,7 @@ pub(crate) async fn timeseries(
         team: q.team,
         key: q.key,
         organization: q.organization,
+        error_class: q.error_class,
     };
     let ctx = context(&st, &p, &filters).await?;
     let filter = &ctx.resolved.keys;
@@ -1246,18 +1393,23 @@ pub(crate) async fn timeseries(
         .query_rollups(&RollupQuery {
             from_ms: from,
             to_ms: to,
-            step_ms: Some(step_ms),
+            step_ms: Some(query_step),
             grouping,
             filter: filter.clone(),
             columns: q.metric.columns(),
         })
         .await?;
+    // Abfrage-Buckets den Punkten zuordnen (bei Tagen in einer Zeitzone mehrere je Punkt).
     let mut by_group: HashMap<String, BTreeMap<i64, RollupCounts>> = HashMap::new();
     for r in rows {
+        let i = edges.partition_point(|e| *e <= r.bucket_ms);
+        let Some(&t) = edges.get(i.saturating_sub(1)) else {
+            continue;
+        };
         by_group
             .entry(r.group)
             .or_default()
-            .entry(r.bucket_ms)
+            .entry(t)
             .or_default()
             .merge(&r.counts);
     }
@@ -1268,9 +1420,8 @@ pub(crate) async fn timeseries(
         .map(|key| {
             let buckets = by_group.remove(&key).unwrap_or_default();
             let mut total = RollupCounts::default();
-            let mut points = Vec::new();
-            let mut t = from;
-            while t < to {
+            let mut points = Vec::with_capacity(edges.len().saturating_sub(1));
+            for &t in &edges[..edges.len().saturating_sub(1)] {
                 let c = buckets.get(&t).unwrap_or(&empty);
                 total.merge(c);
                 points.push(Point {
@@ -1278,7 +1429,6 @@ pub(crate) async fn timeseries(
                     v: q.metric.value(c),
                     amount: q.metric.amount(c),
                 });
-                t += step_ms;
             }
             let total = totals
                 .as_ref()
@@ -1309,7 +1459,9 @@ pub(crate) async fn timeseries(
         from: rfc3339(from),
         to: rfc3339(to),
         step,
-        step_seconds: step_ms / 1000,
+        step_seconds: step.ms() / 1000,
+        timezone: st.calendar.timezone().to_owned(),
+        rollups: st.rollups,
         group_by: q.group_by,
         series,
     }))
@@ -1345,10 +1497,16 @@ fn kpi(metric: Metric, cur: &RollupCounts, prev: &RollupCounts) -> Kpi {
         (Some(v), Some(p)) if p != 0.0 => Some((v - p) / p.abs() * 100.0),
         _ => None,
     };
+    // F144: Quoten zusätzlich in Prozentpunkten (relativ ist bei kleinen Quoten irreführend).
+    let delta_points = match (metric.unit(), value, previous) {
+        (Unit::Ratio, Some(v), Some(p)) => Some((v - p) * 100.0),
+        _ => None,
+    };
     Kpi {
         value,
         previous,
         delta_percent,
+        delta_points,
         amount: metric.amount(cur),
         previous_amount: metric.amount(prev),
     }
@@ -1381,6 +1539,7 @@ pub(crate) async fn summary(
         team: q.team,
         key: q.key,
         organization: q.organization,
+        error_class: q.error_class,
     };
     let ctx = context(&st, &p, &filters).await?;
     let filter = &ctx.resolved.keys;
@@ -1399,6 +1558,7 @@ pub(crate) async fn summary(
         latency_p95_ms: kpi(Metric::LatencyP95, &cur, &prev),
         error_rate: kpi(Metric::ErrorRate, &cur, &prev),
         cache_hit_rate: kpi(Metric::CacheHitRate, &cur, &prev),
+        rollups: st.rollups,
     }))
 }
 
@@ -1430,6 +1590,7 @@ pub(crate) async fn top(
         team: q.team,
         key: q.key,
         organization: q.organization,
+        error_class: q.error_class,
     };
     let ctx = context(&st, &p, &filters).await?;
     let g = group_totals(
@@ -1477,10 +1638,20 @@ pub(crate) async fn top(
         from: rfc3339(from),
         to: rfc3339(to),
         items,
+        rollups: st.rollups,
     }))
 }
 
-fn item(row: RequestLogRow, has_payload: bool, dir: &Directory) -> RequestLogItem {
+/// Darf `p` die Client-Adresse dieser Anfrage sehen? Wie Payloads nur `admin`/`auditor`
+/// (F147).
+fn may_see_ip(p: &Principal, row: &RequestLogRow, dir: &Directory) -> bool {
+    p.can(
+        Permission::ReadPayload,
+        &dir.target_of(row.team_id.as_deref(), row.organization_id.as_deref()),
+    )
+}
+
+fn item(row: RequestLogRow, has_payload: bool, dir: &Directory, show_ip: bool) -> RequestLogItem {
     let name = |m: Option<&String>, f: &dyn Fn(&str) -> Option<String>| m.and_then(|id| f(id));
     RequestLogItem {
         api_key: name(row.api_key_id.as_ref(), &|id| {
@@ -1522,8 +1693,12 @@ fn item(row: RequestLogRow, has_payload: bool, dir: &Directory) -> RequestLogIte
         cache: row.cache,
         stream: row.stream,
         client_aborted: row.client_aborted,
-        client_ip: row.client_ip,
+        client_ip: row.client_ip.filter(|_| show_ip),
         client_request_id: row.client_request_id,
+        error_class: row.error_class,
+        trace_id: row.trace_id,
+        parent_request_id: row.parent_request_id,
+        guardrails: row.guardrails,
     }
 }
 
@@ -1564,9 +1739,11 @@ fn parse_cache(s: &str) -> Result<CacheFilter, Problem> {
         "hit" => Ok(CacheFilter::Hit),
         "miss" => Ok(CacheFilter::Miss),
         "none" => Ok(CacheFilter::None),
-        "hit-exact" | "hit-semantic" => Ok(CacheFilter::Value(s.to_owned())),
+        "hit-exact" | "hit-semantic" | "bypass" | "cache-embedding" => {
+            Ok(CacheFilter::Value(s.to_owned()))
+        }
         _ => Err(Problem::bad_request(
-            "cache: hit, miss, none, hit-exact oder hit-semantic",
+            "cache: hit, miss, none, hit-exact, hit-semantic, bypass oder cache-embedding",
         )),
     }
 }
@@ -1606,6 +1783,7 @@ pub(crate) async fn list_request_logs(
         team: q.team,
         key: q.key,
         organization: q.organization,
+        error_class: q.error_class,
     };
     let ctx = context(&st, &p, &filters).await?;
     let mut keys = ctx.resolved.keys;
@@ -1633,8 +1811,8 @@ pub(crate) async fn list_request_logs(
             error_codes: split(q.error_code.as_deref()),
             request_id: q.request_id,
             client_request_id: q.client_request_id,
-            // F191: Filter in der Admin-API folgt mit dem Ausfüllen der Spalte.
-            parent_request_id: None,
+            parent_request_id: q.parent_request_id,
+            trace_id: q.trace_id,
             stream: q.stream,
             cache,
             before,
@@ -1649,7 +1827,10 @@ pub(crate) async fn list_request_logs(
     };
     let items = rows
         .into_iter()
-        .map(|r| item(r.row, r.has_payload, &ctx.dir))
+        .map(|r| {
+            let ip = may_see_ip(&p, &r.row, &ctx.dir);
+            item(r.row, r.has_payload, &ctx.dir, ip)
+        })
         .collect();
     Ok(Json(RequestLogList { items, next_cursor }))
 }
@@ -1666,7 +1847,7 @@ async fn load_log(
         .await?
         .ok_or_else(|| Problem::not_found(format!("Anfrage {id:?} nicht gefunden")))?;
     let dir = Directory::load(&st.store).await?;
-    let target = dir.target_of(row.team_id.as_deref());
+    let target = dir.target_of(row.team_id.as_deref(), row.organization_id.as_deref());
     p.require_on(Permission::Read, &target)?;
     Ok((row, dir, target))
 }
@@ -1709,7 +1890,8 @@ pub(crate) async fn get_request_log(
     } else {
         (PayloadStatus::NotStored, None, false)
     };
-    let mut request = item(row, has_payload, &dir);
+    let show_ip = may_see_ip(&p, &row, &dir);
+    let mut request = item(row, has_payload, &dir, show_ip);
     request.attempt_count = attempts.len();
     Ok(Json(RequestLogDetail {
         request,
@@ -1778,11 +1960,56 @@ mod tests {
     fn step_selection() {
         let h = 3_600_000;
         assert_eq!(pick_step(0, h, None).unwrap(), Step::M1);
-        assert_eq!(pick_step(0, 24 * h, None).unwrap(), Step::M5);
+        assert_eq!(pick_step(0, 6 * h, None).unwrap(), Step::M5);
+        // F141: 24 h → 15 min
+        assert_eq!(pick_step(0, 24 * h, None).unwrap(), Step::M15);
         assert_eq!(pick_step(0, 7 * 24 * h, None).unwrap(), Step::H1);
         assert_eq!(pick_step(0, 30 * 24 * h, None).unwrap(), Step::D1);
         assert!(pick_step(0, 7 * 24 * h, Some(Step::M1)).is_err());
         assert_eq!(pick_step(0, 24 * h, Some(Step::M1)).unwrap(), Step::M1);
+    }
+
+    #[test]
+    fn day_edges_follow_timezone() {
+        let h = HOUR_MS;
+        let utc = Calendar::utc();
+        // UTC: an der Epoche
+        let (e, s) = bucket_edges(&utc, 5 * h, 50 * h, Step::D1);
+        assert_eq!(e, vec![0, 24 * h, 48 * h, 72 * h]);
+        assert_eq!(s, 24 * h);
+        // Berlin im Winter (UTC+1): Tage beginnen um 23:00 UTC
+        let ber = Calendar::new("Europe/Berlin").unwrap();
+        let jan1 = 1_767_225_600_000; // 2026-01-01T00:00:00Z
+        let (e, s) = bucket_edges(&ber, jan1, jan1 + 30 * h, Step::D1);
+        assert_eq!(e, vec![jan1 - h, jan1 + 23 * h, jan1 + 47 * h]);
+        assert_eq!(s, h);
+        // Zeitumstellung 2026-03-29: Tag mit 23 Stunden
+        let mar29 = 1_774_738_800_000; // 2026-03-28T23:00:00Z = 29.03. 00:00 MEZ
+        let (e, _) = bucket_edges(&ber, mar29, mar29 + h, Step::D1);
+        assert_eq!(e, vec![mar29, mar29 + 23 * h]);
+        // Indien (UTC+5:30): Grenzen auf halben Stunden → 15-Minuten-Abfrage
+        let ind = Calendar::new("Asia/Kolkata").unwrap();
+        let (e, s) = bucket_edges(&ind, jan1, jan1 + h, Step::D1);
+        assert_eq!(e[0], jan1 - (5 * h + 30 * MINUTE_MS));
+        assert_eq!(s, 15 * MINUTE_MS);
+    }
+
+    #[test]
+    fn kpi_delta_points_for_ratios() {
+        let cur = RollupCounts {
+            requests: 100,
+            errors: 3,
+            ..RollupCounts::default()
+        };
+        let prev = RollupCounts {
+            requests: 100,
+            errors: 1,
+            ..RollupCounts::default()
+        };
+        let k = kpi(Metric::ErrorRate, &cur, &prev);
+        assert!((k.delta_points.unwrap() - 2.0).abs() < 1e-9);
+        assert!((k.delta_percent.unwrap() - 200.0).abs() < 1e-9);
+        assert!(kpi(Metric::Requests, &cur, &prev).delta_points.is_none());
     }
 
     #[test]

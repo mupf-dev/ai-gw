@@ -371,6 +371,13 @@ impl DbRow {
         }
     }
 
+    pub(crate) fn opt_bool(&self, col: &str) -> Result<Option<bool>, StoreError> {
+        match self {
+            DbRow::Sqlite(r) => Ok(r.try_get::<Option<i64>, _>(col)?.map(|v| v != 0)),
+            DbRow::Postgres(r) => Ok(r.try_get::<Option<bool>, _>(col)?),
+        }
+    }
+
     pub(crate) fn opt_uuid(&self, col: &str) -> Result<Option<Uuid>, StoreError> {
         match self {
             DbRow::Sqlite(r) => r

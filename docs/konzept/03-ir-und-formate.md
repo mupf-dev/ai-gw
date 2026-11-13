@@ -114,8 +114,9 @@ Kreuzkonvertierung (wird als `Losses` gemeldet):
 **Reasoning für OpenAI-Clients (F10):** Der Chat-Completions-Encoder gibt Reasoning-Text als
 `message.reasoning_content` bzw. `delta.reasoning_content` aus (Konvention von DeepSeek, vLLM
 und anderen kompatiblen Servern) – nicht gestreamt und gestreamt, Standard an. Abschaltbar je
-Modellgruppe (`settings.exposeReasoning: false`) und je API-Key (Metadatum
-`aigw.exposeReasoning: "false"`). Signaturen gehen nicht an OpenAI-Clients. Die Responses API
+Modellgruppe (`settings.exposeReasoning: false`) und über das Spec-Feld `exposeReasoning:
+false` an Organisation, Team oder API-Key (Vererbung Key → Team → Organisation, F185).
+Signaturen gehen nicht an OpenAI-Clients. Die Responses API
 gibt Reasoning weiterhin als `reasoning`-Items aus.
 
 **Mehrere Antwortvarianten (`n`, F12):** `ChatRequest.n` (OpenAI `n`, 1–16; in der Responses

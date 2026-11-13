@@ -16,6 +16,7 @@ use utoipa::ToSchema;
 
 use super::money::Amount;
 use super::secret::SecretRef;
+use crate::observe::PayloadMode;
 use crate::types::ProviderKind;
 
 /// Frei wählbare Metadaten (Schlüssel/Wert), z. B. Kostenstelle.
@@ -48,18 +49,64 @@ pub enum LimitMetric {
     Concurrency,
 }
 
-/// Zeitfenster eines Limits (gleitend).
+/// Zeitfenster eines Limits (F25): gleitend (`second` … `30d`) oder Kalenderzeitraum
+/// (`calendar-day|week|month` in der Zeitzone `billing.timezone`, wie Budgets).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum LimitWindow {
-    /// Sekunde.
+    /// Sekunde (gleitend).
     Second,
-    /// Minute (RPM/TPM).
+    /// Minute (RPM/TPM, gleitend).
     Minute,
-    /// Stunde.
+    /// Stunde (gleitend).
     Hour,
-    /// Tag.
+    /// 24 Stunden (gleitend).
     Day,
+    /// 30 × 24 Stunden (gleitend).
+    #[serde(rename = "30d")]
+    Days30,
+    /// Kalendertag (ab Mitternacht in `billing.timezone`, dann zurückgesetzt).
+    CalendarDay,
+    /// Kalenderwoche (ab Montag 00:00 in `billing.timezone`).
+    CalendarWeek,
+    /// Kalendermonat (ab dem 1. um 00:00 in `billing.timezone`).
+    CalendarMonth,
+}
+
+impl LimitWindow {
+    /// Alle Fenster.
+    pub const ALL: [Self; 8] = [
+        Self::Second,
+        Self::Minute,
+        Self::Hour,
+        Self::Day,
+        Self::Days30,
+        Self::CalendarDay,
+        Self::CalendarWeek,
+        Self::CalendarMonth,
+    ];
+
+    /// Bezeichner wie in der Konfiguration (`minute`, `30d`, `calendar-month` …).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Second => "second",
+            Self::Minute => "minute",
+            Self::Hour => "hour",
+            Self::Day => "day",
+            Self::Days30 => "30d",
+            Self::CalendarDay => "calendar-day",
+            Self::CalendarWeek => "calendar-week",
+            Self::CalendarMonth => "calendar-month",
+        }
+    }
+
+    /// `true` für Kalenderzeiträume (fest, nicht gleitend).
+    pub const fn is_calendar(self) -> bool {
+        matches!(
+            self,
+            Self::CalendarDay | Self::CalendarWeek | Self::CalendarMonth
+        )
+    }
 }
 
 /// Ein Limit, z. B. „100 000 Tokens je Minute für Modellgruppe gpt-4o“.
@@ -152,6 +199,15 @@ pub struct OrganizationSpec {
     /// Budget der Organisation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget: Option<Budget>,
+    /// Payload-Logging (F30): `off` | `metadata` | `masked` | `full`. Vererbung Key → Team →
+    /// Organisation → `observe.payload`; das spezifischste gesetzte Feld gilt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_mode: Option<PayloadMode>,
+    /// Reasoning-Text an OpenAI-Clients ausgeben (`reasoning_content`, F10/F185). Vererbung
+    /// Key → Team → Organisation; `false` blendet aus, auch wenn die Modellgruppe es erlaubt
+    /// (`settings.exposeReasoning` muss zusätzlich an sein).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expose_reasoning: Option<bool>,
     /// Freie Metadaten.
     #[serde(default, skip_serializing_if = "Metadata::is_empty")]
     pub metadata: Metadata,
@@ -175,6 +231,15 @@ pub struct TeamSpec {
     /// Budget des Teams.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget: Option<Budget>,
+    /// Payload-Logging (F30): `off` | `metadata` | `masked` | `full`. Vererbung Key → Team →
+    /// Organisation → `observe.payload`; das spezifischste gesetzte Feld gilt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_mode: Option<PayloadMode>,
+    /// Reasoning-Text an OpenAI-Clients ausgeben (`reasoning_content`, F10/F185). Vererbung
+    /// Key → Team → Organisation; `false` blendet aus, auch wenn die Modellgruppe es erlaubt
+    /// (`settings.exposeReasoning` muss zusätzlich an sein).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expose_reasoning: Option<bool>,
     /// Freie Metadaten.
     #[serde(default, skip_serializing_if = "Metadata::is_empty")]
     pub metadata: Metadata,
@@ -270,6 +335,15 @@ pub struct ApiKeySpec {
     /// Budget des Keys.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget: Option<Budget>,
+    /// Payload-Logging (F30): `off` | `metadata` | `masked` | `full`. Vererbung Key → Team →
+    /// Organisation → `observe.payload`; das spezifischste gesetzte Feld gilt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_mode: Option<PayloadMode>,
+    /// Reasoning-Text an OpenAI-Clients ausgeben (`reasoning_content`, F10/F185). Vererbung
+    /// Key → Team → Organisation; `false` blendet aus, auch wenn die Modellgruppe es erlaubt
+    /// (`settings.exposeReasoning` muss zusätzlich an sein).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expose_reasoning: Option<bool>,
     /// Freie Metadaten (erscheinen im Request-Log).
     #[serde(default, skip_serializing_if = "Metadata::is_empty")]
     pub metadata: Metadata,

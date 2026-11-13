@@ -30,6 +30,7 @@ use aigw_core::config::MetricsConfig;
 use aigw_core::ir::ErrorClass;
 use aigw_core::observe::{PayloadMode, RequestObserver, RequestRecord};
 use aigw_core::resource::Id;
+use aigw_core::snapshot::KeyCtx;
 use aigw_core::types::ProviderKind;
 use aigw_core::wire::WireFormat;
 use aigw_store::ReloadMetrics;
@@ -232,11 +233,25 @@ impl Series {
     }
 }
 
+/// Name des zuletzt verwendeten Deployments (Label `deployment`, F99): aus dem letzten Versuch
+/// mit dieser ID; ohne Versuch die ID selbst.
+#[inline]
+fn deployment_name(r: &RequestRecord) -> Option<&str> {
+    let id = r.deployment_id?;
+    r.attempts
+        .iter()
+        .rev()
+        .find(|a| a.deployment_id == Some(id))
+        .map(|a| a.deployment.as_str())
+}
+
 /// Unveränderte Label-Werte aus dem Datensatz (Schlüssel im Hot Path).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RawKey {
     model_group: Option<Box<str>>,
     deployment: Option<Id>,
+    /// Name des Deployments (eine Umbenennung ergibt eine neue Serie).
+    deployment_name: Option<Box<str>>,
     provider: Option<ProviderKind>,
     ingress: WireFormat,
     status_class: u8,
@@ -247,6 +262,7 @@ impl RawKey {
         Self {
             model_group: r.model_group.as_deref().map(Box::from),
             deployment: r.deployment_id,
+            deployment_name: deployment_name(r).map(Box::from),
             provider: r.provider,
             ingress: r.ingress,
             status_class: class,
@@ -260,6 +276,7 @@ impl RawKey {
             && self.provider == r.provider
             && self.deployment == r.deployment_id
             && self.model_group.as_deref() == r.model_group.as_deref()
+            && self.deployment_name.as_deref() == deployment_name(r)
     }
 }
 
@@ -321,6 +338,9 @@ pub struct DeploymentGauge {
 /// Quelle der Deployment-Zustände.
 type DeploymentSource = Box<dyn Fn() -> Vec<DeploymentGauge> + Send + Sync>;
 
+/// Quelle der Zähler-Statistik: (nachgetragen, verworfen, ausstehend).
+type CounterStatsSource = Box<dyn Fn() -> (u64, u64, u64) + Send + Sync>;
+
 /// Prometheus-Metriken des Gateways.
 pub struct GatewayMetrics {
     max_model_groups: usize,
@@ -339,6 +359,8 @@ pub struct GatewayMetrics {
     fallbacks: AtomicU64,
     deployments: OnceLock<DeploymentSource>,
     counter_degraded: OnceLock<Box<dyn Fn() -> bool + Send + Sync>>,
+    /// Nachtragen der Zähler nach Ausfällen (F28): (nachgetragen, verworfen, ausstehend).
+    counter_stats: OnceLock<CounterStatsSource>,
     /// `aigw_guardrail_hits_total{plugin,category,action}` (nur angefasst bei Erkennungen).
     guardrails: Mutex<BTreeMap<GuardrailKey, u64>>,
     /// MCP-Tool-Aufrufe (AIGW-41) je (Server, Tool, Ergebnis): (Anzahl, Dauer in µs).
@@ -387,6 +409,7 @@ impl GatewayMetrics {
             fallbacks: AtomicU64::new(0),
             deployments: OnceLock::new(),
             counter_degraded: OnceLock::new(),
+            counter_stats: OnceLock::new(),
             guardrails: Mutex::new(BTreeMap::new()),
             mcp: Mutex::new(BTreeMap::new()),
         }
@@ -396,6 +419,13 @@ impl GatewayMetrics {
     /// `aigw-counters`); einmal setzbar. Ohne Quelle entfällt die Metrik.
     pub fn set_counter_health(&self, degraded: impl Fn() -> bool + Send + Sync + 'static) {
         let _ = self.counter_degraded.set(Box::new(degraded));
+    }
+
+    /// Quelle für `aigw_counter_replayed_total`, `aigw_counter_replay_dropped_total` und
+    /// `aigw_counter_replay_pending` (F28; z. B. `CounterBackend::stats()`), als
+    /// (nachgetragen, verworfen, ausstehend); einmal setzbar.
+    pub fn set_counter_stats(&self, stats: impl Fn() -> (u64, u64, u64) + Send + Sync + 'static) {
+        let _ = self.counter_stats.set(Box::new(stats));
     }
 
     /// Quelle für `aigw_deployment_breaker_state` und `aigw_deployment_inflight_requests`
@@ -552,12 +582,16 @@ impl GatewayMetrics {
             }
             Some(_) => OTHER.into(),
         };
+        // F99: Label = Name des Deployments (ohne Versuch mit Namen: die ID).
+        let label = |d: Id| -> Box<str> {
+            deployment_name(r).map_or_else(|| d.to_string().into(), Box::from)
+        };
         let deployment: Box<str> = match r.deployment_id {
             None => "".into(),
-            Some(d) if adm.deployments.contains(&d) => d.to_string().into(),
+            Some(d) if adm.deployments.contains(&d) => label(d),
             Some(d) if adm.deployments.len() < self.max_deployments => {
                 adm.deployments.insert(d);
-                d.to_string().into()
+                label(d)
             }
             Some(_) => OTHER.into(),
         };
@@ -847,6 +881,32 @@ impl GatewayMetrics {
             );
             let _ = writeln!(out, "aigw_counter_backend_degraded {}", u8::from(f()));
         }
+        if let Some(f) = self.counter_stats.get() {
+            let (replayed, dropped, pending) = f();
+            for (name, kind, help, v) in [
+                (
+                    "aigw_counter_replayed_total",
+                    "counter",
+                    "Nach einem Ausfall des Zähler-Backends nachgetragene Deltas",
+                    replayed,
+                ),
+                (
+                    "aigw_counter_replay_dropped_total",
+                    "counter",
+                    "Verworfene Deltas (Fenster abgelaufen oder Rückstau voll)",
+                    dropped,
+                ),
+                (
+                    "aigw_counter_replay_pending",
+                    "gauge",
+                    "Noch nicht nachgetragene Deltas",
+                    pending,
+                ),
+            ] {
+                header(out, name, kind, help);
+                let _ = writeln!(out, "{name} {v}");
+            }
+        }
     }
 }
 
@@ -998,8 +1058,55 @@ impl RequestObserver for MetricsObserver {
         self.next.record(record);
     }
 
-    fn payload_mode(&self) -> PayloadMode {
-        self.next.payload_mode()
+    fn payload_mode(&self, key: Option<&KeyCtx>) -> PayloadMode {
+        self.next.payload_mode(key)
+    }
+}
+
+#[cfg(test)]
+mod f99_tests {
+    use super::*;
+    use aigw_core::observe::Attempt;
+    use aigw_core::resource::new_id;
+
+    #[test]
+    fn deployment_label_is_name() {
+        let m = GatewayMetrics::default();
+        let dep = new_id();
+        let mut r = RequestRecord::new("x", WireFormat::OpenAiChat, 200);
+        r.model_group = Some("g".into());
+        r.deployment_id = Some(dep);
+        r.attempts = vec![Attempt {
+            model_group: Some("g".into()),
+            deployment: "azure-west".into(),
+            deployment_id: Some(dep),
+            error: None,
+            upstream_status: None,
+            duration: Duration::from_millis(5),
+        }];
+        m.request_started();
+        m.observe(&r);
+        m.request_started();
+        m.observe(&r);
+        // Umbenennung: neue Serie mit neuem Namen
+        r.attempts[0].deployment = "azure-west-2".into();
+        m.request_started();
+        m.observe(&r);
+        let mut out = String::new();
+        m.render_prometheus(&mut out);
+        assert!(out.contains("deployment=\"azure-west\""), "{out}");
+        assert!(out.contains("deployment=\"azure-west-2\""));
+        assert!(!out.contains(&dep.to_string()), "keine ID als Label");
+        assert!(out.contains(
+            "aigw_requests_total{model_group=\"g\",deployment=\"azure-west\",provider=\"\",ingress=\"openai-chat\",status_class=\"2xx\"} 2"
+        ));
+        // F28: Zähler-Statistik
+        m.set_counter_stats(|| (5, 2, 1));
+        let mut out = String::new();
+        m.render_prometheus(&mut out);
+        assert!(out.contains("aigw_counter_replayed_total 5"));
+        assert!(out.contains("aigw_counter_replay_dropped_total 2"));
+        assert!(out.contains("aigw_counter_replay_pending 1"));
     }
 }
 
@@ -1039,7 +1146,8 @@ mod tests {
         }
         let attempt = |error: Option<ErrorClass>| Attempt {
             model_group: Some("gpt-4o".into()),
-            deployment: "d".into(),
+            // Name = ID-Text: gleiche Serie wie die Datensätze ohne Versuch (F99 eigener Test).
+            deployment: dep.to_string(),
             deployment_id: Some(dep),
             error,
             upstream_status: None,

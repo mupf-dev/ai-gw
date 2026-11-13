@@ -41,6 +41,8 @@ pub enum RollupDim {
     ModelGroup,
     /// `deployment_id`.
     Deployment,
+    /// `error_class` (F47; `''` = kein Fehler).
+    ErrorClass,
 }
 
 impl RollupDim {
@@ -51,11 +53,12 @@ impl RollupDim {
             Self::Organization => "organization_id",
             Self::ModelGroup => "model_group",
             Self::Deployment => "deployment_id",
+            Self::ErrorClass => "error_class",
         }
     }
 
     fn is_id(self) -> bool {
-        !matches!(self, Self::ModelGroup)
+        !matches!(self, Self::ModelGroup | Self::ErrorClass)
     }
 }
 
@@ -97,16 +100,35 @@ pub struct KeyFilter {
     pub model_groups: Option<Vec<String>>,
     /// Deployment-IDs.
     pub deployments: Option<Vec<String>>,
+    /// Fehlerklassen (F47; in Rollups `''` = kein Fehler).
+    pub error_classes: Option<Vec<String>>,
+    /// Geltungsbereich eingeschränkter Rollen (`None` = alles sichtbar).
+    pub visible: Option<Visibility>,
+}
+
+/// Sichtbarer Bereich einer eingeschränkten Rolle: Anfragen von Keys in diesen Teams **oder**
+/// teamlose Anfragen dieser Organisationen (F146: Keys ohne Team gehören zur Organisation, F3).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Visibility {
+    /// Team-IDs.
+    pub teams: Vec<String>,
+    /// Organisations-IDs, deren Anfragen ohne Team sichtbar sind.
+    pub teamless_orgs: Vec<String>,
+    /// Alle Organisationen des Bereichs (die der Teams und `teamless_orgs`). Leer = nicht
+    /// angegeben. Zusätzliche, gleichwertige Bedingung, damit die Datenbank den Index
+    /// `(organization_id, at)` nutzen kann (sonst verhindert das `OR` die Indexnutzung).
+    pub orgs: Vec<String>,
 }
 
 impl KeyFilter {
-    fn lists(&self) -> [(RollupDim, Option<&Vec<String>>); 5] {
+    fn lists(&self) -> [(RollupDim, Option<&Vec<String>>); 6] {
         [
             (RollupDim::ApiKey, self.api_keys.as_ref()),
             (RollupDim::Team, self.teams.as_ref()),
             (RollupDim::Organization, self.organizations.as_ref()),
             (RollupDim::ModelGroup, self.model_groups.as_ref()),
             (RollupDim::Deployment, self.deployments.as_ref()),
+            (RollupDim::ErrorClass, self.error_classes.as_ref()),
         ]
     }
 
@@ -115,6 +137,10 @@ impl KeyFilter {
         self.lists()
             .iter()
             .any(|(_, l)| l.is_some_and(Vec::is_empty))
+            || self
+                .visible
+                .as_ref()
+                .is_some_and(|v| v.teams.is_empty() && v.teamless_orgs.is_empty())
     }
 }
 
@@ -212,6 +238,36 @@ fn key_filter_sql(f: &KeyFilter, table: Table, q: &mut Q, sql: &mut String) {
                 sql.push_str(" AND 1 = 0");
             } else {
                 let _ = write!(sql, " AND {} IN ({})", dim.column(), q.list(vals));
+            }
+        }
+    }
+    if let Some(v) = &f.visible {
+        let ids = |l: &[String], q: &mut Q| -> Option<String> {
+            let vals: Vec<Val> = l.iter().filter_map(|x| key_val(true, table, x)).collect();
+            (!vals.is_empty()).then(|| q.list(vals))
+        };
+        if let Some(all) = ids(&v.orgs, q) {
+            let _ = write!(sql, " AND organization_id IN ({all})");
+        }
+        let teams = ids(&v.teams, q);
+        let orgs = ids(&v.teamless_orgs, q);
+        let no_team = match table {
+            Table::Rollup => format!("team_id = {}", q.arg(Val::Dim(None))),
+            Table::Log => "team_id IS NULL".to_owned(),
+        };
+        match (teams, orgs) {
+            (None, None) => sql.push_str(" AND 1 = 0"),
+            (Some(t), None) => {
+                let _ = write!(sql, " AND team_id IN ({t})");
+            }
+            (None, Some(o)) => {
+                let _ = write!(sql, " AND {no_team} AND organization_id IN ({o})");
+            }
+            (Some(t), Some(o)) => {
+                let _ = write!(
+                    sql,
+                    " AND (team_id IN ({t}) OR ({no_team} AND organization_id IN ({o})))"
+                );
             }
         }
     }
@@ -387,6 +443,13 @@ impl Store {
             let l = binds.list(e.iter().map(|v| Val::text(v.clone())));
             let _ = write!(sql, " AND error_code IN ({l})");
         }
+        if let Some(id) = &q.trace_id {
+            let _ = write!(
+                sql,
+                " AND trace_id = {}",
+                binds.arg(Val::text(id.to_ascii_lowercase()))
+            );
+        }
         if let Some(id) = &q.request_id {
             let Ok(id) = Uuid::parse_str(id) else {
                 return Ok(Vec::new());
@@ -510,6 +573,8 @@ pub struct LogQuery {
     pub client_request_id: Option<String>,
     /// Nur Folgeanfragen dieser Anfrage (F191, `parent_request_id`).
     pub parent_request_id: Option<String>,
+    /// Genau diese Trace-ID (F100).
+    pub trace_id: Option<String>,
     /// Streaming ja/nein.
     pub stream: Option<bool>,
     /// Cache-Ergebnis.

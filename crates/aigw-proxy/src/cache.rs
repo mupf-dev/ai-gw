@@ -453,7 +453,8 @@ impl RoutedEmbedder {
         r.duration = start.elapsed();
         r.model_alias = Some(model.to_owned());
         r.cache = Some(CacheOutcome::Embedding);
-        r.client_request_id = Some(ctx.request_id.clone());
+        // F191: Verweis auf die auslösende Anfrage (Log-Explorer: parentRequestId).
+        r.parent_request_id = Some(ctx.request_id.clone());
         r.api_key_id = caller.api_key_id();
         r.team_id = caller.team_id();
         r.organization_id = caller.organization_id();

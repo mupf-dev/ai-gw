@@ -215,6 +215,7 @@ mod tests {
             ],
             request_body: r#"{"messages":[{"role":"user","content":"Ich bin bob@example.com, Karte 4111111111111111"}]}"#.into(),
             response_body: "Antwort an bob@example.com".into(),
+            mode: PayloadMode::Masked,
         }
     }
 

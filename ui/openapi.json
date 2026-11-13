@@ -523,6 +523,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "errorClass",
+            "in": "query",
+            "description": "Fehlerklassen (F47, kommagetrennt, z. B. `timeout,rate_limit`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -704,6 +713,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "errorClass",
+            "in": "query",
+            "description": "Fehlerklassen (F47, kommagetrennt, z. B. `timeout,rate_limit`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -872,6 +890,15 @@
             "name": "organization",
             "in": "query",
             "description": "Organisationen (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "errorClass",
+            "in": "query",
+            "description": "Fehlerklassen (F47, kommagetrennt, z. B. `timeout,rate_limit`).",
             "required": false,
             "schema": {
               "type": "string"
@@ -7010,6 +7037,15 @@
             }
           },
           {
+            "name": "errorClass",
+            "in": "query",
+            "description": "Feine Fehlerklassen (F47, kommagetrennt, z. B. `timeout,rate_limit`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "requestId",
             "in": "query",
             "description": "Genau diese Request-ID.",
@@ -7028,6 +7064,24 @@
             }
           },
           {
+            "name": "parentRequestId",
+            "in": "query",
+            "description": "Nur Folgeanfragen dieser Anfrage (F191, z. B. Embeddings des semantischen Caches).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "traceId",
+            "in": "query",
+            "description": "Genau diese Trace-ID (F100, 32 Hex-Zeichen).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "stream",
             "in": "query",
             "description": "Nur Streams (`true`) bzw. keine Streams (`false`).",
@@ -7039,7 +7093,7 @@
           {
             "name": "cache",
             "in": "query",
-            "description": "Cache: `hit`, `miss`, `none`, `hit-exact`, `hit-semantic`.",
+            "description": "Cache: `hit`, `miss`, `none`, `hit-exact`, `hit-semantic`, `bypass`,\n`cache-embedding` (Embedding-Aufrufe des semantischen Caches, F191).",
             "required": false,
             "schema": {
               "type": "string"
@@ -7923,6 +7977,45 @@
           },
           "403": {
             "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/usage/limit-warnings": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "Hinweise zu Limits, die mit dem Zähler-Backend nur ungenau wirken (F29: Sekundenlimits mit\n`postgres-sync` – die Instanzen gleichen nur im Abstand `counters.sync_interval_ms` ab).",
+        "operationId": "limit_warnings_list",
+        "responses": {
+          "200": {
+            "description": "Hinweise (nur Objekte mit Leserecht)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LimitWarnings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9033,7 +9126,8 @@
           "cost",
           "latencyP95Ms",
           "errorRate",
-          "cacheHitRate"
+          "cacheHitRate",
+          "rollups"
         ],
         "properties": {
           "cacheHitRate": {
@@ -9067,6 +9161,10 @@
           "requests": {
             "$ref": "#/components/schemas/Kpi",
             "description": "Anfragen."
+          },
+          "rollups": {
+            "type": "boolean",
+            "description": "`false`, wenn `observe.rollups` aus ist (F33) – dann gibt es keine Daten."
           },
           "to": {
             "type": "string",
@@ -9190,6 +9288,13 @@
             "format": "date-time",
             "description": "Ablaufzeitpunkt (RFC 3339)."
           },
+          "exposeReasoning": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Reasoning-Text an OpenAI-Clients ausgeben (`reasoning_content`, F10/F185). Vererbung\nKey → Team → Organisation; `false` blendet aus, auch wenn die Modellgruppe es erlaubt\n(`settings.exposeReasoning` muss zusätzlich an sein)."
+          },
           "limits": {
             "type": "array",
             "items": {
@@ -9204,6 +9309,17 @@
           "organization": {
             "type": "string",
             "description": "Organisation (Name, Pflicht; F3). Mit Team muss es die Organisation des Teams sein.\nKeys ohne Team erben Limits, Budgets und Plugins der Organisation."
+          },
+          "payloadMode": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PayloadMode",
+                "description": "Payload-Logging (F30): `off` | `metadata` | `masked` | `full`. Vererbung Key → Team →\nOrganisation → `observe.payload`; das spezifischste gesetzte Feld gilt."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "team": {
             "type": [
@@ -10013,7 +10129,8 @@
           "provider",
           "team",
           "key",
-          "org"
+          "org",
+          "error_class"
         ]
       },
       "EffectivePluginControl": {
@@ -10111,6 +10228,36 @@
           }
         }
       },
+      "GuardrailRow": {
+        "type": "object",
+        "description": "Erkennungen eines Guardrail-Plugins in einer Anfrage (Spalte `request_log.guardrails`,\nJSON-Array; F161).",
+        "required": [
+          "plugin",
+          "category",
+          "action",
+          "count"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Aktion (`mask`, `redact`, `reject`, `pseudonymize`, `log-only`, `flag`)."
+          },
+          "category": {
+            "type": "string",
+            "description": "Kategorie (z. B. `email`, `injection`)."
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Anzahl der Erkennungen.",
+            "minimum": 0
+          },
+          "plugin": {
+            "type": "string",
+            "description": "Plugin (`pii`, `prompt-filter`, `content-safety` …)."
+          }
+        }
+      },
       "Invitation": {
         "type": "object",
         "description": "Einladung eines Nutzers (ohne Token).",
@@ -10168,6 +10315,14 @@
             ],
             "format": "double",
             "description": "Änderung in Prozent ((Wert − Vorperiode) / Vorperiode · 100); `null` ohne Vorwert."
+          },
+          "deltaPoints": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Nur bei Quoten (`errorRate`, `cacheHitRate`): Änderung in Prozentpunkten\n((Wert − Vorperiode) · 100, F144); `null` ohne beide Werte."
           },
           "previous": {
             "type": [
@@ -10250,14 +10405,72 @@
         },
         "additionalProperties": false
       },
+      "LimitWarning": {
+        "type": "object",
+        "description": "Hinweis zu einem Limit, das mit dem gewählten Zähler-Backend nur ungenau wirkt (F29).",
+        "required": [
+          "kind",
+          "name",
+          "field",
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Kennung des Hinweises (`second-limit-postgres-sync`)."
+          },
+          "field": {
+            "type": "string",
+            "description": "Feld, z. B. `limits[0]`."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Art des Objekts (`organization`, `team`, `api-key`, `model-group`)."
+          },
+          "message": {
+            "type": "string",
+            "description": "Verständliche Meldung."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name des Objekts."
+          }
+        }
+      },
+      "LimitWarnings": {
+        "type": "object",
+        "description": "Hinweise zu Limits.",
+        "required": [
+          "counterBackend",
+          "warnings"
+        ],
+        "properties": {
+          "counterBackend": {
+            "type": "string",
+            "description": "Gewähltes Zähler-Backend (`local`, `postgres-sync`, `redis`)."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LimitWarning"
+            },
+            "description": "Hinweise (leer, wenn alles exakt wirkt)."
+          }
+        }
+      },
       "LimitWindow": {
         "type": "string",
-        "description": "Zeitfenster eines Limits (gleitend).",
+        "description": "Zeitfenster eines Limits (F25): gleitend (`second` … `30d`) oder Kalenderzeitraum\n(`calendar-day|week|month` in der Zeitzone `billing.timezone`, wie Budgets).",
         "enum": [
           "second",
           "minute",
           "hour",
-          "day"
+          "day",
+          "30d",
+          "calendar-day",
+          "calendar-week",
+          "calendar-month"
         ]
       },
       "LogoutResult": {
@@ -10713,6 +10926,13 @@
             ],
             "description": "Anzeigename."
           },
+          "exposeReasoning": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Reasoning-Text an OpenAI-Clients ausgeben (`reasoning_content`, F10/F185). Vererbung\nKey → Team → Organisation; `false` blendet aus, auch wenn die Modellgruppe es erlaubt\n(`settings.exposeReasoning` muss zusätzlich an sein)."
+          },
           "limits": {
             "type": "array",
             "items": {
@@ -10723,9 +10943,30 @@
           "metadata": {
             "$ref": "#/components/schemas/BTreeMap",
             "description": "Freie Metadaten."
+          },
+          "payloadMode": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PayloadMode",
+                "description": "Payload-Logging (F30): `off` | `metadata` | `masked` | `full`. Vererbung Key → Team →\nOrganisation → `observe.payload`; das spezifischste gesetzte Feld gilt."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
+      },
+      "PayloadMode": {
+        "type": "string",
+        "description": "Umfang des Payload-Loggings.",
+        "enum": [
+          "off",
+          "metadata",
+          "masked",
+          "full"
+        ]
       },
       "PayloadStatus": {
         "type": "string",
@@ -11383,7 +11624,7 @@
               "string",
               "null"
             ],
-            "description": "Client-Adresse."
+            "description": "Client-Adresse (nur für `admin` und `auditor`, F147)."
           },
           "clientRequestId": {
             "type": [
@@ -11414,12 +11655,26 @@
             "type": "string",
             "description": "Eingangsformat (`openai-chat`, `anthropic-messages` …)."
           },
+          "errorClass": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Feine Fehlerklasse (F47)."
+          },
           "errorCode": {
             "type": [
               "string",
               "null"
             ],
             "description": "Fehlerklasse."
+          },
+          "guardrails": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailRow"
+            },
+            "description": "Erkennungen der Guardrail-Plugins (F161; Zähler, keine Inhalte)."
           },
           "hasPayload": {
             "type": "boolean",
@@ -11472,6 +11727,13 @@
             "format": "int64",
             "description": "Ausgabe-Tokens."
           },
+          "parentRequestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Auslösende Anfrage (F191), z. B. bei Embeddings des semantischen Caches."
+          },
           "provider": {
             "type": [
               "string",
@@ -11513,6 +11775,13 @@
               "null"
             ],
             "description": "Team-ID."
+          },
+          "traceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Trace-ID (F100) – Verknüpfung zum Trace im Tracing-Backend."
           },
           "ttftMs": {
             "type": [
@@ -11869,6 +12138,7 @@
         "enum": [
           "1m",
           "5m",
+          "15m",
           "1h",
           "1d"
         ]
@@ -12012,6 +12282,13 @@
             ],
             "description": "Anzeigename."
           },
+          "exposeReasoning": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Reasoning-Text an OpenAI-Clients ausgeben (`reasoning_content`, F10/F185). Vererbung\nKey → Team → Organisation; `false` blendet aus, auch wenn die Modellgruppe es erlaubt\n(`settings.exposeReasoning` muss zusätzlich an sein)."
+          },
           "limits": {
             "type": "array",
             "items": {
@@ -12026,6 +12303,17 @@
           "organization": {
             "type": "string",
             "description": "Organisation (Name)."
+          },
+          "payloadMode": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PayloadMode",
+                "description": "Payload-Logging (F30): `off` | `metadata` | `masked` | `full`. Vererbung Key → Team →\nOrganisation → `observe.payload`; das spezifischste gesetzte Feld gilt."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -12040,6 +12328,8 @@
           "to",
           "step",
           "stepSeconds",
+          "timezone",
+          "rollups",
           "series"
         ],
         "properties": {
@@ -12062,6 +12352,10 @@
             "$ref": "#/components/schemas/Metric",
             "description": "Kennzahl."
           },
+          "rollups": {
+            "type": "boolean",
+            "description": "`false`, wenn `observe.rollups` aus ist (F33) – dann gibt es keine Daten."
+          },
           "series": {
             "type": "array",
             "items": {
@@ -12076,7 +12370,11 @@
           "stepSeconds": {
             "type": "integer",
             "format": "int64",
-            "description": "Bucket-Breite in Sekunden."
+            "description": "Bucket-Breite in Sekunden (bei `1d` nominal 86 400; Tage mit Zeitumstellung sind\n23 bzw. 25 Stunden lang)."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "Zeitzone der Tagesgrenzen (`billing.timezone`)."
           },
           "to": {
             "type": "string",
@@ -12245,7 +12543,8 @@
           "unit",
           "from",
           "to",
-          "items"
+          "items",
+          "rollups"
         ],
         "properties": {
           "dimension": {
@@ -12266,6 +12565,10 @@
           "metric": {
             "$ref": "#/components/schemas/Metric",
             "description": "Kennzahl."
+          },
+          "rollups": {
+            "type": "boolean",
+            "description": "`false`, wenn `observe.rollups` aus ist (F33) – dann gibt es keine Daten."
           },
           "to": {
             "type": "string",

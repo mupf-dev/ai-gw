@@ -114,6 +114,8 @@ async fn run(label: &str, store: Store) {
     let app = aigw_admin::router_with(state.clone()).merge(analytics_router(AnalyticsState {
         store: store.clone(),
         auth: Arc::clone(&state.auth),
+        calendar: Arc::new(aigw_billing::Calendar::utc()),
+        rollups: true,
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -147,6 +149,19 @@ async fn run(label: &str, store: Store) {
         Some(json!({"name": "perf-viewer", "roles": [{"role": "viewer", "organization": "org0", "team": "team0-0"}]}))).await;
     assert_eq!(s, StatusCode::CREATED);
     let scoped = serde_json::from_slice::<Value>(&b).unwrap()["secret"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (s, b) = call(
+        addr,
+        &secret,
+        Method::POST,
+        "/admin-api-keys",
+        Some(json!({"name": "perf-org", "roles": [{"role": "viewer", "organization": "org0"}]})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let org_scoped = serde_json::from_slice::<Value>(&b).unwrap()["secret"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -200,6 +215,7 @@ async fn run(label: &str, store: Store) {
                     organization_id: org.clone(),
                     model_group: groups[d % groups.len()].to_owned(),
                     deployment_id: deployments[d].clone(),
+                    error_class: String::new(),
                 },
                 c,
             ));
@@ -306,7 +322,24 @@ async fn run(label: &str, store: Store) {
         ),
         (
             "timeseries 24h requests (5m)",
+            format!("/analytics/timeseries?metric=requests&step=5m&{r24}"),
+            &secret,
+        ),
+        // F141: Auto-Schritt bei 24 h jetzt 15 min
+        (
+            "timeseries 24h requests (auto -> 15m)",
             format!("/analytics/timeseries?metric=requests&{r24}"),
+            &secret,
+        ),
+        (
+            "timeseries 7d requests (1d)",
+            format!("/analytics/timeseries?metric=requests&step=1d&{r7}"),
+            &secret,
+        ),
+        // F47: Fehlerklassen als Dimension
+        (
+            "timeseries 7d errors groupBy error_class",
+            format!("/analytics/timeseries?metric=errors&groupBy=error_class&{r7}"),
             &secret,
         ),
         (
@@ -348,6 +381,21 @@ async fn run(label: &str, store: Store) {
             "request-logs team-scoped",
             "/request-logs".to_owned(),
             &scoped,
+        ),
+        (
+            "request-logs errorClass",
+            "/request-logs?errorClass=rate_limit".to_owned(),
+            &secret,
+        ),
+        (
+            "request-logs org-scoped (F146)",
+            "/request-logs".to_owned(),
+            &org_scoped,
+        ),
+        (
+            "summary 7d (org-scoped, F146)",
+            format!("/analytics/summary?{r7}"),
+            &org_scoped,
         ),
     ];
     for (name, path, tok) in cases {

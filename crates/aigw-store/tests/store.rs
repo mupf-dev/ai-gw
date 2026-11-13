@@ -60,23 +60,46 @@ async fn run(store: Store) {
             meta("acme"),
             OrganizationSpec {
                 display_name: Some("ACME".into()),
+                // F30/F185: vererbbare Einstellungen
+                payload_mode: Some(aigw_core::observe::PayloadMode::Full),
+                expose_reasoning: Some(true),
                 ..Default::default()
             },
         )
         .await
         .unwrap();
     assert_eq!(org.id.get_version_num(), 7);
+    assert_eq!(
+        org.spec.payload_mode,
+        Some(aigw_core::observe::PayloadMode::Full)
+    );
+    assert_eq!(org.spec.expose_reasoning, Some(true));
     assert!(org.metadata.created_at.is_some());
 
     let team_spec = TeamSpec {
         organization: "acme".into(),
         allowed_models: vec!["gpt-4o".into()],
-        limits: vec![LimitSpec {
-            metric: LimitMetric::Tokens,
-            limit: 100_000,
-            window: LimitWindow::Minute,
-            model_group: None,
-        }],
+        limits: vec![
+            LimitSpec {
+                metric: LimitMetric::Tokens,
+                limit: 100_000,
+                window: LimitWindow::Minute,
+                model_group: None,
+            },
+            // F25: Kalender- und 30-Tage-Fenster
+            LimitSpec {
+                metric: LimitMetric::Requests,
+                limit: 10_000,
+                window: LimitWindow::CalendarMonth,
+                model_group: None,
+            },
+            LimitSpec {
+                metric: LimitMetric::Requests,
+                limit: 9_000,
+                window: LimitWindow::Days30,
+                model_group: None,
+            },
+        ],
         budget: Some(Budget {
             amount: "100.50".parse().unwrap(),
             period: BudgetPeriod::Month,
@@ -84,6 +107,8 @@ async fn run(store: Store) {
             hard_limit: true,
             enforcement: Default::default(),
         }),
+        payload_mode: Some(aigw_core::observe::PayloadMode::Metadata),
+        expose_reasoning: Some(false),
         ..Default::default()
     };
     let team = store

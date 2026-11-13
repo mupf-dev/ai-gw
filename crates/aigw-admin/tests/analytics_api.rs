@@ -30,7 +30,9 @@ use aigw_core::resource::{Amount, DeploymentSpec, ModelGroupSpec, ObjectMeta, ne
 use aigw_core::types::ProviderKind;
 use aigw_store::Store;
 use aigw_store::analytics::histogram_quantile;
-use aigw_store::observe::{AttemptRow, PayloadRow, RequestLogRow, RollupCounts, RollupKey};
+use aigw_store::observe::{
+    AttemptRow, GuardrailRow, PayloadRow, RequestLogRow, RollupCounts, RollupKey,
+};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::{Method, Request, StatusCode};
@@ -263,6 +265,9 @@ async fn scenario(store: Store) {
     let analytics = analytics_router(AnalyticsState {
         store: store.clone(),
         auth: Arc::clone(&state.auth),
+        // Tagesschritte in der Abrechnungszeitzone (F143).
+        calendar: Arc::new(aigw_billing::Calendar::new("Europe/Berlin").unwrap()),
+        rollups: true,
     });
     let app = aigw_admin::router_with(state).merge(analytics);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -357,7 +362,8 @@ async fn scenario(store: Store) {
         4,
     );
     let k_ops = mk("k-ops", &team_ids["ops"], &beta, "claude", &d_oll, 2, 4);
-    let k_none = mk("k-none", "", "", "claude", &d_oll, 3, 4);
+    // Key ohne Team, aber (F3) mit Organisation: für Org-Rollen sichtbar (F146).
+    let k_none = mk("k-none", "", &acme, "claude", &d_oll, 3, 4);
     let keys = [&k_plat, &k_res, &k_ops, &k_none];
 
     // --- Rollups: 3 Stunden, je Minute und Key; Minute 5 doppelt (additiver UPSERT) ---------
@@ -373,6 +379,7 @@ async fn scenario(store: Store) {
                     organization_id: k.org.clone(),
                     model_group: k.group.to_owned(),
                     deployment_id: k.deployment.clone(),
+                    error_class: String::new(),
                 };
                 let c = counts(k, m);
                 data.entry(rk.clone()).or_default().merge(&c);
@@ -390,6 +397,27 @@ async fn scenario(store: Store) {
     for (k, v) in again {
         data.get_mut(&k).unwrap().merge(&v);
     }
+    // F47: Fehlerklasse als weitere Schlüsselspalte (eigene Zeilen neben '' = ohne Fehler).
+    let timeouts = RollupKey {
+        bucket_start: T0 + 10 * MIN,
+        error_class: "timeout".into(),
+        ..data
+            .keys()
+            .find(|k| k.api_key_id == k_plat.id)
+            .unwrap()
+            .clone()
+    };
+    let tc = RollupCounts {
+        requests: 2,
+        errors: 2,
+        latency_ms_sum: 60_000,
+        ..RollupCounts::default()
+    };
+    store
+        .write_request_batch(&[], &[], &[(timeouts.clone(), tc.clone())])
+        .await
+        .unwrap();
+    data.insert(timeouts, tc);
     let all = |_: &RollupKey| true;
 
     // --- Zeitreihe: Stunden-Rollups --------------------------------------------------------
@@ -440,9 +468,10 @@ async fn scenario(store: Store) {
         assert_eq!(num(&p["v"]), (c.input_tokens + c.output_tokens) as f64);
     }
 
-    // automatische Schrittwahl: 24 h → 5m, 7 Tage → 1h, 60 Tage → 1d
+    // automatische Schrittwahl: 24 h → 15m (F141), 7 Tage → 1h, 60 Tage → 1d
     for (range, step) in [
-        (24 * HOUR, "5m"),
+        (6 * HOUR, "5m"),
+        (24 * HOUR, "15m"),
         (7 * 24 * HOUR, "1h"),
         (60 * 24 * HOUR, "1d"),
     ] {
@@ -471,6 +500,11 @@ async fn scenario(store: Store) {
         .await;
     let total_cost = sum(&data, T0, T0 + 3 * HOUR, all).cost;
     assert_eq!(v["unit"], "currency");
+    // F143: Tage beginnen um Mitternacht in Berlin (Winterzeit: 23:00 UTC des Vortags)
+    assert_eq!(v["timezone"], "Europe/Berlin");
+    assert_eq!(v["rollups"], true);
+    assert_eq!(v["series"][0]["points"][0]["t"], ts(T0 - HOUR));
+    assert_eq!(v["series"][0]["points"][1]["t"], ts(T0 + 23 * HOUR));
     assert_eq!(v["series"][0]["points"][0]["amount"], amount(total_cost));
     assert_eq!(v["series"][0]["points"][1]["amount"], amount(0));
     assert_eq!(v["series"][0]["totalAmount"], amount(total_cost));
@@ -505,6 +539,10 @@ async fn scenario(store: Store) {
     );
     let p95 = histogram_quantile(&cur.latency_hist, 0.95).unwrap();
     assert!((num(&v["latencyP95Ms"]["value"]) - p95).abs() < 1e-9);
+    // F144: Quoten zusätzlich in Prozentpunkten
+    let er = |c: &RollupCounts| c.errors as f64 / c.requests as f64;
+    assert!((num(&v["errorRate"]["deltaPoints"]) - (er(&cur) - er(&prev)) * 100.0).abs() < 1e-9);
+    assert!(v["requests"].get("deltaPoints").is_none());
     // Vorperiode ohne Daten → Delta null
     let v = env
         .ok(
@@ -577,6 +615,45 @@ async fn scenario(store: Store) {
         )
         .await;
     assert!(v["series"][0]["total"].is_null());
+
+    // F47: Gruppierung und Filter nach Fehlerklasse
+    let v = env
+        .ok(
+            a,
+            &format!("/analytics/timeseries?metric=errors&groupBy=error_class&step=1h&{range3}"),
+        )
+        .await;
+    let by_class: BTreeMap<String, f64> = v["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| (s["key"].as_str().unwrap().to_owned(), num(&s["total"])))
+        .collect();
+    assert_eq!(by_class["timeout"], 2.0);
+    assert_eq!(
+        by_class[""],
+        sum(&data, T0, T0 + 3 * HOUR, |k| k.error_class.is_empty()).errors as f64
+    );
+    let v = env
+        .ok(
+            a,
+            &format!("/analytics/summary?errorClass=timeout&{range3}"),
+        )
+        .await;
+    assert_eq!(num(&v["requests"]["value"]), 2.0);
+    let v = env
+        .ok(
+            a,
+            &format!("/analytics/top?dimension=error_class&metric=errors&{range3}"),
+        )
+        .await;
+    assert!(
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["key"] == "timeout")
+    );
 
     let v = env
         .ok(
@@ -729,9 +806,14 @@ async fn scenario(store: Store) {
         .as_array()
         .unwrap()
         .iter()
-        .map(|i| i["name"].as_str().unwrap())
+        .map(|i| i["name"].as_str().unwrap_or(""))
         .collect();
-    assert_eq!(names, ["research", "platform"]);
+    // F146: Keys ohne Team der eigenen Organisation (k-none) sind für org-admin sichtbar
+    assert_eq!(names, ["", "research", "platform"]);
+    assert_eq!(
+        req_of(&env.ok(&oa_acme, &format!("{summary}&key=k-none")).await),
+        sum(&data, T0, T0 + 3 * HOUR, |k| k.api_key_id == k_none.id).requests as f64
+    );
     let v = env
         .ok(
             &v_plat,
@@ -813,6 +895,19 @@ async fn scenario(store: Store) {
     ];
     let mut logs = logs;
     logs[2].client_request_id = Some("client-abc-1".into());
+    // F47, F100, F147, F161, F191
+    logs[0].client_ip = Some("10.1.2.3".into());
+    logs[0].guardrails = vec![GuardrailRow {
+        plugin: "pii".into(),
+        category: "email".into(),
+        action: "mask".into(),
+        count: 2,
+    }];
+    logs[1].error_class = Some("rate_limit".into());
+    logs[3].error_class = Some("server_error".into());
+    logs[2].trace_id = Some("4bf92f3577b34da6a3ce929d0e0e4736".into());
+    logs[4].cache = Some("cache-embedding".into());
+    logs[4].parent_request_id = Some(sorted[3].clone());
     logs[0].attempts = vec![
         AttemptRow {
             model_group: Some("gpt-4o".into()),
@@ -884,14 +979,17 @@ async fn scenario(store: Store) {
         ("errorCode=rate_limited,upstream_error", vec![3, 1]),
         ("team=platform", vec![4, 3, 0]),
         ("key=k-ops", vec![2]),
-        ("organization=acme", vec![4, 3, 1, 0]),
+        ("organization=acme", vec![5, 4, 3, 1, 0]),
         ("modelGroup=claude", vec![5, 2]),
         ("deployment=gpt-4o-mock", vec![4, 3, 1, 0]),
         ("provider=ollama", vec![5, 2]),
         ("stream=true", vec![3, 0]),
         ("cache=hit", vec![0]),
         ("cache=miss", vec![2]),
-        ("cache=none", vec![6, 5, 4, 3, 1]),
+        ("cache=none", vec![6, 5, 3, 1]),
+        ("cache=cache-embedding", vec![4]),
+        ("errorClass=rate_limit,server_error", vec![3, 1]),
+        ("errorClass=timeout", vec![]),
     ] {
         let v = env.ok(a, &format!("/request-logs?{q}")).await;
         let w: Vec<String> = want.iter().map(|i: &usize| sorted[*i].clone()).collect();
@@ -906,6 +1004,23 @@ async fn scenario(store: Store) {
         .await;
     assert_eq!(list_ids(&v), [sorted[2].clone()]);
     assert_eq!(v["items"][0]["clientRequestId"], "client-abc-1");
+    // F100: Trace-ID (Groß-/Kleinschreibung egal)
+    let v = env
+        .ok(a, "/request-logs?traceId=4BF92F3577B34DA6A3CE929D0E0E4736")
+        .await;
+    assert_eq!(list_ids(&v), [sorted[2].clone()]);
+    assert_eq!(v["items"][0]["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736");
+    // F191: Folgeanfragen (Cache-Embedding) einer Anfrage
+    let v = env
+        .ok(a, &format!("/request-logs?parentRequestId={}", sorted[3]))
+        .await;
+    assert_eq!(list_ids(&v), [sorted[4].clone()]);
+    assert_eq!(v["items"][0]["parentRequestId"], sorted[3].as_str());
+    assert_eq!(v["items"][0]["cache"], "cache-embedding");
+    let v = env
+        .ok(a, &format!("/request-logs?requestId={}", sorted[1]))
+        .await;
+    assert_eq!(v["items"][0]["errorClass"], "rate_limit");
     let v = env
         .ok(
             a,
@@ -937,7 +1052,29 @@ async fn scenario(store: Store) {
         [sorted[4].clone(), sorted[3].clone(), sorted[0].clone()]
     );
     let v = env.ok(&oa_acme, "/request-logs").await;
-    assert_eq!(list_ids(&v).len(), 4);
+    assert_eq!(
+        list_ids(&v).len(),
+        5,
+        "F146: inkl. Key ohne Team der Organisation"
+    );
+    // F147: clientIp nur für admin/auditor
+    assert!(
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i.get("clientIp").is_none())
+    );
+    let v = env
+        .ok(&viewer, &format!("/request-logs?requestId={}", sorted[0]))
+        .await;
+    assert!(v["items"][0].get("clientIp").is_none());
+    for t in [&auditor, a] {
+        let v = env
+            .ok(t, &format!("/request-logs?requestId={}", sorted[0]))
+            .await;
+        assert_eq!(v["items"][0]["clientIp"], "10.1.2.3");
+    }
     let (s, _) = env.get(&v_plat, "/request-logs?team=ops").await;
     assert_eq!(s, StatusCode::FORBIDDEN);
 
@@ -951,13 +1088,24 @@ async fn scenario(store: Store) {
     assert_eq!(v["payloadStatus"], "forbidden");
     assert!(v.get("payload").is_none());
     assert_eq!(v["team"], "platform");
+    assert!(v.get("clientIp").is_none(), "F147");
+    // F161: Guardrail-Zähler
+    assert_eq!(v["guardrails"][0]["plugin"], "pii");
+    assert_eq!(v["guardrails"][0]["count"], 2);
     let (s, v) = env.get(&v_plat, &format!("{detail}/payload")).await;
     assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
     assert_eq!(v["code"], "forbidden");
     let (s, _) = env.get(&oa_acme, &format!("{detail}/payload")).await;
     assert_eq!(s, StatusCode::FORBIDDEN, "org-admin darf keine Payloads");
+    // F146: Einzelanfrage eines Keys ohne Team der eigenen Organisation
+    let v = env
+        .ok(&oa_acme, &format!("/request-logs/{}", sorted[5]))
+        .await;
+    assert_eq!(v["apiKey"], "k-none");
+    assert_eq!(v["payloadStatus"], "forbidden");
     for t in [&aud_plat, &auditor, a] {
         let v = env.ok(t, &detail).await;
+        assert_eq!(v["clientIp"], "10.1.2.3", "F147");
         assert_eq!(v["payloadStatus"], "available");
         assert_eq!(v["payload"]["mode"], "masked");
         assert_eq!(v["payload"]["payload"]["request"]["bytes"], 12);

@@ -51,7 +51,7 @@ use crate::{admin_keys as ak, session as s};
         s::create_invitation, s::get_invitation, s::delete_invitation,
         ak::list_admin_api_keys, ak::create_admin_api_key, ak::get_admin_api_key,
         ak::put_admin_api_key, ak::delete_admin_api_key,
-        crate::usage::list_budgets,
+        crate::usage::list_budgets, crate::usage::limit_warnings_list,
         crate::audit::audit_log,
         crate::analytics::timeseries, crate::analytics::summary, crate::analytics::top,
         crate::analytics::list_request_logs, crate::analytics::get_request_log,

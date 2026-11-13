@@ -662,6 +662,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/usage/limit-warnings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Hinweise zu Limits, die mit dem Zähler-Backend nur ungenau wirken (F29: Sekundenlimits mit
+         *     `postgres-sync` – die Instanzen gleichen nur im Abstand `counters.sync_interval_ms` ab).
+         */
+        get: operations["limit_warnings_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/users": {
         parameters: {
             query?: never;
@@ -881,6 +901,8 @@ export interface components {
             previousTo: string;
             /** @description Anfragen. */
             requests: components["schemas"]["Kpi"];
+            /** @description `false`, wenn `observe.rollups` aus ist (F33) – dann gibt es keine Daten. */
+            rollups: boolean;
             /** @description Ende (exklusive). */
             to: string;
             /** @description Tokens (Eingabe + Ausgabe). */
@@ -929,6 +951,12 @@ export interface components {
              * @description Ablaufzeitpunkt (RFC 3339).
              */
             expiresAt?: string | null;
+            /**
+             * @description Reasoning-Text an OpenAI-Clients ausgeben (`reasoning_content`, F10/F185). Vererbung
+             *     Key → Team → Organisation; `false` blendet aus, auch wenn die Modellgruppe es erlaubt
+             *     (`settings.exposeReasoning` muss zusätzlich an sein).
+             */
+            exposeReasoning?: boolean | null;
             /** @description Limits des Keys. */
             limits?: components["schemas"]["LimitSpec"][];
             /** @description Freie Metadaten (erscheinen im Request-Log). */
@@ -938,6 +966,7 @@ export interface components {
              *     Keys ohne Team erben Limits, Budgets und Plugins der Organisation.
              */
             organization: string;
+            payloadMode?: components["schemas"]["PayloadMode"] | null;
             /** @description Team (Name, optional). */
             team?: string | null;
             /** @description Besitzender Nutzer (Name). */
@@ -1287,7 +1316,7 @@ export interface components {
          * @description Dimension für Gruppierung und Ranglisten.
          * @enum {string}
          */
-        Dimension: "model_group" | "deployment" | "provider" | "team" | "key" | "org";
+        Dimension: "model_group" | "deployment" | "provider" | "team" | "key" | "org" | "error_class";
         /** @description Wirksame Kettensteuerung einer Bindung (F148), für die Anzeige in der UI. */
         EffectivePluginControl: {
             /**
@@ -1334,6 +1363,23 @@ export interface components {
             /** @description Geheimer Wert: nur „geändert“, nie der Inhalt. */
             secret?: boolean;
         };
+        /**
+         * @description Erkennungen eines Guardrail-Plugins in einer Anfrage (Spalte `request_log.guardrails`,
+         *     JSON-Array; F161).
+         */
+        GuardrailRow: {
+            /** @description Aktion (`mask`, `redact`, `reject`, `pseudonymize`, `log-only`, `flag`). */
+            action: string;
+            /** @description Kategorie (z. B. `email`, `injection`). */
+            category: string;
+            /**
+             * Format: int32
+             * @description Anzahl der Erkennungen.
+             */
+            count: number;
+            /** @description Plugin (`pii`, `prompt-filter`, `content-safety` …). */
+            plugin: string;
+        };
         /** @description Einladung eines Nutzers (ohne Token). */
         Invitation: {
             /**
@@ -1361,6 +1407,12 @@ export interface components {
              * @description Änderung in Prozent ((Wert − Vorperiode) / Vorperiode · 100); `null` ohne Vorwert.
              */
             deltaPercent?: number | null;
+            /**
+             * Format: double
+             * @description Nur bei Quoten (`errorRate`, `cacheHitRate`): Änderung in Prozentpunkten
+             *     ((Wert − Vorperiode) · 100, F144); `null` ohne beide Werte.
+             */
+            deltaPoints?: number | null;
             /**
              * Format: double
              * @description Wert in der Vorperiode.
@@ -1397,11 +1449,32 @@ export interface components {
             /** @description Fenster (bei `concurrency` ignoriert). */
             window?: components["schemas"]["LimitWindow"];
         };
+        /** @description Hinweis zu einem Limit, das mit dem gewählten Zähler-Backend nur ungenau wirkt (F29). */
+        LimitWarning: {
+            /** @description Kennung des Hinweises (`second-limit-postgres-sync`). */
+            code: string;
+            /** @description Feld, z. B. `limits[0]`. */
+            field: string;
+            /** @description Art des Objekts (`organization`, `team`, `api-key`, `model-group`). */
+            kind: string;
+            /** @description Verständliche Meldung. */
+            message: string;
+            /** @description Name des Objekts. */
+            name: string;
+        };
+        /** @description Hinweise zu Limits. */
+        LimitWarnings: {
+            /** @description Gewähltes Zähler-Backend (`local`, `postgres-sync`, `redis`). */
+            counterBackend: string;
+            /** @description Hinweise (leer, wenn alles exakt wirkt). */
+            warnings: components["schemas"]["LimitWarning"][];
+        };
         /**
-         * @description Zeitfenster eines Limits (gleitend).
+         * @description Zeitfenster eines Limits (F25): gleitend (`second` … `30d`) oder Kalenderzeitraum
+         *     (`calendar-day|week|month` in der Zeitzone `billing.timezone`, wie Budgets).
          * @enum {string}
          */
-        LimitWindow: "second" | "minute" | "hour" | "day";
+        LimitWindow: "second" | "minute" | "hour" | "day" | "30d" | "calendar-day" | "calendar-week" | "calendar-month";
         /** @description Ergebnis der Abmeldung. */
         LogoutResult: {
             /** @description Hierhin navigieren (Logout beim IdP oder die Admin-UI). */
@@ -1571,11 +1644,23 @@ export interface components {
             budget?: components["schemas"]["Budget"] | null;
             /** @description Anzeigename. */
             displayName?: string | null;
+            /**
+             * @description Reasoning-Text an OpenAI-Clients ausgeben (`reasoning_content`, F10/F185). Vererbung
+             *     Key → Team → Organisation; `false` blendet aus, auch wenn die Modellgruppe es erlaubt
+             *     (`settings.exposeReasoning` muss zusätzlich an sein).
+             */
+            exposeReasoning?: boolean | null;
             /** @description Limits für die gesamte Organisation. */
             limits?: components["schemas"]["LimitSpec"][];
             /** @description Freie Metadaten. */
             metadata?: components["schemas"]["BTreeMap"];
+            payloadMode?: components["schemas"]["PayloadMode"] | null;
         };
+        /**
+         * @description Umfang des Payload-Loggings.
+         * @enum {string}
+         */
+        PayloadMode: "off" | "metadata" | "masked" | "full";
         /**
          * @description Zugriff auf den Payload einer Anfrage.
          * @enum {string}
@@ -1811,7 +1896,7 @@ export interface components {
             cachedTokens: number;
             /** @description Client-Abbruch. */
             clientAborted: boolean;
-            /** @description Client-Adresse. */
+            /** @description Client-Adresse (nur für `admin` und `auditor`, F147). */
             clientIp?: string | null;
             /** @description Request-ID des Clients (`x-request-id` / `x-client-request-id`). */
             clientRequestId?: string | null;
@@ -1823,8 +1908,12 @@ export interface components {
             deploymentId?: string | null;
             /** @description Eingangsformat (`openai-chat`, `anthropic-messages` …). */
             endpoint: string;
+            /** @description Feine Fehlerklasse (F47). */
+            errorClass?: string | null;
             /** @description Fehlerklasse. */
             errorCode?: string | null;
+            /** @description Erkennungen der Guardrail-Plugins (F161; Zähler, keine Inhalte). */
+            guardrails?: components["schemas"]["GuardrailRow"][];
             /** @description Payload gespeichert (lesbar nur mit `admin`/`auditor`). */
             hasPayload: boolean;
             /** @description Request-ID. */
@@ -1852,6 +1941,8 @@ export interface components {
              * @description Ausgabe-Tokens.
              */
             outputTokens: number;
+            /** @description Auslösende Anfrage (F191), z. B. bei Embeddings des semantischen Caches. */
+            parentRequestId?: string | null;
             /** @description Anbieter. */
             provider?: string | null;
             /** @description Anbieter-Modell. */
@@ -1872,6 +1963,8 @@ export interface components {
             team?: string | null;
             /** @description Team-ID. */
             teamId?: string | null;
+            /** @description Trace-ID (F100) – Verknüpfung zum Trace im Tracing-Backend. */
+            traceId?: string | null;
             /**
              * Format: int64
              * @description Zeit bis zum ersten Token (ms).
@@ -2028,7 +2121,7 @@ export interface components {
          * @description Bucket-Breite einer Zeitreihe.
          * @enum {string}
          */
-        Step: "1m" | "5m" | "1h" | "1d";
+        Step: "1m" | "5m" | "15m" | "1h" | "1d";
         /** @description Anzahl je Aktion. */
         Summary: {
             /** @description Anzulegen. */
@@ -2074,12 +2167,19 @@ export interface components {
             budget?: components["schemas"]["Budget"] | null;
             /** @description Anzeigename. */
             displayName?: string | null;
+            /**
+             * @description Reasoning-Text an OpenAI-Clients ausgeben (`reasoning_content`, F10/F185). Vererbung
+             *     Key → Team → Organisation; `false` blendet aus, auch wenn die Modellgruppe es erlaubt
+             *     (`settings.exposeReasoning` muss zusätzlich an sein).
+             */
+            exposeReasoning?: boolean | null;
             /** @description Limits des Teams. */
             limits?: components["schemas"]["LimitSpec"][];
             /** @description Freie Metadaten. */
             metadata?: components["schemas"]["BTreeMap"];
             /** @description Organisation (Name). */
             organization: string;
+            payloadMode?: components["schemas"]["PayloadMode"] | null;
         };
         /** @description Zeitreihe. */
         Timeseries: {
@@ -2088,15 +2188,20 @@ export interface components {
             groupBy?: components["schemas"]["Dimension"] | null;
             /** @description Kennzahl. */
             metric: components["schemas"]["Metric"];
+            /** @description `false`, wenn `observe.rollups` aus ist (F33) – dann gibt es keine Daten. */
+            rollups: boolean;
             /** @description Reihen (nach Rang, `__other__` zuletzt). */
             series: components["schemas"]["Series"][];
             /** @description Bucket-Breite. */
             step: components["schemas"]["Step"];
             /**
              * Format: int64
-             * @description Bucket-Breite in Sekunden.
+             * @description Bucket-Breite in Sekunden (bei `1d` nominal 86 400; Tage mit Zeitumstellung sind
+             *     23 bzw. 25 Stunden lang).
              */
             stepSeconds: number;
+            /** @description Zeitzone der Tagesgrenzen (`billing.timezone`). */
+            timezone: string;
             /** @description Ende (exklusive, auf `step` ausgerichtet). */
             to: string;
             /** @description Einheit. */
@@ -2146,6 +2251,8 @@ export interface components {
             items: components["schemas"]["TopItem"][];
             /** @description Kennzahl. */
             metric: components["schemas"]["Metric"];
+            /** @description `false`, wenn `observe.rollups` aus ist (F33) – dann gibt es keine Daten. */
+            rollups: boolean;
             /** @description Ende (exklusive). */
             to: string;
             /** @description Einheit. */
@@ -2571,6 +2678,8 @@ export interface operations {
                 key?: string;
                 /** @description Organisationen (Name oder ID). */
                 organization?: string;
+                /** @description Fehlerklassen (F47, kommagetrennt, z. B. `timeout,rate_limit`). */
+                errorClass?: string;
             };
             header?: never;
             path?: never;
@@ -2652,6 +2761,8 @@ export interface operations {
                 key?: string;
                 /** @description Organisationen (Name oder ID). */
                 organization?: string;
+                /** @description Fehlerklassen (F47, kommagetrennt, z. B. `timeout,rate_limit`). */
+                errorClass?: string;
             };
             header?: never;
             path?: never;
@@ -2731,6 +2842,8 @@ export interface operations {
                 key?: string;
                 /** @description Organisationen (Name oder ID). */
                 organization?: string;
+                /** @description Fehlerklassen (F47, kommagetrennt, z. B. `timeout,rate_limit`). */
+                errorClass?: string;
             };
             header?: never;
             path?: never;
@@ -6784,13 +6897,22 @@ export interface operations {
                 key?: string;
                 /** @description Organisationen (Name oder ID). */
                 organization?: string;
+                /** @description Feine Fehlerklassen (F47, kommagetrennt, z. B. `timeout,rate_limit`). */
+                errorClass?: string;
                 /** @description Genau diese Request-ID. */
                 requestId?: string;
                 /** @description Genau diese Client-Request-ID (`x-request-id` / `x-client-request-id` des Clients). */
                 clientRequestId?: string;
+                /** @description Nur Folgeanfragen dieser Anfrage (F191, z. B. Embeddings des semantischen Caches). */
+                parentRequestId?: string;
+                /** @description Genau diese Trace-ID (F100, 32 Hex-Zeichen). */
+                traceId?: string;
                 /** @description Nur Streams (`true`) bzw. keine Streams (`false`). */
                 stream?: boolean;
-                /** @description Cache: `hit`, `miss`, `none`, `hit-exact`, `hit-semantic`. */
+                /**
+                 * @description Cache: `hit`, `miss`, `none`, `hit-exact`, `hit-semantic`, `bypass`,
+                 *     `cache-embedding` (Embedding-Aufrufe des semantischen Caches, F191).
+                 */
                 cache?: string;
                 /** @description Seitengröße (1–500, Standard 50). */
                 limit?: number;
@@ -7395,6 +7517,35 @@ export interface operations {
             };
             /** @description Keine Berechtigung */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    limit_warnings_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Hinweise (nur Objekte mit Leserecht) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LimitWarnings"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

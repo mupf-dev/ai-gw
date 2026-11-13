@@ -90,6 +90,17 @@ impl Runtime {
         let observe = crate::observe::start(config, &store, traces)?;
         let counters =
             aigw_counters::from_config(config, aigw_counters::CounterOptions::default()).await?;
+        // Zustand und Nachtragen des Zähler-Backends in /metrics (F28).
+        if let Some(g) = observe.log.gateway_metrics() {
+            let c = Arc::clone(&counters);
+            g.set_counter_health(move || matches!(c.health(), aigw_counters::Health::Degraded(_)));
+            let c = Arc::clone(&counters);
+            g.set_counter_stats(move || {
+                let s = c.stats();
+                (s.replayed, s.dropped, s.pending)
+            });
+        }
+        warn_limits(config, &snap);
         let calendar = Arc::new(
             Calendar::new(&config.billing.timezone)
                 .map_err(|e| format!("billing.timezone: {e}"))?,
@@ -140,6 +151,32 @@ impl Runtime {
             reload_metrics,
             reloader: reloader.spawn(),
         })
+    }
+
+    /// Öffnet bei `SIGHUP` die Exportdateien neu (JSON-Lines, F31); `None` ohne Unix-Signale.
+    pub(crate) fn spawn_reopen_on_hup(&self) -> Option<tokio::task::JoinHandle<()>> {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let mut hup = match signal(SignalKind::hangup()) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(error = %e, "SIGHUP-Handler nicht installierbar");
+                    return None;
+                }
+            };
+            let reopen = self.observe.log.reopener();
+            Some(tokio::spawn(async move {
+                while hup.recv().await.is_some() {
+                    tracing::info!("SIGHUP: Exportdateien werden neu geöffnet");
+                    reopen();
+                }
+            }))
+        }
+        #[cfg(not(unix))]
+        {
+            None
+        }
     }
 
     /// Quellen für `/metrics` (Gateway, Snapshot, Request-Log, OTLP).
@@ -216,6 +253,55 @@ async fn cold_start_from_cache(
     let store = Store::connect_lazy_with(&config.store).await?;
     let reloader = Reloader::from_cache(store.clone(), Arc::clone(keyring), cached, opts);
     Ok((store, reloader))
+}
+
+/// F29: Sekundenlimits mit `counters.backend: postgres-sync` sind im Cluster unscharf –
+/// einmal beim Start warnen (die Admin-API liefert dieselben Hinweise unter
+/// `GET /admin/api/v1/usage/limit-warnings`).
+fn warn_limits(config: &Config, snap: &aigw_core::snapshot::Snapshot) {
+    let mut keys: Vec<_> = snap.keys.values().collect();
+    keys.sort_by(|a, b| a.key.metadata.name.cmp(&b.key.metadata.name));
+    keys.dedup_by(|a, b| a.key.id == b.key.id);
+    let objects = snap
+        .organizations
+        .values()
+        .map(|o| ("organization", o.metadata.name.as_str(), &o.spec.limits[..]))
+        .chain(
+            snap.teams
+                .values()
+                .map(|t| ("team", t.metadata.name.as_str(), &t.spec.limits[..])),
+        )
+        .chain(keys.iter().map(|k| {
+            (
+                "api-key",
+                k.key.metadata.name.as_str(),
+                &k.key.spec.limits[..],
+            )
+        }))
+        .chain(
+            snap.model_groups
+                .iter()
+                // Aliasse zeigen auf dieselbe Gruppe: nur unter dem kanonischen Namen.
+                .filter(|(name, g)| g.group.metadata.name == **name)
+                .map(|(_, g)| {
+                    ("model-group", g.group.metadata.name.as_str(), &g.group.spec.limits[..])
+                }),
+        );
+    let warnings = aigw_core::validate::bounds::limit_warnings(config.counters.backend, objects);
+    if !warnings.is_empty() {
+        tracing::warn!(
+            anzahl = warnings.len(),
+            beispiele = ?warnings
+                .iter()
+                .take(5)
+                .map(|w| format!("{} {:?} {}", w.kind, w.name, w.field))
+                .collect::<Vec<_>>(),
+            sync_interval_ms = config.counters.sync_interval_ms,
+            "Sekundenlimits mit counters.backend = postgres-sync: im Cluster nur ungenau \
+             (Abgleich im Abstand sync_interval_ms) – redis verwenden oder längere Fenster; \
+             Liste: GET /admin/api/v1/usage/limit-warnings"
+        );
+    }
 }
 
 /// Startet die Ereignis-Webhooks (`events.webhooks`, AIGW-61); `None` ohne Empfänger.

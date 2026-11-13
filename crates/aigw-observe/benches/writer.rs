@@ -65,6 +65,7 @@ fn records(n: usize, payload: bool) -> Vec<RequestRecord> {
                     )
                     .into(),
                     response_body: "Gern geschehen. ".repeat(40).into(),
+                    mode: PayloadMode::Masked,
                 }));
             }
             r

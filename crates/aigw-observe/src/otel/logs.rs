@@ -78,6 +78,13 @@ fn to_log(e: &LogEntry, include_payload: bool, observed: u64) -> LogData {
     opt(&mut a, "aigw.provider_model", &l.provider_model);
     a.push(KeyValue::int("http.response.status_code", l.status));
     opt(&mut a, "error.type", &l.error_code);
+    opt(&mut a, "aigw.error_class", &l.error_class);
+    opt(&mut a, "aigw.parent_request_id", &l.parent_request_id);
+    if !l.guardrails.is_empty()
+        && let Ok(g) = serde_json::to_string(&l.guardrails)
+    {
+        a.push(KeyValue::str("aigw.guardrails", g));
+    }
     a.push(KeyValue::int("gen_ai.usage.input_tokens", l.input_tokens));
     a.push(KeyValue::int("gen_ai.usage.output_tokens", l.output_tokens));
     for (k, v) in [
@@ -114,6 +121,7 @@ fn to_log(e: &LogEntry, include_payload: bool, observed: u64) -> LogData {
             .map(|p| AnyValue::Str(p.payload.to_string())),
         attributes: a,
         event_name: "aigw.request",
+        trace_id: l.trace_id.as_deref().and_then(super::trace::unhex::<16>),
     }
 }
 

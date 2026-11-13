@@ -119,6 +119,8 @@ time = { version = "0.3.47", default-features = false, features = ["std", "serde
 # Budget-Zeiträume in konfigurierbarer Zeitzone (AIGW-31): IANA-Zeitzonen mit eingebetteter
 # tzdb (Container-Images ohne /usr/share/zoneinfo), reines Rust.
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
+# Rotation des JSON-Lines-Exports (F31): gzip der rotierten Dateien, reines Rust (miniz_oxide).
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 # IDs: UUIDv7 (zeitlich sortierbar, gut für B-Baum-Indizes).
 uuid = { version = "1.18", default-features = false, features = ["std", "v7", "serde"] }
 # Krypto (AES-256-GCM, SHA-256, Zufall) über denselben Provider wie rustls.

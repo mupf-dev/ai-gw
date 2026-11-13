@@ -82,6 +82,29 @@ impl KeyCtx {
         self.expires_at.is_none_or(|e| now < e)
     }
 
+    /// Payload-Modus aus `payloadMode` (Key → Team → Organisation; F30), `None` = nicht gesetzt
+    /// (es gilt `observe.payload`).
+    pub fn payload_mode(&self) -> Option<crate::observe::PayloadMode> {
+        self.key
+            .spec
+            .payload_mode
+            .or_else(|| self.team.as_ref().and_then(|t| t.spec.payload_mode))
+            .or_else(|| self.organization.as_ref().and_then(|o| o.spec.payload_mode))
+    }
+
+    /// `exposeReasoning` (Key → Team → Organisation; F185), `None` = nicht gesetzt.
+    pub fn expose_reasoning(&self) -> Option<bool> {
+        self.key
+            .spec
+            .expose_reasoning
+            .or_else(|| self.team.as_ref().and_then(|t| t.spec.expose_reasoning))
+            .or_else(|| {
+                self.organization
+                    .as_ref()
+                    .and_then(|o| o.spec.expose_reasoning)
+            })
+    }
+
     /// Darf der Key die Modellgruppe `group` (kanonischer Name) nutzen?
     ///
     /// Leere Freigabelisten bedeuten „alle“; Key- und Team-Liste müssen beide passen.

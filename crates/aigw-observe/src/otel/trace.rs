@@ -91,7 +91,7 @@ fn hex(bytes: &[u8]) -> String {
     s
 }
 
-fn unhex<const N: usize>(s: &str) -> Option<[u8; N]> {
+pub(crate) fn unhex<const N: usize>(s: &str) -> Option<[u8; N]> {
     let b = s.as_bytes();
     if b.len() != N * 2 {
         return None;
@@ -403,6 +403,8 @@ impl TraceActivator {
             .map_err(|_| OtlpConfigError::Endpoint("Tracing ist bereits aktiviert".into()))?;
         // Für `aigw_core::observe::current_traceparent` (Upstream-Header).
         aigw_core::observe::set_traceparent_source(current_traceparent);
+        // Trace-ID im Request-Log (F100).
+        aigw_core::observe::set_trace_id_source(current_trace_id);
         tracing::callsite::rebuild_interest_cache();
         let (shutdown, shutdown_rx) = watch::channel(false);
         let task = tokio::spawn(run_exporter(
@@ -416,6 +418,19 @@ impl TraceActivator {
         ));
         Ok(TraceExporter { shutdown, task })
     }
+}
+
+/// Trace-ID des aktuellen Spans (Quelle für `aigw_core::observe::current_trace_id`, F100) –
+/// auch ohne Sampling und unabhängig von der Weitergabe.
+fn current_trace_id() -> Option<String> {
+    tracing::Span::current()
+        .with_subscriber(|(id, dispatch)| {
+            let registry = dispatch.downcast_ref::<Registry>()?;
+            let span = registry.span(id)?;
+            let ext = span.extensions();
+            ext.get::<SpanCtx>().map(|c| hex(&c.trace_id))
+        })
+        .flatten()
 }
 
 /// `traceparent` des aktuellen Spans (Quelle für `aigw_core::observe::current_traceparent`).

@@ -330,15 +330,34 @@ pub enum CounterBackendKind {
     Redis,
 }
 
-/// Einstellungen der Zähler.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Einstellungen der Zähler (F26: Abgleich, Redis-Pool und -Zeitlimit).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CountersConfig {
     /// Gewähltes Backend.
     pub backend: CounterBackendKind,
-    /// Redis-URL (nur für `backend: redis`), z. B. `redis://redis:6379/0`.
+    /// Redis-URL (nur für `backend: redis`), z. B. `redis://redis:6379/0`. Nur Einzelinstanz
+    /// bzw. Sentinel-Primary; ein Server im Cluster-Modus bricht den Start ab (F27).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub redis_url: Option<String>,
+    /// Abgleichintervall von `postgres-sync` in Millisekunden (Standard 1000).
+    pub sync_interval_ms: u64,
+    /// Anzahl multiplexter Redis-Verbindungen (Standard 4).
+    pub redis_pool_size: usize,
+    /// Zeitlimit je Redis-Operation in Millisekunden, danach lokaler Rückfall (Standard 250).
+    pub redis_timeout_ms: u64,
+}
+
+impl Default for CountersConfig {
+    fn default() -> Self {
+        Self {
+            backend: CounterBackendKind::default(),
+            redis_url: None,
+            sync_interval_ms: 1000,
+            redis_pool_size: 4,
+            redis_timeout_ms: 250,
+        }
+    }
 }
 
 /// Master-Key für die Verschlüsselung der Anbieter-Zugangsdaten (AES-256-GCM).
@@ -815,8 +834,11 @@ impl Default for AdminConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ObserveConfig {
-    /// Rohlog je Anfrage in `request_log` schreiben (Minuten-Rollups entstehen immer).
+    /// Rohlog je Anfrage in `request_log` schreiben (unabhängig von `rollups`).
     pub request_log: bool,
+    /// Minuten-/Stunden-Rollups für Dashboards und Analytics schreiben (F33, Standard an).
+    /// Aus: Dashboards bleiben leer, Rohlog, Export und Metriken laufen weiter.
+    pub rollups: bool,
     /// Kapazität des Puffers zwischen Proxy und Writer (Einträge); voll → verwerfen + zählen.
     pub queue_capacity: usize,
     /// Höchstzahl Einträge je Batch (Schreiben spätestens bei Erreichen).
@@ -825,7 +847,8 @@ pub struct ObserveConfig {
     pub flush_interval_ms: u64,
     /// Höchstdauer für das Leeren des Puffers beim Herunterfahren (Millisekunden).
     pub shutdown_timeout_ms: u64,
-    /// Payload-Logging: `off` | `metadata` | `masked` | `full` (global; später je Key/Team).
+    /// Payload-Logging: `off` | `metadata` | `masked` | `full` – Standard für alle Anfragen;
+    /// je Organisation/Team/Key überschreibbar (`payloadMode`, F30).
     pub payload: PayloadMode,
     /// Payload-Bodies werden auf diese Größe gekürzt (Bytes, je Request und Response).
     pub payload_max_bytes: usize,
@@ -843,6 +866,7 @@ impl Default for ObserveConfig {
     fn default() -> Self {
         Self {
             request_log: true,
+            rollups: true,
             queue_capacity: 16_384,
             batch_size: 1000,
             flush_interval_ms: 500,
@@ -892,6 +916,8 @@ pub struct JsonlExportConfig {
     pub path: PathBuf,
     /// Payload (sofern geloggt, also bereits maskiert) mit exportieren.
     pub include_payload: bool,
+    /// Rotation (F31).
+    pub rotate: JsonlRotateConfig,
 }
 
 impl Default for JsonlExportConfig {
@@ -900,7 +926,32 @@ impl Default for JsonlExportConfig {
             enabled: false,
             path: PathBuf::from("aigw-requests.jsonl"),
             include_payload: false,
+            rotate: JsonlRotateConfig::default(),
         }
+    }
+}
+
+/// Rotation der JSON-Lines-Datei (F31). Rotiert wird beim Tageswechsel (UTC, `daily`) und/oder
+/// sobald die Datei `max_size_mb` überschreiten würde; die rotierte Datei heißt
+/// `<pfad>.<UTC-Zeitstempel>` (mit `gzip` zusätzlich `.gz`). Unabhängig davon öffnet `SIGHUP`
+/// die Datei neu (für externes logrotate).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct JsonlRotateConfig {
+    /// Beim Tageswechsel (UTC) rotieren.
+    pub daily: bool,
+    /// Höchstgröße in MiB (`0` = ohne Größengrenze).
+    pub max_size_mb: u64,
+    /// So viele rotierte Dateien behalten, ältere löschen (`0` = alle behalten).
+    pub keep: usize,
+    /// Rotierte Dateien mit gzip komprimieren.
+    pub gzip: bool,
+}
+
+impl JsonlRotateConfig {
+    /// `true`, wenn überhaupt rotiert wird.
+    pub fn enabled(&self) -> bool {
+        self.daily || self.max_size_mb > 0
     }
 }
 
@@ -1404,6 +1455,32 @@ counters:
         assert!(Config::from_yaml("server:\n  control:\n    max_body_bytes: 1\n").is_err());
         assert!(Config::from_yaml("unknown_section: {}\n").is_err());
         assert!(Config::from_yaml("counters:\n  backend: memcached\n").is_err());
+        // F26/F33/F31: neue Felder mit Standardwerten, per YAML und ENV
+        let d = Config::default();
+        assert_eq!(d.counters.sync_interval_ms, 1000);
+        assert_eq!(d.counters.redis_pool_size, 4);
+        assert_eq!(d.counters.redis_timeout_ms, 250);
+        assert!(d.observe.rollups);
+        assert!(!d.observe.jsonl.rotate.enabled());
+        let cfg = Config::from_yaml_with_env(
+            "counters:\n  backend: postgres-sync\n  sync_interval_ms: 2000\n\
+             observe:\n  rollups: false\n  jsonl:\n    rotate: {daily: true, keep: 7, gzip: true}\n",
+            [
+                ("AIGW_COUNTERS__REDIS_POOL_SIZE".to_owned(), "8".to_owned()),
+                ("AIGW_COUNTERS__REDIS_TIMEOUT_MS".to_owned(), "100".to_owned()),
+                (
+                    "AIGW_OBSERVE__JSONL__ROTATE__MAX_SIZE_MB".to_owned(),
+                    "64".to_owned(),
+                ),
+            ],
+        )
+        .unwrap();
+        assert_eq!(cfg.counters.sync_interval_ms, 2000);
+        assert_eq!(cfg.counters.redis_pool_size, 8);
+        assert_eq!(cfg.counters.redis_timeout_ms, 100);
+        assert!(!cfg.observe.rollups);
+        let r = &cfg.observe.jsonl.rotate;
+        assert!(r.daily && r.gzip && r.keep == 7 && r.max_size_mb == 64 && r.enabled());
     }
 
     #[test]

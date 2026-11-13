@@ -11,11 +11,12 @@
 //! **Sperrregel:** Wer einen Slot-Mutex hält, greift nicht auf die Maps zu. Mehrere Slots
 //! werden in Adressreihenfolge gesperrt (deadlock-frei, Duplikate werden erkannt).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use dashmap::DashMap;
 
-use crate::window::{Window, estimate, evaluate, reset_after_ms, retry_after_ms};
+use crate::window::{PERIOD_INDEX, Window};
 use crate::{Booked, Clock, LimitCheck, Origin, Quota, Rejection, Reservation, SettleMode};
 
 /// Stand eines Buckets.
@@ -39,21 +40,35 @@ impl Bucket {
     }
 }
 
-/// Zwei Buckets eines Zählers: `cur` gehört zu `idx`, `prev` zu `idx − 1`.
+/// Zwei Buckets eines Zählers: `cur` gehört zu `idx`, `prev` zu `idx − 1`. Bei festen
+/// Zeiträumen ist `idx` der Beginn und `until` das Ende (`prev` bleibt leer).
 #[derive(Debug)]
 pub(crate) struct Slot {
     idx: u64,
+    until: u64,
     cur: Bucket,
     prev: Bucket,
 }
 
 impl Slot {
-    fn new(idx: u64) -> Self {
+    fn new(idx: u64, until: u64) -> Self {
         Self {
             idx,
+            until,
             cur: Bucket::default(),
             prev: Bucket::default(),
         }
+    }
+
+    /// Fenster eines Slots der Map `index` (feste Zeiträume aus Beginn und Ende).
+    fn window(&self, index: usize) -> Window {
+        Window::SLIDING
+            .get(index)
+            .copied()
+            .unwrap_or(Window::Period {
+                start_ms: self.idx,
+                end_ms: self.until,
+            })
     }
 
     /// Rückt auf Bucket `now_idx` vor. Herausfallende, noch nicht abgeglichene Änderungen
@@ -141,23 +156,39 @@ fn apply_delta(b: &mut Bucket, delta: i128, track: bool) {
     }
 }
 
-/// Sliding-Window-Zähler im Prozess.
+/// Sliding-Window-Zähler im Prozess (je gleitendem Fenster eine Map, dazu eine für feste
+/// Zeiträume).
 #[derive(Debug)]
 pub(crate) struct Engine {
-    maps: [DashMap<Box<str>, SlotRef>; 5],
+    maps: [DashMap<Box<str>, SlotRef>; PERIOD_INDEX + 1],
     clock: Arc<dyn Clock>,
     track_sync: bool,
     spill: Mutex<Vec<SyncDelta>>,
+    /// Seit dem letzten [`Engine::take_dirty`] wurde gebucht (nur mit `track_sync`).
+    dirty: AtomicBool,
 }
 
 impl Engine {
-    /// `track_sync`: Änderungen für den Abgleich mit Postgres mitschreiben.
+    /// `track_sync`: Änderungen für den Abgleich (Postgres) bzw. das Nachtragen (Redis, F28)
+    /// mitschreiben.
     pub(crate) fn new(clock: Arc<dyn Clock>, track_sync: bool) -> Self {
         Self {
             maps: std::array::from_fn(|_| DashMap::new()),
             clock,
             track_sync,
             spill: Mutex::new(Vec::new()),
+            dirty: AtomicBool::new(false),
+        }
+    }
+
+    /// `true`, wenn seit dem letzten Aufruf gebucht wurde (setzt zurück).
+    pub(crate) fn take_dirty(&self) -> bool {
+        self.dirty.swap(false, Ordering::AcqRel)
+    }
+
+    fn mark_dirty(&self) {
+        if self.track_sync {
+            self.dirty.store(true, Ordering::Release);
         }
     }
 
@@ -177,7 +208,9 @@ impl Engine {
         }
         Arc::clone(
             map.entry(key.into())
-                .or_insert_with(|| Arc::new(Mutex::new(Slot::new(window.bucket(now)))))
+                .or_insert_with(|| {
+                    Arc::new(Mutex::new(Slot::new(window.bucket(now), window.until())))
+                })
                 .value(),
         )
     }
@@ -189,6 +222,18 @@ impl Engine {
     }
 
     fn roll(&self, slot: &mut Slot, key: &str, window: Window, now_idx: u64) {
+        if !window.is_sliding() {
+            // Fester Zeitraum: ein neuer Zeitraum unter demselben Schlüssel beginnt bei 0.
+            if now_idx > slot.idx {
+                slot.idx = now_idx;
+                slot.cur = Bucket::default();
+                slot.prev = Bucket::default();
+            }
+            if now_idx == slot.idx {
+                slot.until = window.until();
+            }
+            return;
+        }
         if self.track_sync {
             slot.roll(now_idx, |bucket, delta| {
                 self.spill
@@ -248,13 +293,14 @@ impl Engine {
             let Some(g) = guards[o].as_ref() else {
                 continue; // unerreichbar: Eigentümer hält immer eine Sperre
             };
-            let len = c.window.length_ms();
-            let elapsed = now.saturating_sub(g.idx * len);
+            let elapsed = now.saturating_sub(c.window.bucket_start(g.idx));
             let cur = g.cur.total().saturating_add(pending[o]);
             let prev = g.prev.total();
-            let ev = evaluate(cur, prev, elapsed, len, c.limit, c.amount);
+            let ev = c.window.evaluate(cur, prev, elapsed, c.limit, c.amount);
             if !ev.admit {
-                let ra = retry_after_ms(cur, prev, elapsed, len, c.limit, c.amount);
+                let ra = c
+                    .window
+                    .retry_after_ms(cur, prev, elapsed, c.limit, c.amount);
                 let replace = match worst {
                     None => true,
                     Some((_, None, _)) => false,
@@ -287,11 +333,11 @@ impl Engine {
             }
         }
         drop(guards);
+        self.mark_dirty();
 
         let mut booked = Vec::with_capacity(n);
         let mut quotas = Vec::with_capacity(n);
         for (c, &(idx, cur, prev, elapsed, est)) in checks.iter().zip(&stats) {
-            let len = c.window.length_ms();
             booked.push(Booked {
                 key: c.key.into(),
                 window: c.window,
@@ -302,11 +348,10 @@ impl Engine {
             quotas.push(Quota {
                 limit: c.limit,
                 remaining: c.limit.saturating_sub(est.saturating_add(c.amount)),
-                reset_after: std::time::Duration::from_millis(reset_after_ms(
+                reset_after: std::time::Duration::from_millis(c.window.reset_after_ms(
                     cur.saturating_add(c.amount),
                     prev,
                     elapsed,
-                    len,
                 )),
             });
         }
@@ -329,7 +374,7 @@ impl Engine {
                 continue;
             }
             let now_idx = b.window.bucket(now);
-            if b.bucket + 1 < now_idx {
+            if !b.window.counts(b.bucket, now) {
                 continue; // Bucket zählt nicht mehr zum Fenster
             }
             let slot = if delta > 0 {
@@ -344,6 +389,7 @@ impl Engine {
             self.roll(&mut g, &b.key, b.window, now_idx);
             if let Some(bucket) = g.bucket_mut(b.bucket) {
                 apply_delta(bucket, delta, self.track_sync);
+                self.mark_dirty();
             }
         }
     }
@@ -354,14 +400,15 @@ impl Engine {
             return 0;
         };
         let now = self.clock.now_ms();
-        let len = window.length_ms();
         let mut g = lock(&slot);
         self.roll(&mut g, key, window, window.bucket(now));
-        estimate(
+        if !window.counts(g.idx, now) {
+            return 0;
+        }
+        window.estimate(
             g.cur.total(),
             g.prev.total(),
-            now.saturating_sub(g.idx * len),
-            len,
+            now.saturating_sub(window.bucket_start(g.idx)),
         )
     }
 
@@ -370,7 +417,19 @@ impl Engine {
     pub(crate) fn purge_expired(&self) -> usize {
         let now = self.clock.now_ms();
         let mut removed = 0;
-        for w in Window::ALL {
+        // Feste Zeiträume: nach ihrem Ende (nicht abgeglichene Deltas sind dann bedeutungslos).
+        self.maps[PERIOD_INDEX].retain(|_, slot| {
+            if Arc::strong_count(slot) > 1 {
+                return true;
+            }
+            let Ok(g) = slot.try_lock() else {
+                return true;
+            };
+            let keep = now < g.until && !g.is_empty();
+            removed += usize::from(!keep);
+            keep
+        });
+        for w in Window::SLIDING {
             let now_idx = w.bucket(now);
             self.maps[w.index()].retain(|key, slot| {
                 if Arc::strong_count(slot) > 1 {
@@ -395,7 +454,33 @@ impl Engine {
         let mut deltas =
             std::mem::take(&mut *self.spill.lock().unwrap_or_else(PoisonError::into_inner));
         let mut wanted = Vec::new();
-        for w in Window::ALL {
+        let periods: Vec<(Box<str>, SlotRef)> = self.maps[PERIOD_INDEX]
+            .iter()
+            .map(|e| (e.key().clone(), Arc::clone(e.value())))
+            .collect();
+        for (key, slot) in periods {
+            let mut g = lock(&slot);
+            let w = g.window(PERIOD_INDEX);
+            if g.cur.unsynced != 0 {
+                deltas.push(SyncDelta {
+                    key: key.clone(),
+                    window: w,
+                    bucket: g.idx,
+                    delta: std::mem::take(&mut g.cur.unsynced),
+                });
+            }
+            let live = w.counts(g.idx, now);
+            let idx = g.idx;
+            drop(g);
+            if live {
+                wanted.push(Wanted {
+                    key,
+                    window: w,
+                    bucket: idx,
+                });
+            }
+        }
+        for w in Window::SLIDING {
             let now_idx = w.bucket(now);
             let entries: Vec<(Box<str>, SlotRef)> = self.maps[w.index()]
                 .iter()
@@ -432,6 +517,44 @@ impl Engine {
         // Die Uhr kann zwischen dem Leeren von `spill` und den Rolls weitergelaufen sein.
         deltas.append(&mut self.spill.lock().unwrap_or_else(PoisonError::into_inner));
         (deltas, wanted)
+    }
+
+    /// Entnimmt die nicht abgeglichenen Änderungen aller Buckets, die noch zum Fenster zählen
+    /// (Nachtragen nach einem Redis-Ausfall, F28). Herausgefallene Buckets (`spill`) werden
+    /// verworfen; Rückgabe: (Deltas, Anzahl verworfener).
+    pub(crate) fn take_live_deltas(&self) -> (Vec<SyncDelta>, usize) {
+        let dropped =
+            std::mem::take(&mut *self.spill.lock().unwrap_or_else(PoisonError::into_inner)).len();
+        let now = self.clock.now_ms();
+        let mut out = Vec::new();
+        for (i, map) in self.maps.iter().enumerate() {
+            let entries: Vec<(Box<str>, SlotRef)> = map
+                .iter()
+                .map(|e| (e.key().clone(), Arc::clone(e.value())))
+                .collect();
+            for (key, slot) in entries {
+                let mut g = lock(&slot);
+                let w = g.window(i);
+                if w.is_sliding() {
+                    self.roll(&mut g, &key, w, w.bucket(now));
+                }
+                let idx = g.idx;
+                let slot = &mut *g;
+                for (bucket, b) in [(idx, &mut slot.cur), (idx.wrapping_sub(1), &mut slot.prev)] {
+                    if b.unsynced != 0 && w.counts(bucket, now) {
+                        out.push(SyncDelta {
+                            key: key.clone(),
+                            window: w,
+                            bucket,
+                            delta: std::mem::take(&mut b.unsynced),
+                        });
+                    }
+                }
+            }
+        }
+        let late =
+            std::mem::take(&mut *self.spill.lock().unwrap_or_else(PoisonError::into_inner)).len();
+        (out, dropped + late)
     }
 
     /// Setzt den Fremdanteil eines Buckets (falls der Zähler noch existiert).
@@ -675,6 +798,72 @@ mod tests {
     }
 
     #[test]
+    fn period_window_counts_until_end_then_resets() {
+        let (c, e) = engine(false);
+        let p1 = Window::period(T0, T0 + 10 * MIN);
+        let r = e.reserve(&[LimitCheck::new("k@1", p1, 100, 60)]).unwrap();
+        // Reset = Ende des Zeitraums, kein Gleiten
+        assert_eq!(r.quotas()[0].reset_after, Duration::from_millis(10 * MIN));
+        c.advance(9 * MIN);
+        assert_eq!(e.get("k@1", p1), 60);
+        let rej = e
+            .reserve(&[LimitCheck::new("k@1", p1, 100, 41)])
+            .unwrap_err();
+        assert_eq!(rej.retry_after, Some(Duration::from_millis(MIN)));
+        assert_eq!(rej.used, 60);
+        // settle im laufenden Zeitraum wirkt
+        e.settle(&r.booked, 10);
+        assert_eq!(e.get("k@1", p1), 10);
+        // nach dem Ende: 0, settle wirkungslos, Speicher frei
+        c.advance(MIN);
+        assert_eq!(e.get("k@1", p1), 0);
+        e.settle(&r.booked, 90);
+        assert_eq!(e.get("k@1", p1), 0);
+        assert_eq!(e.purge_expired(), 1);
+        // neuer Zeitraum unter demselben Schlüssel beginnt bei 0
+        let p2 = Window::period(T0 + 10 * MIN, T0 + 20 * MIN);
+        let r2 = e.reserve(&[LimitCheck::new("k@1", p2, 100, 100)]).unwrap();
+        assert_eq!(r2.quotas()[0].remaining, 0);
+    }
+
+    #[test]
+    fn period_sync_tracking() {
+        let (c, e) = engine(true);
+        let p = Window::period(T0, T0 + MIN);
+        e.reserve(&[LimitCheck::new("p", p, 100, 7)]).unwrap();
+        let (d, w) = e.collect_sync();
+        assert_eq!(d.len(), 1);
+        assert_eq!((d[0].window, d[0].bucket, d[0].delta), (p, T0, 7));
+        assert_eq!(w.len(), 1);
+        e.set_remote("p", p, T0, 90);
+        assert_eq!(e.get("p", p), 97);
+        assert!(e.reserve(&[LimitCheck::new("p", p, 100, 4)]).is_err());
+        c.advance(MIN);
+        let (_, w) = e.collect_sync();
+        assert!(
+            w.is_empty(),
+            "abgelaufener Zeitraum wird nicht mehr gelesen"
+        );
+    }
+
+    #[test]
+    fn live_deltas_skip_expired_buckets() {
+        let (c, e) = engine(true);
+        e.reserve(&[LimitCheck::new("a", Window::Second, 100, 3)])
+            .unwrap();
+        e.reserve(&[LimitCheck::new("b", Window::Hour, 100, 5)])
+            .unwrap();
+        assert!(e.take_dirty());
+        assert!(!e.take_dirty());
+        c.advance(5_000); // Sekunden-Bucket abgelaufen
+        let (d, dropped) = e.take_live_deltas();
+        assert_eq!(d.len(), 1);
+        assert_eq!((d[0].key.as_ref(), d[0].delta), ("b", 5));
+        assert_eq!(dropped, 1);
+        assert!(e.take_live_deltas().0.is_empty());
+    }
+
+    #[test]
     fn concurrent_reservations_never_exceed_limit() {
         let (_c, e) = engine(false);
         let e = Arc::new(e);
@@ -691,7 +880,7 @@ mod tests {
                             LimitCheck::new("team", Window::Minute, 10_000, 3),
                         ];
                         if e.reserve(&checks).is_ok() {
-                            granted.fetch_add(3, std::sync::atomic::Ordering::Relaxed);
+                            granted.fetch_add(3, Ordering::Relaxed);
                         }
                     }
                 })
@@ -701,7 +890,7 @@ mod tests {
             t.join().unwrap();
         }
         let team = e.get("team", Window::Minute);
-        assert_eq!(team, granted.load(std::sync::atomic::Ordering::Relaxed));
+        assert_eq!(team, granted.load(Ordering::Relaxed));
         assert!(team <= 10_000);
         assert!(team > 10_000 - 3, "Limit wird ausgeschöpft: {team}");
         let keys: u64 = (0..4)

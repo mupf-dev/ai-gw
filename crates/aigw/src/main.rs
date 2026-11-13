@@ -293,11 +293,15 @@ fn serve(
             store: runtime_state.store.clone(),
             calendar: std::sync::Arc::clone(&runtime_state.calendar),
             auth: std::sync::Arc::clone(&auth),
+            counters: config.counters.backend,
         }))
         .merge(aigw_admin::analytics::router(
             aigw_admin::analytics::AnalyticsState {
                 store: runtime_state.store.clone(),
                 auth: std::sync::Arc::clone(&auth),
+                // Tagesschritte nach billing.timezone (F143).
+                calendar: std::sync::Arc::clone(&runtime_state.calendar),
+                rollups: config.observe.rollups,
             },
         ))
         .merge(observe::metrics_router(observe::MetricsSources {
@@ -320,6 +324,8 @@ fn serve(
             mcp_task = Some(gateway.spawn(runtime_state.snapshot.clone()));
             data_router = data_router.merge(aigw_proxy::mcp::router(state, gateway));
         }
+        // SIGHUP: Exportdateien neu öffnen (externes logrotate, F31).
+        let reopen_task = runtime_state.spawn_reopen_on_hup();
         // Snapshot-Zustand für GET /admin/api/v1/version (F15, AIGW-75).
         let control = control.layer(axum::Extension(runtime_state.snapshot.clone()));
         server::run(
@@ -330,6 +336,9 @@ fn serve(
             shutdown_signal(),
         )
         .await?;
+        if let Some(t) = reopen_task {
+            t.abort();
+        }
         drop(mcp_task);
         drop(routes_task);
         drop(plugins_task);

@@ -57,7 +57,8 @@ spec:
   organization: acme
   limits:
     - {metric: requests, limit: 600, window: minute}          # RPM
-    - {metric: tokens, limit: 2000000, window: day}            # TPD
+    - {metric: tokens, limit: 2000000, window: day}            # TPD (24 h gleitend)
+    - {metric: requests, limit: 100000, window: calendar-month} # je Kalendermonat (F25)
     - {metric: tokens, limit: 200000, window: minute, modelGroup: gpt-4o}   # nur für gpt-4o
   budget:
     amount: "500"            # Abrechnungswährung, Festkomma (9 Nachkommastellen)
@@ -107,7 +108,13 @@ billing:
 | Deployment (Kapazität, §5) | `Deployment.spec.capacity` | `dep:<id>:requests`, `dep:<id>:tokens` |
 
 - Metriken: `requests` (RPM/RPD), `tokens` (TPM/TPD), `input-tokens`, `output-tokens`; Fenster
-  `second`, `minute`, `hour`, `day` (gleitend, 05 §2). Dasselbe Limit in zwei Fenstern sind
+  gleitend `second`, `minute`, `hour`, `day` (24 h), `30d` (05 §2; früher intern „Monat“) oder
+  **Kalenderzeitraum** `calendar-day`, `calendar-week` (ab Montag), `calendar-month` in der
+  Zeitzone `billing.timezone` wie die Budgets (F25): fester Zähler ohne Gleiten, der mit dem
+  nächsten Zeitraum bei 0 beginnt. Der Zählerschlüssel trägt Art und Beginn des Zeitraums
+  (`key:<id>:tokens@calendar-month:<Beginn-ms>`); `Retry-After` und der Reset der
+  Rate-Limit-Header zeigen auf das Ende des Zeitraums. Den laufenden Zeitraum je Art hält der
+  `Limiter` zwischengespeichert (Umrechnung nur beim Wechsel). Dasselbe Limit in zwei Fenstern sind
   zwei Zähler.
 - `modelGroup` an einem Key-/Team-/Org-Limit: Das Limit gilt nur für Anfragen an diese Gruppe
   (Name oder Alias); im Schlüssel steht der kanonische Name. Ohne Snapshot (`AllowAll`) entfallen

@@ -86,6 +86,9 @@ impl Col {
     pub(crate) fn bool(b: bool) -> Self {
         Self::V(Val::Bool(Some(b)))
     }
+    pub(crate) fn opt_bool(b: Option<bool>) -> Self {
+        Self::V(Val::Bool(b))
+    }
     pub(crate) fn opt_time(t: Option<OffsetDateTime>) -> Self {
         Self::V(Val::opt_time(t))
     }
@@ -130,6 +133,9 @@ impl Row<'_> {
     }
     pub(crate) fn bool(&self, col: &str) -> Result<bool, StoreError> {
         self.0.bool(col)
+    }
+    pub(crate) fn opt_bool(&self, col: &str) -> Result<Option<bool>, StoreError> {
+        self.0.opt_bool(col)
     }
     pub(crate) fn u32(&self, col: &str) -> Result<u32, StoreError> {
         u32::try_from(self.int(col)?)

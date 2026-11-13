@@ -385,6 +385,22 @@ fn deployment(endpoint: &str) -> DeploymentCtx {
 }
 
 /// Proxy mit einem Deployment (`ok`) vor dem Fake-Upstream.
+/// Sammelt die Datensätze des Proxys (Trace-ID im Request-Log, F100).
+#[derive(Debug, Default)]
+struct Records(Mutex<Vec<RequestRecord>>);
+
+impl aigw_core::observe::RequestObserver for Records {
+    fn record(&self, record: RequestRecord) {
+        self.0.lock().unwrap().push(record);
+    }
+}
+
+static RECORDS: std::sync::OnceLock<Arc<Records>> = std::sync::OnceLock::new();
+
+fn records() -> Arc<Records> {
+    Arc::clone(RECORDS.get_or_init(Arc::default))
+}
+
 async fn start_gateway() -> (SocketAddr, Arc<Upstream0>) {
     let up = Arc::new(Upstream0::default());
     let up_addr = serve(
@@ -402,10 +418,9 @@ async fn start_gateway() -> (SocketAddr, Arc<Upstream0>) {
     .unwrap();
     let mut routes = StaticRoutes::new();
     routes.insert("ok", Arc::new(upstream));
-    let gw = serve(aigw_proxy::router(ProxyState::with_routes(Arc::new(
-        routes,
-    ))))
-    .await;
+    let mut state = ProxyState::with_routes(Arc::new(routes));
+    state.observer = records();
+    let gw = serve(aigw_proxy::router(state)).await;
     (gw, up)
 }
 
@@ -512,6 +527,17 @@ async fn traces_through_proxy_with_genai_attributes_and_propagation() {
     assert_eq!(metrics.spans_dropped(), 0);
     let seen = up.seen.lock().unwrap().clone();
     assert_eq!(seen.len(), 3, "drei Upstream-Aufrufe");
+
+    // F100: Trace-ID im Request-Log – auch ohne Sampling (Korrelation mit dem Client-Trace).
+    let traced: Vec<Option<String>> = records()
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|r| r.trace_id.clone())
+        .collect();
+    assert!(traced.contains(&Some(TRACE_ID.to_owned())), "{traced:?}");
+    assert!(traced.contains(&Some("11111111111111111111111111111111".to_owned())));
 
     // --- 1) Wurzel-Span übernimmt den eingehenden Kontext.
     let root = spans
@@ -700,7 +726,16 @@ async fn request_log_exported_as_otlp_logs() {
     .exporter(Arc::new(exporter))
     .start();
     let obs = handle.observer();
-    let ok = record(200);
+    let mut ok = record(200);
+    // F100/F47/F161: Trace-ID als LogRecord.trace_id, Fehlerklasse und Guardrails als Attribute
+    ok.trace_id = Some(TRACE_ID.to_owned());
+    ok.error_class = Some(aigw_core::ir::ErrorClass::ContentFilter);
+    ok.guardrails = vec![aigw_core::observe::GuardrailHit {
+        plugin: "pii",
+        category: "email".into(),
+        action: "mask",
+        count: 3,
+    }];
     let ok_id = ok.request_id.clone();
     obs.request_started();
     obs.record(ok);
@@ -744,6 +779,9 @@ async fn request_log_exported_as_otlp_logs() {
     assert_eq!(a["aigw.ttft_ms"], Attr::I(45));
     assert_eq!(a["aigw.endpoint"], Attr::S("anthropic-messages".into()));
     assert!(a.contains_key("aigw.api_key_id"));
+    assert_eq!(hex(&one_bytes(ok, 9).unwrap()), TRACE_ID);
+    assert_eq!(a["aigw.error_class"], Attr::S("content_filter".into()));
+    assert!(matches!(&a["aigw.guardrails"], Attr::S(s) if s.contains("\"count\":3")));
     let err = logs
         .iter()
         .find(|l| attrs(l, 6)["http.response.status_code"] == Attr::I(529))

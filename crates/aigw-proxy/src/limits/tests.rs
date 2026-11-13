@@ -100,7 +100,7 @@ fn plan_orders_by_metric_and_scopes_groups() {
         vec![limit(M::InputTokens, 70, W::Minute, None)],
     );
     let mut out = Vec::new();
-    plan(Some(&k), Some(&g), &mut out);
+    plan(Some(&k), Some(&g), &Periods::default(), 0, &mut out);
     let got: Vec<_> = out
         .iter()
         .map(|p| (p.metric, p.level, p.window, p.limit))
@@ -121,8 +121,111 @@ fn plan_orders_by_metric_and_scopes_groups() {
 
     // Ohne Snapshot-Gruppe entfallen gruppenbezogene Limits.
     let mut out = Vec::new();
-    plan(Some(&k), None, &mut out);
+    plan(Some(&k), None, &Periods::default(), 0, &mut out);
     assert_eq!(out.len(), 3);
+}
+
+#[test]
+fn plan_calendar_windows_carry_period_in_key() {
+    use LimitMetric as M;
+    use LimitWindow as W;
+    let g = group("g", &[], vec![limit(M::Requests, 3, W::CalendarDay, None)]);
+    let k = key(
+        vec![
+            limit(M::Tokens, 100, W::CalendarMonth, None),
+            limit(M::Tokens, 100, W::Days30, None),
+        ],
+        vec![limit(M::Tokens, 100, W::CalendarWeek, None)],
+        Vec::new(),
+    );
+    // Berlin, Mittwoch 2026-11-11 10:00 UTC
+    let now = 1_794_391_200_000u64;
+    let periods = Periods::new(aigw_billing::Calendar::new("Europe/Berlin").unwrap());
+    let mut out = Vec::new();
+    plan(Some(&k), Some(&g), &periods, now, &mut out);
+    let by = |l: Level, w: W| {
+        out.iter()
+            .find(|p| p.level == l && p.spec_window == w)
+            .unwrap()
+    };
+    // Kalendermonat November in Berlin: 31.10. 23:00 UTC bis 30.11. 23:00 UTC
+    let m = by(Level::Key, W::CalendarMonth);
+    assert_eq!(
+        m.window,
+        Window::period(1_793_487_600_000, 1_796_079_600_000)
+    );
+    assert_eq!(
+        m.key,
+        format!("key:{}:tokens@calendar-month:1793487600000", k.key.id)
+    );
+    // gleitend: ohne Zeitraum im Schlüssel
+    let d = by(Level::Key, W::Days30);
+    assert_eq!(d.window, Window::Days30);
+    assert_eq!(d.key, format!("key:{}:tokens", k.key.id));
+    // Woche ab Montag 9.11. 00:00 MEZ = 8.11. 23:00 UTC
+    let w = by(Level::Team, W::CalendarWeek);
+    assert_eq!(
+        w.window,
+        Window::period(1_794_178_800_000, 1_794_783_600_000)
+    );
+    let day = by(Level::ModelGroup, W::CalendarDay);
+    assert_eq!(
+        day.window,
+        Window::period(1_794_351_600_000, 1_794_438_000_000)
+    );
+    assert!(day.key.ends_with("@calendar-day:1794351600000"));
+    // Zwischenspeicher: im selben Zeitraum identisch, danach der nächste
+    assert_eq!(periods.window(W::CalendarDay, now + 3_600_000), day.window);
+    assert_eq!(
+        periods.window(W::CalendarDay, 1_794_438_000_000),
+        Window::period(1_794_438_000_000, 1_794_524_400_000)
+    );
+}
+
+#[tokio::test]
+async fn calendar_limit_resets_at_period_end_and_reports_reset() {
+    use LimitMetric as M;
+    use LimitWindow as W;
+    let clock = Arc::new(aigw_counters::ManualClock::new(0));
+    let counters = Arc::new(LocalCounters::with_clock(clock.clone()));
+    let limiter = Limiter::new(counters.clone(), None, &LimitsConfig::default());
+    assert_eq!(limiter.timezone(), "UTC");
+    let k = key(
+        vec![limit(M::Requests, 2, W::CalendarDay, None)],
+        Vec::new(),
+        Vec::new(),
+    );
+    let auth = AuthContext {
+        key: Some(k),
+        ..AuthContext::default()
+    };
+    // 2026-11-13 22:00 UTC: noch 2 h bis Mitternacht
+    let day = 1_794_614_400_000u64;
+    let t = day - 2 * 3_600_000;
+    clock.set(t);
+    let at = |ms: u64| SystemTime::UNIX_EPOCH + Duration::from_millis(ms);
+    let est = TokenEstimate::default();
+    let a = limiter.admit(&auth, None, est, at(t)).await.unwrap();
+    // Reset-Header = Ende des Kalendertags, nicht 24 h gleitend
+    assert_eq!(a.headers(), &{
+        let mut h = RateHeaders::default();
+        h.set_requests_for_test(2, 1, Duration::from_millis(2 * 3_600_000));
+        h
+    });
+    let _b = limiter.admit(&auth, None, est, at(t)).await.unwrap();
+    clock.set(t + 1_000);
+    let denied = limiter
+        .admit(&auth, None, est, at(t + 1_000))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        denied.error.retry_after,
+        Some(Duration::from_millis(2 * 3_600_000 - 1_000))
+    );
+    assert!(denied.error.error.message.contains("Kalendertag"));
+    // Nach Mitternacht (UTC) neuer Zeitraum
+    clock.set(day + 1);
+    assert!(limiter.admit(&auth, None, est, at(day + 1)).await.is_ok());
 }
 
 #[tokio::test]
