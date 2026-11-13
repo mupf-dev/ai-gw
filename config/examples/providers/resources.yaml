@@ -1,0 +1,239 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Alle Anbieterarten (docs/konzept/06-streaming-und-anbieter.md). Geheimnisse nur als Verweis
+# (valueFrom env|file) – zur Apply-Zeit aufgelöst, verschlüsselt gespeichert.
+#
+#   aigw config apply -c config/examples/providers/aigw.yaml config/examples/providers/resources.yaml
+#
+# Benötigte Variablen bzw. Dateien:
+#   AIGW_SECRET_OPENAI_API_KEY, AIGW_SECRET_ANTHROPIC_API_KEY, AIGW_SECRET_AZURE_API_KEY,
+#   AIGW_SECRET_AWS_ACCESS_KEY_ID, AIGW_SECRET_AWS_SECRET_ACCESS_KEY, AIGW_SECRET_GEMINI_API_KEY,
+#   AIGW_SECRET_MISTRAL_API_KEY, /run/secrets/vertex-service-account.json (Schlüsseldatei)
+#
+# Modellgruppen sind die Namen, die Clients als "model" schicken; Deployments sind die
+# konkreten Ziele dahinter (mehrere je Gruppe = Lastverteilung/Fallback, docs/konzept/10-routing.md).
+
+# --- OpenAI -----------------------------------------------------------------------------------
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata: {name: openai}
+spec:
+  provider: openai
+  data:
+    apiKey: {valueFrom: {env: AIGW_SECRET_OPENAI_API_KEY}}
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: gpt-4o}
+spec:
+  aliases: [gpt-4o-latest]
+  routing: least-latency
+  fallbacks:
+    - modelGroup: claude-sonnet
+      on: [rate-limit, unavailable]
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: gpt-4o-openai}
+spec:
+  modelGroup: gpt-4o
+  provider: openai
+  providerModel: gpt-4o-2024-08-06
+  credential: openai
+  weight: 2
+  capacity: {rpm: 500, tpm: 300000}
+
+# --- Azure OpenAI (zweites Deployment derselben Gruppe) ----------------------------------------
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata: {name: azure-westeurope}
+spec:
+  provider: azure-openai
+  data:
+    apiKey: {valueFrom: {env: AIGW_SECRET_AZURE_API_KEY}}
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: gpt-4o-azure}
+spec:
+  modelGroup: gpt-4o
+  provider: azure-openai
+  endpoint: https://acme-westeurope.openai.azure.com
+  # Name des Azure-Deployments
+  providerModel: gpt-4o-prod
+  credential: azure-westeurope
+  weight: 1
+  settings:
+    apiVersion: "2024-10-21"
+
+# --- Anthropic --------------------------------------------------------------------------------
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata: {name: anthropic}
+spec:
+  provider: anthropic
+  data:
+    apiKey: {valueFrom: {env: AIGW_SECRET_ANTHROPIC_API_KEY}}
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: claude-sonnet}
+spec:
+  aliases: [claude-sonnet-latest]
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: claude-sonnet-anthropic}
+spec:
+  modelGroup: claude-sonnet
+  provider: anthropic
+  providerModel: claude-sonnet-4-5
+  credential: anthropic
+  priority: 0
+
+# --- AWS Bedrock (Fallback-Deployment derselben Gruppe, Priorität 1) --------------------------
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata: {name: aws-bedrock}
+spec:
+  provider: bedrock
+  data:
+    accessKeyId: {valueFrom: {env: AIGW_SECRET_AWS_ACCESS_KEY_ID}}
+    secretAccessKey: {valueFrom: {env: AIGW_SECRET_AWS_SECRET_ACCESS_KEY}}
+    # alternativ Bedrock-API-Key: apiKey
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: claude-sonnet-bedrock}
+spec:
+  modelGroup: claude-sonnet
+  provider: bedrock
+  # Modell-ID oder Inference-Profile-ID
+  providerModel: eu.anthropic.claude-sonnet-4-5-20250929-v1:0
+  credential: aws-bedrock
+  priority: 1
+  settings:
+    region: eu-central-1
+
+# --- Google Gemini API und Vertex AI ----------------------------------------------------------
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata: {name: gemini}
+spec:
+  provider: vertex
+  data:
+    apiKey: {valueFrom: {env: AIGW_SECRET_GEMINI_API_KEY}}
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata: {name: vertex-sa}
+spec:
+  provider: vertex
+  data:
+    # Schlüsseldatei des Service-Accounts (JSON); project kommt aus project_id
+    serviceAccountJson: {valueFrom: {file: /run/secrets/vertex-service-account.json}}
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: gemini-flash}
+spec: {}
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: gemini-flash-api}
+spec:
+  modelGroup: gemini-flash
+  provider: vertex
+  providerModel: gemini-2.5-flash
+  credential: gemini
+  settings:
+    api: gemini
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: gemini-flash-vertex}
+spec:
+  modelGroup: gemini-flash
+  provider: vertex
+  providerModel: gemini-2.5-flash
+  credential: vertex-sa
+  settings:
+    api: vertex
+    location: europe-west4
+
+# --- Mistral ----------------------------------------------------------------------------------
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata: {name: mistral}
+spec:
+  provider: mistral
+  data:
+    apiKey: {valueFrom: {env: AIGW_SECRET_MISTRAL_API_KEY}}
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: mistral-large}
+spec: {}
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: mistral-large-mistral}
+spec:
+  modelGroup: mistral-large
+  provider: mistral
+  providerModel: mistral-large-latest
+  credential: mistral
+
+# --- Selbst betrieben: Ollama und vLLM (ohne Zugangsdaten) -------------------------------------
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: llama}
+spec:
+  routing: least-busy
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: llama-ollama}
+spec:
+  modelGroup: llama
+  provider: ollama
+  endpoint: http://ollama:11434
+  providerModel: llama3.1:8b
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: llama-vllm}
+spec:
+  modelGroup: llama
+  provider: vllm
+  endpoint: http://vllm:8000/v1
+  providerModel: meta-llama/Llama-3.1-8B-Instruct
+  capacity: {rpm: 600}
+
+# --- Preise (Kostenrechnung/Budgets; Abrechnungswährung, Festkomma) ----------------------------
+---
+apiVersion: aigw/v1alpha1
+kind: Price
+metadata: {name: gpt-4o-2024-08}
+spec:
+  provider: openai
+  model: gpt-4o-2024-08-06
+  validFrom: "2024-08-06T00:00:00Z"
+  perMillionTokens: {input: "2.50", cachedInput: "1.25", output: "10"}
+---
+apiVersion: aigw/v1alpha1
+kind: Price
+metadata: {name: claude-sonnet-4-5}
+spec:
+  provider: anthropic
+  model: claude-sonnet-4-5
+  validFrom: "2025-09-29T00:00:00Z"
+  perMillionTokens: {input: "3", cachedInput: "0.30", output: "15"}

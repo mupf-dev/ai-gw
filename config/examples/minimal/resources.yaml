@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Kleinster sinnvoller Bestand: eine Organisation, ein OpenAI-Zugang, eine Modellgruppe.
+# Benötigt AIGW_SECRET_OPENAI_API_KEY in der Umgebung von `aigw config apply`.
+# API-Keys für Clients danach über die Admin-UI bzw. POST /admin/api/v1/api-keys anlegen.
+---
+apiVersion: aigw/v1alpha1
+kind: Organization
+metadata: {name: default}
+spec:
+  displayName: Standard
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata: {name: openai}
+spec:
+  provider: openai
+  data:
+    apiKey:
+      valueFrom: {env: AIGW_SECRET_OPENAI_API_KEY}
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: gpt-4o-mini}
+spec: {}
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: gpt-4o-mini-openai}
+spec:
+  modelGroup: gpt-4o-mini
+  provider: openai
+  providerModel: gpt-4o-mini
+  credential: openai

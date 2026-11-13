@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Startkonfiguration für Teams, Limits und Budgets (docs/konzept/11-limits-und-budgets.md).
+# Die Limits selbst stehen an den Ressourcen (resources.yaml); hier nur, wie sie gezählt werden.
+store:
+  url: "sqlite://aigw.db?mode=rwc"
+counters:
+  # Einzelinstanz: local. Mehrere Instanzen: postgres-sync oder redis (siehe ha-postgres-redis/).
+  backend: local
+limits:
+  # Reservierung für strikte Budgets/Token-Limits, wenn die Anfrage kein max_tokens enthält
+  default_max_tokens: 4096
+  response_headers: true
+billing:
+  # Kalendermonate/-tage der Budgets in dieser Zeitzone
+  timezone: Europe/Berlin
+  budget_sync_ms: 1000
+events:
+  # Budget-Warnungen an einen Webhook (Signatur-Geheimnis aus einer Datei)
+  webhooks:
+    - name: finance
+      url: https://hooks.example.org/aigw
+      events: [budget.warning, budget.exhausted]
+      secret: {file: /run/secrets/aigw-webhook-secret}

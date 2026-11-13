@@ -1,0 +1,70 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aigw
+  labels: {app.kubernetes.io/name: aigw}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app.kubernetes.io/name: aigw}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: aigw}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: aigw
+          image: ai-gw
+          args: ["serve"]
+          env:
+            - {name: AIGW_CONFIG, value: /etc/aigw/aigw.yaml}
+            - name: AIGW_STORE__URL
+              valueFrom: {secretKeyRef: {name: aigw, key: store-url}}
+          ports:
+            - {name: data, containerPort: 4000}
+            - {name: control, containerPort: 4001}
+          readinessProbe:
+            httpGet: {path: /readyz, port: control}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: control}
+            periodSeconds: 10
+            failureThreshold: 6
+          startupProbe:
+            httpGet: {path: /healthz, port: control}
+            periodSeconds: 2
+            failureThreshold: 60
+          resources:
+            requests: {cpu: 500m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/aigw, readOnly: true}
+            - {name: secrets, mountPath: /run/secrets/aigw, readOnly: true}
+            - {name: data, mountPath: /data}
+      volumes:
+        - name: config
+          configMap: {name: aigw-config}
+        - name: secrets
+          secret:
+            secretName: aigw
+            items: [{key: master-key, path: master-key}]
+            defaultMode: 0440   # Gruppe = fsGroup 65532
+        # nur Snapshot-Cache (Kaltstart bei DB-Ausfall); Bestand liegt in Postgres
+        - name: data
+          emptyDir: {sizeLimit: 256Mi}

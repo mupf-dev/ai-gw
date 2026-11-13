@@ -1,0 +1,92 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# ai-gw mit Postgres 17 + Redis 7 (+ optional OpenTelemetry-Collector), Doku:
+# docs/betrieb/installation.md. Startkonfiguration: config/examples/ha-postgres-redis/aigw.yaml.
+#
+# Vorbereitung (einmalig, im Verzeichnis deploy/compose):
+#   cp env.example .env                     # POSTGRES_PASSWORD setzen (keine echten Werte ins Repo)
+#   mkdir -p secrets
+#   docker run --rm ai-gw:dev keygen > secrets/aigw-master-key
+#   sudo chown 65532:65532 secrets/aigw-master-key && sudo chmod 0400 secrets/aigw-master-key
+#
+# Start:
+#   docker compose up -d                    # ohne Collector
+#   AIGW_OTLP_ENDPOINT=http://otel-collector:4318 docker compose --profile otel up -d
+#
+# Erstanmeldung: Bootstrap-Token aus `docker compose logs aigw` (einmalig auf stderr) bzw. fest
+# über AIGW_BOOTSTRAP_TOKEN in .env; danach OIDC oder Admin-API-Key einrichten.
+
+name: aigw
+
+services:
+  aigw:
+    image: ${AIGW_IMAGE:-ai-gw:dev}
+    restart: unless-stopped
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    environment:
+      AIGW_CONFIG: /etc/aigw/aigw.yaml
+      # Passwort nur über die Umgebung (.env), nie in der YAML-Datei
+      AIGW_STORE__URL: postgres://aigw:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}@postgres:5432/aigw
+      # leer = kein OTLP-Export; mit Profil "otel": http://otel-collector:4318
+      AIGW_OBSERVE__OTLP__ENDPOINT: ${AIGW_OTLP_ENDPOINT:-}
+      AIGW_BOOTSTRAP_TOKEN: ${AIGW_BOOTSTRAP_TOKEN:-}
+      AIGW_LOG: ${AIGW_LOG:-info}
+    secrets:
+      - aigw-master-key
+    volumes:
+      - ../../config/examples/ha-postgres-redis/aigw.yaml:/etc/aigw/aigw.yaml:ro
+      - aigw-data:/data
+    ports:
+      # Datenebene (/v1/*) und Steuerebene (Admin-API/-UI, /metrics) nur lokal; davor einen
+      # Reverse Proxy mit TLS setzen (docs/betrieb/haertung.md).
+      - "127.0.0.1:${AIGW_DATA_PORT:-4000}:4000"
+      - "127.0.0.1:${AIGW_CONTROL_PORT:-4001}:4001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # Healthcheck kommt aus dem Image (`aigw healthcheck` → GET /readyz).
+
+  postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aigw
+      POSTGRES_DB: aigw
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aigw -d aigw"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-bookworm
+    restart: unless-stopped
+    # Zähler und Cache sind flüchtig rekonstruierbar; ohne Persistenz, mit Speichergrenze.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "512mb", "--maxmemory-policy", "volatile-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.120.0
+    profiles: [otel]
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+
+secrets:
+  aigw-master-key:
+    file: ./secrets/aigw-master-key
+
+volumes:
+  aigw-data:
+  postgres-data:

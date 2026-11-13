@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Antwort-Cache (docs/konzept/14-cache.md): RAM + gemeinsame Redis-Ebene (exakt) und
+# semantischer Cache mit eigenem HNSW-Index. Wo gecacht wird, legen Bindungen des Plugins
+# `cache` fest (resources.yaml).
+store:
+  url: "sqlite://aigw.db?mode=rwc"
+cache:
+  enabled: true
+  memory_max_bytes: 268435456
+  redis_url: redis://redis:6379/0
+  semantic:
+    backend: memory
+    embedding_model: text-embedding-3-small
+    persist: true

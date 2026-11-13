@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aigw
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: aigw}

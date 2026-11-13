@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Grundgerüst für Kubernetes (kustomize): ai-gw mit externem Postgres und Redis.
+#   kubectl create namespace aigw
+#   kubectl -n aigw create secret generic aigw \
+#     --from-file=master-key=./aigw-master-key \
+#     --from-literal=store-url='postgres://aigw:<passwort>@postgres:5432/aigw'
+#   kubectl -n aigw apply -k deploy/kubernetes
+# Siehe docs/betrieb/installation.md (Abschnitt Kubernetes).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml
+images:
+  - name: ai-gw
+    newName: registry.example.org/ai-gw
+    newTag: 0.1.0

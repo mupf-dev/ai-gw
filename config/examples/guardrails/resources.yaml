@@ -1,0 +1,82 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Guardrails als Plugin-Bindungen: PII global, Prompt-Filter für ein Team, externe
+# Inhaltsprüfung (Azure AI Content Safety) für eine Organisation.
+# Benötigt AIGW_SECRET_CONTENT_SAFETY_API_KEY.
+---
+apiVersion: aigw/v1alpha1
+kind: Organization
+metadata: {name: acme}
+spec: {}
+---
+apiVersion: aigw/v1alpha1
+kind: Team
+metadata: {name: support}
+spec:
+  organization: acme
+---
+apiVersion: aigw/v1alpha1
+kind: PluginBinding
+metadata: {name: pii-default}
+spec:
+  scope: {level: global}
+  plugin: pii
+  order: 20
+  # Tiefere Ebenen dürfen die Bindung nicht abschalten
+  locked: true
+  config:
+    action: mask
+    direction: both
+    categories:
+      email: pseudonymize
+      phone: pseudonymize
+      creditCard: reject
+      iban: {action: redact, direction: input}
+      apiKey: {action: mask, direction: both}
+    allow: ["*@example.com"]
+---
+apiVersion: aigw/v1alpha1
+kind: PluginBinding
+metadata: {name: support-prompt-filter}
+spec:
+  scope: {level: team, target: support}
+  plugin: prompt-filter
+  order: 10
+  config:
+    action: reject
+    roles: [user, tool]
+    words:
+      terms: ["streng geheim"]
+      action: flag
+    injection:
+      threshold: 1.0
+      action: reject
+    limits: {maxMessages: 100, maxChars: 200000}
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata: {name: azure-content-safety}
+spec:
+  provider: openai-compatible
+  data:
+    apiKey: {valueFrom: {env: AIGW_SECRET_CONTENT_SAFETY_API_KEY}}
+---
+apiVersion: aigw/v1alpha1
+kind: PluginBinding
+metadata: {name: acme-content-safety}
+spec:
+  scope: {level: organization, target: acme}
+  plugin: content-safety
+  order: 30
+  # Fehler/Zeitüberschreitung des Prüfdienstes: Anfrage ablehnen
+  failMode: closed
+  timeoutMs: 1500
+  config:
+    provider: azure
+    endpoint: https://acme.cognitiveservices.azure.com
+    credential: azure-content-safety
+    apiVersion: "2024-09-01"
+    thresholds: {hate: 2, violence: 4}
+    direction: input
+    action: reject

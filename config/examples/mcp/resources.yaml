@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# MCP-Server hinter dem Gateway und Freigaben je Team (Werkzeug-Muster, ! = ausschließen).
+# Benötigt AIGW_SECRET_GITHUB_MCP_TOKEN.
+---
+apiVersion: aigw/v1alpha1
+kind: Organization
+metadata: {name: acme}
+spec: {}
+---
+apiVersion: aigw/v1alpha1
+kind: Team
+metadata: {name: platform}
+spec:
+  organization: acme
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata: {name: github-mcp}
+spec:
+  provider: openai-compatible
+  data:
+    apiKey: {valueFrom: {env: AIGW_SECRET_GITHUB_MCP_TOKEN}}
+---
+apiVersion: aigw/v1alpha1
+kind: McpServer
+metadata: {name: github}
+spec:
+  url: https://mcp.example.org/github/mcp
+  transport: streamable-http
+  credential: github-mcp
+  settings:
+    credentialHeader: authorization
+---
+apiVersion: aigw/v1alpha1
+kind: McpGrant
+metadata: {name: platform-github}
+spec:
+  server: github
+  subject: {level: team, target: platform}
+  tools: ["get_*", "search_*", "!get_secret*"]

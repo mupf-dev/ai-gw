@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# MCP-Gateway (docs/konzept/15-mcp-gateway.md): /mcp und /mcp/{server} auf der Datenebene.
+store:
+  url: "sqlite://aigw.db?mode=rwc"
+mcp:
+  enabled: true
+  call_timeout_secs: 60

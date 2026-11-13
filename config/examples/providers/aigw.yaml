@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Startkonfiguration für das Anbieter-Beispiel (resources.yaml): Ollama und vLLM laufen im
+# eigenen Netz ohne TLS und müssen ausdrücklich freigegeben werden (SSRF-Schutz,
+# docs/betrieb/haertung.md). Freigaben so eng wie möglich halten.
+store:
+  url: "sqlite://aigw.db?mode=rwc"
+admin:
+  # http:// nur für diese Hosts
+  allow_insecure_upstreams: ["ollama", "vllm"]
+  # private Ziele (Docker-/Kubernetes-Dienstnamen, LAN)
+  allow_private_upstreams: ["ollama", "vllm"]
+  # Produktiv: keine Mock-Deployments
+  allow_mock: false

@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Mehrere Instanzen hinter einem Load Balancer: Postgres (gemeinsamer Bestand, Änderungen
+# sofort per LISTEN/NOTIFY), Redis für Zähler und gemeinsamen Cache, verschlüsselter
+# Snapshot-Cache für den Kaltstart bei DB-Ausfall, Traces/Logs per OTLP.
+# Passt zu deploy/compose/docker-compose.yaml (Dienstnamen postgres, redis, otel-collector).
+#
+# Zugangsdaten nie hier: Datenbank-URL mit Passwort per AIGW_STORE__URL, Master-Key als
+# Datei (Docker-/Kubernetes-Secret).
+server:
+  data:
+    listen: "0.0.0.0:4000"
+  control:
+    listen: "0.0.0.0:4001"
+store:
+  # ohne Passwort – vollständige URL per AIGW_STORE__URL=postgres://aigw:<passwort>@postgres:5432/aigw
+  url: "postgres://aigw@postgres:5432/aigw"
+  max_connections: 20
+  reload_poll_secs: 30
+snapshot:
+  cache_file: /data/snapshot.cache
+  stale_after_secs: 300
+  cache_max_age_secs: 86400
+counters:
+  # redis: exakt clusterweit, aber Rundreisen im Hot Path (docs/betrieb/leistung.md §4.1);
+  # postgres-sync: lokal zählen, periodisch abgleichen (geringere Latenz, kurzzeitig ungenau)
+  backend: redis
+  redis_url: redis://redis:6379/0
+secrets:
+  master_key_file: /run/secrets/aigw-master-key
+log:
+  format: json
+observe:
+  otlp:
+    endpoint: http://otel-collector:4318
+    service_name: ai-gw
+    traces: {enabled: true}
+    logs: {enabled: false}
+admin:
+  ui:
+    mock: false
+  allow_mock: false
+cache:
+  redis_url: redis://redis:6379/0

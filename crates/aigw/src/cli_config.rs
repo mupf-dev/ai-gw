@@ -112,6 +112,25 @@ pub(crate) enum ConfigCommand {
         #[arg(long, default_value = GITOPS_ACTOR)]
         actor: String,
     },
+    /// Prüft die Startkonfiguration (YAML + `AIGW_…__…`-Overrides der Umgebung): Syntax,
+    /// unbekannte Felder, Typen, Upstream-Regeln (`admin.*`), Webhook-Geheimnisse. Öffnet
+    /// weder Datenbank noch Master-Key.
+    Check {
+        /// Startkonfiguration (YAML).
+        #[arg(short, long, env = "AIGW_CONFIG")]
+        config: PathBuf,
+    },
+    /// Master-Key-Rotation: verschlüsselt alle Zugangsdaten und Secrets, die nicht mit dem
+    /// aktuellen Key (`secrets.master_key_file` bzw. `AIGW_MASTER_KEY`) verschlüsselt sind,
+    /// neu; die alten Keys müssen dazu in `secrets.previous_key_files` stehen.
+    Rekey {
+        /// Startkonfiguration (YAML) mit Datenbank und Master-Keys.
+        #[arg(short, long, env = "AIGW_CONFIG")]
+        config: PathBuf,
+        /// Akteur im Audit-Log.
+        #[arg(long, default_value = "rekey")]
+        actor: String,
+    },
     /// Prüft Manifeste: ohne `--config` offline (Syntax, Schema, Namen, Geheimnisregel,
     /// Dubletten), mit `--config` zusätzlich Verweise und Geheimnisse gegen die Datenbank.
     Validate {
@@ -220,8 +239,52 @@ fn report(e: GitopsError) -> Result<ExitCode, BoxError> {
     }
 }
 
+/// Prüfungen von `aigw config check` (ohne Datenbank und Master-Key).
+fn check_start_config(path: &Path) -> Result<Config, BoxError> {
+    let cfg = Config::load(path)?;
+    check_config(&cfg)?;
+    Ok(cfg)
+}
+
+fn check_config(cfg: &Config) -> Result<(), BoxError> {
+    aigw_core::upstream::UpstreamPolicy::from_config(&cfg.admin)
+        .map_err(|e| format!("admin: {e}"))?;
+    for w in &cfg.events.webhooks {
+        if let Some(secret) = &w.secret {
+            secret
+                .validate()
+                .map_err(|e| format!("events.webhooks[{}]: {e}", w.name))?;
+        }
+    }
+    Ok(())
+}
+
 async fn exec(cmd: ConfigCommand) -> Result<ExitCode, BoxError> {
     match cmd {
+        ConfigCommand::Rekey { config, actor } => {
+            let (cfg, store) = open(&config).await?;
+            let keyring = Keyring::from_config(&cfg.secrets)?;
+            let res = store.rotate_credentials(&actor, &keyring).await;
+            store.close().await;
+            let n = res?;
+            out(&format!(
+                "Neu verschlüsselt: {n} Datensatz/Datensätze (Key-ID {})",
+                keyring.primary_id()
+            ))?;
+            Ok(ExitCode::SUCCESS)
+        }
+        ConfigCommand::Check { config } => {
+            let cfg = check_start_config(&config)?;
+            out(&format!(
+                "OK: Startkonfiguration {} gültig (Datenbank: {}, Zähler: {:?}, Daten {} / Steuerung {})",
+                config.display(),
+                cfg.store.url.split(':').next().unwrap_or_default(),
+                cfg.counters.backend,
+                cfg.server.data.listen,
+                cfg.server.control.listen,
+            ))?;
+            Ok(ExitCode::SUCCESS)
+        }
         ConfigCommand::Export {
             config,
             out: target,
@@ -404,5 +467,108 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(code, ExitCode::SUCCESS);
+    }
+    /// Geheimnisquelle für die Beispielprüfung: jede Variable/Datei liefert einen Platzhalter.
+    struct DummySecrets;
+
+    impl gitops::SecretSource for DummySecrets {
+        fn env(&self, name: &str) -> Option<String> {
+            Some(dummy_secret(name))
+        }
+        fn file(&self, path: &str) -> std::io::Result<String> {
+            Ok(dummy_secret(path))
+        }
+    }
+
+    fn dummy_secret(name: &str) -> String {
+        // Vertex-Schlüsseldatei als JSON, sonst ein beliebiger Wert.
+        if name.contains("SERVICE_ACCOUNT") || name.ends_with(".json") {
+            serde_json::json!({
+                "type": "service_account",
+                "project_id": "example",
+                "client_email": "aigw@example.iam.gserviceaccount.com",
+                "private_key": "-----BEGIN PRIVATE KEY-----\nMA==\n-----END PRIVATE KEY-----\n",
+            })
+            .to_string()
+        } else {
+            // Gültiges Key-Format, damit auch ApiKey.spec.secret geprüft werden kann.
+            aigw_store::generate_api_key().unwrap().secret
+        }
+    }
+
+    /// AIGW-59: Alle Beispiele unter `config/examples/` müssen gültig bleiben – jede
+    /// Startkonfiguration (`*/aigw.yaml`) wie `aigw config check`, jedes Manifest
+    /// (`*/resources*.yaml`, `gitops.yaml`) per Apply in eine frische SQLite-Datenbank mit den
+    /// Upstream-Regeln der zugehörigen Startkonfiguration und anschließendem Snapshot-Aufbau.
+    #[tokio::test]
+    async fn config_examples_are_valid() {
+        let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../config"));
+        let mut checked = Vec::new();
+        // Container-Standardkonfiguration und kommentiertes Vollbeispiel.
+        for f in ["aigw.container.yaml", "aigw.example.yaml"] {
+            let cfg = Config::from_yaml(&std::fs::read_to_string(root.join(f)).unwrap())
+                .unwrap_or_else(|e| panic!("{f}: {e}"));
+            check_config(&cfg).unwrap_or_else(|e| panic!("{f}: {e}"));
+            checked.push(f.to_owned());
+        }
+        let examples = root.join("examples");
+        let mut dirs: Vec<PathBuf> = std::fs::read_dir(&examples)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.is_dir())
+            .collect();
+        dirs.sort();
+        // gitops.yaml (oberste Ebene) mit der Standard-Startkonfiguration.
+        let mut sets: Vec<(String, Config, Vec<PathBuf>)> = vec![(
+            "gitops.yaml".into(),
+            Config::default(),
+            vec![examples.join("gitops.yaml")],
+        )];
+        for dir in dirs {
+            let name = dir.file_name().unwrap().to_string_lossy().into_owned();
+            let start = dir.join("aigw.yaml");
+            let cfg = Config::from_yaml(&std::fs::read_to_string(&start).unwrap())
+                .unwrap_or_else(|e| panic!("{name}/aigw.yaml: {e}"));
+            check_config(&cfg).unwrap_or_else(|e| panic!("{name}/aigw.yaml: {e}"));
+            checked.push(format!("{name}/aigw.yaml"));
+            let mut manifests: Vec<PathBuf> = std::fs::read_dir(&dir)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .filter(|p| {
+                    p.file_name()
+                        .is_some_and(|n| n.to_string_lossy().starts_with("resources"))
+                })
+                .collect();
+            manifests.sort();
+            sets.push((name, cfg, manifests));
+        }
+        for (name, cfg, manifests) in sets {
+            let store = Store::connect("sqlite::memory:").await.unwrap();
+            store.migrate().await.unwrap();
+            let keyring = Keyring::new(aigw_store::MasterKey::from_bytes(&[7u8; 32]).unwrap());
+            let args = PlanArgs {
+                file: PathBuf::new(),
+                prune: false,
+                api_keys: KeysArg::Include,
+                output: OutputFormat::Text,
+                verbose: false,
+            };
+            let opts = options(&cfg, &args, false, GITOPS_ACTOR).unwrap();
+            for m in manifests {
+                let label = format!("{name}/{}", m.file_name().unwrap().to_string_lossy());
+                let docs = gitops::parse_documents(&std::fs::read_to_string(&m).unwrap())
+                    .unwrap_or_else(|e| panic!("{label}: {e}"));
+                let rep = gitops::apply(&store, &keyring, &docs, &opts, &DummySecrets)
+                    .await
+                    .unwrap_or_else(|e| panic!("{label}: {e}"));
+                assert!(rep.applied, "{label}: nichts angewendet");
+                checked.push(label);
+            }
+            aigw_store::load_snapshot(&store, &keyring)
+                .await
+                .unwrap_or_else(|e| panic!("{name}: Snapshot: {e}"));
+            store.close().await;
+        }
+        assert!(checked.len() >= 10, "zu wenige Beispiele: {checked:?}");
     }
 }

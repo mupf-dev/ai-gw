@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Einzelinstanz mit SQLite (Test, kleine Installationen). Datenbank im Volume /data.
+#   mkdir -p secrets && docker run --rm ai-gw:dev keygen > secrets/aigw-master-key
+#   sudo chown 65532:65532 secrets/aigw-master-key && sudo chmod 0400 secrets/aigw-master-key
+#   docker compose -f docker-compose.sqlite.yaml up -d
+
+name: aigw-sqlite
+
+services:
+  aigw:
+    image: ${AIGW_IMAGE:-ai-gw:dev}
+    restart: unless-stopped
+    environment:
+      AIGW_SECRETS__MASTER_KEY_FILE: /run/secrets/aigw-master-key
+      AIGW_BOOTSTRAP_TOKEN: ${AIGW_BOOTSTRAP_TOKEN:-}
+    secrets:
+      - aigw-master-key
+    volumes:
+      - aigw-data:/data
+    ports:
+      - "127.0.0.1:${AIGW_DATA_PORT:-4000}:4000"
+      - "127.0.0.1:${AIGW_CONTROL_PORT:-4001}:4001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+secrets:
+  aigw-master-key:
+    file: ./secrets/aigw-master-key
+
+volumes:
+  aigw-data:

@@ -1,0 +1,68 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Cache für ein Team: erst exakt, dann semantisch (Embeddings über die Modellgruppe
+# text-embedding-3-small des Gateways). Benötigt AIGW_SECRET_OPENAI_API_KEY.
+---
+apiVersion: aigw/v1alpha1
+kind: Organization
+metadata: {name: acme}
+spec: {}
+---
+apiVersion: aigw/v1alpha1
+kind: Team
+metadata: {name: research}
+spec:
+  organization: acme
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata: {name: openai}
+spec:
+  provider: openai
+  data:
+    apiKey: {valueFrom: {env: AIGW_SECRET_OPENAI_API_KEY}}
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: text-embedding-3-small}
+spec:
+  capabilities: [embeddings]
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: text-embedding-3-small-openai}
+spec:
+  modelGroup: text-embedding-3-small
+  provider: openai
+  providerModel: text-embedding-3-small
+  credential: openai
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: gpt-4o-mini}
+spec: {}
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: gpt-4o-mini-openai}
+spec:
+  modelGroup: gpt-4o-mini
+  provider: openai
+  providerModel: gpt-4o-mini
+  credential: openai
+---
+apiVersion: aigw/v1alpha1
+kind: PluginBinding
+metadata: {name: research-cache}
+spec:
+  scope: {level: team, target: research}
+  plugin: cache
+  config:
+    mode: semantic
+    scope: team
+    ttlSecs: 3600
+    clientControl: true
+    semantic:
+      threshold: 0.95
+      embeddingModel: text-embedding-3-small

@@ -7,7 +7,9 @@
 //!   sowie Admin-API und Admin-UI (`server.control.listen`, Standard `:4001`); bei gleicher
 //!   Adresse auf einem gemeinsamen Port.
 //! - `aigw openapi` gibt die OpenAPI-Spezifikation der Admin-API aus (für `ui/` → TS-Typen).
-//! - `aigw config export|diff|apply|validate` – GitOps (siehe [`cli_config`]).
+//! - `aigw config export|diff|apply|validate` – GitOps (siehe [`cli_config`]);
+//!   `aigw config check` prüft die Startkonfiguration.
+//! - `aigw healthcheck` – Bereitschaftsprüfung für Container (siehe [`healthcheck`]).
 
 /// Globaler Allokator (AIGW-57): mimalloc statt glibc-malloc – weniger CPU je Anfrage und
 /// keine Arena-Sperren unter Last (Messung: docs/betrieb/leistung.md).
@@ -17,6 +19,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod cli_audit;
 mod cli_config;
+mod healthcheck;
 mod keygen;
 mod observe;
 mod runtime;
@@ -61,6 +64,9 @@ enum Command {
     /// Audit-Log: Hash-Kette prüfen (F116).
     #[command(subcommand)]
     Audit(cli_audit::AuditCommand),
+    /// Bereitschaftsprüfung (`GET /readyz` der Steuerebene) für Container-HEALTHCHECKs;
+    /// Exit-Code 0 = bereit.
+    Healthcheck(healthcheck::HealthcheckArgs),
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -120,6 +126,7 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::Healthcheck(args) => healthcheck::run(&args),
         Command::Config(cmd) => {
             init_tracing(cli.log_format);
             cli_config::run(cmd)

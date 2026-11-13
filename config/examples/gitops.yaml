@@ -159,4 +159,4 @@ spec:
   scope: {level: team, target: platform}
   plugin: pii
   order: 10
-  config: {mode: mask}
+  config: {action: mask}

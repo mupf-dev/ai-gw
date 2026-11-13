@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Minimaler OpenTelemetry-Collector für docker-compose.yaml (Profil "otel"): nimmt OTLP/HTTP
+# von ai-gw an und gibt Traces/Logs auf stdout aus. Für den Betrieb den Exporter durch das
+# eigene Backend ersetzen (Tempo, Jaeger, Loki, …).
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+  batch: {}
+exporters:
+  debug:
+    verbosity: basic
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]

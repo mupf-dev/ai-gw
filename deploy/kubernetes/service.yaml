@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Getrennte Services: Datenebene für Clients (Ingress), Steuerebene nur intern.
+apiVersion: v1
+kind: Service
+metadata:
+  name: aigw-data
+spec:
+  selector: {app.kubernetes.io/name: aigw}
+  ports:
+    - {name: data, port: 4000, targetPort: data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aigw-control
+spec:
+  selector: {app.kubernetes.io/name: aigw}
+  ports:
+    - {name: control, port: 4001, targetPort: control}

@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Startkonfiguration (ohne Geheimnisse; DB-URL und Master-Key kommen aus dem Secret "aigw").
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aigw-config
+data:
+  aigw.yaml: |
+    server:
+      data: {listen: "0.0.0.0:4000"}
+      control: {listen: "0.0.0.0:4001"}
+    store:
+      url: "postgres://aigw@postgres:5432/aigw"
+      max_connections: 20
+    counters:
+      backend: redis
+      redis_url: redis://redis:6379/0
+    cache:
+      redis_url: redis://redis:6379/0
+    secrets:
+      master_key_file: /run/secrets/aigw/master-key
+    snapshot:
+      cache_file: /data/snapshot.cache
+    log:
+      format: json
+    admin:
+      allow_mock: false
+      ui: {mock: false}

@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Minimale Startkonfiguration: SQLite, ein Port je Ebene, Master-Key aus AIGW_MASTER_KEY.
+#
+#   export AIGW_MASTER_KEY=$(aigw keygen)
+#   aigw config check -c config/examples/minimal/aigw.yaml
+#   aigw serve -c config/examples/minimal/aigw.yaml
+#   aigw config apply -c config/examples/minimal/aigw.yaml config/examples/minimal/resources.yaml
+#
+# Alle anderen Felder haben Standardwerte (kommentiert: config/aigw.example.yaml).
+store:
+  url: "sqlite://aigw.db?mode=rwc"

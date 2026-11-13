@@ -1,0 +1,76 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Organisation → Teams → API-Keys mit Modellfreigaben, Limits und Budgets.
+# Setzt die Modellgruppen aus providers/resources.yaml voraus (hier verkürzt mit eigenen
+# Gruppen, damit das Beispiel allein anwendbar ist).
+#
+# API-Keys werden nur mit `--api-keys include` angewendet; neue Keys brauchen dann
+# spec.secret.valueFrom (Format sk-aigw-…), sonst werden sie mit Warnung übersprungen.
+# Üblich: Keys über Admin-UI/-API anlegen, nur Organisation/Teams per GitOps.
+---
+apiVersion: aigw/v1alpha1
+kind: Organization
+metadata: {name: acme}
+spec:
+  displayName: ACME GmbH
+  # Monatsbudget der ganzen Organisation, Warnungen bei 80 % und 100 %
+  budget: {amount: "5000", period: month, warnAtPercent: [80, 100]}
+  payloadModeMax: masked
+---
+apiVersion: aigw/v1alpha1
+kind: Team
+metadata:
+  name: platform
+  labels: {env: prod}
+spec:
+  organization: acme
+  displayName: Plattform-Team
+  allowedModels: [gpt-4o, claude-sonnet]
+  limits:
+    - {metric: requests, limit: 600, window: minute}
+    - {metric: tokens, limit: 2000000, window: day}
+    - {metric: tokens, limit: 200000, window: minute, modelGroup: gpt-4o}
+  budget:
+    amount: "500"
+    period: month
+    warnAtPercent: [50, 80, 100]
+    hardLimit: true
+    # strict: Kosten vorab reservieren (ohne max_tokens: limits.default_max_tokens)
+    enforcement: strict
+---
+apiVersion: aigw/v1alpha1
+kind: Team
+metadata: {name: research}
+spec:
+  organization: acme
+  allowedModels: [claude-sonnet]
+  limits:
+    - {metric: requests, limit: 100000, window: calendar-month}
+  # nur warnen, nicht sperren
+  budget: {amount: "200", period: month, warnAtPercent: [80], hardLimit: false, enforcement: soft}
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: gpt-4o}
+spec:
+  # Obergrenze für die ganze Gruppe (alle Teams zusammen)
+  limits: [{metric: tokens, limit: 1000000, window: minute}]
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: claude-sonnet}
+spec: {}
+---
+apiVersion: aigw/v1alpha1
+kind: ApiKey
+metadata:
+  name: platform-ci
+  labels: {owner: platform}
+spec:
+  organization: acme
+  team: platform
+  allowedModels: [gpt-4o]
+  expiresAt: "2027-12-31T23:59:59Z"
+  limits: [{metric: requests, limit: 60, window: minute}]
+  budget: {amount: "50", period: month, warnAtPercent: [100]}
