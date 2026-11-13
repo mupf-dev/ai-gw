@@ -13,10 +13,12 @@
 #![allow(private_interfaces)]
 
 mod api_key;
+pub mod audit;
 pub(crate) mod credential;
 mod kinds;
 
 pub(crate) use api_key::api_key_from_row;
+pub use audit::AuditEntry;
 
 use aigw_core::resource::{
     Id, Object, ObjectMeta, ResourceKind, ScopeLevel, new_id, validate_name,
@@ -242,15 +244,21 @@ pub(crate) enum Action {
     Update,
     Delete,
     Rotate,
+    /// API-Key sperren.
+    Revoke,
+    /// API-Key entsperren.
+    Reactivate,
 }
 
 impl Action {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Create => "create",
             Self::Update => "update",
             Self::Delete => "delete",
             Self::Rotate => "rotate",
+            Self::Revoke => "revoke",
+            Self::Reactivate => "reactivate",
         }
     }
 }
@@ -347,11 +355,24 @@ impl AdminTx {
         before: Option<&B>,
         after: Option<&A>,
     ) -> Result<(), StoreError> {
-        let before = before.map(serde_json::to_string).transpose()?;
-        let after = after.map(serde_json::to_string).transpose()?;
+        let before = before.map(serde_json::to_value).transpose()?;
+        let after = after.map(serde_json::to_value).transpose()?;
+        // Geltungsbereich vorher/nachher (für org-/team-admins, AIGW-66).
+        let scope_before = match &before {
+            Some(v) => self.scope_of(kind, name, v).await?,
+            None => audit::Scope::default(),
+        };
+        let scope_after = match &after {
+            Some(v) => self.scope_of(kind, name, v).await?,
+            None => scope_before.clone(),
+        };
+        let before = before.as_ref().map(serde_json::to_string).transpose()?;
+        let after = after.as_ref().map(serde_json::to_string).transpose()?;
         sqlx::query(
-            "INSERT INTO audit_log (id, at, actor, action, kind, object_id, object_name, config_version, before_json, after_json)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            "INSERT INTO audit_log (id, at, actor, action, kind, object_id, object_name, config_version,
+                                    before_json, after_json, organization, team,
+                                    organization_before, team_before)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
         )
         .bind(new_id().to_string())
         .bind(millis(now()))
@@ -363,6 +384,10 @@ impl AdminTx {
         .bind(self.version)
         .bind(before)
         .bind(after)
+        .bind(scope_after.organization)
+        .bind(scope_after.team)
+        .bind(scope_before.organization)
+        .bind(scope_before.team)
         .execute(&mut *self.tx)
         .await?;
         Ok(())
@@ -705,6 +730,15 @@ impl Store {
             Some(&after),
         )
         .await?;
+        if R::KIND == ResourceKind::User
+            && audit::user_change_ends_sessions(
+                &serde_json::to_value(&before.spec)?,
+                &serde_json::to_value(&after.spec)?,
+            )
+        {
+            tx.end_user_sessions(before.id, &after.metadata.name, "roles-changed")
+                .await?;
+        }
         tx.commit().await?;
         self.get_by_id(before.id).await
     }
@@ -727,6 +761,11 @@ impl Store {
             .transpose()?
             .ok_or_else(|| StoreError::Corrupt("Objekt ohne ID".into()))?;
         let mut tx = AdminTx::begin(self, actor).await?;
+        if kind == ResourceKind::User {
+            // Der Fremdschlüssel löscht die Sessions ohnehin (ON DELETE CASCADE); ausdrücklich,
+            // damit es nicht von der Fremdschlüssel-Durchsetzung abhängt und im Audit-Log steht.
+            tx.end_user_sessions(id, name, "user-deleted").await?;
+        }
         tx.delete_row(kind, id).await?;
         tx.audit(
             Action::Delete,
@@ -777,64 +816,4 @@ impl Store {
         };
         Ok(v?)
     }
-
-    /// Letzte Einträge des Audit-Logs (neueste zuerst).
-    pub async fn audit_log(&self, limit: i64) -> Result<Vec<AuditEntry>, StoreError> {
-        let rows = sqlx::query(
-            "SELECT id, at, actor, action, kind, object_id, object_name, config_version, before_json, after_json
-             FROM audit_log ORDER BY at DESC, id DESC LIMIT $1",
-        )
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await?;
-        rows.iter()
-            .map(|row| {
-                let r = Row(row);
-                Ok(AuditEntry {
-                    id: parse_id(&r.text("id")?)?,
-                    at: r.time("at")?,
-                    actor: r.text("actor")?,
-                    action: r.text("action")?,
-                    kind: r.text("kind")?,
-                    object_id: r.opt_text("object_id")?.map(|s| parse_id(&s)).transpose()?,
-                    object_name: r.opt_text("object_name")?,
-                    config_version: r.int("config_version")?,
-                    before: r.opt_json("before_json")?,
-                    after: r.opt_json("after_json")?,
-                })
-            })
-            .collect()
-    }
-}
-
-/// Eintrag im Audit-Log.
-#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AuditEntry {
-    /// ID.
-    #[schema(value_type = String, format = Uuid)]
-    pub id: Id,
-    /// Zeitpunkt.
-    #[serde(with = "time::serde::rfc3339")]
-    #[schema(value_type = String, format = DateTime)]
-    pub at: OffsetDateTime,
-    /// Wer (Nutzer, Admin-Key, `system`, `gitops`).
-    pub actor: String,
-    /// `create` | `update` | `delete` | `rotate`.
-    pub action: String,
-    /// Ressourcenart.
-    pub kind: String,
-    /// Objekt-ID.
-    #[schema(value_type = Option<String>, format = Uuid)]
-    pub object_id: Option<Id>,
-    /// Objektname.
-    pub object_name: Option<String>,
-    /// Konfigurationsversion nach der Änderung.
-    pub config_version: i64,
-    /// Zustand vorher.
-    #[schema(value_type = Option<Object>)]
-    pub before: Option<serde_json::Value>,
-    /// Zustand nachher.
-    #[schema(value_type = Option<Object>)]
-    pub after: Option<serde_json::Value>,
 }

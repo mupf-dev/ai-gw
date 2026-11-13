@@ -172,8 +172,12 @@ impl Store {
         .await?;
         let mut after = before.clone();
         after.status.state = state;
+        let action = match state {
+            ApiKeyState::Revoked => Action::Revoke,
+            ApiKeyState::Active => Action::Reactivate,
+        };
         tx.audit(
-            Action::Update,
+            action,
             ResourceKind::ApiKey,
             Some(before.id),
             name,

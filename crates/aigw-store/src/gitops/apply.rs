@@ -117,6 +117,10 @@ pub async fn apply(
                 name,
                 current,
             } => {
+                if kind == ResourceKind::User {
+                    tx.end_user_sessions(current.id, &name, "user-deleted")
+                        .await?;
+                }
                 tx.delete_row(kind, current.id).await?;
                 tx.audit(
                     Action::Delete,
@@ -232,7 +236,18 @@ async fn upsert_plain<R: PlainResource>(
         metadata: meta,
         spec,
     };
-    audit(tx, action, R::KIND, id, &name, existing, &after).await
+    audit(tx, action, R::KIND, id, &name, existing, &after).await?;
+    // Rollenänderung per GitOps beendet die Sessions des Nutzers (wie über die Admin-API).
+    if R::KIND == ResourceKind::User
+        && let Some(c) = existing
+        && crate::repo::audit::user_change_ends_sessions(
+            &c.audit["spec"],
+            &serde_json::to_value(&after.spec)?,
+        )
+    {
+        tx.end_user_sessions(id, &name, "roles-changed").await?;
+    }
+    Ok(())
 }
 
 async fn upsert_credential(

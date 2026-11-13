@@ -13,6 +13,7 @@
 //!   (siehe [`deployments`], [`credentials`], [`prices`]; Endpunktprüfung in [`upstream`])
 //! - `/admin/api/v1/admin-api-keys` – Admin-API-Keys ([`admin_keys`]),
 //!   `/admin/api/v1/session` – angemeldeter Principal
+//! - `/admin/api/v1/audit-log` – Audit-Log lesen und exportieren ([`audit`])
 //! - `/admin/auth/{login,callback,logout}` – OIDC-Login und Abmeldung ([`session`], [`oidc`])
 //! - `GET /admin/api/v1/usage/budgets` – Budgetstände (siehe [`usage`])
 //! - `GET /admin/…` – eingebettete Svelte-SPA (siehe [`ui`])
@@ -21,6 +22,7 @@
 
 pub mod admin_keys;
 pub mod api;
+pub mod audit;
 pub mod auth;
 pub mod credentials;
 pub mod deployments;
@@ -173,6 +175,7 @@ pub fn router_with(state: AdminState) -> Router {
         .merge(credentials::router())
         .merge(prices::router())
         .merge(admin_keys::router())
+        .merge(audit::router())
         .merge(session::protected_router())
         .route_layer(axum::middleware::from_fn_with_state(
             Arc::clone(&state.auth),

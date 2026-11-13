@@ -408,10 +408,15 @@ impl AdminKeyAuthenticator {
             tracing::debug!(key = %k.name, "Admin-API-Key abgelaufen");
             return Ok(None);
         }
-        if k.last_used_at
-            .is_none_or(|t| now - t >= Duration::seconds(TOUCH_INTERVAL_SECS))
-        {
-            self.store.touch_admin_api_key(k.id, now).await?;
+        match k.last_used_at {
+            // Erstnutzung: einmalig mit Audit-Ereignis `first-use` (AIGW-66).
+            None => {
+                self.store.touch_admin_api_key_first(&k, now).await?;
+            }
+            Some(t) if now - t >= Duration::seconds(TOUCH_INTERVAL_SECS) => {
+                self.store.touch_admin_api_key(k.id, now).await?;
+            }
+            Some(_) => {}
         }
         Ok(Some(Principal {
             subject: format!("admin-key:{}", k.name),

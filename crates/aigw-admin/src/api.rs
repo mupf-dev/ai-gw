@@ -43,6 +43,7 @@ use crate::{admin_keys as ak, session as s};
         ak::list_admin_api_keys, ak::create_admin_api_key, ak::get_admin_api_key,
         ak::put_admin_api_key, ak::delete_admin_api_key,
         crate::usage::list_budgets,
+        crate::audit::audit_log,
     ),
     components(schemas(VersionInfo, Problem)),
     modifiers(&SecuritySchemes),
@@ -60,6 +61,7 @@ use crate::{admin_keys as ak, session as s};
         (name = "auth", description = "Anmeldung: OIDC-Login, Session, Abmeldung"),
         (name = "admin-api-keys", description = "Admin-API-Keys für Automatisierung"),
         (name = "usage", description = "Verbrauch und Budgetstände"),
+        (name = "audit-log", description = "Audit-Log: Änderungen und Anmeldeereignisse, Export als JSON Lines"),
     )
 )]
 pub struct ApiDoc;
@@ -219,9 +221,15 @@ mod tests {
             "/admin/api/v1/auth/info",
             "/admin/api/v1/admin-api-keys",
             "/admin/api/v1/admin-api-keys/{name}",
+            "/admin/api/v1/audit-log",
         ] {
             assert!(json["paths"][p].is_object(), "Pfad {p} fehlt");
         }
+        assert!(json["components"]["schemas"]["AuditEntry"].is_object());
+        assert!(json["components"]["schemas"]["AuditLogPage"].is_object());
+        let content =
+            &json["paths"]["/admin/api/v1/audit-log"]["get"]["responses"]["200"]["content"];
+        assert!(content["application/x-ndjson"].is_object(), "{content}");
         // Ressourcen akzeptieren Bearer und Session.
         let sec = json["paths"]["/admin/api/v1/teams"]["post"]["security"].to_string();
         assert!(sec.contains("bearer") && sec.contains("session"), "{sec}");

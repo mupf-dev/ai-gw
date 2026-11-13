@@ -28,7 +28,8 @@ use aigw_core::config::{GroupRoleMapping, OidcConfig, SessionConfig};
 use aigw_core::resource::{Object, ObjectMeta, RoleBinding, UserSpec, validate_name};
 use aigw_core::snapshot::KeyHash;
 use aigw_store::admin_auth::LoginState;
-use aigw_store::{Store, StoreError, hash_api_key};
+use aigw_store::repo::audit::ADMIN_SESSION_KIND;
+use aigw_store::{AuditEvent, Store, StoreError, hash_api_key};
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Extension, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -373,12 +374,29 @@ pub(crate) struct CallbackQuery {
 struct LoginFailure {
     code: &'static str,
     log: String,
+    /// Im Audit-Log festhalten (nur nach gültigem `state`, d. h. für einen echten, in diesem
+    /// Browser begonnenen Login – sonst könnte jeder ohne Anmeldung das Audit-Log füllen).
+    audit: bool,
+    /// Zugeordneter Nutzer (falls schon bekannt, z. B. bei `no-access`).
+    user: Option<String>,
 }
 
 fn fail(code: &'static str, log: impl Into<String>) -> LoginFailure {
     LoginFailure {
         code,
         log: log.into(),
+        audit: false,
+        user: None,
+    }
+}
+
+/// Höchstlänge des Grundes in Audit-Ereignissen fehlgeschlagener Logins.
+const AUDIT_REASON_MAX: usize = 300;
+
+/// Schreibt ein Anmelde-Ereignis; ein Fehler beim Schreiben verhindert die Anmeldung nicht.
+async fn audit_event(store: &Store, ev: AuditEvent) {
+    if let Err(e) = store.record_audit_event(&ev).await {
+        tracing::warn!(error = %e, action = %ev.action, "Audit-Ereignis nicht gespeichert");
     }
 }
 
@@ -414,6 +432,21 @@ pub(crate) async fn callback(
         }
         Err(f) => {
             tracing::warn!(reason = %f.log, code = f.code, "OIDC-Login abgelehnt");
+            if f.audit {
+                let reason: String = f.log.chars().take(AUDIT_REASON_MAX).collect();
+                audit_event(
+                    &st.store,
+                    AuditEvent {
+                        actor: LOGIN_ACTOR.into(),
+                        action: "login-failed".into(),
+                        kind: ADMIN_SESSION_KIND.into(),
+                        object_id: None,
+                        object_name: f.user.clone(),
+                        details: Some(serde_json::json!({"code": f.code, "reason": reason})),
+                    },
+                )
+                .await;
+            }
             redirect(&format!("/admin/?auth_error={}", f.code))
         }
     };
@@ -457,12 +490,24 @@ async fn finish_login(
         .take_login_state(&session_hash(&state))
         .await?
         .ok_or_else(|| fail("state", "unbekannter oder bereits verwendeter state"))?;
+    complete_login(st, svc, &code, login)
+        .await
+        .map_err(|f| LoginFailure { audit: true, ..f })
+}
+
+/// Zweiter Teil des Rücksprungs (nach gültigem `state`): Token, Nutzer, Session.
+async fn complete_login(
+    st: &AdminState,
+    svc: &LoginService,
+    code: &str,
+    login: LoginState,
+) -> Result<(String, String, u64), LoginFailure> {
     if login.created_at + Duration::seconds(LOGIN_TTL_SECS) < now() {
         return Err(fail("state", "Login abgelaufen"));
     }
     let id_token = svc
         .oidc
-        .exchange_code(&code, &login.code_verifier)
+        .exchange_code(code, &login.code_verifier)
         .await
         .map_err(|e| fail("token", e.to_string()))?;
     let claims = svc
@@ -475,13 +520,16 @@ async fn finish_login(
     let user = resolve_user(st, svc, &claims, !group_roles.is_empty()).await?;
     let roles = effective_roles(&user.spec, &claims.groups, &svc.group_roles);
     if roles.is_empty() {
-        return Err(fail(
-            "no-access",
-            format!(
-                "Nutzer {} (sub {}) hat keine Rolle (Gruppen {:?})",
-                user.metadata.name, claims.subject, claims.groups
-            ),
-        ));
+        return Err(LoginFailure {
+            user: Some(user.metadata.name.clone()),
+            ..fail(
+                "no-access",
+                format!(
+                    "Nutzer {} (sub {}) hat keine Rolle (Gruppen {:?})",
+                    user.metadata.name, claims.subject, claims.groups
+                ),
+            )
+        });
     }
     if rbac::is_global_admin(&roles) {
         match st
@@ -512,6 +560,23 @@ async fn finish_login(
         .create_admin_session(&session_hash(&sid), user.id, &claims.groups, expires)
         .await?;
     tracing::info!(user = %user.metadata.name, "Admin-Login per OIDC");
+    audit_event(
+        &st.store,
+        AuditEvent {
+            actor: format!("user:{}", user.metadata.name),
+            action: "login".into(),
+            kind: ADMIN_SESSION_KIND.into(),
+            object_id: Some(user.id),
+            object_name: Some(user.metadata.name.clone()),
+            details: Some(serde_json::json!({
+                "method": "oidc",
+                "groups": claims.groups,
+                "roles": roles,
+                "expiresAt": expires.format(&time::format_description::well_known::Rfc3339).ok(),
+            })),
+        },
+    )
+    .await;
     Ok((sid, login.return_to, svc.session.max_age_secs))
 }
 
@@ -663,7 +728,27 @@ pub(crate) async fn logout(
 ) -> Result<Response, Problem> {
     if let Some(sid) = cookie(&headers, SESSION_COOKIE) {
         check_csrf(&headers, Some(&csrf_for(sid)), st.allowed_origin.as_deref())?;
-        st.store.delete_admin_session(&session_hash(sid)).await?;
+        let hash = session_hash(sid);
+        let session = st.store.get_admin_session(&hash).await?;
+        st.store.delete_admin_session(&hash).await?;
+        if let Some(rec) = session {
+            let user = st.store.get_by_id::<UserSpec>(rec.user_id).await.ok();
+            let name = user.map(|u| u.metadata.name);
+            audit_event(
+                &st.store,
+                AuditEvent {
+                    actor: name
+                        .as_ref()
+                        .map_or_else(|| "user:?".to_owned(), |n| format!("user:{n}")),
+                    action: "logout".into(),
+                    kind: ADMIN_SESSION_KIND.into(),
+                    object_id: Some(rec.user_id),
+                    object_name: name,
+                    details: None,
+                },
+            )
+            .await;
+        }
     }
     let mut redirect_url = "/admin/".to_owned();
     if let Some(svc) = st.login.as_ref()

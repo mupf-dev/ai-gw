@@ -18,6 +18,7 @@ use sqlx::any::AnyRow;
 use time::OffsetDateTime;
 
 use crate::keys::generate_admin_api_key;
+use crate::repo::audit::{AuditEvent, BOOTSTRAP_TOKEN_KIND};
 use crate::repo::{Action, AdminTx, Row, map_db, millis, now, parse_id};
 use crate::{Store, StoreError};
 
@@ -232,6 +233,17 @@ impl Store {
         .execute(&self.pool)
         .await?
         .rows_affected();
+        if n > 0 {
+            self.record_audit_event(&AuditEvent {
+                actor: "system".into(),
+                action: "disable".into(),
+                kind: BOOTSTRAP_TOKEN_KIND.into(),
+                object_id: None,
+                object_name: None,
+                details: Some(serde_json::json!({"reason": reason})),
+            })
+            .await?;
+        }
         Ok(n > 0)
     }
 }
@@ -456,6 +468,36 @@ impl Store {
             .as_ref()
             .map(admin_key_from_row)
             .transpose()
+    }
+
+    /// Vermerkt die **erste** Nutzung eines Admin-API-Keys; `true` nur für genau einen Aufruf
+    /// (auch bei gleichzeitigen Anfragen mehrerer Instanzen) – dann steht ein Ereignis
+    /// `first-use` im Audit-Log.
+    pub async fn touch_admin_api_key_first(
+        &self,
+        key: &AdminApiKeyRecord,
+        at: OffsetDateTime,
+    ) -> Result<bool, StoreError> {
+        let n = sqlx::query(
+            "UPDATE admin_api_key SET last_used_at = $1 WHERE id = $2 AND last_used_at IS NULL",
+        )
+        .bind(millis(at))
+        .bind(key.id.to_string())
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        if n > 0 {
+            self.record_audit_event(&AuditEvent {
+                actor: format!("admin-key:{}", key.name),
+                action: "first-use".into(),
+                kind: ADMIN_API_KEY_KIND.into(),
+                object_id: Some(key.id),
+                object_name: Some(key.name.clone()),
+                details: None,
+            })
+            .await?;
+        }
+        Ok(n > 0)
     }
 
     /// Vermerkt die Nutzung eines Admin-API-Keys.

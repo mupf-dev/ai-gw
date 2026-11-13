@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use aigw_admin::AdminState;
 use aigw_core::config::{AdminAuthConfig, BootstrapMode, GroupRoleMapping, OidcConfig};
 use aigw_core::resource::{ModelGroupSpec, ObjectMeta, Role, new_id};
-use aigw_store::Store;
+use aigw_store::{AuditQuery, Store};
 use aws_lc_rs::digest;
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{
@@ -1002,27 +1002,40 @@ async fn scenario(store: Store, db_url: &str) {
     )
     .await
     .expect(StatusCode::FORBIDDEN);
-    // Rollenänderung in der DB wirkt sofort auf die laufende Session
+    // Rollenänderung in der DB beendet die laufenden Sessions des Nutzers (AIGW-66)
+    let vera_spec = |roles: Value| {
+        json!({"metadata": {"name": "vera"},
+               "spec": {"email": "Vera@Example.org", "oidcIssuer": idp.issuer,
+                        "oidcSubject": "vera-idp", "roles": roles}})
+    };
+    gw.boot(Method::PUT, "/users/vera", Some(vera_spec(json!([]))))
+        .await
+        .expect(StatusCode::OK);
+    gw.sess(&vera, Method::GET, "/teams", None, false)
+        .await
+        .expect(StatusCode::UNAUTHORIZED);
+    // ohne Rolle kein neuer Login; mit Rolle wieder
+    let mut v = user("vera-idp", &[]);
+    v.email = Some("vera@example.org".into());
+    assert_eq!(gw.login(&idp, v.clone()).await.unwrap_err(), "no-access");
     gw.boot(
         Method::PUT,
         "/users/vera",
-        Some(json!({"metadata": {"name": "vera"},
-                    "spec": {"email": "Vera@Example.org", "oidcIssuer": idp.issuer,
-                             "oidcSubject": "vera-idp", "roles": []}})),
+        Some(vera_spec(json!([{"role": "viewer"}]))),
     )
     .await
     .expect(StatusCode::OK);
-    gw.sess(&vera, Method::GET, "/teams", None, false)
+    let vera = gw.login(&idp, v).await.unwrap();
+    assert_eq!(vera.info["roles"], json!([{"role": "viewer"}]));
+    // Änderung ohne Rollen/Identität (E-Mail) lässt die Session bestehen
+    let mut same = vera_spec(json!([{"role": "viewer"}]));
+    same["spec"]["email"] = json!("vera@example.org");
+    gw.boot(Method::PUT, "/users/vera", Some(same))
         .await
         .expect(StatusCode::OK);
-    let me = gw
-        .sess(&vera, Method::GET, "/session", None, false)
+    gw.sess(&vera, Method::GET, "/session", None, false)
         .await
-        .json();
-    assert_eq!(me["roles"], json!([]));
-    gw.sess(&vera, Method::GET, "/teams/data", None, false)
-        .await
-        .expect(StatusCode::FORBIDDEN);
+        .expect(StatusCode::OK);
 
     // --- globaler Admin per OIDC schaltet das Bootstrap-Token ab ------------------------------
     let (adam, loc) = gw
@@ -1227,10 +1240,20 @@ async fn scenario(store: Store, db_url: &str) {
     .expect(StatusCode::UNAUTHORIZED);
     let log = gw.store.audit_log(100).await.unwrap();
     assert_eq!(
-        log.iter().filter(|e| e.kind == "admin-api-key").count(),
+        log.iter()
+            .filter(|e| e.kind == "admin-api-key" && e.action != "first-use")
+            .count(),
         4,
         "create ci, create ci-platform, update ci-platform, delete ci"
     );
+    // Erstnutzung genau einmal je Key (AIGW-66)
+    let mut first: Vec<&str> = log
+        .iter()
+        .filter(|e| e.kind == "admin-api-key" && e.action == "first-use")
+        .map(|e| e.actor.as_str())
+        .collect();
+    first.sort_unstable();
+    assert_eq!(first, ["admin-key:ci", "admin-key:ci-platform"]);
 
     // --- Ablauf und Leerlauf der Sessions -------------------------------------------------------
     gw.sql("UPDATE admin_session SET last_seen_at = 1000 WHERE user_id = (SELECT id FROM app_user WHERE name = 'tina')")
@@ -1349,6 +1372,73 @@ async fn scenario(store: Store, db_url: &str) {
     )
     .await;
     assert_eq!(cb.location(), "/admin/?auth_error=idp");
+
+    // --- Audit-Ereignisse der Anmeldung (AIGW-66) ---------------------------------------------
+    let events = gw
+        .store
+        .query_audit_log(&AuditQuery {
+            kinds: vec!["admin-session".into()],
+            limit: 1000,
+            ..AuditQuery::default()
+        })
+        .await
+        .unwrap()
+        .items;
+    let count = |action: &str, actor: &str| {
+        events
+            .iter()
+            .filter(|e| e.action == action && e.actor == actor)
+            .count()
+    };
+    assert!(count("login", "user:adam") >= 2, "{events:#?}");
+    assert_eq!(count("logout", "user:adam"), 1);
+    assert!(count("login", "user:tina") >= 1);
+    let login = events
+        .iter()
+        .find(|e| e.action == "login" && e.actor == "user:adam")
+        .unwrap();
+    assert_eq!(
+        login.after.as_ref().unwrap()["roles"],
+        json!([{"role": "admin"}])
+    );
+    // abgelehnte Logins nach gültigem state (Nutzer ohne Rolle, ungültige Tokens) stehen im Log,
+    // solche ohne gültigen state (fremdes Cookie, Wiederholung, IdP-Fehler) nicht
+    let failed: Vec<_> = events
+        .iter()
+        .filter(|e| e.action == "login-failed")
+        .map(|e| e.after.clone().unwrap())
+        .collect();
+    let codes = |c: &str| failed.iter().filter(|f| f["code"] == c).count();
+    assert_eq!(codes("token"), 5, "{failed:#?}");
+    assert_eq!(codes("no-access"), 3, "{failed:#?}");
+    assert_eq!(codes("state") + codes("idp"), 0, "{failed:#?}");
+    assert!(events.iter().any(|e| e.action == "login-failed"
+        && e.actor == "oidc-login"
+        && e.object_name.as_deref() == Some("vera")));
+    // Rollenänderung und Löschen beenden Sessions – mit Grund im Log
+    let revoked: Vec<_> = events
+        .iter()
+        .filter(|e| e.action == "revoke" && e.object_name.as_deref() == Some("vera"))
+        .map(|e| e.after.clone().unwrap()["reason"].clone())
+        .collect();
+    assert_eq!(revoked, vec![json!("user-deleted"), json!("roles-changed")]);
+    // Bootstrap-Abschaltung
+    let boot = gw
+        .store
+        .query_audit_log(&AuditQuery {
+            kinds: vec!["bootstrap-token".into()],
+            limit: 10,
+            ..AuditQuery::default()
+        })
+        .await
+        .unwrap()
+        .items;
+    assert_eq!(boot.len(), 1);
+    assert_eq!(
+        (boot[0].action.as_str(), boot[0].actor.as_str()),
+        ("disable", "system")
+    );
+    assert_eq!(boot[0].after.as_ref().unwrap()["reason"], "oidc-admin:adam");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

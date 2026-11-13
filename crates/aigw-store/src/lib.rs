@@ -33,6 +33,9 @@ use tokio::sync::watch;
 pub use crypto::{Keyring, MasterKey};
 pub use keys::{generate_api_key, hash_api_key};
 pub use reload::{ReloadMetrics, ReloadOptions, Reloader, ReloaderTask};
+pub use repo::audit::{
+    ActorType, AuditCursor, AuditEvent, AuditPage, AuditQuery, AuditScope, ScopeRule,
+};
 pub use repo::{AuditEntry, PlainResource, Resource};
 pub use snapshot::load_snapshot;
 
@@ -135,6 +138,13 @@ pub fn migrator() -> Migrator {
             "admin_auth".into(),
             MigrationType::Simple,
             include_str!("../migrations/0003_admin_auth.sql").into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            4,
+            "audit_scope".into(),
+            MigrationType::Simple,
+            include_str!("../migrations/0004_audit_scope.sql").into_sql_str(),
             false,
         ),
     ])

@@ -1,4 +1,4 @@
-# ai-gw – Admin-API: Mandanten, Nutzer, Keys, Modelle, Preise, Anmeldung (AIGW-28, AIGW-65, AIGW-32)
+# ai-gw – Admin-API: Mandanten, Nutzer, Keys, Modelle, Preise, Anmeldung, Audit-Log (AIGW-28, AIGW-65, AIGW-32, AIGW-66)
 
 Stand: 2026-11-13 · Status: umgesetzt (Entwurf zur Durchsicht)
 Grundlage: [01-architektur.md](01-architektur.md) §3, §5, §6, §8, §13, §15 · [02-datenmodell.md](02-datenmodell.md)
@@ -10,7 +10,7 @@ Die Admin-API läuft auf der Steuerebene (`server.control.listen`, Standard `:40
 (`GET /admin/api/openapi.json`, eingecheckt als `ui/openapi.json`, daraus
 `ui/src/lib/api/schema.d.ts`). Code: `crates/aigw-admin` (`resources.rs` mit den generischen
 Abläufen, `deployments.rs`, `credentials.rs`, `prices.rs`, `auth.rs`,
-`problem.rs`; Anmeldung und Rollen siehe §5).
+`problem.rs`; Anmeldung und Rollen siehe §5, Audit-Log `audit.rs` §5.10).
 
 Jede Änderung läuft als eine Datenbank-Transaktion mit `config_version + 1` und Audit-Eintrag
 (Akteur = angemeldeter Principal). Der Reloader baut danach den Snapshot neu (§14), d. h. ein
@@ -34,6 +34,7 @@ Instanz nach ca. 100 ms (Debounce), bei Postgres auf allen Instanzen per `NOTIFY
 | `/prices`, `/prices/{name}` | GET, POST · GET, PUT, DELETE | Preisversionen je Anbieter-Modell |
 | `/admin-api-keys`, `/admin-api-keys/{name}` | GET, POST · GET, PUT, DELETE | Admin-API-Keys (§5.5) |
 | `/session`, `/auth/info` | GET | angemeldeter Principal bzw. Anmeldeverfahren (§5) |
+| `/audit-log` | GET | Audit-Log lesen, filtern, als JSON Lines exportieren (§5.10) |
 | `/version` | GET | Version (ohne Anmeldung) |
 
 Körper wie in GitOps-YAML ([02-datenmodell.md](02-datenmodell.md) §3), als JSON:
@@ -64,7 +65,8 @@ Unbekanntem). `PUT` ersetzt Labels und `spec` vollständig; Umbenennen ist nicht
   jetzt + Übergangszeit (Standard 24 h, `0` = sofort, höchstens 365 Tage; ein früherer Ablauf
   bleibt). Standardname: alter Name mit Zeitstempel `-JJJJMMTThhmmss` (ein vorhandener
   Zeitstempel wird ersetzt). Antwort `201` mit `{"newKey": {key, secret}, "previousKey": {…}}`.
-  Gesperrte Keys lassen sich nicht rotieren (`409`). Audit: `create` (neu) und `rotate` (alt).
+  Gesperrte Keys lassen sich nicht rotieren (`409`). Audit: `create` (neu) und `rotate` (alt);
+  Sperren/Entsperren: `revoke`/`reactivate`.
 - **Team ist optional** (Stand AIGW-9). Keys ohne Team haben keine Organisation; ihre Freigaben
   ergeben sich nur aus `spec.allowedModels`.
 
@@ -354,8 +356,14 @@ Umgebungsvariable `client_secret_env` (Standard `AIGW_OIDC_CLIENT_SECRET`), nie 
   geschrieben. Abgelaufene Sessions werden bei der Prüfung gelöscht, alte Sessions und
   Login-Zustände bei jedem Login aufgeräumt.
 - **Rollen je Anfrage:** direkte Rollen des Nutzers (`UserSpec.roles`, aktuell aus der DB) ∪
-  Rollen aus den gespeicherten Gruppen (aktuelle Konfiguration). Eine Rollenänderung in der DB
-  wirkt damit sofort; Gruppenänderungen beim IdP erst beim nächsten Login.
+  Rollen aus den gespeicherten Gruppen (aktuelle Konfiguration). Gruppenänderungen beim IdP
+  wirken erst beim nächsten Login.
+- **Sessions enden** (AIGW-66), wenn sich die direkten Rollen (`spec.roles`, Reihenfolge egal)
+  oder die OIDC-Identität (`oidcIssuer`/`oidcSubject`) eines Nutzers ändern oder der Nutzer
+  gelöscht wird – über die Admin-API und GitOps, in derselben Transaktion wie die Änderung.
+  Der Nutzer muss sich neu anmelden; im Audit-Log steht `revoke` (Art `admin-session`, Grund
+  `roles-changed` bzw. `user-deleted`, Anzahl der Sessions). Andere Änderungen (E-Mail,
+  Anzeigename, Labels) lassen Sessions bestehen.
 - **CSRF** (zusätzlich zu `SameSite=Strict`), für `POST/PUT/PATCH/DELETE` mit Session-Cookie:
   1. Header `X-CSRF-Token` muss passen (Synchronizer-Token). Das Token ist
      SHA-256(`"aigw-csrf\0" + Session-ID`) – an die Session gebunden, ohne eigene Spalte und
@@ -392,7 +400,7 @@ eingeschränkt. Jede Operation fordert `Permission::Read`/`Write` auf einem `Tar
 | `org-admin` (Org O) | O, Teams und Keys in O, Katalog | Teams und Keys in O, nicht O selbst |
 | `team-admin` (Team T) | T, Keys in T, Katalog; O nur, wenn die Zuweisung `organization` nennt | Keys in T |
 | `viewer` | im Bereich (global: alles), Katalog | – |
-| `auditor` | wie `viewer` (Audit-Log-Endpunkt folgt) | – |
+| `auditor` | wie `viewer`; dazu das Audit-Log (§5.10) | – |
 
 - `org-admin` ohne `organization` und `team-admin` ohne `team` sind wirkungslos.
 - Listen sind gefiltert (eingeschränkte Rollen sehen nur ihren Bereich, z. B. `GET /teams`
@@ -425,7 +433,8 @@ POST /admin/api/v1/admin-api-keys
 - `PUT` ersetzt `description`, `roles`, `expiresAt`; `DELETE` widerruft sofort (keine
   Snapshot-Verzögerung, da je Anfrage aus der DB gelesen).
 - `lastUsedAt` (höchstens minütlich aktualisiert). Audit: `create`/`update`/`delete` mit Art
-  `admin-api-key` (ohne Hash).
+  `admin-api-key` (ohne Hash); die erste Nutzung eines Keys einmalig als `first-use` (Akteur
+  `admin-key:<name>`, auch bei gleichzeitigen Anfragen genau ein Eintrag).
 
 ### 5.6 Bootstrap-Token
 
@@ -493,6 +502,93 @@ Ablauf, Nutzerlöschung, Abmeldung mit RP-initiated Logout, abgelehnte Tokens (`
 `nonce`, `iss`, Signatur), `state`-Fehler und -Wiederholung, offenen Redirect, Admin-API-Keys
 (Rollen, Ablauf, Widerruf) und die Bootstrap-Modi.
 
+`crates/aigw-admin/tests/audit_log.rs` (SQLite und Postgres): Filter und Paginierung (auch
+Seitengröße 3 vs. 500 und `order=asc`), Bereichsfilter je Rolle (org-admin, team-admin,
+eingeschränkter auditor, viewer `403`), Vorher/Nachher (auch Verschieben eines Keys),
+Redaktion (kein Zugangsdaten-Wert, kein Key-Klartext, kein Key-Hash in JSON und NDJSON),
+NDJSON-Export (mit Filter, Höchstzahl, Bereich), Erstnutzung von Admin-Keys, Sessions enden
+bei Rollenänderung/Löschen, Logout. `oidc_login.rs` prüft zusätzlich die Login-Ereignisse
+(`login`, `login-failed` nur nach gültigem `state`, `logout`, Bootstrap-Abschaltung).
+
+### 5.10 Audit-Log (AIGW-66)
+
+`GET /admin/api/v1/audit-log` – Einträge **neueste zuerst** mit Vorher/Nachher-Zustand:
+
+```json
+{"items": [{"id": "0193…", "at": "2026-11-13T10:15:02.123Z", "actor": "user:anna",
+            "action": "update", "kind": "ApiKey", "objectId": "0193…", "objectName": "ci",
+            "configVersion": 42, "organization": "other", "team": "ops",
+            "organizationBefore": "acme", "teamBefore": "data",
+            "before": {"id": "…", "metadata": {…}, "spec": {"team": "data"}, "status": {…}},
+            "after":  {"id": "…", "metadata": {…}, "spec": {"team": "ops"},  "status": {…}}}],
+ "nextCursor": "1763028902123.0193…"}
+```
+
+| Parameter | Bedeutung |
+|---|---|
+| `limit`, `cursor` | Seitengröße 1–500 (Standard 50), Fortsetzung aus `nextCursor` (Keyset über Zeitpunkt + ID, stabil auch bei neuen Einträgen) |
+| `order` | `desc` (Standard) oder `asc` |
+| `from`, `to` | Zeitraum, RFC 3339; `from` einschließlich, `to` ausschließlich (`+` im Offset als `%2B` kodieren oder `Z` verwenden) |
+| `actor` | exakte Akteure, kommagetrennt (`user:anna,admin-key:ci`) |
+| `actorType` | `user`, `admin-key`, `bootstrap`, `gitops` (CLI `gitops`, API `gitops:<principal>`), `oidc-login`, `system` |
+| `kind` | Arten, kommagetrennt: Ressourcen wie in YAML (`Organization`, `Team`, `User`, `ApiKey`, `ModelGroup`, `Deployment`, `ProviderCredential`, `Price` …) und `admin-api-key`, `admin-session`, `bootstrap-token` |
+| `action` | `create`, `update`, `delete`, `rotate`, `revoke`, `reactivate`, `login`, `login-failed`, `logout`, `first-use`, `disable` |
+| `object` | Name **oder** ID des Objekts (exakt) |
+
+Unbekannte bzw. ungültige Parameter → `400`. Alle Filter wirken zusätzlich zum Bereich des
+Lesers.
+
+**Export (SIEM):** Mit `Accept: application/x-ndjson` kommen **alle** passenden Einträge (ohne
+Seitengrenze; `limit` = Höchstzahl) als JSON Lines, je Zeile ein `AuditEntry`, gestreamt in
+Blöcken zu 500 aus der Datenbank. Für inkrementelles Abholen: `order=asc&from=<letzter
+Zeitpunkt>` und Duplikate über `id` verwerfen. Bricht die Datenbank während des Exports ab, wird
+die Übertragung abgebrochen (kein vollständiger Abschluss) und der Fehler geloggt.
+
+**Ereignisse** (ohne neue Konfigurationsversion; `configVersion` = damals aktuelle):
+
+| Art / Aktion | Akteur | Inhalt (`after`) |
+|---|---|---|
+| `admin-session` / `login` | `user:<name>` | Verfahren, IdP-Gruppen, wirksame Rollen, Ablauf |
+| `admin-session` / `login-failed` | `oidc-login` (Objekt: Nutzer, falls zugeordnet) | `code` (`token`, `no-access`, `state` bei abgelaufenem Login, `internal`), gekürzter Grund |
+| `admin-session` / `logout` | `user:<name>` | – |
+| `admin-session` / `revoke` | Akteur der Änderung | Grund, Anzahl der beendeten Sessions (§5.3) |
+| `admin-api-key` / `first-use` | `admin-key:<name>` | – |
+| `bootstrap-token` / `disable` | `system` | Grund (`oidc-admin:<name>`, `admin-api-key:<name>`) |
+
+Fehlgeschlagene Logins werden **nur nach gültigem `state`** festgehalten (Login in diesem
+Browser begonnen, Cookie passt): Aufrufe von `/admin/auth/callback` ohne gültigen `state`
+(fremde Seiten, Wiederholungen, `error=` vom IdP ohne Login) könnte jeder ohne Anmeldung
+erzeugen und damit das Audit-Log fluten; sie stehen nur im Server-Log. Fehlgeschlagene
+Bearer-Anmeldungen (falscher Admin-Key) stehen aus demselben Grund nur im Debug-Log. Kann ein
+Anmelde-Ereignis nicht geschrieben werden, scheitert die Anmeldung nicht (WARN im Log).
+
+**Berechtigung:**
+
+| Rolle | Sicht |
+|---|---|
+| `admin`, `auditor` (global) | alle Einträge |
+| `org-admin` (Org O), `admin`/`auditor` eingeschränkt auf O | Einträge, deren Objekt vorher oder nachher in O lag (O selbst, Teams und Keys in O) |
+| `team-admin` (Team T), `admin`/`auditor` eingeschränkt auf T | Einträge zu T und Keys in T |
+| `viewer` | kein Zugriff (`403`) |
+
+Mehrere Zuweisungen ergeben die Vereinigung. Globale Objekte (Nutzer, Katalog, Zugangsdaten,
+Admin-API-Keys, Sessions, Bootstrap) sehen nur globale Leser.
+
+**Geltungsbereich der Einträge** (Migration `0004_audit_scope.sql`): Die ursprünglichen Einträge
+trugen keinen Bereich. Jeder neue Eintrag speichert Organisation und Team des Objekts **zum
+Zeitpunkt der Änderung** – nachher (`organization`, `team`; beim Löschen: vorher) und vorher
+(`organizationBefore`, `teamBefore`). Wird ein Key in ein Team einer anderen Organisation
+verschoben, sehen beide Bereiche den Eintrag. Bereich haben Organisationen (sich selbst), Teams
+(Organisation + Team) und API-Keys mit Team (Organisation des Teams); alle anderen Arten sind
+global. Spätere Umzüge ändern alte Einträge nicht. Bestandseinträge aus der Zeit vor der
+Migration: nur Organisationen erhalten ihren Bereich, ältere Team-/Key-Einträge sind nur global
+sichtbar.
+
+**Geheimnisse:** Vorher/Nachher sind die Darstellungen der Admin-API: Zugangsdaten nur mit
+Feldnamen (`spec.fields`), Keys nur mit Präfix, Admin-Keys ohne Hash, `SecretString` als
+`<redacted>`. Session-IDs, CSRF-Tokens und ID-Tokens erscheinen nie. Antworten tragen
+`Cache-Control: no-store`.
+
 ## 6. Datenebene: Schlüsselprüfung und Modellfreigaben
 
 `aigw_proxy::SnapshotAuthenticator` (Architektur §3, Schritte 2–3):
@@ -543,5 +639,9 @@ Anbieterart `mock` (`providerModel` `mock`, `mock-error`, `mock-stream-error`).
 - AIGW-32 (Vorschläge, noch nicht entschieden): Höchstlaufzeit bzw. Pflichtablauf für
   Admin-API-Keys; Verwaltung von Admin-Keys auch durch `org-admin` (nur im eigenen Bereich);
   `team-admin`-Grenzen für Key-Limits/-Budgets („im Rahmen der Team-Grenzen“) inhaltlich prüfen;
-  Audit-Log-Endpunkt für `auditor`; Abmelden aller Sessions eines Nutzers bei Rollenentzug;
   IdP-Gruppen bei jedem Request statt nur beim Login (Refresh-Token/Introspection).
+- AIGW-66 (Vorschläge, noch nicht entschieden): Aufbewahrungsfrist bzw. Archivierung des
+  Audit-Logs; Manipulationsschutz (Hash-Kette über die Einträge); Löschen eines Admin-API-Keys
+  zusätzlich als `revoke` statt `delete` benennen; einheitliche Schreibweise der Arten
+  (`ApiKey` vs. `admin-api-key`); Push-Export (Syslog/Webhook) statt Abholen per NDJSON;
+  Audit-Lesezugriff selbst protokollieren.
