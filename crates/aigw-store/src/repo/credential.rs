@@ -16,7 +16,7 @@ use aigw_core::resource::{
 };
 use aigw_core::types::ProviderKind;
 
-use super::{Action, AdminTx, Row, Val};
+use super::{Action, AdminTx, Expect, Row, Val};
 use crate::crypto::{Keyring, Sealed};
 use crate::db::{DbRow, Q};
 use crate::{Store, StoreError};
@@ -166,15 +166,17 @@ impl Store {
         keyring: &Keyring,
         meta: ObjectMeta,
         spec: ProviderCredentialSpec,
+        expect: Expect,
     ) -> Result<ProviderCredential, StoreError> {
         let before = self.get_credential(&meta.name).await?;
         let (fields, sealed) = seal_spec(keyring, before.id, &spec)?;
         let mut tx = AdminTx::begin(self, actor).await?;
-        tx.update_row(
+        tx.update_row_expect(
             ResourceKind::ProviderCredential,
             before.id,
             &meta,
             sealed_cols(spec.provider, &fields, &refs_of(&spec), sealed)?,
+            expect,
         )
         .await?;
         let after = ProviderCredential {
@@ -203,6 +205,7 @@ impl Store {
     /// entfernt (`None`) einzelne Felder, nicht genannte Felder behalten ihren Wert. Labels
     /// und Anbieter werden nur ersetzt, wenn angegeben. Die Werte werden entschlüsselt,
     /// zusammengeführt und mit dem aktuellen Master-Key neu verschlüsselt.
+    #[allow(clippy::too_many_arguments)] // Merge-Patch-Teile + erwarteter Stand (F38)
     pub async fn patch_credential(
         &self,
         actor: &str,
@@ -211,6 +214,7 @@ impl Store {
         labels: Option<BTreeMap<String, String>>,
         provider: Option<ProviderKind>,
         changes: BTreeMap<String, Option<SecretString>>,
+        expect: Expect,
     ) -> Result<ProviderCredential, StoreError> {
         let row = self
             .fetch_one_row(ResourceKind::ProviderCredential, NO_REFS, name)
@@ -241,11 +245,12 @@ impl Store {
         let sealed = keyring.seal(before.id.as_bytes(), &json)?;
         let fields: Vec<String> = values.into_keys().collect();
         let mut tx = AdminTx::begin(self, actor).await?;
-        tx.update_row(
+        tx.update_row_expect(
             ResourceKind::ProviderCredential,
             before.id,
             &meta,
             sealed_cols(provider, &fields, &refs, sealed)?,
+            expect,
         )
         .await?;
         let after = ProviderCredential {

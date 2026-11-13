@@ -48,7 +48,7 @@ pub use repo::audit::{
     ActorType, AuditCursor, AuditEvent, AuditPage, AuditQuery, AuditScope, ScopeRule,
 };
 pub use repo::list::{ListFilter, ListQuery, Page};
-pub use repo::{AuditEntry, PlainResource, Resource, WriteExtras};
+pub use repo::{AuditEntry, Expect, PlainResource, Resource, WriteExtras};
 pub use snapshot::{Fallback, Incremental, load_incremental, load_parts, load_snapshot};
 pub use snapshot_cache::{CacheError, CachedSnapshot, SnapshotCache};
 
@@ -81,6 +81,15 @@ pub enum StoreError {
     /// Inhaltlich ungültige Eingabe.
     #[error("ungültig: {0}")]
     Invalid(String),
+    /// Erwarteter Stand passt nicht (optimistische Sperre, `If-Match`, F38): das Objekt wurde
+    /// zwischen Lesen und Schreiben geändert – auch von einer anderen Instanz.
+    #[error("{kind} {name:?} wurde zwischenzeitlich geändert")]
+    PreconditionFailed {
+        /// Art.
+        kind: String,
+        /// Name.
+        name: String,
+    },
     /// Verschlüsselung/Master-Key.
     #[error("Krypto: {0}")]
     Crypto(String),
@@ -151,6 +160,11 @@ const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
         "snapshot_journal",
         include_str!("../migrations/sqlite/0002_snapshot_journal.sql"),
     ),
+    (
+        3,
+        "admin_auth",
+        include_str!("../migrations/sqlite/0002_admin_auth.sql"),
+    ),
 ];
 
 /// Migrationssatz für Postgres (`migrations/postgres/`), gleiche Versionen wie SQLite.
@@ -164,6 +178,11 @@ const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
         2,
         "snapshot_journal",
         include_str!("../migrations/postgres/0002_snapshot_journal.sql"),
+    ),
+    (
+        3,
+        "admin_auth",
+        include_str!("../migrations/postgres/0002_admin_auth.sql"),
     ),
 ];
 

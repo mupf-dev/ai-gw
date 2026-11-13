@@ -129,7 +129,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/admin/api/v1/api-keys/{name}/reactivate": {
+    "/admin/api/v1/api-keys/{name}/resume": {
         parameters: {
             query?: never;
             header?: never;
@@ -138,8 +138,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Entsperrt einen gesperrten API-Key. */
-        post: operations["reactivate_api_key"];
+        /** Hebt die vorübergehende Sperre eines API-Keys auf (F37; widerrufene Keys: `409`). */
+        post: operations["resume_api_key"];
         delete?: never;
         options?: never;
         head?: never;
@@ -155,7 +155,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Sperrt einen API-Key (wirkt nach dem nächsten Snapshot-Neubau, i. d. R. < 1 s). */
+        /**
+         * Widerruft einen API-Key **endgültig** (F37; wirkt nach dem nächsten Snapshot-Neubau,
+         *     i. d. R. < 1 s). Ein widerrufener Key lässt sich weder fortsetzen noch ändern oder
+         *     rotieren, nur löschen.
+         */
         post: operations["revoke_api_key"];
         delete?: never;
         options?: never;
@@ -177,6 +181,23 @@ export interface paths {
          *     Antwort), der alte läuft nach der Übergangszeit ab.
          */
         post: operations["rotate_api_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/api-keys/{name}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sperrt einen API-Key vorübergehend (F37, umkehrbar mit `resume`). */
+        post: operations["suspend_api_key"];
         delete?: never;
         options?: never;
         head?: never;
@@ -673,6 +694,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/users/{name}/invitation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Zeigt die offene Einladung eines Nutzers (ohne Link). */
+        get: operations["get_invitation"];
+        put?: never;
+        /**
+         * Erstellt einen Einladungslink für einen vorab angelegten Nutzer (F90): einmalig, gültig
+         *     `admin.auth.oidc.invite_ttl_secs`; ersetzt eine frühere Einladung. Beim Login über den Link
+         *     wird die OIDC-Identität (Issuer + Kennung) mit dem Nutzer verknüpft.
+         */
+        post: operations["create_invitation"];
+        /** Widerruft die offene Einladung eines Nutzers. */
+        delete: operations["delete_invitation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/version": {
         parameters: {
             query?: never;
@@ -903,7 +947,7 @@ export interface components {
          * @description Zustand eines API-Keys.
          * @enum {string}
          */
-        ApiKeyState: "active" | "revoked";
+        ApiKeyState: "active" | "suspended" | "revoked";
         /** @description Vom Server verwaltete Felder eines API-Keys. */
         ApiKeyStatus: {
             /**
@@ -1013,10 +1057,20 @@ export interface components {
          *     `200`; so prüft die UI beim Start ohne `401` in der Browser-Konsole).
          */
         AuthInfo: {
+            /**
+             * @description Das Bootstrap-Token ist aktiv (F56) – die UI zeigt einen Warnhinweis (Notfallzugang
+             *     abschalten: OIDC-Admin anmelden bzw. Admin-API-Key mit Rolle `admin` anlegen).
+             */
+            bootstrap: boolean;
             /** @description Start des Logins (falls OIDC konfiguriert). */
             loginUrl?: string | null;
             /** @description OIDC-Login konfiguriert. */
             oidc: boolean;
+            /**
+             * @description Modus „nur YAML“ (`gitops.read_only_admin`, F56): Schreibrouten antworten mit `403`,
+             *     Änderungen nur per GitOps – die UI blendet Schreibaktionen aus.
+             */
+            readOnly: boolean;
             session?: components["schemas"]["SessionInfo"] | null;
         };
         BTreeMap: {
@@ -1115,7 +1169,7 @@ export interface components {
          * @description Umgang mit bestehenden Objekten über einer gesenkten Grenze.
          * @enum {string}
          */
-        Cascade: "reject" | "clamp";
+        Cascade: "reject" | "clamp" | "remove";
         /** @description Eine Ressource im Plan. */
         Change: {
             /** @description Aktion. */
@@ -1147,6 +1201,13 @@ export interface components {
             key: components["schemas"]["ApiKey"];
             /** @description Klartext `sk-aigw-…` (nicht wiederherstellbar). */
             secret: string;
+        };
+        /** @description Neu erstellte Einladung samt Link (nur in dieser Antwort). */
+        CreatedInvitation: {
+            /** @description Einladung. */
+            invitation: components["schemas"]["Invitation"];
+            /** @description Einladungslink (einmalig, bis `expiresAt`): an den Nutzer weitergeben. */
+            url: string;
         };
         /** @description Metadaten im `PATCH`. */
         CredentialPatchMeta: {
@@ -1272,6 +1333,25 @@ export interface components {
             path: string;
             /** @description Geheimer Wert: nur „geändert“, nie der Inhalt. */
             secret?: boolean;
+        };
+        /** @description Einladung eines Nutzers (ohne Token). */
+        Invitation: {
+            /**
+             * Format: date-time
+             * @description Erstellt.
+             */
+            createdAt: string;
+            /** @description Erstellt von (Audit-Akteur). */
+            createdBy: string;
+            /** @description Abgelaufen (nicht mehr einlösbar). */
+            expired: boolean;
+            /**
+             * Format: date-time
+             * @description Gültig bis.
+             */
+            expiresAt: string;
+            /** @description Nutzer (Name). */
+            user: string;
         };
         /** @description Eine KPI mit Vergleich. */
         Kpi: {
@@ -1825,7 +1905,7 @@ export interface components {
          * @description Rolle eines Nutzers (§15).
          * @enum {string}
          */
-        Role: "admin" | "org-admin" | "team-admin" | "viewer" | "auditor";
+        Role: "admin" | "org-admin" | "team-admin" | "viewer" | "auditor" | "gitops";
         /** @description Rollenzuweisung, optional eingeschränkt auf Organisation oder Team. */
         RoleBinding: {
             /** @description Organisation (Name), falls eingeschränkt. */
@@ -2107,7 +2187,11 @@ export interface components {
             email?: string | null;
             /** @description OIDC-Issuer. */
             oidcIssuer?: string | null;
-            /** @description OIDC-Subjekt (`sub`). */
+            /**
+             * @description Unveränderliche OIDC-Kennung beim Issuer: Wert des Claims
+             *     `admin.auth.oidc.identity_claim` (Standard `sub`; Profil `entra`: `oid`, F90). Kann vorab
+             *     gesetzt werden (Nutzer anlegen, bevor er sich das erste Mal anmeldet).
+             */
             oidcSubject?: string | null;
             /** @description Rollen. */
             roles?: components["schemas"]["RoleBinding"][];
@@ -2309,7 +2393,10 @@ export interface operations {
     put_admin_api_key: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
+            };
             path: {
                 /** @description Name */
                 name: string;
@@ -2367,8 +2454,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Ungültige Eingabe */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2381,7 +2486,10 @@ export interface operations {
     delete_admin_api_key: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
+            };
             path: {
                 /** @description Name */
                 name: string;
@@ -2417,6 +2525,24 @@ export interface operations {
             };
             /** @description Nicht gefunden */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2857,9 +2983,9 @@ export interface operations {
                 /** @description Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`). */
                 force?: boolean;
             };
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -2938,14 +3064,23 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     delete_api_key: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -2998,14 +3133,23 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
-    reactivate_api_key: {
+    resume_api_key: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -3053,8 +3197,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Key ist widerrufen (endgültig) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description ETag passt nicht */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3067,9 +3229,9 @@ export interface operations {
     revoke_api_key: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -3079,7 +3241,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Gesperrt */
+            /** @description Widerrufen */
             200: {
                 headers: {
                     /** @description Neue Version */
@@ -3126,14 +3288,23 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     rotate_api_key: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name des bisherigen Keys */
@@ -3206,6 +3377,97 @@ export interface operations {
             };
             /** @description ETag passt nicht */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    suspend_api_key: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gesperrt */
+            200: {
+                headers: {
+                    /** @description Neue Version */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKey"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Key ist widerrufen (endgültig) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3320,7 +3582,7 @@ export interface operations {
                 dryRun?: boolean;
                 /** @description Ressourcen löschen, die nicht im Manifest stehen. */
                 prune?: boolean;
-                /** @description Umgang mit API-Keys (`include` | `ignore`). */
+                /** @description Umgang mit API-Keys (`ignore` = Standard, F4 | `include`). */
                 apiKeys?: components["schemas"]["ApiKeyMode"];
             };
             header?: never;
@@ -3393,7 +3655,7 @@ export interface operations {
     export_config: {
         parameters: {
             query?: {
-                /** @description `include` (Standard): API-Keys ohne Klartext exportieren; `ignore`: weglassen. */
+                /** @description `ignore` (Standard, F4): API-Keys weglassen; `include`: ohne Klartext exportieren. */
                 apiKeys?: components["schemas"]["ApiKeyMode"];
             };
             header?: never;
@@ -3632,9 +3894,9 @@ export interface operations {
     put_deployment: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -3722,14 +3984,23 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     delete_deployment: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -3784,6 +4055,15 @@ export interface operations {
             };
             /** @description ETag passt nicht */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3983,9 +4263,9 @@ export interface operations {
     put_mcp_grant: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -4064,14 +4344,23 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     delete_mcp_grant: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -4117,6 +4406,15 @@ export interface operations {
             };
             /** @description ETag passt nicht */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4316,9 +4614,9 @@ export interface operations {
     put_mcp_server: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -4406,14 +4704,23 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     delete_mcp_server: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -4468,6 +4775,15 @@ export interface operations {
             };
             /** @description ETag passt nicht */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4535,7 +4851,12 @@ export interface operations {
     };
     create_model_group: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`). */
+                force?: boolean;
+                /** @description Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`. */
+                cascade?: components["schemas"]["Cascade"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4660,10 +4981,15 @@ export interface operations {
     };
     put_model_group: {
         parameters: {
-            query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            query?: {
+                /** @description Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`). */
+                force?: boolean;
+                /** @description Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`. */
+                cascade?: components["schemas"]["Cascade"];
+            };
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -4751,14 +5077,28 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     delete_model_group: {
         parameters: {
-            query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            query?: {
+                /** @description Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`). */
+                force?: boolean;
+                /** @description Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`. */
+                cascade?: components["schemas"]["Cascade"];
+            };
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -4813,6 +5153,15 @@ export interface operations {
             };
             /** @description ETag passt nicht */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5016,9 +5365,9 @@ export interface operations {
                 /** @description Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`. */
                 cascade?: components["schemas"]["Cascade"];
             };
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -5106,14 +5455,23 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     delete_organization: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -5168,6 +5526,15 @@ export interface operations {
             };
             /** @description ETag passt nicht */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5241,7 +5608,12 @@ export interface operations {
     };
     create_plugin_binding: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`). */
+                force?: boolean;
+                /** @description Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`. */
+                cascade?: components["schemas"]["Cascade"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5366,10 +5738,15 @@ export interface operations {
     };
     put_plugin_binding: {
         parameters: {
-            query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            query?: {
+                /** @description Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`). */
+                force?: boolean;
+                /** @description Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`. */
+                cascade?: components["schemas"]["Cascade"];
+            };
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -5457,14 +5834,23 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     delete_plugin_binding: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -5519,6 +5905,15 @@ export interface operations {
             };
             /** @description ETag passt nicht */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5718,9 +6113,9 @@ export interface operations {
     put_price: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -5808,14 +6203,23 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     delete_price: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -5870,6 +6274,15 @@ export interface operations {
             };
             /** @description ETag passt nicht */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6065,9 +6478,9 @@ export interface operations {
     put_credential: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -6155,14 +6568,23 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     delete_credential: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -6224,14 +6646,23 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     patch_credential: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -6312,6 +6743,15 @@ export interface operations {
             };
             /** @description Ungültige Eingabe */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6735,9 +7175,9 @@ export interface operations {
                 /** @description Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`. */
                 cascade?: components["schemas"]["Cascade"];
             };
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -6825,14 +7265,23 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     delete_team: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -6887,6 +7336,15 @@ export interface operations {
             };
             /** @description ETag passt nicht */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7132,9 +7590,9 @@ export interface operations {
     put_user: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -7222,14 +7680,23 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     delete_user: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
-                "If-Match"?: string | null;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
             };
             path: {
                 /** @description Name */
@@ -7291,6 +7758,172 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_invitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name des Nutzers */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Offene Einladung */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invitation"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nutzer oder Einladung nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_invitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name des Nutzers */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Einladung erstellt (Link nur in dieser Antwort) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedInvitation"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nutzer nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description OIDC nicht konfiguriert oder Nutzer bereits verknüpft */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_invitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name des Nutzers */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Widerrufen */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nutzer oder Einladung nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     version: {
@@ -7331,7 +7964,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Angemeldet (setzt das Session-Cookie) und weiter zu `returnTo`; bei Fehlern weiter zu `/admin/?auth_error=<code>` (`idp`, `state`, `token`, `no-access`, `internal`) */
+            /** @description Angemeldet (setzt das Session-Cookie) und weiter zu `returnTo`; bei Fehlern weiter zu `/admin/?auth_error=<code>` (`idp`, `state`, `token`, `invite`, `no-access`, `internal`) */
             303: {
                 headers: {
                     [name: string]: unknown;
@@ -7345,6 +7978,8 @@ export interface operations {
             query?: {
                 /** @description Ziel nach dem Login (Pfad unter `/admin/`). */
                 returnTo?: string;
+                /** @description Einladungs-Token (F90, aus dem Einladungslink). */
+                invite?: string;
             };
             header?: never;
             path?: never;

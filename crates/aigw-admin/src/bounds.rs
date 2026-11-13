@@ -35,6 +35,9 @@ pub enum Cascade {
     Reject,
     /// Betroffene Teams/Keys auf die neuen Grenzen kürzen (Audit `clamp` je Objekt).
     Clamp,
+    /// Nur Modellgruppen (F66): Verweise von Organisationen, Teams und Keys auf die gelöschte
+    /// Gruppe bzw. entfernte Aliasse entfernen (Audit `cascade-remove` je Objekt).
+    Remove,
 }
 
 /// Optionen beim Schreiben von Teams und Organisationen.
@@ -210,6 +213,11 @@ pub(crate) async fn team(
     q: &BoundsQuery,
 ) -> Result<WriteExtras, Problem> {
     let force = force_of(p, q.force)?;
+    if q.cascade == Some(Cascade::Remove) {
+        return Err(Problem::bad_request(
+            "cascade=remove gibt es nur beim Löschen/Ändern von Modellgruppen",
+        ));
+    }
     let clamp = q.cascade == Some(Cascade::Clamp);
     let models = model_names(store).await?;
     let org = org_of(store, &spec.organization).await?;
@@ -273,6 +281,11 @@ pub(crate) async fn organization(
     q: &BoundsQuery,
 ) -> Result<WriteExtras, Problem> {
     let force = force_of(p, q.force)?;
+    if q.cascade == Some(Cascade::Remove) {
+        return Err(Problem::bad_request(
+            "cascade=remove gibt es nur beim Löschen/Ändern von Modellgruppen",
+        ));
+    }
     let clamp = q.cascade == Some(Cascade::Clamp);
     let models = model_names(store).await?;
     let org_node = Node::organization(name, spec);

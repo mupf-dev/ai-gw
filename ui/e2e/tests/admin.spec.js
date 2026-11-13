@@ -126,7 +126,8 @@ test('ETag-Konflikt: paralleles Ändern → Dialog „neu laden“', async ({ pa
 });
 
 test('Rollen: Viewer-Admin-API-Key sieht keine Schreibaktionen', async ({ page, request }) => {
-  await api(request, 'DELETE', 'admin-api-keys/e2e-viewer');
+  // If-Match ist Pflicht (F38); `*` löscht ohne Versionsvergleich.
+  await api(request, 'DELETE', 'admin-api-keys/e2e-viewer', undefined, undefined, { 'if-match': '*' });
   const created = await api(request, 'POST', 'admin-api-keys', { name: 'e2e-viewer', description: 'E2E nur lesen', roles: [{ role: 'viewer' }] });
   expect(created.status).toBe(201);
   // Daten, die der Viewer sehen soll

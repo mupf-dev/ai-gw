@@ -231,7 +231,8 @@ fn check_value(field: &str, v: &CredentialValue) -> Result<(), Problem> {
     validate::credential_value(field, v.value.expose()).map_err(Problem::invalid)
 }
 
-/// Ein Anbieterwechsel darf keine Deployments mit anderem Anbieter zurücklassen.
+/// Ein Anbieterwechsel darf keine Deployments mit unpassendem Anbieter zurücklassen
+/// (Kompatibilitätsliste F65).
 async fn check_provider_change(
     st: &AdminState,
     name: &str,
@@ -246,7 +247,10 @@ async fn check_provider_change(
         .list::<DeploymentSpec>()
         .await?
         .into_iter()
-        .filter(|d| d.spec.credential.as_deref() == Some(name) && d.spec.provider != new)
+        .filter(|d| {
+            d.spec.credential.as_deref() == Some(name)
+                && !validate::credential_compatible(new, d.spec.provider)
+        })
         .map(|d| d.metadata.name)
         .collect();
     if users.is_empty() {
@@ -404,7 +408,7 @@ pub(crate) async fn get_credential(
     request_body = ProviderCredentialInput,
     params(
         ("name" = String, Path, description = "Name"),
-        ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
     ),
     responses(
         (status = 200, description = "Ersetzt (ohne Werte)", body = ProviderCredential,
@@ -415,6 +419,7 @@ pub(crate) async fn get_credential(
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
         (status = 409, description = "Anbieterwechsel bei verwendeten Zugangsdaten", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
         (status = 422, description = "Ungültige Eingabe", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []))
@@ -433,14 +438,15 @@ pub(crate) async fn put_credential(
     let keyring = keyring(&st)?;
     let _guard = st.write_lock.lock().await;
     let current = st.store.get_credential(&name).await?;
-    check_if_match(
+    let expect = check_if_match(
         &headers,
         &etag_of(&ProviderCredential::from(current.clone())),
+        current.metadata.updated_at,
     )?;
     check_provider_change(&st, &name, current.spec.provider, input.spec.provider).await?;
     let c = st
         .store
-        .update_credential(p.actor(), keyring, meta, to_store_spec(input.spec))
+        .update_credential(p.actor(), keyring, meta, to_store_spec(input.spec), expect)
         .await?;
     Ok(respond(StatusCode::OK, c))
 }
@@ -452,7 +458,7 @@ pub(crate) async fn put_credential(
     request_body(content = ProviderCredentialPatch, content_type = "application/merge-patch+json"),
     params(
         ("name" = String, Path, description = "Name"),
-        ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
     ),
     responses(
         (status = 200, description = "Geändert (ohne Werte)", body = ProviderCredential,
@@ -463,6 +469,7 @@ pub(crate) async fn put_credential(
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
         (status = 409, description = "Anbieterwechsel bei verwendeten Zugangsdaten", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
         (status = 422, description = "Ungültige Eingabe", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []))
@@ -493,9 +500,10 @@ pub(crate) async fn patch_credential(
     let keyring = keyring(&st)?;
     let _guard = st.write_lock.lock().await;
     let current = st.store.get_credential(&name).await?;
-    check_if_match(
+    let expect = check_if_match(
         &headers,
         &etag_of(&ProviderCredential::from(current.clone())),
+        current.metadata.updated_at,
     )?;
     let provider = spec.provider.unwrap_or(current.spec.provider);
     // Resultierende Feldmenge ohne Entschlüsseln prüfen.
@@ -523,6 +531,7 @@ pub(crate) async fn patch_credential(
             meta.labels,
             spec.provider,
             changes,
+            expect,
         )
         .await?;
     Ok(respond(StatusCode::OK, c))
@@ -533,7 +542,7 @@ pub(crate) async fn patch_credential(
     delete, path = "/admin/api/v1/provider-credentials/{name}", tag = "provider-credentials",
     params(
         ("name" = String, Path, description = "Name"),
-        ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
     ),
     responses(
         (status = 204, description = "Gelöscht"),
@@ -542,6 +551,7 @@ pub(crate) async fn patch_credential(
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
         (status = 409, description = "Wird noch verwendet", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []))
 )]
@@ -554,9 +564,19 @@ pub(crate) async fn delete_credential(
     p.require_on(Permission::Write, &Target::Catalog)?;
     let _guard = st.write_lock.lock().await;
     let current = st.store.get_credential(&name).await?;
-    check_if_match(&headers, &etag_of(&ProviderCredential::from(current)))?;
+    let updated_at = current.metadata.updated_at;
+    let expect = check_if_match(
+        &headers,
+        &etag_of(&ProviderCredential::from(current)),
+        updated_at,
+    )?;
     st.store
-        .delete(p.actor(), core::ResourceKind::ProviderCredential, &name)
+        .delete_expect(
+            p.actor(),
+            core::ResourceKind::ProviderCredential,
+            &name,
+            expect,
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }

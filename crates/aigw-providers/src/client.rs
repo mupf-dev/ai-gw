@@ -73,6 +73,8 @@ impl ClientConfig {
 #[derive(Clone)]
 pub struct UpstreamClient {
     inner: OutboundClient,
+    /// `upstream.ca_dir` (F177): einziges Verzeichnis für `settings.caFile`.
+    ca_dir: Option<std::sync::Arc<std::path::PathBuf>>,
 }
 
 impl fmt::Debug for UpstreamClient {
@@ -87,7 +89,12 @@ impl UpstreamClient {
     /// Baut den Client mit den SSRF-Regeln `policy` (Betrieb: aus `admin.*`). Muss innerhalb
     /// einer Tokio-Laufzeit benutzt werden.
     pub fn new(cfg: &ClientConfig, policy: UpstreamPolicy) -> Result<Self, OutboundError> {
-        Self::with_guard(cfg, AddressGuard::policy(policy))
+        let ca_dir = policy
+            .ca_dir()
+            .map(|d| std::sync::Arc::new(d.to_path_buf()));
+        let mut c = Self::with_guard(cfg, AddressGuard::policy(policy))?;
+        c.ca_dir = ca_dir;
+        Ok(c)
     }
 
     /// Baut den Client mit beliebigem Adressfilter.
@@ -100,7 +107,10 @@ impl UpstreamClient {
 
     /// Hülle um einen fertigen [`OutboundClient`] (z. B. mit eigenem Resolver in Tests).
     pub fn from_outbound(inner: OutboundClient) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            ca_dir: None,
+        }
     }
 
     /// Client mit Standardeinstellungen und den SSRF-Regeln `policy`.
@@ -119,15 +129,34 @@ impl UpstreamClient {
         Self::with_guard(&ClientConfig::default(), AddressGuard::Trusted)
     }
 
+    /// Setzt `upstream.ca_dir` (F177) für `settings.caFile` (bei [`UpstreamClient::new`] aus
+    /// der Policy übernommen).
+    #[must_use]
+    pub fn with_ca_dir(mut self, dir: Option<std::path::PathBuf>) -> Self {
+        self.ca_dir = dir.map(std::sync::Arc::new);
+        self
+    }
+
     /// Der zugrunde liegende Outbound-Client.
     pub fn outbound(&self) -> &OutboundClient {
         &self.inner
     }
 
     /// Variante mit zusätzlicher CA-Datei (`settings.caFile` eines Deployments; eigener Pool,
-    /// gleiche SSRF-Regeln).
+    /// gleiche SSRF-Regeln). Die Datei muss in `upstream.ca_dir` liegen (F177: relativ =
+    /// darin; Symlinks, die hinausführen, werden abgelehnt).
     pub fn for_ca_file(&self, path: &Path) -> Result<Self, OutboundError> {
-        self.inner.with_ca_file(path).map(Self::from_outbound)
+        let Some(dir) = &self.ca_dir else {
+            return Err(OutboundError::Tls(
+                "nur mit upstream.ca_dir in der Startkonfiguration erlaubt (F177)".into(),
+            ));
+        };
+        let real = aigw_core::paths::resolve_within(dir, &path.to_string_lossy())
+            .map_err(OutboundError::Tls)?;
+        self.inner.with_ca_file(&real).map(|inner| Self {
+            inner,
+            ca_dir: self.ca_dir.clone(),
+        })
     }
 
     /// Sendet eine Anfrage; das Ergebnis liegt vor, sobald die Antwort-Header da sind.

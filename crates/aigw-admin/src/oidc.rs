@@ -11,6 +11,8 @@
 //!   ES256, EdDSA/Ed25519) – keine eigene Kryptografie; `none` und HMAC werden abgelehnt.
 //!   Geprüft werden `iss` (exakt), `aud` (enthält die Client-ID; `azp` falls vorhanden),
 //!   `exp`/`iat`/`nbf` (mit Uhrenabweichung) und `nonce`.
+//! - Nutzerkennung (F90): Issuer + Wert von `identity_claim` (Standard `sub`; Profil `entra`:
+//!   `oid`, dazu muss `tid` dem konfigurierten Tenant entsprechen).
 //! - HTTP über den gemeinsamen Outbound-Baustein (`aigw-outbound`, AIGW-72): rustls/aws-lc-rs
 //!   mit den Vertrauensankern aus `upstream.roots`/`upstream.ca_file` plus optional
 //!   `admin.auth.oidc.ca_file`, keine Weiterleitungen, Antwort- und Zeitlimit. Der IdP stammt
@@ -20,7 +22,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use aigw_core::config::OidcConfig;
+use aigw_core::config::{OidcConfig, OidcProfile};
 use aigw_outbound::{AddressGuard, FetchLimits, OutboundClient, OutboundOptions};
 use aws_lc_rs::signature::{
     ECDSA_P256_SHA256_FIXED, ED25519, RSA_PKCS1_2048_8192_SHA256, RsaPublicKeyComponents,
@@ -131,7 +133,8 @@ struct JwsHeader {
 pub struct IdClaims {
     /// Issuer.
     pub issuer: String,
-    /// Subjekt.
+    /// Unveränderliche Nutzerkennung: Wert des Claims `identity_claim` (Standard `sub`,
+    /// Profil `entra`: `oid`; F90). Zusammen mit `issuer` die Identität.
     pub subject: String,
     /// E-Mail.
     pub email: Option<String>,
@@ -158,6 +161,10 @@ pub struct OidcClient {
     redirect_url: String,
     scopes: Vec<String>,
     groups_claim: String,
+    /// Claim der Nutzerkennung (F90).
+    identity_claim: String,
+    /// Profil `entra`: erwarteter Tenant (`tid`).
+    tenant: Option<String>,
     cache_ttl: Duration,
     timeout: Duration,
     skew: i64,
@@ -206,6 +213,20 @@ impl OidcClient {
                 scopes.push(s.clone());
             }
         }
+        let tenant = match cfg.profile {
+            OidcProfile::Generic => None,
+            OidcProfile::Entra => Some(
+                cfg.tenant_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                    .ok_or_else(|| {
+                        err("admin.auth.oidc.tenant_id ist beim Profil entra Pflicht (F90)")
+                    })?
+                    .to_owned(),
+            ),
+        };
+        let identity_claim = cfg.effective_identity_claim().to_owned();
         let mut tls = aigw_outbound::default_tls();
         if let Some(ca) = &cfg.ca_file {
             tls = tls.with_ca_file(ca);
@@ -226,6 +247,8 @@ impl OidcClient {
             redirect_url: redirect_url.to_owned(),
             scopes,
             groups_claim: cfg.groups_claim.clone(),
+            identity_claim,
+            tenant,
             cache_ttl: Duration::from_secs(cfg.cache_secs.max(1)),
             timeout: Duration::from_secs(cfg.http_timeout_secs.max(1)),
             skew: i64::try_from(cfg.clock_skew_secs).unwrap_or(60),
@@ -510,9 +533,23 @@ impl OidcClient {
             Some(n) if crate::auth::secure_eq(n, nonce) => {}
             _ => return Err(err("nonce fehlt oder passt nicht")),
         }
-        let subject = s("sub")
+        // `sub` ist nach OIDC Core Pflicht – auch wenn die Kennung aus einem anderen Claim kommt.
+        s("sub")
             .filter(|x| !x.is_empty())
-            .ok_or_else(|| err("sub fehlt"))?
+            .ok_or_else(|| err("sub fehlt"))?;
+        if let Some(tenant) = &self.tenant {
+            match s("tid") {
+                Some(t) if t.eq_ignore_ascii_case(tenant) => {}
+                other => {
+                    return Err(err(format!(
+                        "tid {other:?} passt nicht zum konfigurierten Tenant (Profil entra)"
+                    )));
+                }
+            }
+        }
+        let subject = s(&self.identity_claim)
+            .filter(|x| !x.is_empty())
+            .ok_or_else(|| err(format!("Kennungs-Claim {} fehlt", self.identity_claim)))?
             .to_owned();
         let email_verified = match c.get("email_verified") {
             Some(Value::Bool(b)) => *b,
@@ -712,11 +749,72 @@ mod tests {
         assert!(with("nbf", json!(now + 600)).is_err());
         assert!(with("nonce", json!("n2")).is_err());
         assert!(with("sub", json!("")).is_err());
+        let mut no_sub = good.clone();
+        no_sub.as_object_mut().unwrap().remove("sub");
+        assert!(
+            c.check_claims(&no_sub, "https://idp.example", "n1", now)
+                .is_err()
+        );
         assert_eq!(
             claim_strings(&good, "realm_access.roles"),
             vec!["r1".to_owned(), "r2".to_owned()]
         );
         assert!(claim_strings(&good, "missing.path").is_empty());
+    }
+
+    #[test]
+    fn identity_claim_and_entra_tenant() {
+        let now = 1_000_000;
+        let token = |tid: &str| {
+            json!({"iss": "https://idp.example", "aud": "aigw", "sub": "pairwise-1",
+                "oid": "00000000-0000-0000-0000-0000000000aa", "tid": tid,
+                "exp": now + 60, "iat": now, "nonce": "n1"})
+        };
+        // eigener Claim (generic)
+        let cfg = OidcConfig {
+            issuer: Some("https://idp.example".into()),
+            client_id: "aigw".into(),
+            redirect_url: Some("https://gw.example/admin/auth/callback".into()),
+            identity_claim: Some("oid".into()),
+            ..OidcConfig::default()
+        };
+        let c = OidcClient::new(&cfg, None).unwrap();
+        let ok = c
+            .check_claims(&token("t1"), "https://idp.example", "n1", now)
+            .unwrap();
+        assert_eq!(ok.subject, "00000000-0000-0000-0000-0000000000aa");
+        // entra: oid + Tenant-Prüfung, tenant_id Pflicht
+        let entra = OidcConfig {
+            identity_claim: None,
+            profile: OidcProfile::Entra,
+            tenant_id: Some("T1".into()),
+            ..cfg.clone()
+        };
+        let c = OidcClient::new(&entra, None).unwrap();
+        let ok = c
+            .check_claims(&token("t1"), "https://idp.example", "n1", now)
+            .unwrap();
+        assert_eq!(ok.subject, "00000000-0000-0000-0000-0000000000aa");
+        let e = c
+            .check_claims(&token("t2"), "https://idp.example", "n1", now)
+            .unwrap_err();
+        assert!(e.to_string().contains("tid"), "{e}");
+        let mut no_oid = token("t1");
+        no_oid.as_object_mut().unwrap().remove("oid");
+        assert!(
+            c.check_claims(&no_oid, "https://idp.example", "n1", now)
+                .is_err()
+        );
+        assert!(
+            OidcClient::new(
+                &OidcConfig {
+                    tenant_id: None,
+                    ..entra
+                },
+                None
+            )
+            .is_err()
+        );
     }
 
     #[test]

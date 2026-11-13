@@ -80,6 +80,34 @@ pub struct AdminState {
     pub(crate) keyring: Option<Arc<Keyring>>,
     /// Regeln für Upstream-Endpunkte (SSRF-Schutz).
     pub(crate) upstreams: Arc<UpstreamPolicy>,
+    /// Einstellungen der Anmeldung, die die Routen brauchen (F87, F90, F113).
+    pub(crate) auth_opts: AuthOptions,
+    /// Modus „nur YAML“ (`gitops.read_only_admin`, für `GET /auth/info`, F56).
+    pub(crate) read_only: bool,
+    /// Bootstrap-Token (für `GET /auth/info`: aktiv?, F56).
+    pub(crate) bootstrap: Option<Arc<BootstrapGate>>,
+}
+
+/// Einstellungen der Anmeldung (aus `admin.auth`).
+#[derive(Debug, Clone)]
+pub(crate) struct AuthOptions {
+    /// Login/Logout nur mit Audit-Eintrag in derselben Transaktion (F113).
+    pub(crate) audit_required: bool,
+    /// Höchstlaufzeit von Admin-API-Keys in Sekunden (F87).
+    pub(crate) max_admin_key_lifetime: Option<u64>,
+    /// Gültigkeit von Einladungslinks in Sekunden (F90).
+    pub(crate) invite_ttl_secs: u64,
+}
+
+impl Default for AuthOptions {
+    fn default() -> Self {
+        let d = AdminAuthConfig::default();
+        Self {
+            audit_required: d.audit_required,
+            max_admin_key_lifetime: None,
+            invite_ttl_secs: d.oidc.invite_ttl_secs,
+        }
+    }
 }
 
 impl AdminState {
@@ -93,7 +121,18 @@ impl AdminState {
             write_lock: Arc::new(Mutex::new(())),
             keyring: None,
             upstreams: Arc::new(UpstreamPolicy::strict()),
+            auth_opts: AuthOptions::default(),
+            read_only: false,
+            bootstrap: None,
         }
+    }
+
+    /// Modus „nur YAML“ (`gitops.read_only_admin`) – nur für die Anzeige in
+    /// `GET /admin/api/v1/auth/info` (die Sperre selbst setzt [`read_only::apply`]).
+    #[must_use]
+    pub fn with_read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
+        self
     }
 
     /// Master-Keys zum Verschlüsseln von Anbieter-Zugangsdaten.
@@ -123,14 +162,18 @@ impl AdminState {
         let mut chain = AuthChain::new().bearer(Arc::new(admin_keys::AdminKeyAuthenticator::new(
             store.clone(),
         )));
+        let auth_opts = AuthOptions {
+            audit_required: cfg.audit_required,
+            max_admin_key_lifetime: cfg.max_admin_key_lifetime_secs()?,
+            invite_ttl_secs: cfg.oidc.invite_ttl_secs.max(60),
+        };
+        let mut gate = None;
         if let Some(token) = bootstrap
             && cfg.bootstrap != aigw_core::config::BootstrapMode::Off
         {
-            chain = chain.bearer(Arc::new(BootstrapGate::new(
-                token,
-                cfg.bootstrap,
-                store.clone(),
-            )));
+            let g = Arc::new(BootstrapGate::new(token, cfg.bootstrap, store.clone()));
+            chain = chain.bearer(Arc::clone(&g) as Arc<dyn AdminAuthenticator>);
+            gate = Some(g);
         }
         let mut login = None;
         let mut allowed_origin = None;
@@ -153,6 +196,9 @@ impl AdminState {
             write_lock: Arc::new(Mutex::new(())),
             keyring: None,
             upstreams: Arc::new(UpstreamPolicy::strict()),
+            auth_opts,
+            read_only: false,
+            bootstrap: gate,
         })
     }
 

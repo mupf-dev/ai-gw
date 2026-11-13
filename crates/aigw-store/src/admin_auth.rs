@@ -18,12 +18,15 @@ use time::OffsetDateTime;
 
 use crate::db::{DbRow, Q, Val};
 use crate::keys::generate_admin_api_key;
-use crate::repo::audit::{AuditEvent, BOOTSTRAP_TOKEN_KIND};
-use crate::repo::{Action, AdminTx, Row, map_db, now};
+use crate::repo::audit::{AuditEvent, BOOTSTRAP_TOKEN_KIND, event_query};
+use crate::repo::{Action, AdminTx, Expect, Row, map_db, now};
 use crate::{Store, StoreError};
 
 /// Art im Audit-Log für Admin-API-Keys.
 pub const ADMIN_API_KEY_KIND: &str = "admin-api-key";
+
+/// Art im Audit-Log für Einladungslinks (F90).
+pub const ADMIN_INVITATION_KIND: &str = "admin-invitation";
 
 /// Schlüssel in `admin_auth_state`: Bootstrap-Token dauerhaft abgeschaltet.
 const BOOTSTRAP_DISABLED: &str = "bootstrap_disabled";
@@ -58,6 +61,21 @@ pub struct LoginState {
     pub return_to: String,
     /// Beginn des Logins.
     pub created_at: OffsetDateTime,
+    /// SHA-256 eines Einladungs-Tokens, mit dem dieser Login begonnen wurde (F90).
+    pub invite_hash: Option<KeyHash>,
+}
+
+/// Offene Einladung eines Nutzers (F90; das Token selbst wird nicht gespeichert).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvitationRecord {
+    /// Eingeladener Nutzer.
+    pub user_id: Id,
+    /// Akteur, der die Einladung erstellt hat.
+    pub created_by: String,
+    /// Erstellt.
+    pub created_at: OffsetDateTime,
+    /// Gültig bis.
+    pub expires_at: OffsetDateTime,
 }
 
 impl Store {
@@ -84,6 +102,206 @@ impl Store {
         .await
         .map_err(|e| map_db(e, "admin_session"))?;
         Ok(())
+    }
+
+    /// Legt eine Session an und schreibt das Ereignis `event` in **derselben** Transaktion
+    /// (F113, `admin.auth.audit_required`): scheitert der Audit-Eintrag, entsteht keine
+    /// Session.
+    pub async fn create_admin_session_audited(
+        &self,
+        id_hash: &KeyHash,
+        user_id: Id,
+        groups: &[String],
+        expires_at: OffsetDateTime,
+        event: &AuditEvent,
+    ) -> Result<(), StoreError> {
+        let t = now();
+        let mut tx = self.pool.begin().await?;
+        let version = Q::new("SELECT version FROM config_version WHERE id = 1")
+            .fetch_i64(&mut tx)
+            .await?;
+        Q::new(
+            "INSERT INTO admin_session (id_hash, user_id, groups, created_at, last_seen_at, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(Val::text(id_hash.to_hex()))
+        .bind(Val::uuid(user_id))
+        .bind(Val::json(&groups)?)
+        .bind(Val::time(t))
+        .bind(Val::time(t))
+        .bind(Val::time(expires_at))
+        .execute(&mut tx)
+        .await
+        .map_err(|e| map_db(e, "admin_session"))?;
+        event_query(event, version).execute(&mut tx).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Löscht eine Session und schreibt das Ereignis `event` in derselben Transaktion (F113).
+    /// Liefert `false`, wenn es die Session nicht (mehr) gab – dann wird nichts geschrieben.
+    pub async fn delete_admin_session_audited(
+        &self,
+        id_hash: &KeyHash,
+        event: &AuditEvent,
+    ) -> Result<bool, StoreError> {
+        let mut tx = self.pool.begin().await?;
+        let n = Q::new("DELETE FROM admin_session WHERE id_hash = $1")
+            .bind(Val::text(id_hash.to_hex()))
+            .execute(&mut tx)
+            .await?;
+        if n == 0 {
+            return Ok(false);
+        }
+        let version = Q::new("SELECT version FROM config_version WHERE id = 1")
+            .fetch_i64(&mut tx)
+            .await?;
+        event_query(event, version).execute(&mut tx).await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Einladungen (F90)
+    // -----------------------------------------------------------------------------------------
+
+    /// Legt eine Einladung für `user_id` an (ersetzt eine bestehende) – mit Audit-Eintrag
+    /// (Art `admin-invitation`, Aktion `create`, ohne Token).
+    pub async fn create_invitation(
+        &self,
+        actor: &str,
+        user_id: Id,
+        user_name: &str,
+        token_hash: &KeyHash,
+        expires_at: OffsetDateTime,
+    ) -> Result<InvitationRecord, StoreError> {
+        let t = now();
+        let mut tx = AdminTx::begin(self, actor).await?;
+        Q::new("DELETE FROM admin_invitation WHERE user_id = $1")
+            .bind(Val::uuid(user_id))
+            .execute(&mut tx.tx)
+            .await?;
+        Q::new(
+            "INSERT INTO admin_invitation (token_hash, user_id, created_by, created_at, expires_at)
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(Val::text(token_hash.to_hex()))
+        .bind(Val::uuid(user_id))
+        .bind(Val::text(actor))
+        .bind(Val::time(t))
+        .bind(Val::time(expires_at))
+        .execute(&mut tx.tx)
+        .await
+        .map_err(|e| map_db(e, ADMIN_INVITATION_KIND))?;
+        let rec = InvitationRecord {
+            user_id,
+            created_by: actor.to_owned(),
+            created_at: crate::repo::trunc_millis(t),
+            expires_at: crate::repo::trunc_millis(expires_at),
+        };
+        let details = serde_json::json!({
+            "expiresAt": expires_at
+                .format(&time::format_description::well_known::Rfc3339)
+                .ok(),
+        });
+        tx.audit_kind(
+            Action::Create,
+            ADMIN_INVITATION_KIND,
+            Some(user_id),
+            user_name,
+            None::<&()>,
+            Some(&details),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(rec)
+    }
+
+    /// Offene Einladung eines Nutzers (auch abgelaufene; der Aufrufer prüft `expires_at`).
+    pub async fn get_invitation(
+        &self,
+        user_id: Id,
+    ) -> Result<Option<InvitationRecord>, StoreError> {
+        Q::new("SELECT * FROM admin_invitation WHERE user_id = $1")
+            .bind(Val::uuid(user_id))
+            .fetch_optional(&self.pool)
+            .await?
+            .map(|r| {
+                let r = Row(&r);
+                Ok(InvitationRecord {
+                    user_id: r.uuid("user_id")?,
+                    created_by: r.text("created_by")?,
+                    created_at: r.time("created_at")?,
+                    expires_at: r.time("expires_at")?,
+                })
+            })
+            .transpose()
+    }
+
+    /// Widerruft die Einladung eines Nutzers (mit Audit-Eintrag `delete`); `false`, wenn es
+    /// keine gab.
+    pub async fn delete_invitation(
+        &self,
+        actor: &str,
+        user_id: Id,
+        user_name: &str,
+    ) -> Result<bool, StoreError> {
+        if self.get_invitation(user_id).await?.is_none() {
+            return Ok(false);
+        }
+        let mut tx = AdminTx::begin(self, actor).await?;
+        let n = Q::new("DELETE FROM admin_invitation WHERE user_id = $1")
+            .bind(Val::uuid(user_id))
+            .execute(&mut tx.tx)
+            .await?;
+        tx.audit_kind(
+            Action::Delete,
+            ADMIN_INVITATION_KIND,
+            Some(user_id),
+            user_name,
+            None::<&()>,
+            None::<&()>,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(n > 0)
+    }
+
+    /// Löst eine Einladung ein (einmalig): löscht sie und liefert den Nutzer, wenn sie zum
+    /// Zeitpunkt `at` noch gilt. Abgelaufene Einladungen werden dabei ebenfalls entfernt.
+    pub async fn take_invitation(
+        &self,
+        token_hash: &KeyHash,
+        at: OffsetDateTime,
+    ) -> Result<Option<Id>, StoreError> {
+        let row = Q::new(
+            "DELETE FROM admin_invitation WHERE token_hash = $1 RETURNING user_id, expires_at",
+        )
+        .bind(Val::text(token_hash.to_hex()))
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let r = Row(&row);
+        let expires = r.time("expires_at")?;
+        (expires > at).then(|| r.uuid("user_id")).transpose()
+    }
+
+    /// Gibt es eine (noch nicht abgelaufene) Einladung zu diesem Token? (ohne einzulösen)
+    pub async fn invitation_valid(
+        &self,
+        token_hash: &KeyHash,
+        at: OffsetDateTime,
+    ) -> Result<bool, StoreError> {
+        let n = Q::new(
+            "SELECT COUNT(*) FROM admin_invitation WHERE token_hash = $1 AND expires_at > $2",
+        )
+        .bind(Val::text(token_hash.to_hex()))
+        .bind(Val::time(at))
+        .fetch_i64(&self.pool)
+        .await?;
+        Ok(n > 0)
     }
 
     /// Liest eine Session (ohne Prüfung von Ablauf/Leerlauf).
@@ -155,6 +373,10 @@ impl Store {
             .bind(Val::time(login_before))
             .execute(&self.pool)
             .await?;
+        n += Q::new("DELETE FROM admin_invitation WHERE expires_at <= $1")
+            .bind(Val::time(at))
+            .execute(&self.pool)
+            .await?;
         Ok(n)
     }
 
@@ -165,14 +387,16 @@ impl Store {
         state: &LoginState,
     ) -> Result<(), StoreError> {
         Q::new(
-            "INSERT INTO admin_login_state (state_hash, nonce, code_verifier, return_to, created_at)
-             VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO admin_login_state (state_hash, nonce, code_verifier, return_to, created_at,
+                                            invite_hash)
+             VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(Val::text(state_hash.to_hex()))
         .bind(Val::text(state.nonce.clone()))
         .bind(Val::text(state.code_verifier.clone()))
         .bind(Val::text(state.return_to.clone()))
         .bind(Val::time(state.created_at))
+        .bind(Val::Text(state.invite_hash.as_ref().map(KeyHash::to_hex)))
         .execute(&self.pool)
         .await
         .map_err(|e| map_db(e, "admin_login_state"))?;
@@ -186,7 +410,7 @@ impl Store {
     ) -> Result<Option<LoginState>, StoreError> {
         let row = Q::new(
             "DELETE FROM admin_login_state WHERE state_hash = $1
-             RETURNING nonce, code_verifier, return_to, created_at",
+             RETURNING nonce, code_verifier, return_to, created_at, invite_hash",
         )
         .bind(Val::text(state_hash.to_hex()))
         .fetch_optional(&self.pool)
@@ -198,6 +422,13 @@ impl Store {
                 code_verifier: r.text("code_verifier")?,
                 return_to: r.text("return_to")?,
                 created_at: r.time("created_at")?,
+                invite_hash: r
+                    .opt_text("invite_hash")?
+                    .map(|h| {
+                        KeyHash::from_hex(&h)
+                            .ok_or_else(|| StoreError::Corrupt("ungültiger Einladungs-Hash".into()))
+                    })
+                    .transpose()?,
             })
         })
         .transpose()
@@ -378,9 +609,12 @@ impl Store {
         actor: &str,
         name: &str,
         spec: AdminApiKeySpec,
+        expect: Expect,
     ) -> Result<AdminApiKeyRecord, StoreError> {
         let mut tx = AdminTx::begin(self, actor).await?;
         let before = fetch_admin_key(&mut tx, name).await?;
+        tx.check_expect("admin_api_key", ADMIN_API_KEY_KIND, name, before.id, expect)
+            .await?;
         Q::new(
             "UPDATE admin_api_key SET description = $1, roles = $2, expires_at = $3, updated_at = $4
              WHERE name = $5",
@@ -388,7 +622,7 @@ impl Store {
         .bind(Val::Text(spec.description.clone()))
         .bind(Val::json(&spec.roles)?)
         .bind(Val::opt_time(spec.expires_at))
-        .bind(Val::time(now()))
+        .bind(Val::time(AdminTx::next_version(Some(before.updated_at))))
         .bind(Val::text(name))
         .execute(&mut tx.tx)
         .await?;
@@ -407,9 +641,16 @@ impl Store {
     }
 
     /// Löscht einen Admin-API-Key (wirkt sofort; Audit: `delete`).
-    pub async fn delete_admin_api_key(&self, actor: &str, name: &str) -> Result<(), StoreError> {
+    pub async fn delete_admin_api_key(
+        &self,
+        actor: &str,
+        name: &str,
+        expect: Expect,
+    ) -> Result<(), StoreError> {
         let mut tx = AdminTx::begin(self, actor).await?;
         let before = fetch_admin_key(&mut tx, name).await?;
+        tx.check_expect("admin_api_key", ADMIN_API_KEY_KIND, name, before.id, expect)
+            .await?;
         Q::new("DELETE FROM admin_api_key WHERE name = $1")
             .bind(Val::text(name))
             .execute(&mut tx.tx)
@@ -570,10 +811,135 @@ mod tests {
             code_verifier: "v".into(),
             return_to: "/admin/".into(),
             created_at: crate::repo::trunc_millis(now()),
+            invite_hash: Some(h("invite")),
         };
         s.put_login_state(&h("state"), &st).await.unwrap();
         assert_eq!(s.take_login_state(&h("state")).await.unwrap(), Some(st));
         assert_eq!(s.take_login_state(&h("state")).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn invitations_are_single_use_and_expire() {
+        let s = store().await;
+        let user = s
+            .create("t", ObjectMeta::named("anna"), UserSpec::default())
+            .await
+            .unwrap();
+        let exp = now() + Duration::hours(1);
+        s.create_invitation("bootstrap-admin", user.id, "anna", &h("inv1"), exp)
+            .await
+            .unwrap();
+        assert!(s.invitation_valid(&h("inv1"), now()).await.unwrap());
+        // eine neue Einladung ersetzt die alte
+        s.create_invitation("bootstrap-admin", user.id, "anna", &h("inv2"), exp)
+            .await
+            .unwrap();
+        assert!(!s.invitation_valid(&h("inv1"), now()).await.unwrap());
+        assert_eq!(s.take_invitation(&h("inv1"), now()).await.unwrap(), None);
+        assert_eq!(
+            s.get_invitation(user.id).await.unwrap().unwrap().created_by,
+            "bootstrap-admin"
+        );
+        // einmalig
+        assert_eq!(
+            s.take_invitation(&h("inv2"), now()).await.unwrap(),
+            Some(user.id)
+        );
+        assert_eq!(s.take_invitation(&h("inv2"), now()).await.unwrap(), None);
+        // abgelaufen: nicht einlösbar (und entfernt)
+        s.create_invitation("x", user.id, "anna", &h("inv3"), exp)
+            .await
+            .unwrap();
+        assert_eq!(
+            s.take_invitation(&h("inv3"), exp + Duration::seconds(1))
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(s.get_invitation(user.id).await.unwrap().is_none());
+        // widerrufen, Audit ohne Token
+        s.create_invitation("x", user.id, "anna", &h("inv4"), exp)
+            .await
+            .unwrap();
+        assert!(s.delete_invitation("x", user.id, "anna").await.unwrap());
+        assert!(!s.delete_invitation("x", user.id, "anna").await.unwrap());
+        let log = s.audit_log(50).await.unwrap();
+        assert!(
+            log.iter()
+                .any(|e| e.kind == ADMIN_INVITATION_KIND && e.action == "create")
+        );
+        assert!(
+            log.iter()
+                .any(|e| e.kind == ADMIN_INVITATION_KIND && e.action == "delete")
+        );
+        let text = serde_json::to_string(&log).unwrap();
+        assert!(
+            !text.contains(&h("inv4").to_hex()),
+            "kein Token-Hash im Audit"
+        );
+        // Nutzer löschen entfernt Einladungen
+        s.create_invitation("x", user.id, "anna", &h("inv5"), exp)
+            .await
+            .unwrap();
+        s.delete("t", aigw_core::resource::ResourceKind::User, "anna")
+            .await
+            .unwrap();
+        assert!(!s.invitation_valid(&h("inv5"), now()).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn audited_sessions_write_event_in_same_transaction() {
+        let s = store().await;
+        let user = s
+            .create("t", ObjectMeta::named("anna"), UserSpec::default())
+            .await
+            .unwrap();
+        let ev = |action: &str| AuditEvent {
+            actor: "user:anna".into(),
+            action: action.into(),
+            kind: crate::repo::audit::ADMIN_SESSION_KIND.into(),
+            object_id: Some(user.id),
+            object_name: Some("anna".into()),
+            details: None,
+        };
+        let exp = now() + Duration::hours(1);
+        s.create_admin_session_audited(&h("sid"), user.id, &[], exp, &ev("login"))
+            .await
+            .unwrap();
+        assert!(s.get_admin_session(&h("sid")).await.unwrap().is_some());
+        assert!(
+            s.delete_admin_session_audited(&h("sid"), &ev("logout"))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !s.delete_admin_session_audited(&h("sid"), &ev("logout"))
+                .await
+                .unwrap()
+        );
+        let actions: Vec<String> = s
+            .audit_log(10)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == crate::repo::audit::ADMIN_SESSION_KIND)
+            .map(|e| e.action)
+            .collect();
+        assert_eq!(actions, vec!["logout".to_owned(), "login".to_owned()]);
+        // Scheitert der Audit-Eintrag, entsteht keine Session (fail-closed).
+        sqlx::query("DROP TABLE audit_log")
+            .execute(match &s.pool {
+                crate::db::Pool::Sqlite(p) => p,
+                crate::db::Pool::Postgres(_) => unreachable!(),
+            })
+            .await
+            .unwrap();
+        assert!(
+            s.create_admin_session_audited(&h("sid2"), user.id, &[], exp, &ev("login"))
+                .await
+                .is_err()
+        );
+        assert!(s.get_admin_session(&h("sid2")).await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -615,7 +981,10 @@ mod tests {
         ));
         let mut spec2 = spec.clone();
         spec2.description = None;
-        let u = s.update_admin_api_key("me", "ci", spec2).await.unwrap();
+        let u = s
+            .update_admin_api_key("me", "ci", spec2, Expect::Any)
+            .await
+            .unwrap();
         assert_eq!(u.spec.description, None);
         s.touch_admin_api_key(u.id, now()).await.unwrap();
         assert!(
@@ -626,7 +995,9 @@ mod tests {
                 .last_used_at
                 .is_some()
         );
-        s.delete_admin_api_key("me", "ci").await.unwrap();
+        s.delete_admin_api_key("me", "ci", Expect::Any)
+            .await
+            .unwrap();
         assert!(s.get_admin_api_key("ci").await.unwrap().is_none());
         assert!(s.list_admin_api_keys().await.unwrap().is_empty());
         let log = s.audit_log(10).await.unwrap();

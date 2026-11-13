@@ -38,9 +38,9 @@ pub(crate) enum OutputFormat {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 pub(crate) enum KeysArg {
     /// Keys exportieren/anwenden (ohne Klartext; neue Keys nur mit `spec.secret.valueFrom`).
-    #[default]
     Include,
-    /// Keys weder exportieren noch anwenden noch löschen.
+    /// Keys weder exportieren noch anwenden noch löschen (Standard, F4).
+    #[default]
     Ignore,
 }
 
@@ -185,7 +185,8 @@ fn options(
         api_keys: args.api_keys.into(),
         actor: actor.to_owned(),
         // Gleiche Endpunktregeln wie die Admin-API (`admin.*` der Startkonfiguration).
-        upstreams: aigw_core::upstream::UpstreamPolicy::from_config(&cfg.admin)?,
+        upstreams: aigw_core::upstream::UpstreamPolicy::from_config(&cfg.admin)?
+            .with_ca_dir(cfg.upstream.ca_dir.clone()),
         group_settings: Some(aigw_admin::resources::group_settings),
         // Plugin-Bindungen mit der Registry der Plugin-Kette (F118/F165).
         plugin_bindings: Some(aigw_admin::plugin_bindings::check),
@@ -363,10 +364,24 @@ mod tests {
         };
         assert!(args.prune && dry_run && args.output == OutputFormat::Json);
         assert_eq!(actor, "gitops");
-        let t = T::try_parse_from(["t", "validate", "m.yaml", "--api-keys", "ignore"]).unwrap();
+        let t = T::try_parse_from(["t", "validate", "m.yaml", "--api-keys", "include"]).unwrap();
+        assert!(matches!(
+            t.cmd,
+            ConfigCommand::Validate { config: None, args } if args.api_keys == KeysArg::Include
+        ));
+        // F4: ohne Angabe werden API-Keys ignoriert (export, diff, apply, validate).
+        let t = T::try_parse_from(["t", "validate", "m.yaml"]).unwrap();
         assert!(matches!(
             t.cmd,
             ConfigCommand::Validate { config: None, args } if args.api_keys == KeysArg::Ignore
+        ));
+        let t = T::try_parse_from(["t", "export", "-c", "x.yaml"]).unwrap();
+        assert!(matches!(
+            t.cmd,
+            ConfigCommand::Export {
+                api_keys: KeysArg::Ignore,
+                ..
+            }
         ));
     }
 

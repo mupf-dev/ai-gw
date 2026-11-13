@@ -11,13 +11,16 @@
 //! - Listen: `?limit=` (1–500, Standard 50), `?cursor=` (aus `nextCursor`), `?q=`
 //!   (Teilstring im Namen), `?label=k=v,k2` und ressourcenspezifische Filter; sortiert nach Name.
 //!   Filter, Geltungsbereich und Keyset-Cursor laufen in SQL (F42, `Store::list_page`).
-//! - `ETag` bei Einzelobjekten, `If-Match` bei Änderungen (optimistische Sperre, `412`).
+//! - `ETag` bei Einzelobjekten, `If-Match` **Pflicht** bei Änderungen, Löschen und Aktionen
+//!   (F38: fehlt er → `428`, passt er nicht → `412`; `*` erlaubt). Der Versionsvergleich läuft
+//!   zusätzlich im `UPDATE`/`DELETE` der Datenbank ([`aigw_store::Expect`]) – dicht auch
+//!   zwischen mehreren Instanzen.
 //! - Fehler als Problem Details ([`Problem`]).
 
 // `#[utoipa::path(params(…))]` erzeugt für IntoParams-Typen qualifizierte Pfade.
 #![allow(unused_qualifications)]
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fmt::Write as _;
 use std::future::Future;
 
@@ -26,7 +29,9 @@ use aigw_core::resource::{
     OrganizationSpec, TeamSpec, UserSpec,
 };
 use aigw_core::validate;
-use aigw_store::{AuditScope, ListFilter, ListQuery, Page, PlainResource, Store, WriteExtras};
+use aigw_store::{
+    AuditScope, Expect, ListFilter, ListQuery, Page, PlainResource, Store, WriteExtras,
+};
 use aws_lc_rs::digest;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Extension, Path, Query, State};
@@ -87,19 +92,33 @@ fn key_etag(k: &ApiKey) -> String {
     ))
 }
 
-/// Prüft `If-Match` (fehlt der Header, wird ohne Prüfung geschrieben).
-pub(crate) fn check_if_match(headers: &HeaderMap, current: &str) -> Result<(), Problem> {
+/// Prüft `If-Match` (F38): Pflicht (`428`, wenn er fehlt), `*` oder eine Liste von ETags;
+/// passt keiner → `412`. Liefert den erwarteten Stand für den Versionsvergleich in der
+/// Datenbank: bei passendem ETag `updatedAt` des gelesenen Objekts, bei `*` keinen.
+pub(crate) fn check_if_match(
+    headers: &HeaderMap,
+    current: &str,
+    updated_at: Option<OffsetDateTime>,
+) -> Result<Expect, Problem> {
     let Some(v) = headers.get(header::IF_MATCH) else {
-        return Ok(());
+        return Err(Problem::precondition_required());
     };
     let v = v
         .to_str()
         .map_err(|_| Problem::bad_request("If-Match ist kein gültiger Header-Wert"))?;
-    if v.split(',')
+    let tags: Vec<&str> = v
+        .split(',')
         .map(str::trim)
-        .any(|t| t == "*" || t == current)
-    {
-        Ok(())
+        .filter(|t| !t.is_empty())
+        .collect();
+    if tags.is_empty() {
+        return Err(Problem::precondition_required());
+    }
+    if tags.contains(&"*") {
+        return Ok(Expect::Any);
+    }
+    if tags.contains(&current) {
+        Ok(updated_at.map_or(Expect::Any, Expect::Version))
     } else {
         Err(Problem::precondition_failed())
     }
@@ -275,6 +294,16 @@ pub(crate) trait AdminResource: PlainResource {
         async { Ok(()) }
     }
 
+    /// Zusätzliche Schreibvorgänge beim Löschen (unter der Schreibsperre), z. B. Verweise
+    /// entfernen mit `?cascade=remove` (F66).
+    fn delete_extras<'a>(
+        _st: &'a AdminState,
+        _current: &'a Object<Self>,
+        _q: &'a BoundsQuery,
+    ) -> impl Future<Output = Result<WriteExtras, Problem>> + Send + 'a {
+        async { Ok(WriteExtras::default()) }
+    }
+
     /// Grenzen Key ≤ Team ≤ Organisation (AIGW-67, unter der Schreibsperre); liefert
     /// zusätzliche Schreibvorgänge (`?cascade=clamp`, Audit bei `?force=true`).
     fn bounds<'a>(
@@ -297,13 +326,40 @@ pub(crate) trait AdminResource: PlainResource {
     fn create_target(name: &str, spec: &Self) -> Target {
         Self::target(name, spec)
     }
+
+    /// Geltungsbereich mit Datenbankzugriff (z. B. Organisation eines Teams, F183); Standard:
+    /// [`AdminResource::target`].
+    fn target_for<'a>(
+        _st: &'a AdminState,
+        name: &'a str,
+        spec: &'a Self,
+    ) -> impl Future<Output = Result<Target, Problem>> + Send + 'a {
+        async move { Ok(Self::target(name, spec)) }
+    }
+
+    /// Geltungsbereich beim Anlegen mit Datenbankzugriff; Standard:
+    /// [`AdminResource::create_target`] bzw. bei gleichem Ziel [`AdminResource::target_for`].
+    fn create_target_for<'a>(
+        st: &'a AdminState,
+        name: &'a str,
+        spec: &'a Self,
+    ) -> impl Future<Output = Result<Target, Problem>> + Send + 'a {
+        async move {
+            let t = Self::create_target(name, spec);
+            if t == Self::target(name, spec) {
+                Self::target_for(st, name, spec).await
+            } else {
+                Ok(t)
+            }
+        }
+    }
 }
 
 /// Lesbarer Bereich eines Principals für Listen (wie `Principal::can(Read, …)`): global, wenn
 /// eine wirksame Zuweisung ohne Einschränkung besteht, sonst die eingeschränkten Zuweisungen.
 pub(crate) fn read_scope(p: &Principal) -> AuditScope {
     let mut rules = Vec::new();
-    for b in p.roles.iter().filter(|b| crate::rbac::is_effective(b)) {
+    for b in p.roles.iter().filter(|b| crate::rbac::grants_read(b)) {
         if b.organization.is_none() && b.team.is_none() {
             return AuditScope::All;
         }
@@ -352,7 +408,10 @@ pub(crate) async fn get_impl<R: AdminResource>(
     name: &str,
 ) -> ApiResult {
     let obj: Object<R> = st.store.get(name).await?;
-    p.require_on(Permission::Read, &R::target(&obj.metadata.name, &obj.spec))?;
+    p.require_on(
+        Permission::Read,
+        &R::target_for(st, &obj.metadata.name, &obj.spec).await?,
+    )?;
     let tag = etag_of(&obj);
     Ok(json_with(StatusCode::OK, Some(tag), &R::Res::from(obj)))
 }
@@ -369,7 +428,10 @@ pub(crate) async fn create_impl<R: AdminResource>(
     {
         meta.name = name;
     }
-    p.require_on(Permission::Write, &R::create_target(&meta.name, &spec))?;
+    p.require_on(
+        Permission::Write,
+        &R::create_target_for(st, &meta.name, &spec).await?,
+    )?;
     check_models(&st.store, spec.allowed_models()).await?;
     let _guard = st.write_lock.lock().await;
     R::check(st, &meta.name, &spec, None).await?;
@@ -394,14 +456,19 @@ pub(crate) async fn put_impl<R: AdminResource>(
 ) -> ApiResult {
     let meta = same_name(name, meta)?;
     // Neuer Zustand im Geltungsbereich (z. B. Team nicht in fremde Organisation verschieben).
-    p.require_on(Permission::Write, &R::target(name, &spec))?;
+    p.require_on(Permission::Write, &R::target_for(st, name, &spec).await?)?;
     check_models(&st.store, spec.allowed_models()).await?;
     let _guard = st.write_lock.lock().await;
     let current: Object<R> = st.store.get(name).await?;
-    p.require_on(Permission::Write, &R::target(name, &current.spec))?;
-    check_if_match(headers, &etag_of(&current))?;
+    p.require_on(
+        Permission::Write,
+        &R::target_for(st, name, &current.spec).await?,
+    )?;
+    let expect = check_if_match(headers, &etag_of(&current), current.metadata.updated_at)?;
     R::check(st, name, &spec, Some(&current)).await?;
-    let extras = R::bounds(st, p, name, &spec, Some(&current), q).await?;
+    let extras = R::bounds(st, p, name, &spec, Some(&current), q)
+        .await?
+        .expecting(expect);
     let obj = st.store.update_with(p.actor(), meta, spec, &extras).await?;
     let tag = etag_of(&obj);
     Ok(json_with(StatusCode::OK, Some(tag), &R::Res::from(obj)))
@@ -412,13 +479,21 @@ pub(crate) async fn delete_impl<R: AdminResource>(
     p: &Principal,
     name: &str,
     headers: &HeaderMap,
+    q: &BoundsQuery,
 ) -> ApiResult {
     let _guard = st.write_lock.lock().await;
     let current: Object<R> = st.store.get(name).await?;
-    p.require_on(Permission::Write, &R::target(name, &current.spec))?;
-    check_if_match(headers, &etag_of(&current))?;
+    // Verwaiste Objekte (Ziel gelöscht) darf ein globaler Admin entfernen.
+    let target = R::target_for(st, name, &current.spec)
+        .await
+        .unwrap_or(Target::Global);
+    p.require_on(Permission::Write, &target)?;
+    let expect = check_if_match(headers, &etag_of(&current), current.metadata.updated_at)?;
     R::check_delete(st, &current).await?;
-    st.store.delete(p.actor(), R::KIND, name).await?;
+    let extras = R::delete_extras(st, &current, q).await?;
+    st.store
+        .delete_with(p.actor(), R::KIND, name, expect, &extras)
+        .await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -434,6 +509,7 @@ macro_rules! plain_resource {
         handlers = [$list_fn:ident, $create_fn:ident, $get_fn:ident, $put_fn:ident, $delete_fn:ident]
         $(, input_meta = [$($iattr:meta),*])?
         $(, bounds = $bq:ty)?
+        $(, delete_query = $dq:ty)?
         $(, res_extra = [$($(#[$fattr:meta])* $fname:ident : $fty:ty = $fexpr:path),* $(,)?])?
     ) => {
         #[doc = concat!($what, " (gelesen).")]
@@ -561,7 +637,7 @@ macro_rules! plain_resource {
             put, path = $item, tag = $tag, request_body = $input,
             params(
                 ("name" = String, Path, description = "Name"),
-                ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+                ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
                 $($bq)?
             ),
             responses(
@@ -573,6 +649,7 @@ macro_rules! plain_resource {
                 (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
                 (status = 409, description = "Konflikt (z. B. bestehende Objekte über neuen Grenzen)", body = Problem, content_type = "application/problem+json"),
                 (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+                (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
                 (status = 422, description = "Ungültige Eingabe oder Verweis", body = Problem, content_type = "application/problem+json"),
             ),
             security(("bearer" = []))
@@ -597,7 +674,8 @@ macro_rules! plain_resource {
             delete, path = $item, tag = $tag,
             params(
                 ("name" = String, Path, description = "Name"),
-                ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+                ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
+                $($dq)?
             ),
             responses(
                 (status = 204, description = "Gelöscht"),
@@ -606,6 +684,7 @@ macro_rules! plain_resource {
                 (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
                 (status = 409, description = "Wird noch verwendet", body = Problem, content_type = "application/problem+json"),
                 (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+                (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
             ),
             security(("bearer" = []))
         )]
@@ -614,8 +693,12 @@ macro_rules! plain_resource {
             Extension(p): Extension<Principal>,
             Path(name): Path<String>,
             headers: HeaderMap,
+            $(dq: Result<Query<$dq>, QueryRejection>,)?
         ) -> ApiResult {
-            delete_impl::<$spec>(&st, &p, &name, &headers).await
+            #[allow(unused_variables)] // mit `delete_query = …` überdeckt
+            let q = $crate::bounds::BoundsQuery::default();
+            $(let Query::<$dq>(q) = dq?;)?
+            delete_impl::<$spec>(&st, &p, &name, &headers, &q).await
         }
     };
 }
@@ -825,6 +908,16 @@ impl AdminResource for UserSpec {
             .map(|e| ListFilter::Email(e.clone()))
             .collect())
     }
+
+    async fn check(
+        _st: &AdminState,
+        _name: &str,
+        spec: &Self,
+        _current: Option<&Object<Self>>,
+    ) -> Result<(), Problem> {
+        // F90: OIDC-Identität (Issuer + Kennung) nur vollständig; F55: gitops nur global.
+        validate::user(spec).map_err(Problem::invalid)
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -862,7 +955,9 @@ plain_resource!(
         get_model_group,
         put_model_group,
         delete_model_group
-    ]
+    ],
+    bounds = BoundsQuery,
+    delete_query = BoundsQuery
 );
 
 impl AdminResource for ModelGroupSpec {
@@ -900,6 +995,36 @@ impl AdminResource for ModelGroupSpec {
         validate::fallbacks(&by_name, name, spec).map_err(Problem::invalid)
     }
 
+    async fn bounds(
+        st: &AdminState,
+        _p: &Principal,
+        name: &str,
+        spec: &Self,
+        current: Option<&Object<Self>>,
+        q: &BoundsQuery,
+    ) -> Result<WriteExtras, Problem> {
+        let cascade = model_cascade(q)?;
+        // F66: entfernte Aliasse dürfen keine Verweise zurücklassen.
+        let Some(current) = current else {
+            return Ok(WriteExtras::default());
+        };
+        let removed: BTreeSet<String> = group_names(&current.metadata.name, &current.spec)
+            .difference(&group_names(name, spec))
+            .cloned()
+            .collect();
+        model_refs(st, &removed, cascade).await
+    }
+
+    async fn delete_extras(
+        st: &AdminState,
+        current: &Object<Self>,
+        q: &BoundsQuery,
+    ) -> Result<WriteExtras, Problem> {
+        let cascade = model_cascade(q)?;
+        let names = group_names(&current.metadata.name, &current.spec);
+        model_refs(st, &names, cascade).await
+    }
+
     async fn check_delete(st: &AdminState, current: &Object<Self>) -> Result<(), Problem> {
         let name = &current.metadata.name;
         let users: Vec<String> = st
@@ -918,6 +1043,167 @@ impl AdminResource for ModelGroupSpec {
             )))
         }
     }
+}
+
+/// `?cascade=` bei Modellgruppen: nur `remove` (F66); `force`/`clamp` gibt es hier nicht.
+fn model_cascade(q: &BoundsQuery) -> Result<bool, Problem> {
+    if q.force.is_some() {
+        return Err(Problem::bad_request(
+            "force gibt es bei Modellgruppen nicht (nur ?cascade=remove)",
+        ));
+    }
+    match q.cascade {
+        None | Some(bounds::Cascade::Reject) => Ok(false),
+        Some(bounds::Cascade::Remove) => Ok(true),
+        Some(bounds::Cascade::Clamp) => Err(Problem::bad_request(
+            "cascade=clamp gibt es bei Modellgruppen nicht (nur ?cascade=remove)",
+        )),
+    }
+}
+
+/// Alle Namen einer Modellgruppe (kanonischer Name und Aliasse).
+fn group_names(name: &str, spec: &ModelGroupSpec) -> BTreeSet<String> {
+    std::iter::once(name.to_owned())
+        .chain(spec.aliases.iter().cloned())
+        .collect()
+}
+
+/// Verweise auf die Modellnamen `names` (F66): `allowedModels` von Teams und Keys sowie
+/// `limits[].modelGroup` von Organisationen, Teams und Keys. Ohne `cascade` → `409` mit
+/// allen Verweisen (`violations`); mit `cascade` die Änderungen zum Entfernen (Audit
+/// `cascade-remove`) – außer eine Freigabeliste würde dadurch leer (leer = **alle**
+/// Modelle; das wäre eine Rechteausweitung), dann ebenfalls `409`.
+pub(crate) async fn model_refs(
+    st: &AdminState,
+    names: &BTreeSet<String>,
+    cascade: bool,
+) -> Result<WriteExtras, Problem> {
+    use aigw_core::validate::bounds::{Level, Violation};
+    let mut extras = WriteExtras::default();
+    if names.is_empty() {
+        return Ok(extras);
+    }
+    let mut found = Vec::new();
+    let mut widening = Vec::new();
+    let hit = |m: &Option<String>| m.as_ref().is_some_and(|m| names.contains(m));
+    let viol = |level: Level, name: &str, field: String, what: &str| Violation {
+        level,
+        name: name.to_owned(),
+        field,
+        message: format!("verweist auf Modellgruppe/Alias {what}"),
+    };
+    let limit_refs = |level: Level, name: &str, limits: &[aigw_core::resource::LimitSpec]| {
+        limits
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| hit(&l.model_group))
+            .map(|(i, l)| {
+                viol(
+                    level,
+                    name,
+                    format!("limits[{i}].modelGroup"),
+                    &format!("{:?}", l.model_group.as_deref().unwrap_or_default()),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    for o in st.store.list::<OrganizationSpec>().await? {
+        let v = limit_refs(Level::Organization, &o.metadata.name, &o.spec.limits);
+        if v.is_empty() {
+            continue;
+        }
+        found.extend(v);
+        let mut spec = o.spec.clone();
+        spec.limits.retain(|l| !hit(&l.model_group));
+        extras.unref_organizations.push((o, spec));
+    }
+    for t in st.store.list::<TeamSpec>().await? {
+        let mut v = limit_refs(Level::Team, &t.metadata.name, &t.spec.limits);
+        let allowed: Vec<&String> = t
+            .spec
+            .allowed_models
+            .iter()
+            .filter(|m| names.contains(*m))
+            .collect();
+        if !allowed.is_empty() {
+            v.push(viol(
+                Level::Team,
+                &t.metadata.name,
+                "allowedModels".into(),
+                &format!("{allowed:?}"),
+            ));
+        }
+        if v.is_empty() {
+            continue;
+        }
+        let mut spec = t.spec.clone();
+        spec.limits.retain(|l| !hit(&l.model_group));
+        spec.allowed_models.retain(|m| !names.contains(m));
+        if !t.spec.allowed_models.is_empty() && spec.allowed_models.is_empty() {
+            widening.push(viol(
+                Level::Team,
+                &t.metadata.name,
+                "allowedModels".into(),
+                "als einzige Freigabe – Entfernen gäbe alle Modelle frei",
+            ));
+        }
+        found.extend(v);
+        extras.unref_teams.push((t, spec));
+    }
+    for k in st.store.list_api_keys().await? {
+        let mut v = limit_refs(Level::ApiKey, &k.metadata.name, &k.spec.limits);
+        let allowed: Vec<&String> = k
+            .spec
+            .allowed_models
+            .iter()
+            .filter(|m| names.contains(*m))
+            .collect();
+        if !allowed.is_empty() {
+            v.push(viol(
+                Level::ApiKey,
+                &k.metadata.name,
+                "allowedModels".into(),
+                &format!("{allowed:?}"),
+            ));
+        }
+        if v.is_empty() {
+            continue;
+        }
+        let mut spec = k.spec.clone();
+        spec.limits.retain(|l| !hit(&l.model_group));
+        spec.allowed_models.retain(|m| !names.contains(m));
+        if !k.spec.allowed_models.is_empty() && spec.allowed_models.is_empty() {
+            widening.push(viol(
+                Level::ApiKey,
+                &k.metadata.name,
+                "allowedModels".into(),
+                "als einzige Freigabe – Entfernen gäbe alle Modelle frei",
+            ));
+        }
+        found.extend(v);
+        extras.unref_api_keys.push((k, spec));
+    }
+    if found.is_empty() {
+        return Ok(WriteExtras::default());
+    }
+    if !cascade {
+        return Err(Problem::conflict(format!(
+            "Modellgruppe/Alias wird noch verwendet ({} Verweis(e)) – anpassen oder \
+             ?cascade=remove verwenden: {}",
+            found.len(),
+            aigw_core::validate::bounds::summary(&found)
+        ))
+        .with_violations(found));
+    }
+    if !widening.is_empty() {
+        return Err(Problem::conflict(format!(
+            "Verweise lassen sich nicht automatisch entfernen (leere Freigabeliste = alle \
+             Modelle): {}",
+            aigw_core::validate::bounds::summary(&widening)
+        ))
+        .with_violations(widening));
+    }
+    Ok(extras)
 }
 
 /// Prüft `settings` einer Modellgruppe (`retry`, `circuitBreaker`, `healthCheck`) mit dem
@@ -1001,8 +1287,9 @@ pub struct RotatedApiKey {
 }
 
 /// Geltungsbereich eines Keys: Objekt im Team (Organisation über das Team); Keys ohne Team
-/// sind global (nur globale Rollen). Unbekanntes Team -> `422`.
-async fn key_target(store: &Store, spec: &ApiKeySpec) -> Result<Target, Problem> {
+/// liegen direkt in ihrer Organisation (F193: `org-admin` verwaltet sie, `team-admin` nicht).
+/// Unbekanntes Team -> `422`.
+pub(crate) async fn key_target(store: &Store, spec: &ApiKeySpec) -> Result<Target, Problem> {
     match &spec.team {
         Some(t) => match store.get::<TeamSpec>(t).await {
             Ok(team) => Ok(Target::in_team(team.spec.organization, t.clone())),
@@ -1011,7 +1298,7 @@ async fn key_target(store: &Store, spec: &ApiKeySpec) -> Result<Target, Problem>
             }
             Err(e) => Err(e.into()),
         },
-        None => Ok(Target::Global),
+        None => Ok(Target::InOrganization(spec.organization.clone())),
     }
 }
 
@@ -1149,7 +1436,7 @@ pub(crate) async fn get_api_key(
     put, path = "/admin/api/v1/api-keys/{name}", tag = "api-keys", request_body = ApiKeyInput,
     params(
         ("name" = String, Path, description = "Name"),
-        ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
         KeyBoundsQuery,
     ),
     responses(
@@ -1160,6 +1447,7 @@ pub(crate) async fn get_api_key(
         (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
         (status = 422, description = "Ungültige Eingabe oder Verweis", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []))
@@ -1187,8 +1475,15 @@ pub(crate) async fn put_api_key(
         Permission::Write,
         &key_target(&st.store, &current.spec).await?,
     )?;
-    check_if_match(&headers, &key_etag(&current))?;
-    let extras = bounds::api_key(&st.store, &p, &name, &input.spec, &q).await?;
+    let expect = check_if_match(&headers, &key_etag(&current), current.metadata.updated_at)?;
+    if current.status.state == ApiKeyState::Revoked {
+        return Err(Problem::conflict(
+            "Widerrufene Keys sind endgültig und lassen sich nicht mehr ändern",
+        ));
+    }
+    let extras = bounds::api_key(&st.store, &p, &name, &input.spec, &q)
+        .await?
+        .expecting(expect);
     let k = st
         .store
         .update_api_key_with(p.actor(), meta, input.spec, &extras)
@@ -1201,7 +1496,7 @@ pub(crate) async fn put_api_key(
     delete, path = "/admin/api/v1/api-keys/{name}", tag = "api-keys",
     params(
         ("name" = String, Path, description = "Name"),
-        ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
     ),
     responses(
         (status = 204, description = "Gelöscht"),
@@ -1209,6 +1504,7 @@ pub(crate) async fn put_api_key(
         (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []))
 )]
@@ -1224,9 +1520,14 @@ pub(crate) async fn delete_api_key(
         Permission::Write,
         &key_target(&st.store, &current.spec).await?,
     )?;
-    check_if_match(&headers, &key_etag(&current))?;
+    let expect = check_if_match(&headers, &key_etag(&current), current.metadata.updated_at)?;
     st.store
-        .delete(p.actor(), aigw_core::resource::ResourceKind::ApiKey, &name)
+        .delete_expect(
+            p.actor(),
+            aigw_core::resource::ResourceKind::ApiKey,
+            &name,
+            expect,
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -1244,29 +1545,32 @@ async fn set_state(
         Permission::Write,
         &key_target(&st.store, &current.spec).await?,
     )?;
-    check_if_match(headers, &key_etag(&current))?;
-    let k = if current.status.state == state {
-        current // idempotent, keine neue Konfigurationsversion
-    } else {
-        st.store.set_api_key_state(p.actor(), name, state).await?
-    };
+    let expect = check_if_match(headers, &key_etag(&current), current.metadata.updated_at)?;
+    // Widerrufen ist endgültig (F37); gleicher Zustand ist idempotent (keine neue Version).
+    let k = st
+        .store
+        .set_api_key_state(p.actor(), name, state, expect)
+        .await?;
     Ok(json_with(StatusCode::OK, Some(key_etag(&k)), &k))
 }
 
-/// Sperrt einen API-Key (wirkt nach dem nächsten Snapshot-Neubau, i. d. R. < 1 s).
+/// Widerruft einen API-Key **endgültig** (F37; wirkt nach dem nächsten Snapshot-Neubau,
+/// i. d. R. < 1 s). Ein widerrufener Key lässt sich weder fortsetzen noch ändern oder
+/// rotieren, nur löschen.
 #[utoipa::path(
     post, path = "/admin/api/v1/api-keys/{name}/revoke", tag = "api-keys",
     params(
         ("name" = String, Path, description = "Name"),
-        ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
     ),
     responses(
-        (status = 200, description = "Gesperrt", body = ApiKey,
+        (status = 200, description = "Widerrufen", body = ApiKey,
             headers(("ETag" = String, description = "Neue Version"))),
         (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
         (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []))
 )]
@@ -1279,12 +1583,40 @@ pub(crate) async fn revoke_api_key(
     set_state(&st, &p, &name, &headers, ApiKeyState::Revoked).await
 }
 
-/// Entsperrt einen gesperrten API-Key.
+/// Sperrt einen API-Key vorübergehend (F37, umkehrbar mit `resume`).
 #[utoipa::path(
-    post, path = "/admin/api/v1/api-keys/{name}/reactivate", tag = "api-keys",
+    post, path = "/admin/api/v1/api-keys/{name}/suspend", tag = "api-keys",
     params(
         ("name" = String, Path, description = "Name"),
-        ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
+    ),
+    responses(
+        (status = 200, description = "Gesperrt", body = ApiKey,
+            headers(("ETag" = String, description = "Neue Version"))),
+        (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
+        (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Key ist widerrufen (endgültig)", body = Problem, content_type = "application/problem+json"),
+        (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
+    ),
+    security(("bearer" = []))
+)]
+pub(crate) async fn suspend_api_key(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult {
+    set_state(&st, &p, &name, &headers, ApiKeyState::Suspended).await
+}
+
+/// Hebt die vorübergehende Sperre eines API-Keys auf (F37; widerrufene Keys: `409`).
+#[utoipa::path(
+    post, path = "/admin/api/v1/api-keys/{name}/resume", tag = "api-keys",
+    params(
+        ("name" = String, Path, description = "Name"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
     ),
     responses(
         (status = 200, description = "Wieder aktiv", body = ApiKey,
@@ -1292,11 +1624,13 @@ pub(crate) async fn revoke_api_key(
         (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
         (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Key ist widerrufen (endgültig)", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []))
 )]
-pub(crate) async fn reactivate_api_key(
+pub(crate) async fn resume_api_key(
     State(st): St,
     Extension(p): Extension<Principal>,
     Path(name): Path<String>,
@@ -1333,7 +1667,7 @@ fn rotated_name(old: &str, now: OffsetDateTime) -> String {
     request_body(content = RotateApiKeyRequest, description = "Optional; leerer Körper = Standardwerte"),
     params(
         ("name" = String, Path, description = "Name des bisherigen Keys"),
-        ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
     ),
     responses(
         (status = 201, description = "Neuer Key angelegt (mit Klartext)", body = RotatedApiKey,
@@ -1344,6 +1678,7 @@ fn rotated_name(old: &str, now: OffsetDateTime) -> String {
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
         (status = 409, description = "Key gesperrt oder neuer Name vergeben", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []))
 )]
@@ -1377,10 +1712,10 @@ pub(crate) async fn rotate_api_key(
         Permission::Write,
         &key_target(&st.store, &current.spec).await?,
     )?;
-    check_if_match(&headers, &key_etag(&current))?;
+    let expect = check_if_match(&headers, &key_etag(&current), current.metadata.updated_at)?;
     if current.status.state != ApiKeyState::Active {
         return Err(Problem::conflict(
-            "Gesperrte Keys können nicht rotiert werden",
+            "Gesperrte oder widerrufene Keys können nicht rotiert werden",
         ));
     }
     let labels = current.metadata.labels.clone();
@@ -1391,7 +1726,7 @@ pub(crate) async fn rotate_api_key(
     };
     let (new_key, previous_key) = st
         .store
-        .rotate_api_key(p.actor(), &name, meta, old_expires)
+        .rotate_api_key(p.actor(), &name, meta, old_expires, expect)
         .await?;
     let location = format!("{BASE}/api-keys/{}", new_key.key.metadata.name);
     Ok(no_store(created_at(
@@ -1444,9 +1779,10 @@ pub(crate) fn router() -> Router<AdminState> {
         )
         .route("/admin/api/v1/api-keys/{name}/revoke", post(revoke_api_key))
         .route(
-            "/admin/api/v1/api-keys/{name}/reactivate",
-            post(reactivate_api_key),
+            "/admin/api/v1/api-keys/{name}/suspend",
+            post(suspend_api_key),
         )
+        .route("/admin/api/v1/api-keys/{name}/resume", post(resume_api_key))
         .route("/admin/api/v1/api-keys/{name}/rotate", post(rotate_api_key))
         .route(
             "/admin/api/v1/model-groups",
@@ -1506,15 +1842,35 @@ mod tests {
 
     #[test]
     fn if_match_semantics() {
+        let t = OffsetDateTime::from_unix_timestamp(1_763_000_000).unwrap();
         let mut h = HeaderMap::new();
-        assert!(check_if_match(&h, "\"a\"").is_ok());
+        // F38: Pflicht
+        assert_eq!(
+            check_if_match(&h, "\"a\"", Some(t)).unwrap_err().status,
+            428
+        );
+        h.insert(header::IF_MATCH, HeaderValue::from_static(" "));
+        assert_eq!(
+            check_if_match(&h, "\"a\"", Some(t)).unwrap_err().status,
+            428
+        );
         h.insert(header::IF_MATCH, HeaderValue::from_static("\"a\""));
-        assert!(check_if_match(&h, "\"a\"").is_ok());
-        assert_eq!(check_if_match(&h, "\"b\"").unwrap_err().status, 412);
+        assert_eq!(
+            check_if_match(&h, "\"a\"", Some(t)).unwrap(),
+            Expect::Version(t)
+        );
+        assert_eq!(check_if_match(&h, "\"a\"", None).unwrap(), Expect::Any);
+        assert_eq!(
+            check_if_match(&h, "\"b\"", Some(t)).unwrap_err().status,
+            412
+        );
         h.insert(header::IF_MATCH, HeaderValue::from_static("*"));
-        assert!(check_if_match(&h, "\"b\"").is_ok());
+        assert_eq!(check_if_match(&h, "\"b\"", Some(t)).unwrap(), Expect::Any);
         h.insert(header::IF_MATCH, HeaderValue::from_static("\"x\", \"b\""));
-        assert!(check_if_match(&h, "\"b\"").is_ok());
+        assert_eq!(
+            check_if_match(&h, "\"b\"", Some(t)).unwrap(),
+            Expect::Version(t)
+        );
     }
 
     #[test]

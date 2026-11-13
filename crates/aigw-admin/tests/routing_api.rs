@@ -129,7 +129,7 @@ async fn send(
         None => Bytes::new(),
     };
     let res = client
-        .request(req.body(Full::new(body)).unwrap())
+        .request(with_if_match(req).body(Full::new(body)).unwrap())
         .await
         .unwrap();
     let status = res.status();
@@ -939,9 +939,50 @@ async fn snapshot_and_data_plane(env: &Env) {
             .await
             .expect(StatusCode::NO_CONTENT);
     }
-    env.admin(Method::DELETE, "/model-groups/gpt-4o", None)
+    // F66: Verweise (Key only-gpt über den Alias gpt-4o-latest) → 409 mit Liste.
+    let r = env
+        .admin(Method::DELETE, "/model-groups/gpt-4o", None)
+        .await
+        .expect(StatusCode::CONFLICT);
+    let v = r.json();
+    assert_eq!(v["violations"][0]["name"], "only-gpt");
+    assert_eq!(v["violations"][0]["field"], "allowedModels");
+    // cascade=remove würde die einzige Freigabe entfernen (leer = alle Modelle) → 409.
+    let r = env
+        .admin(Method::DELETE, "/model-groups/gpt-4o?cascade=remove", None)
+        .await
+        .expect(StatusCode::CONFLICT);
+    assert!(r.text().contains("alle Modelle"), "{}", r.text());
+    env.admin(Method::DELETE, "/model-groups/gpt-4o?cascade=clamp", None)
+        .await
+        .expect(StatusCode::BAD_REQUEST);
+    // Mit weiterer Freigabe entfernt cascade=remove nur den Verweis (Audit cascade-remove).
+    env.admin(
+        Method::PUT,
+        "/api-keys/only-gpt",
+        Some(json!({"metadata": {"name": "only-gpt"},
+                    "spec": {"organization": "apps", "allowedModels": ["gpt-4o-latest", "claude-3"]}})),
+    )
+    .await
+    .expect(StatusCode::OK);
+    env.admin(Method::DELETE, "/model-groups/gpt-4o?cascade=remove", None)
         .await
         .expect(StatusCode::NO_CONTENT);
+    let k = env
+        .admin(Method::GET, "/api-keys/only-gpt", None)
+        .await
+        .expect(StatusCode::OK)
+        .json();
+    assert_eq!(k["spec"]["allowedModels"], json!(["claude-3"]));
+    let audit = env
+        .store
+        .audit_log(50)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|e| e.action == "cascade-remove")
+        .expect("Audit cascade-remove");
+    assert_eq!(audit.object_name.as_deref(), Some("only-gpt"));
     env.wait_chat(&key, "gpt-4o", StatusCode::NOT_FOUND).await;
     env.admin(Method::DELETE, "/provider-credentials/openai-prod", None)
         .await
@@ -1253,4 +1294,28 @@ async fn postgres() {
         .execute(&admin)
         .await
         .unwrap();
+}
+
+/// F38: `If-Match` ist Pflicht – Anfragen ohne eigenen ETag schreiben hier mit `If-Match: *`
+/// (eigene Tests prüfen 428/412 ausdrücklich).
+fn with_if_match(req: axum::http::request::Builder) -> axum::http::request::Builder {
+    use axum::http::Method as M;
+    let action = req.uri_ref().is_some_and(|u| {
+        let p = u.path();
+        ["/revoke", "/suspend", "/resume", "/rotate"]
+            .iter()
+            .any(|s| p.ends_with(s))
+    });
+    let write = req
+        .method_ref()
+        .is_some_and(|m| matches!(*m, M::PUT | M::PATCH | M::DELETE) || (*m == M::POST && action));
+    if write
+        && !req
+            .headers_ref()
+            .is_some_and(|h| h.contains_key("if-match"))
+    {
+        req.header("if-match", "*")
+    } else {
+        req
+    }
 }

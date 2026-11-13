@@ -115,6 +115,17 @@ impl Problem {
         )
     }
 
+    /// `428 precondition-required` (F38): schreibende Anfrage ohne `If-Match`.
+    pub fn precondition_required() -> Self {
+        Self::new(
+            StatusCode::PRECONDITION_REQUIRED,
+            "precondition-required",
+            "If-Match fehlt",
+            "Schreibende Anfragen brauchen If-Match mit dem ETag aus dem letzten Lesen \
+             (oder `*`, um ohne Prüfung zu überschreiben)",
+        )
+    }
+
     /// `422 validation-failed`.
     pub fn invalid(detail: impl Into<String>) -> Self {
         Self::new(
@@ -178,6 +189,7 @@ impl From<StoreError> for Problem {
             }
             StoreError::Conflict(msg) => Self::conflict(msg),
             StoreError::Invalid(msg) => Self::invalid(msg),
+            StoreError::PreconditionFailed { .. } => Self::precondition_failed(),
             other => {
                 tracing::error!(error = %other, "Admin-API: Fehler der Persistenzschicht");
                 Self::internal()

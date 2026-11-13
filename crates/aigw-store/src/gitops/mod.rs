@@ -59,10 +59,11 @@ pub enum ApiKeyMode {
     /// aus dem Manifest (ihr Geheimnis bleibt, außer `spec.secret` gibt ein anderes vor); neue
     /// Keys werden nur mit `spec.secret.valueFrom` angelegt, sonst übersprungen (Warnung).
     /// `--prune` löscht Keys, die nicht im Manifest stehen.
-    #[default]
     Include,
-    /// Keys werden weder exportiert noch angewendet noch gelöscht (`ApiKey`-Dokumente werden
-    /// mit Warnung übersprungen; Verweise darauf gelten gegen die Datenbank).
+    /// Standard (F4): Keys werden weder exportiert noch angewendet noch gelöscht
+    /// (`ApiKey`-Dokumente werden mit Warnung übersprungen; Verweise darauf gelten gegen die
+    /// Datenbank).
+    #[default]
     Ignore,
 }
 
@@ -96,7 +97,7 @@ impl Default for ApplyOptions {
         Self {
             dry_run: false,
             prune: false,
-            api_keys: ApiKeyMode::Include,
+            api_keys: ApiKeyMode::Ignore,
             actor: GITOPS_ACTOR.to_owned(),
             secrets: SecretPolicy::default(),
             upstreams: UpstreamPolicy::strict(),

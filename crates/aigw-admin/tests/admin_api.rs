@@ -112,7 +112,7 @@ async fn send(
         None => Bytes::new(),
     };
     let res = client
-        .request(req.body(Full::new(body)).unwrap())
+        .request(with_if_match(req).body(Full::new(body)).unwrap())
         .await
         .unwrap();
     let status = res.status();
@@ -424,10 +424,13 @@ async fn scenario(store: Store) {
         .await
         .problem(StatusCode::BAD_REQUEST, "bad-request");
 
-    // --- Sperren → 401, Entsperren → 200 ------------------------------------------------------
-    env.admin(Method::POST, "/api-keys/ci/revoke", None)
+    // --- Vorübergehend sperren → 401, fortsetzen → 200 (F37) ----------------------------------
+    let v = env
+        .admin(Method::POST, "/api-keys/ci/suspend", None)
         .await
-        .expect(StatusCode::OK);
+        .expect(StatusCode::OK)
+        .json();
+    assert_eq!(v["status"]["state"], "suspended");
     let r = env.wait_chat(&ci, "gpt-4o", StatusCode::UNAUTHORIZED).await;
     assert_eq!(r.json()["error"]["code"], "invalid_api_key");
     let r = env
@@ -440,10 +443,32 @@ async fn scenario(store: Store) {
     let unknown = env.chat("sk-aigw-gibtesnicht-xyz", "gpt-4o").await;
     assert_eq!(unknown.status, StatusCode::UNAUTHORIZED);
     assert_eq!(unknown.json()["error"], r_openai_error(&env, &ci).await);
-    env.admin(Method::POST, "/api-keys/ci/reactivate", None)
+    let n = env
+        .admin(Method::GET, "/api-keys?state=suspended", None)
+        .await
+        .expect(StatusCode::OK)
+        .json()["items"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(n, 1);
+    // gleicher Zustand: idempotent
+    env.admin(Method::POST, "/api-keys/ci/suspend", None)
+        .await
+        .expect(StatusCode::OK);
+    env.admin(Method::POST, "/api-keys/ci/resume", None)
         .await
         .expect(StatusCode::OK);
     env.wait_chat(&ci, "gpt-4o", StatusCode::OK).await;
+    // Die alte Route `reactivate` gibt es nicht mehr.
+    let gone = env
+        .admin(Method::POST, "/api-keys/ci/reactivate", None)
+        .await
+        .status;
+    assert!(
+        matches!(gone, StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED),
+        "{gone}"
+    );
 
     // --- Modellfreigaben auf Key-Ebene ohne Team ---------------------------------------------
     let (restricted, _) = create_key(
@@ -550,12 +575,37 @@ async fn scenario(store: Store) {
     assert_eq!(v["newKey"]["key"]["spec"]["team"], "platform");
     env.wait_chat(&ci2, "gpt-4o", StatusCode::OK).await;
     env.wait_chat(&ci, "gpt-4o", StatusCode::UNAUTHORIZED).await;
-    env.admin(Method::POST, "/api-keys/ci/revoke", None)
+    let v = env
+        .admin(Method::POST, "/api-keys/ci/revoke", None)
         .await
-        .expect(StatusCode::OK);
+        .expect(StatusCode::OK)
+        .json();
+    assert_eq!(v["status"]["state"], "revoked");
     env.admin(Method::POST, "/api-keys/ci/rotate", None)
         .await
         .problem(StatusCode::CONFLICT, "conflict");
+    // Widerrufen ist endgültig (F37): weder fortsetzen noch sperren noch ändern.
+    for action in ["resume", "suspend"] {
+        env.admin(Method::POST, &format!("/api-keys/ci/{action}"), None)
+            .await
+            .problem(StatusCode::CONFLICT, "conflict");
+    }
+    let revoked = env
+        .admin(Method::GET, "/api-keys/ci", None)
+        .await
+        .expect(StatusCode::OK)
+        .json();
+    env.admin(
+        Method::PUT,
+        "/api-keys/ci",
+        Some(json!({"metadata": {"name": "ci"}, "spec": revoked["spec"].clone()})),
+    )
+    .await
+    .problem(StatusCode::CONFLICT, "conflict");
+    // erneutes Widerrufen ist idempotent
+    env.admin(Method::POST, "/api-keys/ci/revoke", None)
+        .await
+        .expect(StatusCode::OK);
 
     // --- ETag / If-Match -----------------------------------------------------------------------
     let r = env
@@ -577,6 +627,16 @@ async fn scenario(store: Store) {
         .expect(StatusCode::OK);
     let etag2 = r.header("etag");
     assert_ne!(etag1, etag2);
+    // F38: ohne If-Match → 428 (PUT, DELETE, Aktionen); `*` überschreibt ohne Prüfung.
+    let no_if_match = [("x-test", "ohne-if-match")];
+    for (m, path, b) in [
+        (Method::PUT, "/teams/platform", Some(body.clone())),
+        (Method::DELETE, "/teams/platform", None),
+        (Method::POST, "/api-keys/ci/revoke", None),
+    ] {
+        let r = env.admin_with(m.clone(), path, &no_if_match, b).await;
+        r.problem(StatusCode::PRECONDITION_REQUIRED, "precondition-required");
+    }
     env.admin_with(
         Method::PUT,
         "/teams/platform",
@@ -730,4 +790,28 @@ async fn postgres() {
         .execute(&admin)
         .await
         .unwrap();
+}
+
+/// F38: `If-Match` ist Pflicht – Anfragen ohne eigenen ETag schreiben hier mit `If-Match: *`
+/// (eigene Tests prüfen 428/412 ausdrücklich).
+fn with_if_match(req: axum::http::request::Builder) -> axum::http::request::Builder {
+    use axum::http::Method as M;
+    let action = req.uri_ref().is_some_and(|u| {
+        let p = u.path();
+        ["/revoke", "/suspend", "/resume", "/rotate"]
+            .iter()
+            .any(|s| p.ends_with(s))
+    });
+    let write = req
+        .method_ref()
+        .is_some_and(|m| matches!(*m, M::PUT | M::PATCH | M::DELETE) || (*m == M::POST && action));
+    // `x-test: ohne-if-match` prüft die Pflicht (428).
+    let explicit = req
+        .headers_ref()
+        .is_some_and(|h| h.contains_key("if-match") || h.contains_key("x-test"));
+    if write && !explicit {
+        req.header("if-match", "*")
+    } else {
+        req
+    }
 }

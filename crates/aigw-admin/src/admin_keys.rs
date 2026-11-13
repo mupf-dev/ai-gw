@@ -4,6 +4,10 @@
 //! Admin-API-Keys für Automatisierung (AIGW-32): `sk-aigw-admin-<Präfix>-<Geheimnis>` mit
 //! Rollen und Ablauf. Gespeichert wird nur SHA-256; der Klartext steht nur in der Antwort auf
 //! das Anlegen. Verwalten dürfen nur globale `admin`s (Lesen: globale Leserollen).
+//!
+//! `admin.auth.max_admin_key_lifetime` (F87) begrenzt `expiresAt`: fehlt die Angabe, setzt der
+//! Server jetzt + Höchstlaufzeit; spätere Zeitpunkte → `422`. Einzelobjekte tragen einen
+//! `ETag`, `PUT`/`DELETE` brauchen `If-Match` (F38).
 
 use aigw_core::resource::{OrganizationSpec, RoleBinding, TeamSpec, validate_name};
 use aigw_store::admin_auth::{AdminApiKeyRecord, AdminApiKeySpec};
@@ -23,6 +27,7 @@ use crate::AdminState;
 use crate::auth::{AdminAuthenticator, AuthMethod, BoxFuture, Permission, Principal, bearer_token};
 use crate::problem::Problem;
 use crate::rbac;
+use crate::resources::{check_if_match, etag_of, json_with};
 
 type ApiResult = Result<Response, Problem>;
 
@@ -146,7 +151,8 @@ async fn check_roles(store: &Store, roles: &[RoleBinding]) -> Result<(), Problem
     for b in roles {
         if !rbac::is_effective(b) {
             return Err(Problem::invalid(format!(
-                "roles: {:?} braucht organization (org-admin) bzw. team (team-admin)",
+                "roles: {:?} braucht organization (org-admin) bzw. team (team-admin); \
+                 gitops gilt nur global (ohne organization/team)",
                 b.role
             )));
         }
@@ -181,13 +187,39 @@ async fn exists<R: aigw_store::Resource>(
     }
 }
 
-fn check_expiry(e: Option<OffsetDateTime>) -> Result<(), Problem> {
-    match e {
-        Some(t) if t <= OffsetDateTime::now_utc() => {
-            Err(Problem::invalid("expiresAt liegt in der Vergangenheit"))
-        }
-        _ => Ok(()),
+/// Prüft `expiresAt` (Zukunft; höchstens `max_lifetime` Sekunden ab jetzt, F87) und setzt
+/// ohne Angabe bei konfigurierter Höchstlaufzeit jetzt + Höchstlaufzeit.
+pub(crate) fn effective_expiry(
+    e: Option<OffsetDateTime>,
+    max_lifetime: Option<u64>,
+) -> Result<Option<OffsetDateTime>, Problem> {
+    let now = OffsetDateTime::now_utc();
+    if e.is_some_and(|t| t <= now) {
+        return Err(Problem::invalid("expiresAt liegt in der Vergangenheit"));
     }
+    let Some(max) = max_lifetime else {
+        return Ok(e);
+    };
+    let limit = now + Duration::seconds(i64::try_from(max).unwrap_or(i64::MAX / 1000));
+    match e {
+        None => Ok(Some(limit)),
+        Some(t) if t <= limit => Ok(Some(t)),
+        Some(_) => Err(Problem::invalid(format!(
+            "expiresAt: höchstens {max} s in der Zukunft (admin.auth.max_admin_key_lifetime)"
+        ))),
+    }
+}
+
+/// ETag eines Admin-API-Keys (ohne `lastUsedAt`, das sich bei Nutzung ändert).
+fn admin_key_etag(k: &AdminApiKeyRecord) -> String {
+    etag_of(&(
+        &k.id,
+        &k.name,
+        &k.prefix,
+        &k.spec,
+        &k.created_by,
+        k.updated_at,
+    ))
 }
 
 async fn latch_bootstrap(store: &Store, name: &str, roles: &[RoleBinding]) {
@@ -261,11 +293,11 @@ pub(crate) async fn create_admin_api_key(
     let Json(input) = body?;
     validate_name(&input.name).map_err(Problem::invalid)?;
     check_roles(&st.store, &input.roles).await?;
-    check_expiry(input.expires_at)?;
+    let expires_at = effective_expiry(input.expires_at, st.auth_opts.max_admin_key_lifetime)?;
     let spec = AdminApiKeySpec {
         description: input.description,
         roles: input.roles,
-        expires_at: input.expires_at,
+        expires_at,
     };
     let created = st
         .store
@@ -273,6 +305,7 @@ pub(crate) async fn create_admin_api_key(
         .await?;
     latch_bootstrap(&st.store, &created.key.name, &created.key.spec.roles).await;
     let location = format!("/admin/api/v1/admin-api-keys/{}", created.key.name);
+    let tag = admin_key_etag(&created.key);
     let mut res = (
         StatusCode::CREATED,
         Json(CreatedAdminApiKey {
@@ -285,6 +318,9 @@ pub(crate) async fn create_admin_api_key(
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     if let Ok(v) = HeaderValue::from_str(&location) {
         h.insert(header::LOCATION, v);
+    }
+    if let Ok(v) = HeaderValue::from_str(&tag) {
+        h.insert(header::ETAG, v);
     }
     Ok(res)
 }
@@ -308,19 +344,25 @@ pub(crate) async fn get_admin_api_key(
 ) -> ApiResult {
     p.require(Permission::Read)?;
     let k = get_or_404(&st.store, &name).await?;
-    Ok(Json(AdminApiKey::from(k)).into_response())
+    let tag = admin_key_etag(&k);
+    Ok(json_with(StatusCode::OK, Some(tag), &AdminApiKey::from(k)))
 }
 
 /// Ändert Beschreibung, Rollen und Ablauf eines Admin-API-Keys (nur globale `admin`s).
 #[utoipa::path(
     put, path = "/admin/api/v1/admin-api-keys/{name}", tag = "admin-api-keys", request_body = AdminApiKeyUpdate,
-    params(("name" = String, Path, description = "Name")),
+    params(
+        ("name" = String, Path, description = "Name"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
+    ),
     responses(
         (status = 200, description = "Geändert", body = AdminApiKey),
         (status = 400, description = "Ungültige Anfrage", body = Problem, content_type = "application/problem+json"),
         (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
         (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
+        (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
         (status = 422, description = "Ungültige Eingabe", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []), ("session" = []))
@@ -329,35 +371,47 @@ pub(crate) async fn put_admin_api_key(
     State(st): State<AdminState>,
     Extension(p): Extension<Principal>,
     Path(name): Path<String>,
+    headers: HeaderMap,
     body: Result<Json<AdminApiKeyUpdate>, JsonRejection>,
 ) -> ApiResult {
     p.require(Permission::Write)?;
     let Json(input) = body?;
     check_roles(&st.store, &input.roles).await?;
-    check_expiry(input.expires_at)?;
-    get_or_404(&st.store, &name).await?;
+    let expires_at = effective_expiry(input.expires_at, st.auth_opts.max_admin_key_lifetime)?;
+    let current = get_or_404(&st.store, &name).await?;
+    let expect = check_if_match(
+        &headers,
+        &admin_key_etag(&current),
+        Some(current.updated_at),
+    )?;
     let spec = AdminApiKeySpec {
         description: input.description,
         roles: input.roles,
-        expires_at: input.expires_at,
+        expires_at,
     };
     let k = st
         .store
-        .update_admin_api_key(p.actor(), &name, spec)
+        .update_admin_api_key(p.actor(), &name, spec, expect)
         .await?;
     latch_bootstrap(&st.store, &k.name, &k.spec.roles).await;
-    Ok(Json(AdminApiKey::from(k)).into_response())
+    let tag = admin_key_etag(&k);
+    Ok(json_with(StatusCode::OK, Some(tag), &AdminApiKey::from(k)))
 }
 
 /// Löscht (widerruft) einen Admin-API-Key; wirkt sofort.
 #[utoipa::path(
     delete, path = "/admin/api/v1/admin-api-keys/{name}", tag = "admin-api-keys",
-    params(("name" = String, Path, description = "Name")),
+    params(
+        ("name" = String, Path, description = "Name"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
+    ),
     responses(
         (status = 204, description = "Gelöscht"),
         (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
         (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
+        (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []), ("session" = []))
 )]
@@ -365,10 +419,18 @@ pub(crate) async fn delete_admin_api_key(
     State(st): State<AdminState>,
     Extension(p): Extension<Principal>,
     Path(name): Path<String>,
+    headers: HeaderMap,
 ) -> ApiResult {
     p.require(Permission::Write)?;
-    get_or_404(&st.store, &name).await?;
-    st.store.delete_admin_api_key(p.actor(), &name).await?;
+    let current = get_or_404(&st.store, &name).await?;
+    let expect = check_if_match(
+        &headers,
+        &admin_key_etag(&current),
+        Some(current.updated_at),
+    )?;
+    st.store
+        .delete_admin_api_key(p.actor(), &name, expect)
+        .await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -447,5 +509,30 @@ impl AdminAuthenticator for AdminKeyAuthenticator {
                 }
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_lifetime_bounds_expiry() {
+        let now = OffsetDateTime::now_utc();
+        // ohne Höchstlaufzeit: wie angegeben (auch unbegrenzt)
+        assert_eq!(effective_expiry(None, None).unwrap(), None);
+        let t = now + Duration::days(400);
+        assert_eq!(effective_expiry(Some(t), None).unwrap(), Some(t));
+        assert!(effective_expiry(Some(now - Duration::seconds(1)), None).is_err());
+        // mit Höchstlaufzeit (F87): fehlend → jetzt + max, darüber → 422
+        let max = 90 * 86_400;
+        let e = effective_expiry(None, Some(max)).unwrap().unwrap();
+        assert!(
+            e > now + Duration::days(89) && e <= now + Duration::days(90) + Duration::seconds(5)
+        );
+        let ok = now + Duration::days(30);
+        assert_eq!(effective_expiry(Some(ok), Some(max)).unwrap(), Some(ok));
+        let err = effective_expiry(Some(now + Duration::days(91)), Some(max)).unwrap_err();
+        assert_eq!(err.status, 422);
     }
 }

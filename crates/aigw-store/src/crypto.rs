@@ -60,6 +60,39 @@ impl MasterKey {
         Self::from_bytes(&bytes)
     }
 
+    /// Parst einen Key als Hex (64 Zeichen) oder Base64 (Standard- oder URL-Alphabet, mit oder
+    /// ohne `=`; F6). Leerraum am Rand wird ignoriert.
+    pub fn parse(text: &str) -> Result<Self, StoreError> {
+        use base64::Engine as _;
+        use base64::engine::general_purpose::{
+            STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD,
+        };
+        let t = text.trim();
+        if let Some(bytes) = unhex(t) {
+            return Self::from_bytes(&bytes);
+        }
+        let decoded = [STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD]
+            .iter()
+            .find_map(|e| e.decode(t).ok());
+        match decoded {
+            Some(bytes) if bytes.len() == KEY_LEN => Self::from_bytes(&bytes),
+            _ => Err(StoreError::Crypto(
+                "Master-Key muss 32 Byte sein: 64 Hex-Zeichen oder Base64 (44 Zeichen) – \
+                 erzeugen mit `aigw keygen`"
+                    .into(),
+            )),
+        }
+    }
+
+    /// Erzeugt zufällige Rohbytes für einen Key (`aigw keygen`).
+    pub fn random_bytes() -> Result<[u8; KEY_LEN], StoreError> {
+        let mut bytes = [0u8; KEY_LEN];
+        SystemRandom::new()
+            .fill(&mut bytes)
+            .map_err(|_| StoreError::Crypto("Zufallsquelle nicht verfügbar".into()))?;
+        Ok(bytes)
+    }
+
     /// Erzeugt einen zufälligen Key (Tests, `aigw keygen`).
     pub fn generate() -> Result<(Self, String), StoreError> {
         let mut bytes = [0u8; KEY_LEN];
@@ -143,7 +176,7 @@ impl Keyring {
             })
         };
         let primary = match &cfg.master_key_file {
-            Some(p) => MasterKey::from_hex(&read(p)?)?,
+            Some(p) => MasterKey::parse(&read(p)?)?,
             None => {
                 let v = std::env::var(&cfg.master_key_env).map_err(|_| {
                     StoreError::Crypto(format!(
@@ -151,12 +184,12 @@ impl Keyring {
                         cfg.master_key_env
                     ))
                 })?;
-                MasterKey::from_hex(&v)?
+                MasterKey::parse(&v)?
             }
         };
         let mut ring = Self::new(primary);
         for p in &cfg.previous_key_files {
-            ring = ring.with_previous(MasterKey::from_hex(&read(p)?)?);
+            ring = ring.with_previous(MasterKey::parse(&read(p)?)?);
         }
         Ok(ring)
     }
@@ -340,5 +373,26 @@ mod tests {
         assert_eq!(a.id(), b.id());
         assert_eq!(a.id().len(), 16);
         assert_eq!(unhex(&hex(&[1, 2, 255])).unwrap(), vec![1, 2, 255]);
+    }
+
+    #[test]
+    fn key_parsing_base64() {
+        use base64::Engine as _;
+        let raw = [7u8; 32];
+        let hex_id = MasterKey::parse(&hex(&raw)).unwrap().id().to_owned();
+        for e in [
+            base64::engine::general_purpose::STANDARD,
+            base64::engine::general_purpose::STANDARD_NO_PAD,
+            base64::engine::general_purpose::URL_SAFE_NO_PAD,
+        ] {
+            let k = MasterKey::parse(&format!(" {}\n", e.encode(raw))).unwrap();
+            assert_eq!(k.id(), hex_id);
+        }
+        // falsche Länge, kein Base64
+        let short = base64::engine::general_purpose::STANDARD.encode([1u8; 16]);
+        assert!(MasterKey::parse(&short).is_err());
+        assert!(MasterKey::parse("kein key!").is_err());
+        let msg = MasterKey::parse("x").unwrap_err().to_string();
+        assert!(msg.contains("aigw keygen"), "{msg}");
     }
 }

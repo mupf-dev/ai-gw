@@ -835,6 +835,8 @@ fn check_rules(
                     aigw_core::mcp::validate_server(&opts.upstreams, name, s)
                 }
                 ResourceSpec::McpGrant(g) => aigw_core::mcp::validate_grant(g),
+                // F90: OIDC-Identität vorab (Issuer + Kennung), Rollen (F55: gitops global).
+                ResourceSpec::User(u) => validate::user(u),
                 // Plugin-Kette (F118/F165): wie in der Admin-API.
                 ResourceSpec::PluginBinding(b) => opts
                     .plugin_bindings

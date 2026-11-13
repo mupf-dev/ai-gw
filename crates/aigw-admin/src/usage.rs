@@ -207,7 +207,7 @@ pub(crate) async fn list_budgets(
         for k in st.store.list_api_keys().await? {
             let target = match &k.spec.team {
                 Some(t) => Target::in_team(org_of(t), t.clone()),
-                None => Target::Global,
+                None => Target::InOrganization(k.spec.organization.clone()),
             };
             if k.status.state == ApiKeyState::Active
                 && read(&target)

@@ -207,7 +207,8 @@ pub struct McpGrantQuery {
 /// Team → Organisation und API-Key → Team (für die Rollenprüfung).
 struct Scopes {
     team_orgs: HashMap<String, String>,
-    key_teams: HashMap<String, Option<String>>,
+    /// API-Key → (Team, Organisation).
+    key_teams: HashMap<String, (Option<String>, String)>,
 }
 
 impl Scopes {
@@ -224,7 +225,7 @@ impl Scopes {
             .list_api_keys()
             .await?
             .into_iter()
-            .map(|k| (k.metadata.name, k.spec.team))
+            .map(|k| (k.metadata.name, (k.spec.team, k.spec.organization)))
             .collect();
         Ok(Self {
             team_orgs,
@@ -249,8 +250,9 @@ impl Scopes {
                 ))),
             },
             ScopeLevel::ApiKey => match self.key_teams.get(&name) {
-                Some(Some(team)) => Ok(in_team(team)),
-                Some(None) => Ok(Target::Global),
+                Some((Some(team), _)) => Ok(in_team(team)),
+                // F193: Keys ohne Team liegen direkt in ihrer Organisation.
+                Some((None, org)) => Ok(Target::InOrganization(org.clone())),
                 None => Err(Problem::invalid(format!(
                     "subject.target: unbekannter API-Key {name:?}"
                 ))),
@@ -392,7 +394,7 @@ pub(crate) async fn get_mcp_grant(
     put, path = "/admin/api/v1/mcp-grants/{name}", tag = "mcp-grants", request_body = McpGrantInput,
     params(
         ("name" = String, Path, description = "Name"),
-        ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
     ),
     responses(
         (status = 200, description = "Geändert", body = McpGrant,
@@ -402,6 +404,7 @@ pub(crate) async fn get_mcp_grant(
         (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
         (status = 422, description = "Ungültige Eingabe oder Verweis", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []))
@@ -422,9 +425,18 @@ pub(crate) async fn put_mcp_grant(
     let _guard = st.write_lock.lock().await;
     let current = McpGrant::from(st.store.get::<McpGrantSpec>(&name).await?);
     p.require_on(Permission::Write, &scopes.target(&current.spec)?)?;
-    check_if_match(&headers, &grant_etag(&current))?;
+    let expect = check_if_match(&headers, &grant_etag(&current), current.metadata.updated_at)?;
     check_grant(&st, &input.spec).await?;
-    let g = McpGrant::from(st.store.update(p.actor(), meta, input.spec).await?);
+    let g = McpGrant::from(
+        st.store
+            .update_with(
+                p.actor(),
+                meta,
+                input.spec,
+                &aigw_store::WriteExtras::default().expecting(expect),
+            )
+            .await?,
+    );
     Ok(json_with(StatusCode::OK, Some(grant_etag(&g)), &g))
 }
 
@@ -433,7 +445,7 @@ pub(crate) async fn put_mcp_grant(
     delete, path = "/admin/api/v1/mcp-grants/{name}", tag = "mcp-grants",
     params(
         ("name" = String, Path, description = "Name"),
-        ("If-Match" = Option<String>, Header, description = "ETag aus dem letzten Lesen (optimistische Sperre)"),
+        ("If-Match" = String, Header, description = "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)"),
     ),
     responses(
         (status = 204, description = "Gelöscht"),
@@ -441,6 +453,7 @@ pub(crate) async fn put_mcp_grant(
         (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []))
 )]
@@ -458,12 +471,13 @@ pub(crate) async fn delete_mcp_grant(
         .target(&current.spec)
         .unwrap_or(Target::Global);
     p.require_on(Permission::Write, &target)?;
-    check_if_match(&headers, &grant_etag(&current))?;
+    let expect = check_if_match(&headers, &grant_etag(&current), current.metadata.updated_at)?;
     st.store
-        .delete(
+        .delete_expect(
             p.actor(),
             aigw_core::resource::ResourceKind::McpGrant,
             &name,
+            expect,
         )
         .await?;
     Ok(StatusCode::NO_CONTENT.into_response())

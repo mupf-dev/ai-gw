@@ -289,7 +289,8 @@ impl BootstrapGate {
         }
     }
 
-    async fn active(&self) -> bool {
+    /// Gilt das Token derzeit (Modus und Abschaltvermerk; für `GET /auth/info`, F56)?
+    pub(crate) async fn active(&self) -> bool {
         match self.mode {
             BootstrapMode::Off => false,
             BootstrapMode::On => true,

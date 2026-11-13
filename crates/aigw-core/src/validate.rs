@@ -17,7 +17,9 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use serde_json::Value;
 use time::OffsetDateTime;
 
-use crate::resource::{Amount, ApiKeySpec, DeploymentSpec, JsonObject, ModelGroupSpec, PriceSpec};
+use crate::resource::{
+    Amount, ApiKeySpec, DeploymentSpec, JsonObject, ModelGroupSpec, PriceSpec, Role, UserSpec,
+};
 use crate::types::ProviderKind;
 use crate::upstream::UpstreamPolicy;
 
@@ -35,6 +37,48 @@ pub const MAX_CREDENTIAL_VALUE_LEN: usize = 64 * 1024;
 pub const OLLAMA_DEFAULT_ENDPOINT: &str = "http://localhost:11434/v1";
 
 type Res = Result<(), String>;
+
+// ---------------------------------------------------------------------------------------------
+// Nutzer (F90)
+// ---------------------------------------------------------------------------------------------
+
+/// Nutzer: OIDC-Identität nur vollständig (`oidcIssuer` **und** `oidcSubject`, die Kennung
+/// laut `identity_claim`), damit vorab angelegte Nutzer eindeutig zugeordnet werden; Rolle
+/// `gitops` nur global (F55).
+pub fn user(spec: &UserSpec) -> Res {
+    let filled = |v: &Option<String>| v.as_deref().is_some_and(|s| !s.trim().is_empty());
+    match (filled(&spec.oidc_issuer), filled(&spec.oidc_subject)) {
+        (true, true) | (false, false) => {}
+        _ => {
+            return Err(
+                "oidcIssuer und oidcSubject nur gemeinsam angeben (OIDC-Identität = Issuer + \
+                 Kennung)"
+                    .into(),
+            );
+        }
+    }
+    if spec
+        .oidc_issuer
+        .as_deref()
+        .is_some_and(|s| s.trim().is_empty())
+        || spec
+            .oidc_subject
+            .as_deref()
+            .is_some_and(|s| s.trim().is_empty())
+    {
+        return Err("oidcIssuer/oidcSubject dürfen nicht leer sein".into());
+    }
+    if let Some(b) = spec
+        .roles
+        .iter()
+        .find(|b| b.role == Role::Gitops && (b.organization.is_some() || b.team.is_some()))
+    {
+        return Err(format!(
+            "roles: gitops gilt nur global (ohne organization/team), erhalten {b:?}"
+        ));
+    }
+    Ok(())
+}
 
 // ---------------------------------------------------------------------------------------------
 // API-Keys (F3)
@@ -279,29 +323,25 @@ pub fn deployment(upstreams: &UpstreamPolicy, spec: &DeploymentSpec) -> Res {
         return Err("settings.region: für AWS Bedrock Pflicht (z. B. \"eu-central-1\")".into());
     }
     if let Some(ca) = setting_str(spec, "caFile")? {
-        ca_file(ca)?;
+        ca_file(upstreams, ca)?;
     }
     Ok(())
 }
 
-/// `settings.caFile` (F48): absoluter Pfad einer PEM-Datei auf dem Gateway-Host, ohne `..`.
-/// Ob die Datei lesbar ist, zeigt erst der Aufbau der Route (GitOps kann auf einem anderen
-/// Rechner prüfen).
-fn ca_file(path: &str) -> Res {
-    let p = std::path::Path::new(path);
-    if path.is_empty()
-        || path.len() > 4096
-        || path.chars().any(char::is_control)
-        || !p.is_absolute()
-        || p.components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
-    {
+/// `settings.caFile` (F48, F177): PEM-Datei innerhalb von `upstream.ca_dir` (relativ =
+/// darin, absolut = muss darin liegen, ohne `..`). Ohne `ca_dir` verboten. Ob die Datei lesbar
+/// ist und Symlinks im Verzeichnis bleiben, prüfen Admin-API und Routenaufbau auf dem Gateway
+/// (GitOps per CLI kann auf einem anderen Rechner laufen).
+fn ca_file(upstreams: &UpstreamPolicy, path: &str) -> Res {
+    let Some(dir) = upstreams.ca_dir() else {
         return Err(
-            "settings.caFile: absoluter Pfad einer PEM-Datei ohne \"..\" (z. B. \"/etc/aigw/ca.pem\")"
+            "settings.caFile: nur mit upstream.ca_dir in der Startkonfiguration erlaubt (F177)"
                 .into(),
         );
-    }
-    Ok(())
+    };
+    crate::paths::lexical_within(dir, path)
+        .map(drop)
+        .map_err(|e| format!("settings.caFile: {e}"))
 }
 
 /// Azure OpenAI: Deployment-Name (`providerModel`) als Pfadsegment, `settings.apiVersion`.
@@ -344,17 +384,41 @@ fn azure(spec: &DeploymentSpec) -> Res {
     }
 }
 
-/// Zugangsdaten müssen zum Anbieter des Deployments gehören.
+/// Kompatibilitätsliste Zugangsdaten-Anbieter → weitere Deployment-Anbieter (F65): ein
+/// OpenAI-Key passt auch zu OpenAI-kompatiblen Endpunkten (`openai-compatible`, `vllm`,
+/// `ollama`; dieselbe Bearer-Anmeldung mit `apiKey`). Gleicher Anbieter passt immer.
+pub const CREDENTIAL_COMPAT: &[(ProviderKind, &[ProviderKind])] = &[(
+    ProviderKind::OpenAi,
+    &[
+        ProviderKind::OpenAiCompatible,
+        ProviderKind::Vllm,
+        ProviderKind::Ollama,
+    ],
+)];
+
+/// Dürfen Zugangsdaten des Anbieters `credential` von einem Deployment des Anbieters
+/// `deployment` genutzt werden (F65)?
+pub fn credential_compatible(credential: ProviderKind, deployment: ProviderKind) -> bool {
+    credential == deployment
+        || CREDENTIAL_COMPAT
+            .iter()
+            .any(|(c, deps)| *c == credential && deps.contains(&deployment))
+}
+
+/// Zugangsdaten müssen zum Anbieter des Deployments passen (gleicher Anbieter oder laut
+/// [`CREDENTIAL_COMPAT`]).
 pub fn deployment_credential(
     spec: &DeploymentSpec,
     credential: &str,
     credential_provider: ProviderKind,
 ) -> Res {
-    if credential_provider == spec.provider {
+    if credential_compatible(credential_provider, spec.provider) {
         Ok(())
     } else {
         Err(format!(
-            "credential: {credential:?} gehört zu Anbieter {:?}, das Deployment zu {:?}",
+            "credential: {credential:?} gehört zu Anbieter {:?} und passt nicht zum Anbieter \
+             {:?} des Deployments (kompatibel: gleicher Anbieter; openai auch für \
+             openai-compatible, vllm, ollama)",
             credential_provider.as_str(),
             spec.provider.as_str()
         ))
@@ -521,23 +585,28 @@ mod tests {
 
     #[test]
     fn ca_file_setting() {
-        let p = UpstreamPolicy::strict();
-        let ok = dep(
-            ProviderKind::OpenAi,
-            None,
-            serde_json::json!({"caFile": "/etc/aigw/ca.pem"}),
-        );
-        assert!(deployment(&p, &ok).is_ok());
+        let caf = |v: Value| {
+            dep(
+                ProviderKind::OpenAi,
+                None,
+                serde_json::json!({ "caFile": v }),
+            )
+        };
+        // ohne upstream.ca_dir verboten (F177)
+        let strict = UpstreamPolicy::strict();
+        let err = deployment(&strict, &caf(json!("/etc/aigw/ca/x.pem"))).unwrap_err();
+        assert!(err.contains("ca_dir"), "{err}");
+        let p = UpstreamPolicy::strict().with_ca_dir(Some("/etc/aigw/ca".into()));
+        assert!(deployment(&p, &caf(json!("/etc/aigw/ca/x.pem"))).is_ok());
+        assert!(deployment(&p, &caf(json!("x.pem"))).is_ok());
         for bad in [
-            serde_json::json!({"caFile": "ca.pem"}),
-            serde_json::json!({"caFile": "/etc/../root/x"}),
-            serde_json::json!({"caFile": ""}),
-            serde_json::json!({"caFile": 1}),
+            json!("/etc/aigw/ca/../../root/x"),
+            json!("/etc/passwd"),
+            json!("../x.pem"),
+            json!(""),
+            json!(1),
         ] {
-            assert!(
-                deployment(&p, &dep(ProviderKind::OpenAi, None, bad.clone())).is_err(),
-                "{bad}"
-            );
+            assert!(deployment(&p, &caf(bad.clone())).is_err(), "{bad}");
         }
     }
 
@@ -669,6 +738,46 @@ mod tests {
         let mut bad = ok.clone();
         bad.provider_model = "a/b".into();
         assert!(azure(&bad).is_err());
+    }
+
+    #[test]
+    fn user_identity_rules() {
+        use crate::resource::RoleBinding;
+        let u = |iss: Option<&str>, sub: Option<&str>| UserSpec {
+            oidc_issuer: iss.map(Into::into),
+            oidc_subject: sub.map(Into::into),
+            ..UserSpec::default()
+        };
+        assert!(user(&u(None, None)).is_ok());
+        assert!(user(&u(Some("https://idp"), Some("oid-1"))).is_ok());
+        assert!(user(&u(Some("https://idp"), None)).is_err());
+        assert!(user(&u(None, Some("x"))).is_err());
+        assert!(user(&u(Some("https://idp"), Some(" "))).is_err());
+        let mut g = u(None, None);
+        g.roles = vec![RoleBinding {
+            role: Role::Gitops,
+            organization: Some("o".into()),
+            team: None,
+        }];
+        assert!(user(&g).is_err());
+        g.roles[0].organization = None;
+        assert!(user(&g).is_ok());
+    }
+
+    #[test]
+    fn credential_compatibility() {
+        use ProviderKind as P;
+        assert!(credential_compatible(P::OpenAi, P::OpenAi));
+        for d in [P::OpenAiCompatible, P::Vllm, P::Ollama] {
+            assert!(credential_compatible(P::OpenAi, d), "{d:?}");
+            assert!(!credential_compatible(d, P::OpenAi), "{d:?}");
+        }
+        assert!(!credential_compatible(P::OpenAi, P::AzureOpenAi));
+        assert!(!credential_compatible(P::Anthropic, P::OpenAi));
+        let d = dep(P::Vllm, Some("https://vllm.example/v1"), json!({}));
+        assert!(deployment_credential(&d, "oa", P::OpenAi).is_ok());
+        let err = deployment_credential(&d, "an", P::Anthropic).unwrap_err();
+        assert!(err.contains("passt nicht"), "{err}");
     }
 
     #[test]

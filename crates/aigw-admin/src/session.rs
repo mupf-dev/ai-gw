@@ -13,6 +13,12 @@
 //! 3. `GET /admin/api/v1/session` – angemeldeter Principal samt CSRF-Token für die UI.
 //! 4. `POST /admin/auth/logout` – löscht die Session; liefert die Logout-URL des IdP
 //!    (RP-initiated Logout), falls angeboten.
+//! 5. `POST|DELETE /admin/api/v1/users/{name}/invitation` – Einladungslink für einen vorab
+//!    angelegten Nutzer (F90): einmalig, mit Ablauf; `/admin/auth/login?invite=<token>`
+//!    verknüpft beim Rücksprung die OIDC-Identität (Issuer + Kennung) mit diesem Nutzer.
+//!
+//! Login und Logout schreiben ihren Audit-Eintrag mit `admin.auth.audit_required` (Standard)
+//! in derselben Transaktion wie die Session (F113): scheitert er, scheitert die Anmeldung.
 //!
 //! Session-Cookie: `__Secure-aigw-session=<256 Bit zufällig>; HttpOnly; Secure;
 //! SameSite=Strict; Path=/admin`. Gespeichert wird nur SHA-256 der Session-ID; das CSRF-Token
@@ -27,11 +33,11 @@ use std::sync::Arc;
 use aigw_core::config::{GroupRoleMapping, OidcConfig, SessionConfig};
 use aigw_core::resource::{Object, ObjectMeta, RoleBinding, UserSpec, validate_name};
 use aigw_core::snapshot::KeyHash;
-use aigw_store::admin_auth::LoginState;
+use aigw_store::admin_auth::{InvitationRecord, LoginState};
 use aigw_store::repo::audit::ADMIN_SESSION_KIND;
 use aigw_store::{AuditEvent, Store, StoreError, hash_api_key};
 use axum::extract::rejection::QueryRejection;
-use axum::extract::{Extension, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -42,7 +48,8 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::AdminState;
 use crate::auth::{
-    AdminAuthenticator, AuthMethod, BoxFuture, CsrfToken, Principal, check_csrf, random_bytes,
+    AdminAuthenticator, AuthMethod, BoxFuture, CsrfToken, Permission, Principal, check_csrf,
+    random_bytes,
 };
 use crate::oidc::{IdClaims, OidcClient, b64url, pkce_challenge};
 use crate::problem::Problem;
@@ -304,6 +311,8 @@ impl AdminAuthenticator for SessionAuthenticator {
 pub(crate) struct LoginQuery {
     /// Ziel nach dem Login (Pfad unter `/admin/`).
     return_to: Option<String>,
+    /// Einladungs-Token (F90, aus dem Einladungslink).
+    invite: Option<String>,
 }
 
 /// Startet den OIDC-Login (Weiterleitung zum IdP).
@@ -324,6 +333,19 @@ pub(crate) async fn login(
     };
     let Query(q) = q?;
     let return_to = sanitize_return_to(q.return_to.as_deref());
+    // Einladung (F90): früh prüfen (verständlicher Hinweis), eingelöst erst beim Rücksprung.
+    let invite_hash = match q.invite.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) if t.len() <= 128 => {
+            let h = session_hash(t);
+            if !st.store.invitation_valid(&h, now()).await? {
+                tracing::info!("Login mit ungültiger oder abgelaufener Einladung");
+                return Ok(redirect("/admin/?auth_error=invite"));
+            }
+            Some(h)
+        }
+        Some(_) => return Ok(redirect("/admin/?auth_error=invite")),
+        None => None,
+    };
     let state = random_token()?;
     let nonce = random_token()?;
     let verifier = random_token()?;
@@ -348,6 +370,7 @@ pub(crate) async fn login(
                 code_verifier: verifier,
                 return_to,
                 created_at: now(),
+                invite_hash,
             },
         )
         .await?;
@@ -416,7 +439,7 @@ impl From<Problem> for LoginFailure {
 #[utoipa::path(
     get, path = "/admin/auth/callback", tag = "auth", params(CallbackQuery),
     responses(
-        (status = 303, description = "Angemeldet (setzt das Session-Cookie) und weiter zu `returnTo`; bei Fehlern weiter zu `/admin/?auth_error=<code>` (`idp`, `state`, `token`, `no-access`, `internal`)"),
+        (status = 303, description = "Angemeldet (setzt das Session-Cookie) und weiter zu `returnTo`; bei Fehlern weiter zu `/admin/?auth_error=<code>` (`idp`, `state`, `token`, `invite`, `no-access`, `internal`)"),
     )
 )]
 pub(crate) async fn callback(
@@ -517,7 +540,14 @@ async fn complete_login(
         .map_err(|e| fail("token", e.to_string()))?;
 
     let group_roles = rbac::roles_from_groups(&claims.groups, &svc.group_roles);
-    let user = resolve_user(st, svc, &claims, !group_roles.is_empty()).await?;
+    let user = resolve_user(
+        st,
+        svc,
+        &claims,
+        !group_roles.is_empty(),
+        login.invite_hash.as_ref(),
+    )
+    .await?;
     let roles = effective_roles(&user.spec, &claims.groups, &svc.group_roles);
     if roles.is_empty() {
         return Err(LoginFailure {
@@ -556,27 +586,38 @@ async fn complete_login(
             t - Duration::seconds(LOGIN_TTL_SECS),
         )
         .await?;
-    st.store
-        .create_admin_session(&session_hash(&sid), user.id, &claims.groups, expires)
-        .await?;
+    let event = AuditEvent {
+        actor: format!("user:{}", user.metadata.name),
+        action: "login".into(),
+        kind: ADMIN_SESSION_KIND.into(),
+        object_id: Some(user.id),
+        object_name: Some(user.metadata.name.clone()),
+        details: Some(serde_json::json!({
+            "method": "oidc",
+            "groups": claims.groups,
+            "roles": roles,
+            "expiresAt": expires.format(&time::format_description::well_known::Rfc3339).ok(),
+        })),
+    };
+    if st.auth_opts.audit_required {
+        // F113: Session und Audit-Eintrag in einer Transaktion – ohne Eintrag kein Login.
+        st.store
+            .create_admin_session_audited(
+                &session_hash(&sid),
+                user.id,
+                &claims.groups,
+                expires,
+                &event,
+            )
+            .await
+            .map_err(|e| fail("internal", format!("Audit-Eintrag des Logins: {e}")))?;
+    } else {
+        st.store
+            .create_admin_session(&session_hash(&sid), user.id, &claims.groups, expires)
+            .await?;
+        audit_event(&st.store, event).await;
+    }
     tracing::info!(user = %user.metadata.name, "Admin-Login per OIDC");
-    audit_event(
-        &st.store,
-        AuditEvent {
-            actor: format!("user:{}", user.metadata.name),
-            action: "login".into(),
-            kind: ADMIN_SESSION_KIND.into(),
-            object_id: Some(user.id),
-            object_name: Some(user.metadata.name.clone()),
-            details: Some(serde_json::json!({
-                "method": "oidc",
-                "groups": claims.groups,
-                "roles": roles,
-                "expiresAt": expires.format(&time::format_description::well_known::Rfc3339).ok(),
-            })),
-        },
-    )
-    .await;
     Ok((sid, login.return_to, svc.session.max_age_secs))
 }
 
@@ -587,12 +628,59 @@ async fn resolve_user(
     svc: &LoginService,
     c: &IdClaims,
     has_group_role: bool,
+    invite: Option<&KeyHash>,
 ) -> Result<Object<UserSpec>, LoginFailure> {
     let users = st.store.list::<UserSpec>().await?;
-    if let Some(u) = users.iter().find(|u| {
+    let linked = users.iter().find(|u| {
         u.spec.oidc_issuer.as_deref() == Some(c.issuer.as_str())
             && u.spec.oidc_subject.as_deref() == Some(c.subject.as_str())
-    }) {
+    });
+    // Einladung (F90): einmalig einlösen – verknüpft die Identität mit dem eingeladenen Nutzer.
+    if let Some(hash) = invite {
+        let invited = st
+            .store
+            .take_invitation(hash, now())
+            .await?
+            .ok_or_else(|| fail("invite", "Einladung ungültig, abgelaufen oder verwendet"))?;
+        if let Some(u) = linked {
+            return if u.id == invited {
+                Ok(u.clone())
+            } else {
+                Err(fail(
+                    "invite",
+                    format!(
+                        "Identität (iss {}, Kennung {}) gehört bereits zu Nutzer {}",
+                        c.issuer, c.subject, u.metadata.name
+                    ),
+                ))
+            };
+        }
+        let Some(u) = users.iter().find(|u| u.id == invited) else {
+            return Err(fail("invite", "eingeladener Nutzer existiert nicht mehr"));
+        };
+        if u.spec.oidc_subject.is_some() {
+            return Err(fail(
+                "invite",
+                format!("Nutzer {} ist bereits verknüpft", u.metadata.name),
+            ));
+        }
+        let mut spec = u.spec.clone();
+        spec.oidc_issuer = Some(c.issuer.clone());
+        spec.oidc_subject = Some(c.subject.clone());
+        if spec.display_name.is_none() {
+            spec.display_name.clone_from(&c.name);
+        }
+        if spec.email.is_none() && c.email_verified {
+            spec.email.clone_from(&c.email);
+        }
+        let linked = st
+            .store
+            .update(LOGIN_ACTOR, u.metadata.clone(), spec)
+            .await?;
+        tracing::info!(user = %linked.metadata.name, "OIDC-Konto über Einladung verknüpft");
+        return Ok(linked);
+    }
+    if let Some(u) = linked {
         return Ok(u.clone());
     }
     if svc.link_by_email
@@ -730,13 +818,11 @@ pub(crate) async fn logout(
         check_csrf(&headers, Some(&csrf_for(sid)), st.allowed_origin.as_deref())?;
         let hash = session_hash(sid);
         let session = st.store.get_admin_session(&hash).await?;
-        st.store.delete_admin_session(&hash).await?;
-        if let Some(rec) = session {
-            let user = st.store.get_by_id::<UserSpec>(rec.user_id).await.ok();
-            let name = user.map(|u| u.metadata.name);
-            audit_event(
-                &st.store,
-                AuditEvent {
+        match session {
+            Some(rec) => {
+                let user = st.store.get_by_id::<UserSpec>(rec.user_id).await.ok();
+                let name = user.map(|u| u.metadata.name);
+                let event = AuditEvent {
                     actor: name
                         .as_ref()
                         .map_or_else(|| "user:?".to_owned(), |n| format!("user:{n}")),
@@ -745,9 +831,16 @@ pub(crate) async fn logout(
                     object_id: Some(rec.user_id),
                     object_name: name,
                     details: None,
-                },
-            )
-            .await;
+                };
+                if st.auth_opts.audit_required {
+                    // F113: ohne Audit-Eintrag bleibt die Session bestehen (500).
+                    st.store.delete_admin_session_audited(&hash, &event).await?;
+                } else {
+                    st.store.delete_admin_session(&hash).await?;
+                    audit_event(&st.store, event).await;
+                }
+            }
+            None => st.store.delete_admin_session(&hash).await?,
         }
     }
     let mut redirect_url = "/admin/".to_owned();
@@ -835,6 +928,12 @@ pub struct AuthInfo {
     /// Angemeldeter Principal (Session-Cookie oder Bearer), sonst leer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<SessionInfo>,
+    /// Modus „nur YAML“ (`gitops.read_only_admin`, F56): Schreibrouten antworten mit `403`,
+    /// Änderungen nur per GitOps – die UI blendet Schreibaktionen aus.
+    pub read_only: bool,
+    /// Das Bootstrap-Token ist aktiv (F56) – die UI zeigt einen Warnhinweis (Notfallzugang
+    /// abschalten: OIDC-Admin anmelden bzw. Admin-API-Key mit Rolle `admin` anlegen).
+    pub bootstrap: bool,
 }
 
 /// Liefert die Anmeldeverfahren und den angemeldeten Principal (für die UI).
@@ -849,10 +948,16 @@ pub(crate) async fn auth_info(State(st): State<AdminState>, headers: HeaderMap) 
         .authenticate(&headers)
         .await
         .map(|p| SessionInfo::of(&p));
+    let bootstrap = match &st.bootstrap {
+        Some(g) => g.active().await,
+        None => false,
+    };
     let mut res = Json(AuthInfo {
         oidc,
         login_url: oidc.then(|| "/admin/auth/login".to_owned()),
         session,
+        read_only: st.read_only,
+        bootstrap,
     })
     .into_response();
     res.headers_mut()
@@ -871,7 +976,174 @@ pub(crate) fn public_router() -> Router<AdminState> {
 
 /// Routen mit Anmeldung.
 pub(crate) fn protected_router() -> Router<AdminState> {
-    Router::new().route("/admin/api/v1/session", get(session_info))
+    Router::new()
+        .route("/admin/api/v1/session", get(session_info))
+        .route(
+            "/admin/api/v1/users/{name}/invitation",
+            get(get_invitation)
+                .post(create_invitation)
+                .delete(delete_invitation),
+        )
+}
+
+// ---------------------------------------------------------------------------------------------
+// Einladungen (F90)
+// ---------------------------------------------------------------------------------------------
+
+/// Einladung eines Nutzers (ohne Token).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Invitation {
+    /// Nutzer (Name).
+    pub user: String,
+    /// Erstellt von (Audit-Akteur).
+    pub created_by: String,
+    /// Erstellt.
+    #[serde(with = "time::serde::rfc3339")]
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: OffsetDateTime,
+    /// Gültig bis.
+    #[serde(with = "time::serde::rfc3339")]
+    #[schema(value_type = String, format = DateTime)]
+    pub expires_at: OffsetDateTime,
+    /// Abgelaufen (nicht mehr einlösbar).
+    pub expired: bool,
+}
+
+/// Neu erstellte Einladung samt Link (nur in dieser Antwort).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedInvitation {
+    /// Einladung.
+    pub invitation: Invitation,
+    /// Einladungslink (einmalig, bis `expiresAt`): an den Nutzer weitergeben.
+    pub url: String,
+}
+
+impl Invitation {
+    fn of(user: &str, r: InvitationRecord) -> Self {
+        Self {
+            user: user.to_owned(),
+            created_by: r.created_by,
+            created_at: r.created_at,
+            expired: r.expires_at <= now(),
+            expires_at: r.expires_at,
+        }
+    }
+}
+
+async fn invited_user(
+    st: &AdminState,
+    p: &Principal,
+    name: &str,
+) -> Result<Object<UserSpec>, Problem> {
+    // Nutzerverwaltung ist global (wie `/users`).
+    p.require(Permission::Write)?;
+    Ok(st.store.get::<UserSpec>(name).await?)
+}
+
+/// Erstellt einen Einladungslink für einen vorab angelegten Nutzer (F90): einmalig, gültig
+/// `admin.auth.oidc.invite_ttl_secs`; ersetzt eine frühere Einladung. Beim Login über den Link
+/// wird die OIDC-Identität (Issuer + Kennung) mit dem Nutzer verknüpft.
+#[utoipa::path(
+    post, path = "/admin/api/v1/users/{name}/invitation", tag = "users",
+    params(("name" = String, Path, description = "Name des Nutzers")),
+    responses(
+        (status = 201, description = "Einladung erstellt (Link nur in dieser Antwort)", body = CreatedInvitation),
+        (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
+        (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Nutzer nicht gefunden", body = Problem, content_type = "application/problem+json"),
+        (status = 409, description = "OIDC nicht konfiguriert oder Nutzer bereits verknüpft", body = Problem, content_type = "application/problem+json"),
+    ),
+    security(("bearer" = []))
+)]
+pub(crate) async fn create_invitation(
+    State(st): State<AdminState>,
+    Extension(p): Extension<Principal>,
+    Path(name): Path<String>,
+) -> Result<Response, Problem> {
+    let user = invited_user(&st, &p, &name).await?;
+    let Some(svc) = st.login.as_ref() else {
+        return Err(Problem::conflict(
+            "Einladungen brauchen OIDC-Login (admin.auth.oidc)",
+        ));
+    };
+    if user.spec.oidc_subject.is_some() {
+        return Err(Problem::conflict(format!(
+            "Nutzer {name:?} ist bereits mit einer OIDC-Identität verknüpft"
+        )));
+    }
+    let token = random_token()?;
+    let expires = now() + secs(st.auth_opts.invite_ttl_secs);
+    let rec = st
+        .store
+        .create_invitation(p.actor(), user.id, &name, &session_hash(&token), expires)
+        .await?;
+    let origin = origin_of(svc.oidc.redirect_url()).unwrap_or_default();
+    let body = CreatedInvitation {
+        invitation: Invitation::of(&name, rec),
+        url: format!("{origin}/admin/auth/login?invite={token}"),
+    };
+    let mut res = (StatusCode::CREATED, Json(body)).into_response();
+    res.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(res)
+}
+
+/// Zeigt die offene Einladung eines Nutzers (ohne Link).
+#[utoipa::path(
+    get, path = "/admin/api/v1/users/{name}/invitation", tag = "users",
+    params(("name" = String, Path, description = "Name des Nutzers")),
+    responses(
+        (status = 200, description = "Offene Einladung", body = Invitation),
+        (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
+        (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Nutzer oder Einladung nicht gefunden", body = Problem, content_type = "application/problem+json"),
+    ),
+    security(("bearer" = []))
+)]
+pub(crate) async fn get_invitation(
+    State(st): State<AdminState>,
+    Extension(p): Extension<Principal>,
+    Path(name): Path<String>,
+) -> Result<Response, Problem> {
+    p.require(Permission::Read)?;
+    let user = st.store.get::<UserSpec>(&name).await?;
+    let rec = st
+        .store
+        .get_invitation(user.id)
+        .await?
+        .ok_or_else(|| Problem::not_found(format!("keine Einladung für {name:?}")))?;
+    Ok(Json(Invitation::of(&name, rec)).into_response())
+}
+
+/// Widerruft die offene Einladung eines Nutzers.
+#[utoipa::path(
+    delete, path = "/admin/api/v1/users/{name}/invitation", tag = "users",
+    params(("name" = String, Path, description = "Name des Nutzers")),
+    responses(
+        (status = 204, description = "Widerrufen"),
+        (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
+        (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Nutzer oder Einladung nicht gefunden", body = Problem, content_type = "application/problem+json"),
+    ),
+    security(("bearer" = []))
+)]
+pub(crate) async fn delete_invitation(
+    State(st): State<AdminState>,
+    Extension(p): Extension<Principal>,
+    Path(name): Path<String>,
+) -> Result<Response, Problem> {
+    let user = invited_user(&st, &p, &name).await?;
+    if st
+        .store
+        .delete_invitation(p.actor(), user.id, &name)
+        .await?
+    {
+        Ok(StatusCode::NO_CONTENT.into_response())
+    } else {
+        Err(Problem::not_found(format!("keine Einladung für {name:?}")))
+    }
 }
 
 /// Liest das Client-Secret aus Datei bzw. Umgebung.

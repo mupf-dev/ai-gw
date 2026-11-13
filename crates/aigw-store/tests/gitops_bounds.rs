@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use aigw_core::resource::{ApiKeySpec, LimitMetric, LimitSpec, LimitWindow, ObjectMeta, new_id};
 use aigw_store::gitops::{
-    ApplyOptions, GitopsError, Issue, SecretSource, apply, parse_documents, plan,
+    ApiKeyMode, ApplyOptions, GitopsError, Issue, SecretSource, apply, parse_documents, plan,
 };
 use aigw_store::{Keyring, MasterKey, Store, generate_api_key};
 use sqlx::AssertSqlSafe;
@@ -97,7 +97,11 @@ spec:
 
 async fn issues(store: &Store, ring: &Keyring, env: &Secrets, yaml: &str) -> Vec<Issue> {
     let docs = parse_documents(yaml).unwrap();
-    match plan(store, ring, &docs, &ApplyOptions::default(), env).await {
+    let opts = ApplyOptions {
+        api_keys: ApiKeyMode::Include,
+        ..ApplyOptions::default()
+    };
+    match plan(store, ring, &docs, &opts, env).await {
         Err(GitopsError::Invalid(i)) => i,
         other => panic!("Verstöße erwartet, erhalten: {other:?}"),
     }
@@ -126,7 +130,10 @@ async fn run(store: Store) {
         .insert("AIGW_SECRET_k1".into(), generate_api_key().unwrap().secret);
     env.0
         .insert("AIGW_SECRET_k2".into(), generate_api_key().unwrap().secret);
-    let opts = ApplyOptions::default();
+    let opts = ApplyOptions {
+        api_keys: ApiKeyMode::Include,
+        ..ApplyOptions::default()
+    };
 
     // Ausgangslage: alles innerhalb der Grenzen
     let base = format!(

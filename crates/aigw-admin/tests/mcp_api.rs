@@ -118,7 +118,7 @@ async fn send(
         None => Bytes::new(),
     };
     let res = client
-        .request(req.body(Full::new(body)).unwrap())
+        .request(with_if_match(req).body(Full::new(body)).unwrap())
         .await
         .unwrap();
     let status = res.status();
@@ -697,4 +697,28 @@ async fn postgres() {
         .execute(&admin)
         .await
         .unwrap();
+}
+
+/// F38: `If-Match` ist Pflicht – Anfragen ohne eigenen ETag schreiben hier mit `If-Match: *`
+/// (eigene Tests prüfen 428/412 ausdrücklich).
+fn with_if_match(req: axum::http::request::Builder) -> axum::http::request::Builder {
+    use axum::http::Method as M;
+    let action = req.uri_ref().is_some_and(|u| {
+        let p = u.path();
+        ["/revoke", "/suspend", "/resume", "/rotate"]
+            .iter()
+            .any(|s| p.ends_with(s))
+    });
+    let write = req
+        .method_ref()
+        .is_some_and(|m| matches!(*m, M::PUT | M::PATCH | M::DELETE) || (*m == M::POST && action));
+    if write
+        && !req
+            .headers_ref()
+            .is_some_and(|h| h.contains_key("if-match"))
+    {
+        req.header("if-match", "*")
+    } else {
+        req
+    }
 }

@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 ai-gw contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! API-Keys: Erzeugung (Klartext nur einmal), Lesen mit Status, Sperren.
+//! API-Keys: Erzeugung (Klartext nur einmal), Lesen mit Status, Zustände (F37: `active`,
+//! `suspended` – umkehrbar, `revoked` – endgültig).
 
 use aigw_core::resource::{
     ApiKey, ApiKeySpec, ApiKeyState, ApiKeyStatus, CreatedApiKey, Id, ObjectMeta, ResourceKind,
@@ -10,7 +11,7 @@ use aigw_core::resource::{
 use aigw_core::snapshot::KeyHash;
 use time::OffsetDateTime;
 
-use super::{Action, AdminTx, Col, Resource, Row, Val, WriteExtras, now};
+use super::{Action, AdminTx, Col, Expect, Resource, Row, Val, WriteExtras, now};
 use crate::db::{DbRow, Q};
 use crate::keys::generate_api_key;
 use crate::{Store, StoreError};
@@ -192,7 +193,7 @@ impl Store {
         let mut tx = AdminTx::begin(self, actor).await?;
         tx.check_key_scope(&spec).await?;
         let cols = tx.resolve_cols(spec.to_columns()?).await?;
-        tx.update_row(ResourceKind::ApiKey, before.id, &meta, cols)
+        tx.update_row_expect(ResourceKind::ApiKey, before.id, &meta, cols, extras.expect)
             .await?;
         let after = ApiKey {
             id: before.id,
@@ -222,7 +223,7 @@ impl Store {
 
     /// Sperrt einen Key.
     pub async fn revoke_api_key(&self, actor: &str, name: &str) -> Result<ApiKey, StoreError> {
-        self.set_api_key_state(actor, name, ApiKeyState::Revoked)
+        self.set_api_key_state(actor, name, ApiKeyState::Revoked, Expect::Any)
             .await
     }
 
@@ -232,21 +233,41 @@ impl Store {
         actor: &str,
         name: &str,
         state: ApiKeyState,
+        expect: Expect,
     ) -> Result<ApiKey, StoreError> {
         let before = self.get_api_key(name).await?;
+        if before.status.state == state {
+            // Idempotent: keine neue Konfigurationsversion, aber erwarteter Stand gilt.
+            if let Some(v) = expect.version()
+                && before.metadata.updated_at.map(super::trunc_millis) != Some(v)
+            {
+                return Err(StoreError::PreconditionFailed {
+                    kind: ResourceKind::ApiKey.to_string(),
+                    name: name.to_owned(),
+                });
+            }
+            return Ok(before);
+        }
+        if before.status.state == ApiKeyState::Revoked {
+            return Err(StoreError::Conflict(format!(
+                "API-Key {name:?} ist widerrufen – endgültig, nicht wieder aktivierbar"
+            )));
+        }
         let mut tx = AdminTx::begin(self, actor).await?;
-        tx.update_row(
+        tx.update_row_expect(
             ResourceKind::ApiKey,
             before.id,
             &before.metadata,
             vec![("state", Val::text(state.as_str()))],
+            expect,
         )
         .await?;
         let mut after = before.clone();
         after.status.state = state;
         let action = match state {
             ApiKeyState::Revoked => Action::Revoke,
-            ApiKeyState::Active => Action::Reactivate,
+            ApiKeyState::Suspended => Action::Suspend,
+            ApiKeyState::Active => Action::Resume,
         };
         tx.audit(
             action,
@@ -271,9 +292,16 @@ impl Store {
         name: &str,
         new_meta: ObjectMeta,
         old_expires_at: OffsetDateTime,
+        expect: Expect,
     ) -> Result<(CreatedApiKey, ApiKey), StoreError> {
         validate_name(&new_meta.name).map_err(StoreError::Invalid)?;
         let before = self.get_api_key(name).await?;
+        if before.status.state != ApiKeyState::Active {
+            return Err(StoreError::Conflict(format!(
+                "API-Key {name:?} ist {} – nur aktive Keys lassen sich rotieren",
+                before.status.state.as_str()
+            )));
+        }
         let generated = generate_api_key()?;
         let new_id_ = new_id();
         let mut tx = AdminTx::begin(self, actor).await?;
@@ -315,8 +343,14 @@ impl Store {
         let mut after = before.clone();
         after.spec.expires_at = Some(expires);
         let cols = tx.resolve_cols(after.spec.to_columns()?).await?;
-        tx.update_row(ResourceKind::ApiKey, before.id, &before.metadata, cols)
-            .await?;
+        tx.update_row_expect(
+            ResourceKind::ApiKey,
+            before.id,
+            &before.metadata,
+            cols,
+            expect,
+        )
+        .await?;
         tx.audit(
             Action::Rotate,
             ResourceKind::ApiKey,

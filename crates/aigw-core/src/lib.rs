@@ -12,6 +12,7 @@ pub mod error;
 pub mod ir;
 pub mod mcp;
 pub mod observe;
+pub mod paths;
 pub mod resource;
 pub mod snapshot;
 pub mod types;

@@ -230,6 +230,31 @@ pub trait Resource: Serialize + DeserializeOwned + Clone + Send + Sync + Sized +
     }
 }
 
+/// Erwarteter Stand eines Objekts beim Ändern/Löschen (optimistische Sperre, F38).
+///
+/// Die Admin-API prüft `If-Match` gegen den ETag des gelesenen Objekts und übergibt dessen
+/// `updatedAt` als [`Expect::Version`]. Der Store vergleicht ihn **im** `UPDATE`/`DELETE`
+/// (`WHERE id = … AND updated_at = …`) – damit gewinnt auch zwischen mehreren Instanzen genau
+/// eine Änderung; die andere scheitert mit [`StoreError::PreconditionFailed`]. `updated_at`
+/// steigt dafür je Objekt streng monoton (mindestens +1 ms je Änderung).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Expect {
+    /// Ohne Prüfung (`If-Match: *`, interne Schreibvorgänge, GitOps mit eigener Versionsprüfung).
+    #[default]
+    Any,
+    /// Nur, wenn `updated_at` noch diesen Wert hat.
+    Version(OffsetDateTime),
+}
+
+impl Expect {
+    pub(crate) fn version(self) -> Option<OffsetDateTime> {
+        match self {
+            Self::Any => None,
+            Self::Version(t) => Some(trunc_millis(t)),
+        }
+    }
+}
+
 /// Ressourcen, die per generischem `create`/`update` geschrieben werden dürfen
 /// (alle außer API-Keys, die Präfix/Hash brauchen; Zugangsdaten sind kein [`Resource`]).
 pub trait PlainResource: Resource {}
@@ -249,14 +274,18 @@ pub(crate) enum Action {
     Update,
     Delete,
     Rotate,
-    /// API-Key sperren.
+    /// API-Key widerrufen (endgültig, F37).
     Revoke,
-    /// API-Key entsperren.
-    Reactivate,
     /// Auf neue Grenzen gekürzt (AIGW-67, `?cascade=clamp`).
     Clamp,
     /// Grenzen bewusst überschritten (AIGW-67, `?force=true`).
     Force,
+    /// Verweis auf gelöschte Modellgruppe/entfernten Alias entfernt (F66, `?cascade=remove`).
+    CascadeRemove,
+    /// API-Key vorübergehend gesperrt (F37).
+    Suspend,
+    /// Gesperrten API-Key wieder aktiviert (F37).
+    Resume,
 }
 
 impl Action {
@@ -267,9 +296,11 @@ impl Action {
             Self::Delete => "delete",
             Self::Rotate => "rotate",
             Self::Revoke => "revoke",
-            Self::Reactivate => "reactivate",
             Self::Clamp => "clamp",
             Self::Force => "force",
+            Self::CascadeRemove => "cascade-remove",
+            Self::Suspend => "suspend",
+            Self::Resume => "resume",
         }
     }
 }
@@ -461,7 +492,7 @@ impl AdminTx {
         Ok(())
     }
 
-    /// Aktualisiert eine Zeile (Labels + übergebene Spalten).
+    /// Aktualisiert eine Zeile (Labels + übergebene Spalten), ohne Versionsprüfung.
     pub(crate) async fn update_row(
         &mut self,
         kind: ResourceKind,
@@ -469,24 +500,109 @@ impl AdminTx {
         meta: &ObjectMeta,
         cols: Vec<(&'static str, Val)>,
     ) -> Result<(), StoreError> {
+        self.update_row_expect(kind, id, meta, cols, Expect::Any)
+            .await
+    }
+
+    /// `updated_at` einer Zeile innerhalb der Transaktion (für Versionsprüfung und
+    /// monotonen Zeitstempel).
+    pub(crate) async fn row_version(
+        &mut self,
+        table_name: &str,
+        id: Id,
+    ) -> Result<Option<OffsetDateTime>, StoreError> {
+        let sql = format!("SELECT updated_at FROM {table_name} WHERE id = $1");
+        Q::new(sql)
+            .bind(Val::uuid(id))
+            .fetch_optional(&mut self.tx)
+            .await?
+            .map(|r| r.time("updated_at"))
+            .transpose()
+    }
+
+    /// Neuer Zeitstempel einer Zeile: jetzt, mindestens aber 1 ms nach `previous` (macht
+    /// `updated_at` je Objekt streng monoton – Grundlage von [`Expect::Version`]).
+    pub(crate) fn next_version(previous: Option<OffsetDateTime>) -> OffsetDateTime {
+        let t = trunc_millis(now());
+        match previous {
+            Some(p) if t <= p => p + time::Duration::milliseconds(1),
+            _ => t,
+        }
+    }
+
+    /// Wie [`AdminTx::update_row`], mit Versionsvergleich im `UPDATE` (F38).
+    pub(crate) async fn update_row_expect(
+        &mut self,
+        kind: ResourceKind,
+        id: Id,
+        meta: &ObjectMeta,
+        cols: Vec<(&'static str, Val)>,
+        expect: Expect,
+    ) -> Result<(), StoreError> {
+        let previous = self.row_version(table(kind), id).await?;
         let mut sets = vec!["labels = $1".to_owned(), "updated_at = $2".to_owned()];
-        let mut vals = vec![Val::json(&meta.labels)?, Val::time(now())];
+        let mut vals = vec![
+            Val::json(&meta.labels)?,
+            Val::time(Self::next_version(previous)),
+        ];
         for (n, v) in cols {
             vals.push(v);
             sets.push(format!("{n} = ${}", vals.len()));
         }
         vals.push(Val::uuid(id));
-        let sql = format!(
+        let mut sql = format!(
             "UPDATE {} SET {} WHERE id = ${}",
             table(kind),
             sets.join(", "),
             vals.len()
         );
-        Q { sql, args: vals }
+        if let Some(v) = expect.version() {
+            vals.push(Val::time(v));
+            sql.push_str(&format!(" AND updated_at = ${}", vals.len()));
+        }
+        let n = Q { sql, args: vals }
             .execute(&mut self.tx)
             .await
             .map_err(|e| map_db(e, &format!("{kind} {:?}", meta.name)))?;
+        if n == 0 {
+            return Err(match (expect, previous) {
+                (_, None) => StoreError::NotFound {
+                    kind,
+                    name: meta.name.clone(),
+                },
+                (Expect::Version(_), Some(_)) => StoreError::PreconditionFailed {
+                    kind: kind.to_string(),
+                    name: meta.name.clone(),
+                },
+                (Expect::Any, Some(_)) => {
+                    StoreError::Corrupt(format!("{kind} {:?}: UPDATE ohne Wirkung", meta.name))
+                }
+            });
+        }
         Ok(())
+    }
+
+    /// Prüft den erwarteten Stand einer Zeile in dieser Transaktion (für Schreibvorgänge, die
+    /// die Zeile nicht über [`AdminTx::update_row_expect`] ändern).
+    pub(crate) async fn check_expect(
+        &mut self,
+        table_name: &str,
+        kind: &str,
+        name: &str,
+        id: Id,
+        expect: Expect,
+    ) -> Result<(), StoreError> {
+        let Some(v) = expect.version() else {
+            return Ok(());
+        };
+        if self.row_version(table_name, id).await? == Some(v) {
+            Ok(())
+        } else {
+            Err(StoreError::PreconditionFailed {
+                kind: kind.to_owned(),
+                name: name.to_owned(),
+            })
+        }
     }
 
     /// Pflegt den Alias-Namensraum einer Modellgruppe.
@@ -517,6 +633,20 @@ impl AdminTx {
         kind: ResourceKind,
         id: Id,
     ) -> Result<(), StoreError> {
+        self.delete_row_expect(kind, id, "", Expect::Any).await
+    }
+
+    /// Wie [`AdminTx::delete_row`], mit Versionsvergleich im `DELETE` (F38).
+    pub(crate) async fn delete_row_expect(
+        &mut self,
+        kind: ResourceKind,
+        id: Id,
+        name: &str,
+        expect: Expect,
+    ) -> Result<(), StoreError> {
+        // Vorab (in der Transaktion), damit abhängige Bindungen nur bei passendem Stand fallen.
+        self.check_expect(table(kind), kind.as_str(), name, id, expect)
+            .await?;
         let level = match kind {
             ResourceKind::Organization => Some(ScopeLevel::Organization),
             ResourceKind::Team => Some(ScopeLevel::Team),
@@ -536,12 +666,22 @@ impl AdminTx {
                 .execute(&mut self.tx)
                 .await?;
         }
-        let sql = format!("DELETE FROM {} WHERE id = $1", table(kind));
-        Q::new(sql)
-            .bind(Val::uuid(id))
+        let mut q =
+            Q::new(format!("DELETE FROM {} WHERE id = $1", table(kind))).bind(Val::uuid(id));
+        if let Some(v) = expect.version() {
+            q.sql.push_str(" AND updated_at = $2");
+            q = q.bind(Val::time(v));
+        }
+        let n = q
             .execute(&mut self.tx)
             .await
             .map_err(|e| map_db(e, &kind.to_string()))?;
+        if n == 0 && expect.version().is_some() {
+            return Err(StoreError::PreconditionFailed {
+                kind: kind.to_string(),
+                name: name.to_owned(),
+            });
+        }
         Ok(())
     }
 }
@@ -725,7 +865,8 @@ impl Store {
         let before: Object<R> = self.get(&meta.name).await?;
         let mut tx = AdminTx::begin(self, actor).await?;
         let cols = tx.resolve_cols(spec.to_columns()?).await?;
-        tx.update_row(R::KIND, before.id, &meta, cols).await?;
+        tx.update_row_expect(R::KIND, before.id, &meta, cols, extras.expect)
+            .await?;
         if let Some(aliases) = spec.aliases() {
             tx.write_aliases(before.id, &meta.name, aliases).await?;
         }
@@ -768,6 +909,31 @@ impl Store {
         kind: ResourceKind,
         name: &str,
     ) -> Result<(), StoreError> {
+        self.delete_expect(actor, kind, name, Expect::Any).await
+    }
+
+    /// Wie [`Store::delete`], nur bei erwartetem Stand (F38, `If-Match`).
+    pub async fn delete_expect(
+        &self,
+        actor: &str,
+        kind: ResourceKind,
+        name: &str,
+        expect: Expect,
+    ) -> Result<(), StoreError> {
+        self.delete_with(actor, kind, name, expect, &WriteExtras::default())
+            .await
+    }
+
+    /// Wie [`Store::delete_expect`], mit zusätzlichen Schreibvorgängen in derselben
+    /// Transaktion (z. B. `?cascade=remove`, F66) – vor dem Löschen ausgeführt.
+    pub async fn delete_with(
+        &self,
+        actor: &str,
+        kind: ResourceKind,
+        name: &str,
+        expect: Expect,
+        extras: &WriteExtras,
+    ) -> Result<(), StoreError> {
         let before = self.get_json(kind, name).await?;
         let id = before
             .get("id")
@@ -776,12 +942,15 @@ impl Store {
             .transpose()?
             .ok_or_else(|| StoreError::Corrupt("Objekt ohne ID".into()))?;
         let mut tx = AdminTx::begin(self, actor).await?;
+        tx.check_expect(table(kind), kind.as_str(), name, id, expect)
+            .await?;
+        tx.apply_extras(extras, kind, id, name).await?;
         if kind == ResourceKind::User {
             // Der Fremdschlüssel löscht die Sessions ohnehin (ON DELETE CASCADE); ausdrücklich,
             // damit es nicht von der Fremdschlüssel-Durchsetzung abhängt und im Audit-Log steht.
             tx.end_user_sessions(id, name, "user-deleted").await?;
         }
-        tx.delete_row(kind, id).await?;
+        tx.delete_row_expect(kind, id, name, expect).await?;
         tx.audit(
             Action::Delete,
             kind,

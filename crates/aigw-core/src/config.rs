@@ -387,6 +387,12 @@ pub struct GitopsConfig {
     /// Modus „nur YAML“: Schreibrouten der Admin-API antworten mit `403 read-only`;
     /// Änderungen nur per `aigw config apply` bzw. `POST /admin/api/v1/config:apply`.
     pub read_only_admin: bool,
+    /// Verzeichnis für `valueFrom.file`-Verweise in Manifesten, die über die Admin-API
+    /// (`POST /admin/api/v1/config:apply`) angewendet werden (F52). Ohne: dort keine Dateien.
+    /// Pfade werden normalisiert (relativ = innerhalb dieses Verzeichnisses), Symlinks, die
+    /// hinausführen, werden abgelehnt. Die CLI ist nicht eingeschränkt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret_dir: Option<PathBuf>,
 }
 
 /// Limits (AIGW-30, `docs/konzept/11-limits-und-budgets.md`).
@@ -767,6 +773,11 @@ pub struct UpstreamConfig {
     /// Zusätzliche CA-Zertifikate (PEM) für alle ausgehenden Verbindungen, z. B. eine interne CA.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ca_file: Option<PathBuf>,
+    /// Verzeichnis, aus dem Deployments eigene CA-Dateien laden dürfen (`settings.caFile`,
+    /// F177). Ohne ist `settings.caFile` nicht erlaubt. Pfade werden normalisiert (relativ =
+    /// innerhalb dieses Verzeichnisses), Symlinks, die hinausführen, werden abgelehnt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ca_dir: Option<PathBuf>,
 }
 
 /// Einstellungen der Admin-API (AIGW-65, `docs/konzept/08-admin-api.md`).
@@ -898,7 +909,7 @@ impl Default for JsonlExportConfig {
 // ---------------------------------------------------------------------------------------------
 
 /// Anmeldung an der Admin-API: OIDC-Login mit Session, Admin-API-Keys, Bootstrap-Token.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminAuthConfig {
     /// Bootstrap-Token für die Erstinstallation: `auto` (Standard; aus, sobald ein OIDC-Admin
@@ -908,6 +919,70 @@ pub struct AdminAuthConfig {
     pub session: SessionConfig,
     /// OIDC-Login (Authorization Code + PKCE); ohne `issuer` abgeschaltet.
     pub oidc: OidcConfig,
+    /// Anmelden und Abmelden nur mit Audit-Eintrag (F113, Standard `true`): Session und
+    /// Eintrag entstehen in derselben Transaktion; scheitert der Eintrag, scheitert die
+    /// Anmeldung (fail-closed). `false`: Eintrag nach bestem Bemühen (Warnung im Log).
+    pub audit_required: bool,
+    /// Höchste Laufzeit von Admin-API-Keys (F87), z. B. `90d`, `12h` (Einheiten `s`, `m`,
+    /// `h`, `d`). Ohne Angabe unbegrenzt. Mit Angabe ist `expiresAt` Pflicht-Obergrenze:
+    /// fehlt sie beim Anlegen/Ändern, setzt der Server jetzt + Höchstlaufzeit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_admin_key_lifetime: Option<String>,
+}
+
+impl Default for AdminAuthConfig {
+    fn default() -> Self {
+        Self {
+            bootstrap: BootstrapMode::default(),
+            session: SessionConfig::default(),
+            oidc: OidcConfig::default(),
+            audit_required: true,
+            max_admin_key_lifetime: None,
+        }
+    }
+}
+
+impl AdminAuthConfig {
+    /// `max_admin_key_lifetime` in Sekunden (`None` = unbegrenzt).
+    pub fn max_admin_key_lifetime_secs(&self) -> std::result::Result<Option<u64>, String> {
+        self.max_admin_key_lifetime
+            .as_deref()
+            .map(|s| {
+                parse_duration_secs(s)
+                    .map_err(|e| format!("admin.auth.max_admin_key_lifetime: {e}"))
+            })
+            .transpose()
+    }
+}
+
+/// Dauer als `<Zahl><Einheit>` (`s`, `m`, `h`, `d`; ohne Einheit Sekunden), > 0.
+pub fn parse_duration_secs(text: &str) -> std::result::Result<u64, String> {
+    let t = text.trim();
+    let (num, mult) = match t.char_indices().last() {
+        Some((i, 's')) => (&t[..i], 1),
+        Some((i, 'm')) => (&t[..i], 60),
+        Some((i, 'h')) => (&t[..i], 3600),
+        Some((i, 'd')) => (&t[..i], 86_400),
+        _ => (t, 1),
+    };
+    num.trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|n| *n > 0)
+        .and_then(|n| n.checked_mul(mult))
+        .ok_or_else(|| format!("Dauer {text:?} ungültig (z. B. \"90d\", \"12h\")"))
+}
+
+/// Profil des Identitätsanbieters (F90): bestimmt die unveränderliche Nutzerkennung.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OidcProfile {
+    /// Beliebiger IdP: Kennung = `identity_claim` (Standard `sub`).
+    #[default]
+    Generic,
+    /// Microsoft Entra ID: Kennung = `oid` (über alle Anwendungen des Tenants stabil), der
+    /// Tenant (`tid`) muss `tenant_id` entsprechen.
+    Entra,
 }
 
 /// Verhalten des Bootstrap-Tokens.
@@ -975,9 +1050,22 @@ pub struct OidcConfig {
     /// Unbekannte Nutzer beim ersten Login anlegen, sofern ihnen über Gruppen eine Rolle
     /// zugeordnet ist.
     pub provision_users: bool,
-    /// Beim ersten Login einen vorab angelegten Nutzer ohne OIDC-Subjekt über die (vom IdP
-    /// bestätigte) E-Mail-Adresse verknüpfen.
+    /// Beim ersten Login einen vorab angelegten Nutzer ohne OIDC-Kennung über die (vom IdP
+    /// bestätigte) E-Mail-Adresse verknüpfen. Standard aus (F90): E-Mail-Adressen sind beim
+    /// IdP oft änderbar; sicherer sind vorab eingetragene Kennungen oder Einladungslinks.
     pub link_by_email: bool,
+    /// Profil des IdP: `generic` (Standard) oder `entra` (Microsoft Entra ID, F90).
+    pub profile: OidcProfile,
+    /// Claim mit der unveränderlichen Nutzerkennung (zusammen mit dem Issuer, F90). Ohne
+    /// Angabe: `sub` (`generic`) bzw. `oid` (`entra`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity_claim: Option<String>,
+    /// Profil `entra`: erwarteter Tenant (`tid`, GUID) – Pflicht; Tokens anderer Tenants
+    /// werden abgelehnt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
+    /// Gültigkeit eines Einladungslinks (Sekunden, Standard 7 Tage, F90).
+    pub invite_ttl_secs: u64,
     /// Abmeldung auch beim IdP (RP-initiated Logout), falls er `end_session_endpoint` anbietet.
     pub end_session: bool,
     /// Ziel nach der Abmeldung beim IdP (Standard: Ursprung von `redirect_url` + `/admin/`).
@@ -1006,7 +1094,11 @@ impl Default for OidcConfig {
             groups_claim: "groups".to_owned(),
             group_roles: Vec::new(),
             provision_users: true,
-            link_by_email: true,
+            link_by_email: false,
+            profile: OidcProfile::Generic,
+            identity_claim: None,
+            tenant_id: None,
+            invite_ttl_secs: 7 * 86_400,
             end_session: true,
             post_logout_redirect_url: None,
             ca_file: None,
@@ -1021,6 +1113,15 @@ impl OidcConfig {
     /// `true`, wenn OIDC-Login konfiguriert ist.
     pub fn enabled(&self) -> bool {
         self.issuer.as_deref().is_some_and(|s| !s.trim().is_empty())
+    }
+
+    /// Claim mit der Nutzerkennung (`identity_claim`, sonst Standard des Profils).
+    pub fn effective_identity_claim(&self) -> &str {
+        match (&self.identity_claim, self.profile) {
+            (Some(c), _) if !c.trim().is_empty() => c.trim(),
+            (_, OidcProfile::Entra) => "oid",
+            (_, OidcProfile::Generic) => "sub",
+        }
     }
 }
 
@@ -1447,6 +1548,45 @@ admin:
         assert!(a.oidc.client_secret_file.is_some());
         assert!(!Config::default().admin.auth.oidc.enabled());
         assert!(Config::from_yaml("admin:\n  auth:\n    bootstrap: maybe\n").is_err());
+    }
+
+    #[test]
+    fn admin_auth_identity_lifetime_and_dirs() {
+        let d = Config::default();
+        assert!(d.admin.auth.audit_required, "F113: Standard fail-closed");
+        assert!(!d.admin.auth.oidc.link_by_email, "F90: Standard aus");
+        assert_eq!(d.admin.auth.oidc.effective_identity_claim(), "sub");
+        assert_eq!(d.admin.auth.max_admin_key_lifetime_secs(), Ok(None));
+        assert!(d.gitops.secret_dir.is_none() && d.upstream.ca_dir.is_none());
+        let cfg = Config::from_yaml_with_env(
+            "admin:\n  auth:\n    oidc:\n      profile: entra\n      tenant_id: t-1\n",
+            env(&[
+                ("AIGW_ADMIN__AUTH__MAX_ADMIN_KEY_LIFETIME", "90d"),
+                ("AIGW_ADMIN__AUTH__AUDIT_REQUIRED", "false"),
+                ("AIGW_GITOPS__SECRET_DIR", "/run/aigw/secrets"),
+                ("AIGW_UPSTREAM__CA_DIR", "/etc/aigw/ca"),
+            ]),
+        )
+        .unwrap();
+        let a = &cfg.admin.auth;
+        assert_eq!(a.oidc.profile, OidcProfile::Entra);
+        assert_eq!(a.oidc.effective_identity_claim(), "oid");
+        assert_eq!(a.max_admin_key_lifetime_secs(), Ok(Some(90 * 86_400)));
+        assert!(!a.audit_required);
+        assert_eq!(
+            cfg.gitops.secret_dir.as_deref(),
+            Some(Path::new("/run/aigw/secrets"))
+        );
+        assert_eq!(
+            cfg.upstream.ca_dir.as_deref(),
+            Some(Path::new("/etc/aigw/ca"))
+        );
+        for (t, v) in [("30", 30), ("5m", 300), ("12h", 43_200), ("1d", 86_400)] {
+            assert_eq!(parse_duration_secs(t), Ok(v), "{t}");
+        }
+        for bad in ["", "0d", "x", "-1h", "1w"] {
+            assert!(parse_duration_secs(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

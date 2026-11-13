@@ -10,7 +10,7 @@
 //! `limit + 1` Zeilen, unabhängig von der Gesamtzahl.
 //!
 //! Geltungsbereich je Art: `Organization` (eigener Name), `Team` (Organisation bzw. Team),
-//! `ApiKey` (Team des Keys; Keys ohne Team nur mit [`AuditScope::All`]), `McpGrant` (Team bzw.
+//! `ApiKey` (Team des Keys; Keys ohne Team über ihre Organisation, F193), `McpGrant` (Team bzw.
 //! Team des Keys). Alle anderen Arten sind entweder Katalog (der Aufrufer prüft das Leserecht
 //! vorher und übergibt `All`) oder global (`Within` liefert dann nichts).
 
@@ -155,10 +155,24 @@ fn scope_sql(kind: ResourceKind, scope: &AuditScope, q: &mut Q) -> Option<String
         }
         ResourceKind::Team => team_in_scope("t.id", rules, q),
         ResourceKind::ApiKey => {
-            format!(
-                "(t.team_id IS NOT NULL AND {})",
-                team_in_scope("t.team_id", rules, q)
-            )
+            let team = team_in_scope("t.team_id", rules, q);
+            // F193: Keys ohne Team gehören zur Organisation – sichtbar für Zuweisungen auf
+            // Organisationsebene (ohne Team).
+            let orgs: Vec<Val> = rules
+                .iter()
+                .filter(|r| r.team.is_none())
+                .filter_map(|r| r.organization.clone())
+                .map(Val::text)
+                .collect();
+            if orgs.is_empty() {
+                format!("(t.team_id IS NOT NULL AND {team})")
+            } else {
+                format!(
+                    "((t.team_id IS NOT NULL AND {team}) OR (t.team_id IS NULL AND \
+                     t.organization_id IN (SELECT so.id FROM organization so WHERE so.name IN ({}))))",
+                    q.list(orgs)
+                )
+            }
         }
         ResourceKind::McpGrant => {
             let team = team_in_scope("t.subject_id", rules, q);

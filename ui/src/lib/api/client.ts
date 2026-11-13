@@ -10,6 +10,8 @@
 // - Fehler: RFC 9457 Problem Details → `ApiError` (Status, Code, Titel, Detail); 401 meldet sich beim
 //   Sitzungsmodul (Login-Weiterleitung bzw. Token-Dialog), siehe session.svelte.ts.
 // - Optimistische Sperre: `get` liefert das ETag, `update`/`remove`/Aktionen senden es als If-Match.
+//   If-Match ist Pflicht (F38, sonst 428): ohne übergebenes ETag holt der Client vorher den aktuellen
+//   Stand (GET) und nutzt dessen ETag (`*` nur, wenn der Server keines liefert).
 // - Cursor-Pagination: `listAll` folgt `nextCursor`, `listPage` liefert eine Seite.
 // - Mock-Modus: dieselben Aufrufe gehen an ein In-Memory-Backend (mock/backend.ts, nachgeladen).
 import createClient from 'openapi-fetch';
@@ -150,7 +152,17 @@ function cleanQuery(q: Query = {}): Record<string, string | number | boolean> {
   return out;
 }
 
-const ifMatch = (etag?: string | null): Record<string, string> => (etag ? { 'If-Match': etag } : {});
+const ifMatch = (etag: string): Record<string, string> => ({ 'If-Match': etag });
+
+/**
+ * ETag für If-Match (F38: Pflicht bei PUT/PATCH/DELETE/Aktionen). Ohne gelesenes ETag wird der aktuelle
+ * Stand geholt – die Prüfung schützt dann zumindest vor Änderungen zwischen diesem Lesen und dem Schreiben.
+ */
+export async function etagFor(itemPath: string, name: string, etag?: string | null): Promise<string> {
+  if (etag) return etag;
+  const r = await unwrapVersioned<unknown>(loose.GET(itemPath, { params: { path: { name } } }));
+  return r.etag ?? '*';
+}
 
 export interface Page<T> {
   items: T[];
@@ -196,27 +208,31 @@ export function resource<T, I, Q extends Query = Query>(segment: string): Resour
     list: (query) => listAll<T>(path, query),
     get: (name) => unwrapVersioned<T>(loose.GET(one, { params: at(name) })),
     create: (input) => unwrapVersioned<T>(loose.POST(path, { body: input })),
-    update: (name, input, etag) => unwrapVersioned<T>(loose.PUT(one, { params: at(name), body: input, headers: ifMatch(etag) })),
+    update: async (name, input, etag) =>
+      unwrapVersioned<T>(loose.PUT(one, { params: at(name), body: input, headers: ifMatch(await etagFor(one, name, etag)) })),
     remove: async (name, etag) => {
-      await unwrap<void>(loose.DELETE(one, { params: at(name), headers: ifMatch(etag) }));
+      await unwrap<void>(loose.DELETE(one, { params: at(name), headers: ifMatch(await etagFor(one, name, etag)) }));
     },
   };
 }
 
 /** POST auf eine Aktion einer Ressource (z. B. api-keys/{name}/revoke) mit If-Match. */
-export function action<T>(segment: string, name: string, verb: string, body?: unknown, etag?: string | null): Promise<Versioned<T>> {
+export async function action<T>(segment: string, name: string, verb: string, body?: unknown, etag?: string | null): Promise<Versioned<T>> {
+  const tag = await etagFor(`/admin/api/v1/${segment}/{name}`, name, etag);
   return unwrapVersioned<T>(
-    loose.POST(`/admin/api/v1/${segment}/{name}/${verb}`, { params: { path: { name } }, body: body ?? {}, headers: ifMatch(etag) }),
+    loose.POST(`/admin/api/v1/${segment}/{name}/${verb}`, { params: { path: { name } }, body: body ?? {}, headers: ifMatch(tag) }),
   );
 }
 
 /** PATCH (JSON Merge Patch) mit If-Match. */
-export function patch<T>(segment: string, name: string, body: unknown, etag?: string | null): Promise<Versioned<T>> {
+export async function patch<T>(segment: string, name: string, body: unknown, etag?: string | null): Promise<Versioned<T>> {
+  const one = `/admin/api/v1/${segment}/{name}`;
+  const tag = await etagFor(one, name, etag);
   return unwrapVersioned<T>(
-    loose.PATCH(`/admin/api/v1/${segment}/{name}`, {
+    loose.PATCH(one, {
       params: { path: { name } },
       body,
-      headers: { 'Content-Type': 'application/merge-patch+json', ...ifMatch(etag) },
+      headers: { 'Content-Type': 'application/merge-patch+json', ...ifMatch(tag) },
     }),
   );
 }

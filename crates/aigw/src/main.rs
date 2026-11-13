@@ -10,6 +10,7 @@
 //! - `aigw config export|diff|apply|validate` – GitOps (siehe [`cli_config`]).
 
 mod cli_config;
+mod keygen;
 mod observe;
 mod runtime;
 mod server;
@@ -47,6 +48,9 @@ enum Command {
     /// GitOps: Ressourcen als YAML exportieren, vergleichen, anwenden, prüfen.
     #[command(subcommand)]
     Config(cli_config::ConfigCommand),
+    /// Erzeugt einen Master-Key (Hex oder Base64) für `secrets.master_key_file` bzw.
+    /// `AIGW_MASTER_KEY` – auf die Standardausgabe oder in eine Datei (Rechte 0600).
+    Keygen(keygen::KeygenArgs),
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -96,6 +100,13 @@ fn main() -> ExitCode {
                     std::io::stderr(),
                     "OpenAPI-Serialisierung fehlgeschlagen: {e}"
                 );
+                ExitCode::FAILURE
+            }
+        },
+        Command::Keygen(args) => match keygen::run(&args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                let _ = writeln!(std::io::stderr(), "aigw keygen: {e}");
                 ExitCode::FAILURE
             }
         },
@@ -154,9 +165,10 @@ fn serve(
         // Health Checks im Hintergrund; Keys und Modellfreigaben prüft der Snapshot (AIGW-28).
         let routes = std::sync::Arc::new(
             // SSRF-Regeln auch nach der Namensauflösung (AIGW-72).
-            aigw_proxy::SnapshotRoutes::with_policy(aigw_admin::UpstreamPolicy::from_config(
-                &config.admin,
-            )?)
+            aigw_proxy::SnapshotRoutes::with_policy(
+                aigw_admin::UpstreamPolicy::from_config(&config.admin)?
+                    .with_ca_dir(config.upstream.ca_dir.clone()),
+            )
             .map_err(|e| format!("Upstream-Client: {e}"))?
             // `admin.allow_mock: false` lässt Mock-Deployments aus (F85).
             .with_mock(config.admin.allow_mock),
@@ -258,11 +270,14 @@ fn serve(
             tracing::info!("Admin-API: OIDC-Login aktiv");
         }
         let auth = std::sync::Arc::clone(&admin.auth);
-        let upstreams = aigw_admin::UpstreamPolicy::from_config(&config.admin)?;
+        // F177: settings.caFile nur aus upstream.ca_dir (Admin-API, GitOps, Routing).
+        let upstreams = aigw_admin::UpstreamPolicy::from_config(&config.admin)?
+            .with_ca_dir(config.upstream.ca_dir.clone());
         let control = aigw_admin::router_with(
             admin
                 .with_keyring(std::sync::Arc::clone(&runtime_state.keyring))
-                .with_upstream_policy(upstreams.clone()),
+                .with_upstream_policy(upstreams.clone())
+                .with_read_only(config.gitops.read_only_admin),
         )
         .merge(aigw_admin::gitops::router(
             aigw_admin::gitops::GitopsState {
@@ -270,6 +285,8 @@ fn serve(
                 keyring: std::sync::Arc::clone(&runtime_state.keyring),
                 auth: std::sync::Arc::clone(&auth),
                 upstreams,
+                // F52: valueFrom.file über die Admin-API nur innerhalb von gitops.secret_dir.
+                secret_dir: config.gitops.secret_dir.clone(),
             },
         ))
         .merge(aigw_admin::usage::router(aigw_admin::usage::UsageState {

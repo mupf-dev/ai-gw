@@ -54,7 +54,8 @@ counters:
   # redis_url: "redis://127.0.0.1:6379/0"
 
 secrets:
-  # Master-Key (32 Byte hex, z. B. `openssl rand -hex 32`) für verschlüsselte Zugangsdaten.
+  # Master-Key (32 Byte, hex oder Base64) für verschlüsselte Zugangsdaten – erzeugen mit
+  # `aigw keygen --out /run/secrets/aigw-master-key` (Rechte 0600) oder `aigw keygen` (stdout).
   # Aus Datei oder – ohne Datei – aus der genannten Umgebungsvariable.
   # master_key_file: /run/secrets/aigw-master-key
   master_key_env: AIGW_MASTER_KEY
@@ -96,6 +97,9 @@ gitops:
   # Modus „nur YAML“: Schreibrouten der Admin-API (und damit der UI) antworten mit 403;
   # Änderungen nur per `aigw config apply` bzw. POST /admin/api/v1/config:apply.
   read_only_admin: false
+  # valueFrom.file in Manifesten über die Admin-API (POST config:apply) nur aus diesem
+  # Verzeichnis (F52; ohne: keine Dateien). Die CLI ist nicht eingeschränkt.
+  # secret_dir: /run/aigw/secrets
 
 # Ausgehende Verbindungen (Anbieter, Webhooks, MCP, OIDC, Guardrail-Dienste, OTLP;
 # docs/konzept/06-streaming-und-anbieter.md §4). Je Deployment zusätzlich settings.caFile.
@@ -104,6 +108,8 @@ upstream:
   roots: webpki
   # zusätzliche CA-Zertifikate (PEM), z. B. eine interne CA
   # ca_file: /etc/aigw/ca.pem
+  # Verzeichnis für settings.caFile der Deployments (F177; ohne: settings.caFile verboten)
+  # ca_dir: /etc/aigw/ca
 
 # Admin-API (docs/konzept/08-admin-api.md).
 admin:
@@ -122,6 +128,10 @@ admin:
     # "auto" = aus, sobald sich ein OIDC-Admin angemeldet hat oder ein Admin-API-Key mit
     # Rolle admin existiert; "on" = immer; "off" = nie. (Anführungszeichen wegen YAML 1.1.)
     bootstrap: "auto"
+    # Login/Logout nur mit Audit-Eintrag in derselben Transaktion (F113, fail-closed).
+    audit_required: true
+    # Höchstlaufzeit von Admin-API-Keys (F87), z. B. 90d; ohne = unbegrenzt.
+    # max_admin_key_lifetime: 90d
     session:
       max_age_secs: 28800        # 8 h ab Anmeldung
       idle_timeout_secs: 1800    # 30 min ohne Aktivität
@@ -144,7 +154,12 @@ admin:
       #    organization: acme
       #    team: platform
       provision_users: true      # Nutzer mit Gruppenrolle beim ersten Login anlegen
-      link_by_email: true        # vorab angelegte Nutzer über bestätigte E-Mail verknüpfen
+      link_by_email: false       # F90: vorab angelegte Nutzer über bestätigte E-Mail verknüpfen
+      # Identität = Issuer + Kennung (F90): profile generic (Claim sub) | entra (oid + tid-Prüfung)
+      profile: generic
+      # identity_claim: sub        # eigener Claim (Standard: sub bzw. oid bei entra)
+      # tenant_id: "…"             # Pflicht bei profile: entra
+      invite_ttl_secs: 604800    # Einladungslinks (POST /admin/api/v1/users/{name}/invitation)
       end_session: true          # Abmelden auch beim IdP (falls end_session_endpoint)
       # post_logout_redirect_url: "https://gateway.example.org/admin/"
       # ca_file: /etc/aigw/idp-ca.pem   # zusätzlich zu upstream.roots/upstream.ca_file

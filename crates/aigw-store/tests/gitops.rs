@@ -46,8 +46,12 @@ impl SecretSource for Secrets {
     }
 }
 
+/// Wie die bisherigen Tests: API-Keys verwalten (Standard ist seit F4 `ignore`).
 fn opts() -> ApplyOptions {
-    ApplyOptions::default()
+    ApplyOptions {
+        api_keys: ApiKeyMode::Include,
+        ..ApplyOptions::default()
+    }
 }
 
 fn dry(mut o: ApplyOptions) -> ApplyOptions {
@@ -424,7 +428,9 @@ async fn run(store: Store) {
             .await
             .is_err()
     );
-    // Modus ignore: Keys weder angewendet noch per prune gelöscht.
+    // Modus ignore (Standard seit F4): Keys weder angewendet noch per prune gelöscht.
+    assert_eq!(ApplyOptions::default().api_keys, ApiKeyMode::Ignore);
+    assert_eq!(ApiKeyMode::default(), ApiKeyMode::Ignore);
     let mut ignore = pruning(opts());
     ignore.api_keys = ApiKeyMode::Ignore;
     let no_keys = without(&from_file, ResourceKind::ApiKey, &["ci"]);

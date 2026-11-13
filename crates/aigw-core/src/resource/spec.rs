@@ -194,6 +194,9 @@ pub enum Role {
     Viewer,
     /// Audit-Log lesen.
     Auditor,
+    /// Nur GitOps: `config:export` und `config:apply` (auch Trockenlauf), z. B. für einen
+    /// Admin-API-Key der CI-Pipeline (F55). Nur global wirksam.
+    Gitops,
 }
 
 /// Rollenzuweisung, optional eingeschränkt auf Organisation oder Team.
@@ -217,7 +220,9 @@ pub struct UserSpec {
     /// OIDC-Issuer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oidc_issuer: Option<String>,
-    /// OIDC-Subjekt (`sub`).
+    /// Unveränderliche OIDC-Kennung beim Issuer: Wert des Claims
+    /// `admin.auth.oidc.identity_claim` (Standard `sub`; Profil `entra`: `oid`, F90). Kann vorab
+    /// gesetzt werden (Nutzer anlegen, bevor er sich das erste Mal anmeldet).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oidc_subject: Option<String>,
     /// E-Mail-Adresse.
@@ -277,7 +282,9 @@ pub enum ApiKeyState {
     /// Aktiv.
     #[default]
     Active,
-    /// Gesperrt (dauerhaft).
+    /// Vorübergehend gesperrt (umkehrbar mit `resume`, F37).
+    Suspended,
+    /// Widerrufen (endgültig, F37).
     Revoked,
 }
 
@@ -286,6 +293,7 @@ impl ApiKeyState {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Active => "active",
+            Self::Suspended => "suspended",
             Self::Revoked => "revoked",
         }
     }
@@ -294,6 +302,7 @@ impl ApiKeyState {
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "active" => Some(Self::Active),
+            "suspended" => Some(Self::Suspended),
             "revoked" => Some(Self::Revoked),
             _ => None,
         }

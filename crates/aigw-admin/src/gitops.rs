@@ -9,10 +9,13 @@
 //!   Antwort: Plan bzw. Ergebnis (`ApplyReport`), Berechtigung `Write` (auch für den
 //!   Trockenlauf, weil er Geheimnisse des Servers auflöst und vergleicht).
 //!
-//! Über die API dürfen Manifeste nur Umgebungsvariablen mit Präfix `AIGW_SECRET_` verwenden,
-//! keine Dateien ([`SecretPolicy::restricted`]) – sonst könnte ein Admin-Token beliebige
-//! Variablen oder Dateien des Servers in Zugangsdaten kopieren. Die CLI hat diese
-//! Einschränkung nicht.
+//! Über die API dürfen Manifeste nur Umgebungsvariablen mit Präfix `AIGW_SECRET_` verwenden
+//! und Dateien nur innerhalb von `gitops.secret_dir` (F52; [`SecretPolicy::restricted`],
+//! [`SecretPolicy::with_file_dir`]) – sonst könnte ein Admin-Token beliebige Variablen oder
+//! Dateien des Servers in Zugangsdaten kopieren. Die CLI hat diese Einschränkung nicht.
+//!
+//! Berechtigung (F55): Ziel [`Target::GitOps`] – `config:export` lesen globale
+//! Leserollen und `gitops`, `config:apply` (auch Trockenlauf) globaler `admin` und `gitops`.
 
 // `#[utoipa::path(params(…))]` erzeugt für IntoParams-Typen qualifizierte Pfade.
 #![allow(unused_qualifications)]
@@ -35,7 +38,7 @@ use bytes::Bytes;
 use serde::Deserialize;
 use utoipa::IntoParams;
 
-use crate::auth::{AdminAuthenticator, Permission, Principal, require_principal};
+use crate::auth::{AdminAuthenticator, Permission, Principal, Target, require_principal};
 use crate::problem::Problem;
 use crate::upstream::UpstreamPolicy;
 
@@ -57,6 +60,9 @@ pub struct GitopsState {
     pub auth: Arc<dyn AdminAuthenticator>,
     /// Regeln für Endpunkte von Deployments (wie bei den Ressourcen-Routen).
     pub upstreams: UpstreamPolicy,
+    /// `gitops.secret_dir` (F52): `valueFrom.file` nur innerhalb dieses Verzeichnisses;
+    /// ohne sind Dateien über die Admin-API verboten.
+    pub secret_dir: Option<std::path::PathBuf>,
 }
 
 impl fmt::Debug for GitopsState {
@@ -72,7 +78,7 @@ impl fmt::Debug for GitopsState {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub(crate) struct ExportQuery {
-    /// `include` (Standard): API-Keys ohne Klartext exportieren; `ignore`: weglassen.
+    /// `ignore` (Standard, F4): API-Keys weglassen; `include`: ohne Klartext exportieren.
     #[serde(default)]
     api_keys: ApiKeyMode,
 }
@@ -88,7 +94,7 @@ pub(crate) struct ApplyQuery {
     /// Ressourcen löschen, die nicht im Manifest stehen.
     #[serde(default)]
     prune: bool,
-    /// Umgang mit API-Keys (`include` | `ignore`).
+    /// Umgang mit API-Keys (`ignore` = Standard, F4 | `include`).
     #[serde(default)]
     api_keys: ApiKeyMode,
 }
@@ -127,7 +133,7 @@ pub(crate) async fn export_config(
     Extension(p): Extension<Principal>,
     q: Result<Query<ExportQuery>, QueryRejection>,
 ) -> Result<Response, Problem> {
-    p.require(Permission::Read)?;
+    p.require_on(Permission::Read, &Target::GitOps)?;
     let Query(q) = q?;
     let yaml = gitops::export_yaml(&st.store, q.api_keys)
         .await
@@ -160,7 +166,7 @@ pub(crate) async fn apply_config(
     q: Result<Query<ApplyQuery>, QueryRejection>,
     body: Bytes,
 ) -> Result<Response, Problem> {
-    p.require(Permission::Write)?;
+    p.require_on(Permission::Write, &Target::GitOps)?;
     let Query(q) = q?;
     let text =
         std::str::from_utf8(&body).map_err(|_| Problem::bad_request("Körper ist kein UTF-8"))?;
@@ -170,7 +176,7 @@ pub(crate) async fn apply_config(
         prune: q.prune,
         api_keys: q.api_keys,
         actor: format!("{}:{}", gitops::GITOPS_ACTOR, p.actor()),
-        secrets: SecretPolicy::restricted(SECRET_ENV_PREFIX),
+        secrets: SecretPolicy::restricted(SECRET_ENV_PREFIX).with_file_dir(st.secret_dir.clone()),
         upstreams: st.upstreams.clone(),
         group_settings: Some(crate::resources::group_settings),
         plugin_bindings: Some(crate::plugin_bindings::check),

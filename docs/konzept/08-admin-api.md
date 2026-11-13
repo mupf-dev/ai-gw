@@ -1,4 +1,4 @@
-# ai-gw – Admin-API: Mandanten, Nutzer, Keys, Modelle, Preise, Anmeldung, Audit-Log (AIGW-28, AIGW-65, AIGW-32, AIGW-66)
+# ai-gw – Admin-API: Mandanten, Nutzer, Keys, Modelle, Preise, Anmeldung, Audit-Log (AIGW-28, AIGW-65, AIGW-32, AIGW-66, AIGW-74)
 
 Stand: 2026-11-13 · Status: umgesetzt (Entwurf zur Durchsicht)
 Grundlage: [01-architektur.md](01-architektur.md) §3, §5, §6, §8, §13, §15 · [02-datenmodell.md](02-datenmodell.md)
@@ -23,10 +23,12 @@ Instanz nach ca. 100 ms (Debounce), bei Postgres auf allen Instanzen per `NOTIFY
 |---|---|---|
 | `/organizations`, `/organizations/{name}` | GET, POST · GET, PUT, DELETE | Organisationen |
 | `/teams`, `/teams/{name}` | GET, POST · GET, PUT, DELETE | Teams (`organization`, `allowedModels`, Limits, Budget) |
-| `/users`, `/users/{name}` | GET, POST · GET, PUT, DELETE | Nutzer (OIDC-Issuer/-Subjekt, E-Mail, Rollen) |
+| `/users`, `/users/{name}` | GET, POST · GET, PUT, DELETE | Nutzer (OIDC-Issuer + Kennung, E-Mail, Rollen; §5.2) |
+| `/users/{name}/invitation` | GET, POST, DELETE | Einladungslink für einen vorab angelegten Nutzer (F90, §5.2) |
 | `/api-keys`, `/api-keys/{name}` | GET, POST · GET, PUT, DELETE | virtuelle Keys der Datenebene |
-| `/api-keys/{name}/revoke` | POST | sperren (`state: revoked`) |
-| `/api-keys/{name}/reactivate` | POST | entsperren (`state: active`) |
+| `/api-keys/{name}/suspend` | POST | vorübergehend sperren (`state: suspended`, F37) |
+| `/api-keys/{name}/resume` | POST | Sperre aufheben (`state: active`) |
+| `/api-keys/{name}/revoke` | POST | **endgültig** widerrufen (`state: revoked`) |
 | `/api-keys/{name}/rotate` | POST | neuer Key, alter läuft ab |
 | `/model-groups`, `/model-groups/{name}` | GET, POST · GET, PUT, DELETE | Modellgruppen (Aliasse, Routing-Strategie, Fallbacks, Limits) |
 | `/deployments`, `/deployments/{name}` | GET, POST · GET, PUT, DELETE | Deployments (Anbieter, Endpunkt, Anbieter-Modell, Zugangsdaten, Gewicht, Priorität, Kapazität, aktiv) |
@@ -61,22 +63,29 @@ Unbekanntem). `PUT` ersetzt Labels und `spec` vollständig; Umbenennen ist nicht
   Klartext steht **nur** in dieser Antwort (`Cache-Control: no-store`), gespeichert werden
   Präfix und SHA-256.
 - **Liste/Detail** zeigen nur `status.prefix` (12 Zeichen), `status.state`, `status.lastUsedAt`.
-- **Sperren/Entsperren**: `POST …/revoke` bzw. `…/reactivate`; idempotent (gleicher Zustand
-  erzeugt keine neue Konfigurationsversion). Gesperrte Keys fehlen im Key-Index des Snapshots.
+- **Zustände (F37):** `active` → `suspended` (`POST …/suspend`, umkehrbar mit `…/resume`) bzw.
+  → `revoked` (`POST …/revoke`, **endgültig**: kein `resume`/`suspend`, kein `PUT`, keine
+  Rotation – `409`; nur noch Löschen). Gleicher Zustand ist idempotent (keine neue
+  Konfigurationsversion). Gesperrte und widerrufene Keys fehlen im Key-Index des Snapshots
+  (wirkt nach dem Hot Reload, i. d. R. < 1 s). Audit: `suspend`, `resume`, `revoke`. Die
+  frühere Route `…/reactivate` entfällt. GitOps ändert den Zustand nicht (09-gitops.md §4.3).
 - **Rotation**: `POST …/rotate` mit optionalem Körper
   `{"name": "ci-2", "gracePeriodSeconds": 3600}`. Legt in **einer** Transaktion einen neuen Key
   mit derselben Spezifikation und denselben Labels an und setzt beim alten `expiresAt` auf
   jetzt + Übergangszeit (Standard 24 h, `0` = sofort, höchstens 365 Tage; ein früherer Ablauf
   bleibt). Standardname: alter Name mit Zeitstempel `-JJJJMMTThhmmss` (ein vorhandener
   Zeitstempel wird ersetzt). Antwort `201` mit `{"newKey": {key, secret}, "previousKey": {…}}`.
-  Gesperrte Keys lassen sich nicht rotieren (`409`). Audit: `create` (neu) und `rotate` (alt);
-  Sperren/Entsperren: `revoke`/`reactivate`.
+  Gesperrte und widerrufene Keys lassen sich nicht rotieren (`409`). Audit: `create` (neu) und
+  `rotate` (alt).
 - **Organisation ist Pflicht, Team optional** (F3, AIGW-73): `spec.organization` muss existieren
   (`422`), mit Team muss es die Organisation des Teams sein (`422`). Keys ohne Team erben Limits,
   Budgets und Plugins der Organisation und werden bei den Grenzen (AIGW-67) direkt gegen die
   Organisation geprüft (auch `?cascade=clamp` beim Senken der Organisationsgrenzen). Zieht ein
   Team in eine andere Organisation um, ziehen seine Keys mit (Fremdschlüssel `ON UPDATE
-  CASCADE`). Rollenprüfung unverändert: Keys ohne Team sind global (nur globale Rollen).
+  CASCADE`). Rollen (F193): Keys ohne Team liegen **direkt in ihrer Organisation**
+  (`Target::InOrganization`) – `org-admin` der Organisation (und dort eingeschränkte
+  `admin`/`viewer`/`auditor`) verwalten bzw. lesen sie, `team-admin` nicht; Listen filtern das in
+  SQL. Die Sichtbarkeit in Dashboards/Log-Explorer (F146) folgt mit AIGW-76.
 
 ### 2.2 Modellgruppen (AIGW-65)
 
@@ -100,6 +109,14 @@ POST /admin/api/v1/model-groups
   `422` mit Hinweis), nicht die Gruppe selbst, ohne Doppelungen und **ohne Zyklen** über
   Gruppen hinweg (`a → b → a` → `422`). Eine Gruppe, die Fallback-Ziel ist, lässt sich nicht
   löschen (`409`); ebenso eine Gruppe mit Deployments (Fremdschlüssel).
+- **Verweise (F66):** Löschen einer Gruppe bzw. Entfernen eines Alias (`PUT` ohne ihn) ergibt
+  `409` mit `violations[]`, solange `allowedModels` von Teams/Keys oder `limits[].modelGroup` von
+  Organisationen/Teams/Keys den Namen bzw. Alias nennen. Mit `?cascade=remove` werden diese
+  Verweise in **derselben Transaktion** entfernt (Audit `cascade-remove` je Objekt). Ausnahme:
+  Würde dadurch eine Freigabeliste leer (leer = **alle** Modelle), bleibt es bei `409` – die
+  Liste muss zuerst angepasst werden (keine stille Rechteausweitung). Andere `cascade`-Werte und
+  `force` → `400`. GitOps hat kein `cascade`: Verweise auf entfernte Gruppen sind dort
+  Validierungsfehler.
 - Suche `?q=` trifft Namen und Aliasse.
 
 ### 2.3 Deployments (AIGW-65)
@@ -117,12 +134,13 @@ POST /admin/api/v1/deployments
 | Prüfung | Regel |
 |---|---|
 | Verweise | `modelGroup` und `credential` müssen existieren (`422`) |
-| Zugangsdaten | `credential.provider` = `provider` (`422`); Zugangsdaten mit Deployments lassen sich nicht löschen (`409`) und nicht auf einen anderen Anbieter umstellen (`409`) |
+| Zugangsdaten | Anbieter der Zugangsdaten passt zum Deployment (`422`): gleicher Anbieter oder laut **Kompatibilitätsliste** (F65, `aigw_core::validate::CREDENTIAL_COMPAT`): `openai` auch für `openai-compatible`, `vllm`, `ollama`. Zugangsdaten mit Deployments lassen sich nicht löschen (`409`) und nur auf einen Anbieter umstellen, zu dem alle ihre Deployments passen (`409`). GitOps prüft dieselbe Liste |
 | Endpunkt | Pflicht bei `azure-openai`, `vllm`, `openai-compatible`; `ollama` ohne Endpunkt nutzt `http://localhost:11434/v1` und unterliegt ebenfalls den SSRF-Regeln (Freischaltung nötig); siehe §2.6 |
 | Azure OpenAI | `providerModel` = Azure-Deployment-Name (Buchstaben, Ziffern, `-_.`); `settings.apiVersion` Pflicht bei `settings.apiStyle` `deployment` (Standard), optional bei `v1` |
 | AWS Bedrock | `settings.region` Pflicht |
 | Gewicht/Kapazität | `weight` 1–1 000 000 (abschalten über `enabled: false`), `capacity.rpm/tpm` > 0, falls angegeben |
 | `providerModel` | 1–256 Zeichen ohne Steuerzeichen |
+| `settings.caFile` | nur mit `upstream.ca_dir` (F177): relativ = darin, absolut = muss darin liegen, ohne `..`; die Admin-API löst Symlinks auf und lehnt Ziele außerhalb sowie unlesbare Dateien ab (`422`). GitOps per CLI prüft nur textuell (kann auf einem anderen Rechner laufen); beim Aufbau der Route prüft der Gateway erneut (Symlinks, Lesbarkeit) |
 
 Filter: `?modelGroup=`, `?provider=`, `?credential=`, `?enabled=true|false`, `?q=` (Name oder
 `providerModel`). Deaktivierte Deployments bleiben in der Datenbank, fehlen aber im Snapshot.
@@ -247,14 +265,18 @@ aufgelösten Adressen mit `UpstreamPolicy::resolved_ip_allowed` (siehe
 | Filter (je Art) | Teams `organization`; Nutzer `email` (ohne Groß-/Kleinschreibung); Keys `team`, `user`, `organization` (Organisation des Keys, F3), `state`; Deployments `modelGroup`, `provider`, `credential`, `enabled`; Zugangsdaten `provider`; Preise `model`, `provider`, `effectiveAt`; MCP-Server `transport`, `credential`, `enabled`; MCP-Freigaben `server`, `team`, `apiKey` |
 | Teiländerung | `PATCH` (JSON Merge Patch) nur bei Zugangsdaten (Werte bleiben erhalten); sonst `PUT` mit vollständiger `spec` |
 | Unbekannte Parameter | `400` (Tippfehler fallen auf) |
-| Optimistische Sperre | Einzelobjekte tragen einen starken `ETag` (SHA-256 über den Inhalt; bei Keys ohne `lastUsedAt`). `PUT`, `DELETE`, `revoke`, `reactivate`, `rotate` werten `If-Match` aus (`*` oder Liste erlaubt); passt er nicht: `412 precondition-failed`. Ohne `If-Match` wird ohne Prüfung geschrieben. |
+| Optimistische Sperre (F38) | Einzelobjekte tragen einen starken `ETag` (SHA-256 über den Inhalt; bei Keys ohne `lastUsedAt`; auch Admin-API-Keys). **`If-Match` ist Pflicht** für `PUT`, `PATCH`, `DELETE` und Aktionen (`suspend`, `resume`, `revoke`, `rotate`): fehlt er → `428 precondition-required`; passt keiner der angegebenen ETags → `412 precondition-failed`; `*` schreibt ohne Versionsvergleich. Anlegen (`POST` auf die Liste), `config:apply` (eigene Versionsprüfung) und Einladungen brauchen ihn nicht. |
 | Anlegen | `201` mit `Location` und `ETag` |
 | Löschen | `204`; Verweise anderer Ressourcen verhindern das Löschen (`409`), Plugin-Bindungen und MCP-Freigaben des Objekts werden mitgelöscht |
 | Zeitpunkte | RFC 3339 (UTC) |
 
-Die Prüfung von `If-Match` und das Schreiben laufen innerhalb einer Instanz unter einer
-Sperre. Zwischen mehreren Instanzen (Postgres-HA) bleibt ein kleines Zeitfenster; siehe
-offene Punkte.
+**Cluster-sicher:** Die Admin-API vergleicht den ETag mit dem gelesenen Objekt und übergibt
+dessen `updatedAt` an den Store (`aigw_store::Expect`). Der Store vergleicht ihn **im** `UPDATE`
+bzw. `DELETE` (`… WHERE id = $1 AND updated_at = $2`); trifft die Anweisung keine Zeile, wurde das
+Objekt zwischenzeitlich geändert – auch von einer anderen Instanz – und die Antwort ist `412`,
+ohne neue Konfigurationsversion. `updated_at` steigt je Objekt streng monoton (mindestens +1 ms je
+Änderung), damit zwei Änderungen in derselben Millisekunde nicht denselben Stand tragen. Bei
+`If-Match: *` entfällt der Vergleich.
 
 ## 4. Fehlerformat (RFC 9457)
 
@@ -273,7 +295,8 @@ Alle Fehler der Admin-API sind Problem Details mit `Content-Type: application/pr
 | 403 | `forbidden` | Rolle oder Geltungsbereich reicht nicht; CSRF-Prüfung fehlgeschlagen |
 | 404 | `not-found` | Ressource unbekannt |
 | 409 | `conflict` | Name vergeben, Ressource noch verwendet, Key gesperrt (Rotation) |
-| 412 | `precondition-failed` | `If-Match` passt nicht |
+| 412 | `precondition-failed` | `If-Match` passt nicht (auch: zwischen Lesen und Schreiben geändert) |
+| 428 | `precondition-required` | `If-Match` fehlt bei `PUT`/`PATCH`/`DELETE`/Aktionen (F38) |
 | 415 | `unsupported-media-type` | kein `Content-Type: application/json` |
 | 422 | `validation-failed` | ungültiger Name, unbekannte Felder, unbekannter Verweis oder Modell |
 | 500 | `internal` | interner Fehler – ohne Details nach außen, Ursache im Log |
@@ -283,8 +306,9 @@ Alle Fehler der Admin-API sind Problem Details mit `Content-Type: application/pr
 ## 5. Authentifizierung, Sessions, Rollen (AIGW-32)
 
 Code: `crates/aigw-admin` – `auth.rs` (Principal, Middleware, CSRF, Bootstrap), `oidc.rs`
-(Relying Party), `session.rs` (Login, Session, Abmeldung), `rbac.rs` (Rollen), `admin_keys.rs`
-(Admin-API-Keys); Speicher `aigw-store/src/admin_auth.rs`, Migration `0003_admin_auth.sql`;
+(Relying Party), `session.rs` (Login, Session, Abmeldung, Einladungen), `rbac.rs` (Rollen),
+`admin_keys.rs` (Admin-API-Keys); Speicher `aigw-store/src/admin_auth.rs`, Migrationen
+`0001_init.sql` und `0002_admin_auth.sql` (Einladungen, je Dialekt);
 Konfiguration `admin.auth` (`aigw_core::config::AdminAuthConfig`).
 
 ### 5.1 Verfahren
@@ -308,13 +332,22 @@ Ohne Anmeldung erreichbar: `GET /admin/api/v1/version`, `GET /admin/api/v1/auth/
 keinen `401` in der Konsole erzeugt), `GET /admin/api/openapi.json`, die UI und
 `/admin/auth/{login,callback,logout}`.
 
+`auth/info` meldet zusätzlich (F56) `readOnly` (Modus „nur YAML“, `gitops.read_only_admin`: die UI
+blendet Schreibaktionen aus) und `bootstrap` (das Bootstrap-Token gilt derzeit: Modus `on` bzw.
+`auto` ohne Abschaltvermerk – die UI zeigt einen Warnhinweis).
+
+```json
+{"oidc": true, "loginUrl": "/admin/auth/login", "readOnly": false, "bootstrap": true,
+ "session": {"subject": "user:anna", "method": "session", "roles": [{"role": "admin"}], "csrfToken": "…"}}
+```
+
 ### 5.2 OIDC-Login (Authorization Code + PKCE)
 
 | Schritt | Pfad | Inhalt |
 |---|---|---|
 | 1 | `GET /admin/auth/login?returnTo=/admin/keys` | erzeugt `state`, `nonce`, PKCE-Verifier (je 256 Bit); speichert sie (Tabelle `admin_login_state`, Schlüssel SHA-256 von `state`, 10 min); setzt Cookie `__Secure-aigw-login=<state>` (`HttpOnly; Secure; SameSite=Lax; Path=/admin/auth`); `303` zum IdP mit `code_challenge_method=S256` |
 | 2 | `GET /admin/auth/callback?code&state` | `state` muss zum Login-Cookie passen (Schutz vor Login-CSRF) und wird beim Lesen gelöscht (einmalig); Code-Tausch mit Verifier; ID-Token-Prüfung; Nutzerzuordnung; Session anlegen; `303` nach `returnTo` (nur Pfade unter `/admin/`, kein offener Redirect) |
-| – | Fehler | `303` nach `/admin/?auth_error=<code>` mit `idp`, `state`, `token`, `no-access`, `internal`; Grund nur im Server-Log |
+| – | Fehler | `303` nach `/admin/?auth_error=<code>` mit `idp`, `state`, `token`, `invite`, `no-access`, `internal`; Grund nur im Server-Log |
 
 **Discovery und Schlüssel:** `<issuer>/.well-known/openid-configuration` wird beim ersten Login
 geladen (der Server startet auch bei nicht erreichbarem IdP) und `cache_secs` gehalten; ebenso
@@ -328,23 +361,51 @@ abgelehnt.
 und `crit` werden abgelehnt; Schlüsselwahl über `kid`, `use=sig`, passendes `kty`/`crv`/`alg`.
 Danach `iss` (exakt wie im Discovery-Dokument), `aud` enthält die Client-ID, `azp` (falls
 vorhanden) = Client-ID, `exp`/`iat`/`nbf` mit `clock_skew_secs`, `nonce` (konstante Zeit),
-`sub` nicht leer. Gruppen aus `groups_claim` (Liste oder einzelner Wert; Punkte für verschachtelte
+`sub` nicht leer, dazu die Kennung aus `identity_claim` (siehe unten). Gruppen aus `groups_claim` (Liste oder einzelner Wert; Punkte für verschachtelte
 Claims, z. B. `realm_access.roles` bei Keycloak). Das Access-Token wird nicht verwendet.
 
 **Client-Authentifizierung:** mit Secret `client_secret_basic`, sonst öffentlicher Client
 (`client_id` im Formular, nur PKCE). Das Secret kommt aus `client_secret_file` oder der
 Umgebungsvariable `client_secret_env` (Standard `AIGW_OIDC_CLIENT_SECRET`), nie aus der YAML.
 
+**Identität (F90):** Ein Nutzer ist über **(Issuer, Kennung)** zugeordnet – `oidcIssuer` und
+`oidcSubject` am Nutzer. Die Kennung ist der Wert des Claims `admin.auth.oidc.identity_claim`
+(Standard `sub`). Profil `entra` (Microsoft Entra ID): Kennung `oid` (über alle Anwendungen des
+Tenants stabil; `sub` ist dort je Anwendung paarweise), und `tid` muss `tenant_id` entsprechen
+(sonst `auth_error=token`); `tenant_id` ist dann Pflicht. Nutzer lassen sich **vorab** mit
+Issuer + Kennung anlegen (Admin-API, GitOps); beide Felder nur gemeinsam (`422`).
+
 **Nutzerzuordnung** (Ressource `User`, §2):
-1. Nutzer mit gleichem `oidcIssuer` + `oidcSubject`;
-2. sonst (wenn `link_by_email`) ein vorab angelegter Nutzer **ohne** `oidcSubject`, dessen
-   E-Mail (ohne Groß-/Kleinschreibung) der vom IdP **bestätigten** E-Mail (`email_verified`)
-   entspricht – genau ein Treffer; Issuer/Subjekt werden eingetragen (Audit-Akteur
-   `oidc-login`);
-3. sonst (wenn `provision_users` und mindestens eine Gruppenrolle) Neuanlage mit Name aus
+1. Login über einen **Einladungslink** (`/admin/auth/login?invite=<token>`): Die Einladung wird
+   beim Rücksprung einmalig eingelöst und verknüpft die Identität mit dem eingeladenen Nutzer
+   (der noch keine Identität haben darf; Audit-Akteur `oidc-login`). Gehört die Identität schon
+   einem anderen Nutzer bzw. ist die Einladung abgelaufen oder verwendet → `auth_error=invite`
+   (eine ungültige Einladung fällt schon beim Start des Logins auf);
+2. Nutzer mit gleichem `oidcIssuer` + `oidcSubject`;
+3. nur mit `link_by_email: true` (**Standard aus**, F90 – E-Mail-Adressen sind beim IdP oft
+   änderbar): ein vorab angelegter Nutzer **ohne** Identität, dessen E-Mail (ohne
+   Groß-/Kleinschreibung) der vom IdP **bestätigten** E-Mail (`email_verified`) entspricht –
+   genau ein Treffer; Issuer/Kennung werden eingetragen (Audit-Akteur `oidc-login`);
+4. sonst (wenn `provision_users` und mindestens eine Gruppenrolle) Neuanlage mit Name aus
    `preferred_username` bzw. dem lokalen Teil der E-Mail (bei Kollision mit Hash-Suffix), ohne
    direkte Rollen;
-4. sonst bzw. wenn keine wirksame Rolle übrig bleibt: `auth_error=no-access`, keine Session.
+5. sonst bzw. wenn keine wirksame Rolle übrig bleibt: `auth_error=no-access`, keine Session.
+
+**Einladungen** (`/admin/api/v1/users/{name}/invitation`, nur globaler `admin`; lesen: globale
+Leserollen):
+
+```json
+POST /admin/api/v1/users/anna/invitation
+→ 201 {"invitation": {"user": "anna", "createdBy": "user:root", "createdAt": "…",
+                      "expiresAt": "…", "expired": false},
+       "url": "https://gateway.example.org/admin/auth/login?invite=Q2x…"}
+```
+
+Token 256 Bit, gespeichert nur SHA-256 (Tabelle `admin_invitation`, Migration
+`0002_admin_auth.sql`), gültig `oidc.invite_ttl_secs` (Standard 7 Tage), höchstens eine je Nutzer
+(eine neue ersetzt die alte), der Link steht nur in dieser Antwort (`Cache-Control: no-store`).
+Ohne OIDC bzw. für Nutzer mit Identität → `409`. `GET` zeigt den Stand ohne Link, `DELETE`
+widerruft. Audit: Art `admin-invitation`, `create`/`delete` (ohne Token).
 
 **Bibliothekswahl:** eigene, schlanke Relying Party (rund 500 Zeilen ohne Tests) statt `openidconnect-rs`:
 - Kryptografie wird **nicht** selbst gebaut: Signaturprüfung ausschließlich über aws-lc-rs
@@ -388,6 +449,11 @@ Umgebungsvariable `client_secret_env` (Standard `AIGW_OIDC_CLIENT_SECRET`), nie 
   3. Ein `Origin`-Header muss dem Ursprung von `oidc.redirect_url` entsprechen (ohne OIDC: dem
      `Host`).
   Bearer-Anfragen (Admin-Key, Bootstrap) brauchen kein CSRF-Token.
+- **Audit-Pflicht (F113):** Mit `admin.auth.audit_required: true` (Standard) entstehen Session
+  und Audit-Eintrag `login` in **einer** Transaktion; kann der Eintrag nicht geschrieben werden,
+  scheitert die Anmeldung (`auth_error=internal`, keine Session). Ebenso die Abmeldung: ohne
+  Eintrag `logout` bleibt die Session bestehen (`500`). `false`: Eintrag nach bestem Bemühen
+  (Warnung im Log).
 - **Abmelden:** `POST /admin/auth/logout` (mit CSRF-Token) löscht die Session und das Cookie
   und liefert `{"redirectUrl": …}`: mit `end_session: true` und `end_session_endpoint` beim IdP
   die RP-initiated-Logout-URL (`client_id`, `post_logout_redirect_uri`), sonst `/admin/`.
@@ -402,20 +468,30 @@ eingeschränkt. Jede Operation fordert `Permission::Read`/`Write` auf einem `Tar
 | Ziel (`Target`) | Beispiele |
 |---|---|
 | `Global` | Nutzer, Admin-API-Keys, Organisation anlegen, API-Keys ohne Team |
-| `Global` (GitOps) | `config:export` = Lesen global (`admin`, `viewer`, `auditor`), `config:apply` = Schreiben global (nur `admin`) |
+| `GitOps` | `config:export` = Lesen (globale `admin`, `viewer`, `auditor` und `gitops`), `config:apply` inkl. Trockenlauf = Schreiben (globaler `admin` und `gitops`, F55) |
 | `Catalog` | Modellgruppen, Deployments, Anbieter-Zugangsdaten (nur Metadaten, Werte sind nie lesbar), Preise (lesen: jede wirksame Rolle; schreiben: globaler `admin`) |
 | `Organization(o)` | die Organisation selbst (lesen, ändern, löschen) |
 | `Team(o, t)` | das Team selbst |
-| `InTeam(o, t)` | API-Keys des Teams (anlegen, ändern, sperren, rotieren, löschen) |
+| `InTeam(o, t)` | API-Keys des Teams (anlegen, ändern, sperren, rotieren, löschen), Plugin-Bindungen des Teams |
+| `InOrganization(o)` | Objekte direkt in der Organisation: API-Keys ohne Team (F193), Plugin-Bindungen der Organisation (F183) |
 
 | Rolle | Lesen | Schreiben |
 |---|---|---|
 | `admin` (global) | alles | alles |
 | `admin` (Org/Team) | im Bereich | im Bereich |
-| `org-admin` (Org O) | O, Teams und Keys in O, Katalog | Teams und Keys in O, nicht O selbst |
-| `team-admin` (Team T) | T, Keys in T, Katalog; O nur, wenn die Zuweisung `organization` nennt | Keys in T |
+| `org-admin` (Org O) | O, Teams und Keys in O (auch ohne Team), Katalog | Teams, Keys und Plugin-Bindungen in O, nicht O selbst |
+| `team-admin` (Team T) | T, Keys in T, Katalog; O nur, wenn die Zuweisung `organization` nennt | Keys und Plugin-Bindungen in T |
 | `viewer` | im Bereich (global: alles), Katalog | – |
 | `auditor` | wie `viewer`; dazu das Audit-Log (§5.10) und gespeicherte Payloads (§5.11) | – |
+| `gitops` (nur global, F55) | nur `config:export` | nur `config:apply` (auch Trockenlauf) – für Admin-API-Keys der CI; sonst keine Rechte, Listen bleiben leer |
+
+- **Plugin-Bindungen (F183):** Schreiben je Ebene – `global`/`model-group`: globaler `admin`;
+  `organization` O: `InOrganization(O)`; `team` T: `InTeam(O, T)`; `api-key`: wie der Key (Team
+  bzw. Organisation). Lesen weiterhin jede wirksame Rolle. Eingeschränkte Rollen dürfen eine
+  Bindung, die auf einer äußeren Ebene (global, Organisation, Team des Ziels) für dasselbe Plugin
+  `locked: true` ist, nicht per `inherit: override|disable` aushebeln (`403` mit Name der
+  Sperre); zur Laufzeit wäre sie ohnehin wirkungslos. Ein globaler `admin` darf das (die Sperre
+  gehört ihm).
 
 - **Grenzen (AIGW-67):** Limits, Budgets und Modellfreigaben eines Keys dürfen die seines
   Teams und seiner Organisation nicht überschreiten, die eines Teams nicht die der
@@ -449,10 +525,15 @@ POST /admin/api/v1/admin-api-keys
 - Format wie die Keys der Datenebene mit eigenem Präfix: `sk-aigw-admin-<12 Base62>-<43 Base62>`
   (256 Bit). Gespeichert: Präfix und SHA-256 (Tabelle `admin_api_key`); Klartext nur in der
   Antwort (`Cache-Control: no-store`).
-- Rollen: mindestens eine, wirksam, Verweise müssen existieren (`422`). `expiresAt` optional,
-  beim Anlegen/Ändern in der Zukunft; abgelaufene Keys ergeben `401`.
+- Rollen: mindestens eine, wirksam, Verweise müssen existieren (`422`); `gitops` nur global.
+  `expiresAt` optional, beim Anlegen/Ändern in der Zukunft; abgelaufene Keys ergeben `401`.
+- **Höchstlaufzeit (F87):** `admin.auth.max_admin_key_lifetime` (z. B. `90d`; Einheiten `s`,
+  `m`, `h`, `d`). Gesetzt: `expiresAt` höchstens jetzt + Höchstlaufzeit (`422`), fehlt die
+  Angabe, setzt der Server jetzt + Höchstlaufzeit (auch beim `PUT`). Bestehende Keys bleiben
+  unverändert.
 - `PUT` ersetzt `description`, `roles`, `expiresAt`; `DELETE` widerruft sofort (keine
-  Snapshot-Verzögerung, da je Anfrage aus der DB gelesen).
+  Snapshot-Verzögerung, da je Anfrage aus der DB gelesen). Beide brauchen `If-Match` (ETag aus
+  `GET`/Anlegen, F38).
 - `lastUsedAt` (höchstens minütlich aktualisiert). Audit: `create`/`update`/`delete` mit Art
   `admin-api-key` (ohne Hash); die erste Nutzung eines Keys einmalig als `first-use` (Akteur
   `admin-key:<name>`, auch bei gleichzeitigen Anfragen genau ein Eintrag).
@@ -480,8 +561,14 @@ admin:
   auth:
     bootstrap: "auto"            # auto | on | off
     session: {max_age_secs: 28800, idle_timeout_secs: 1800}
+    audit_required: true         # F113: Login/Logout nur mit Audit-Eintrag (fail-closed)
+    max_admin_key_lifetime: 90d  # F87: optional; ohne = unbegrenzt
     oidc:
       issuer: "https://idp.example.org/realms/acme"     # leer = OIDC aus
+      profile: generic           # generic | entra (F90)
+      identity_claim: sub        # Standard: sub (generic) bzw. oid (entra)
+      # tenant_id: "…"           # Pflicht bei profile: entra (tid-Prüfung)
+      invite_ttl_secs: 604800    # Einladungslinks (7 Tage)
       client_id: aigw
       client_secret_file: /run/secrets/aigw-oidc-secret  # oder Env AIGW_OIDC_CLIENT_SECRET
       redirect_url: "https://gateway.example.org/admin/auth/callback"
@@ -491,7 +578,7 @@ admin:
         - {group: aigw-admins, role: admin}
         - {group: acme-platform-leads, role: team-admin, organization: acme, team: platform}
       provision_users: true
-      link_by_email: true
+      link_by_email: false       # F90: Standard aus
       end_session: true
 ```
 
@@ -523,6 +610,16 @@ Ablauf, Nutzerlöschung, Abmeldung mit RP-initiated Logout, abgelehnte Tokens (`
 `nonce`, `iss`, Signatur), `state`-Fehler und -Wiederholung, offenen Redirect, Admin-API-Keys
 (Rollen, Ablauf, Widerruf) und die Bootstrap-Modi.
 
+`crates/aigw-admin/tests/oidc_login.rs` (`identity_*`) prüft F90/F113: vorab angelegte Nutzer
+(Issuer + Kennung), E-Mail-Verknüpfung standardmäßig aus, Einladungen (einmalig, Ablauf,
+Widerruf, fremde Identität, nur globale Admins, kein Token im Audit), Profil `entra` (`oid`,
+`tid`), Login/Logout scheitern ohne Audit-Eintrag (bzw. nicht mit `audit_required: false`).
+`crates/aigw-admin/tests/admin_auth_api.rs` (SQLite und Postgres) prüft F55, F56, F87, F38 bei
+Admin-Keys und Zugangsdaten, F4, F52, F193, F183, F65, F177 und F66 (Alias);
+`crates/aigw-store/tests/admin_auth.rs` den Versionsvergleich in der Datenbank (auch zwei
+gleichzeitige Änderungen), Key-Zustände, Bereich teamloser Keys, Einladungen und Sessions mit
+Audit in beiden Dialekten.
+
 `crates/aigw-admin/tests/audit_log.rs` (SQLite und Postgres): Filter und Paginierung (auch
 Seitengröße 3 vs. 500 und `order=asc`), Bereichsfilter je Rolle (org-admin, team-admin,
 eingeschränkter auditor, viewer `403`), Vorher/Nachher (auch Verschieben eines Keys),
@@ -552,8 +649,8 @@ bei Rollenänderung/Löschen, Logout. `oidc_login.rs` prüft zusätzlich die Log
 | `from`, `to` | Zeitraum, RFC 3339; `from` einschließlich, `to` ausschließlich (`+` im Offset als `%2B` kodieren oder `Z` verwenden) |
 | `actor` | exakte Akteure, kommagetrennt (`user:anna,admin-key:ci`) |
 | `actorType` | `user`, `admin-key`, `bootstrap`, `gitops` (CLI `gitops`, API `gitops:<principal>`), `oidc-login`, `system` |
-| `kind` | Arten, kommagetrennt: Ressourcen wie in YAML (`Organization`, `Team`, `User`, `ApiKey`, `ModelGroup`, `Deployment`, `ProviderCredential`, `Price` …) und `admin-api-key`, `admin-session`, `bootstrap-token` |
-| `action` | `create`, `update`, `delete`, `rotate`, `revoke`, `reactivate`, `login`, `login-failed`, `logout`, `first-use`, `disable` |
+| `kind` | Arten, kommagetrennt: Ressourcen wie in YAML (`Organization`, `Team`, `User`, `ApiKey`, `ModelGroup`, `Deployment`, `ProviderCredential`, `Price` …) und `admin-api-key`, `admin-session`, `admin-invitation`, `bootstrap-token` |
+| `action` | `create`, `update`, `delete`, `rotate`, `suspend`, `resume`, `revoke`, `clamp`, `force`, `cascade-remove`, `login`, `login-failed`, `logout`, `first-use`, `disable` |
 | `object` | Name **oder** ID des Objekts (exakt) |
 
 Unbekannte bzw. ungültige Parameter → `400`. Alle Filter wirken zusätzlich zum Bereich des
@@ -581,7 +678,9 @@ Browser begonnen, Cookie passt): Aufrufe von `/admin/auth/callback` ohne gültig
 (fremde Seiten, Wiederholungen, `error=` vom IdP ohne Login) könnte jeder ohne Anmeldung
 erzeugen und damit das Audit-Log fluten; sie stehen nur im Server-Log. Fehlgeschlagene
 Bearer-Anmeldungen (falscher Admin-Key) stehen aus demselben Grund nur im Debug-Log. Kann ein
-Anmelde-Ereignis nicht geschrieben werden, scheitert die Anmeldung nicht (WARN im Log).
+Anmelde-Ereignis (`login`/`logout`) nicht geschrieben werden, scheitert die Anmeldung bzw.
+Abmeldung (F113, `admin.auth.audit_required`, Standard); `login-failed` bleibt nach bestem
+Bemühen.
 
 **Berechtigung:**
 
@@ -684,21 +783,13 @@ Anbieterart `mock` (`providerModel` `mock`, `mock-error`, `mock-stream-error`).
   adressiert über Namen und kapselt Verweise in `spec`; ein Wechsel zu Pfaden wie
   `/organizations/{org}/teams/{name}` ließe sich als zusätzliche Routen über dieselben generischen
   Abläufe (`AdminResource`) abbilden.
-- Getrennte Zustände „gesperrt (umkehrbar)“ und „widerrufen (endgültig)“.
-- `If-Match` verpflichtend machen (`428 Precondition Required`) und die Prüfung in die
-  Store-Transaktion verlegen (instanzübergreifend dicht).
 - Paginierung in SQL statt im Speicher, sobald Mengen es erfordern.
 - Persistentes Bootstrap-Token (Hash in der DB) statt Erzeugung je Prozessstart.
-- Verweise ohne Fremdschlüssel auf Modellgruppen (`allowedModels` von Teams/Keys,
-  `LimitSpec.modelGroup`): Löschen oder Alias-Umbenennen lässt sie derzeit stehen (sie greifen
-  dann ins Leere bzw. bei Neuanlage desselben Namens wieder).
-- Deployments ohne Zugangsdaten-Anbieter-Gleichheit (z. B. OpenAI-Key für einen
-  `openai-compatible`-Endpunkt) sind derzeit nicht erlaubt.
 - Preisversionen mit `validFrom` in der Vergangenheit dürfen angelegt werden (Import
   historischer Preise); bereits berechnete Kosten im Request-Log ändern sich dadurch nicht.
-- AIGW-32 (Vorschläge, noch nicht entschieden): Höchstlaufzeit bzw. Pflichtablauf für
-  Admin-API-Keys; Verwaltung von Admin-Keys auch durch `org-admin` (nur im eigenen Bereich);
-  IdP-Gruppen bei jedem Request statt nur beim Login (Refresh-Token/Introspection).
+- AIGW-74 (Vorschläge, offen): Einladungen auch über die UI anlegen (AIGW-77); Einladungen
+  vorab je Rolle/Ablauf per GitOps (derzeit nur API); Höchstlaufzeit auch rückwirkend auf
+  bestehende Admin-Keys anwenden; ETag-Abgleich für Zugangsdaten zusätzlich über `keyId`.
 - AIGW-66 (Vorschläge, noch nicht entschieden): Aufbewahrungsfrist bzw. Archivierung des
   Audit-Logs; Manipulationsschutz (Hash-Kette über die Einträge); Löschen eines Admin-API-Keys
   zusätzlich als `revoke` statt `delete` benennen; einheitliche Schreibweise der Arten

@@ -485,6 +485,7 @@ async fn run(store: Store) {
             None,
             None,
             BTreeMap::from([("apiKey".to_owned(), Some(SecretString::new("sk-neu")))]),
+            aigw_store::Expect::Any,
         )
         .await
         .unwrap();

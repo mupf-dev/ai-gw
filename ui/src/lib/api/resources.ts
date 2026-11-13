@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Ressourcen der Admin-API mit den generierten Typen (docs/konzept/08-admin-api.md §2).
-import { action, listAll, patch, resource, unwrap, unwrapVersioned, type Schemas, type Versioned, api } from './client';
+import { action, etagFor, listAll, patch, resource, unwrap, unwrapVersioned, type Schemas, type Versioned, api } from './client';
 
 export type S = Schemas;
 export type Organization = S['Organization'];
@@ -34,8 +34,18 @@ export const apiKeys = {
   ...keysBase,
   /** Anlegen: Klartext nur in dieser Antwort. */
   createWithSecret: (input: S['ApiKeyInput']) => unwrapVersioned<S['CreatedApiKey']>(api.POST('/admin/api/v1/api-keys', { body: input })),
-  revoke: (name: string, etag?: string | null) => action<ApiKey>('api-keys', name, 'revoke', undefined, etag),
-  reactivate: (name: string, etag?: string | null) => action<ApiKey>('api-keys', name, 'reactivate', undefined, etag),
+  /** Vorübergehend sperren (F37, umkehrbar mit `resume`). */
+  suspend: (name: string, etag?: string | null) => action<ApiKey>('api-keys', name, 'suspend', undefined, etag),
+  /** Vorübergehende Sperre aufheben (F37). */
+  resume: (name: string, etag?: string | null) => action<ApiKey>('api-keys', name, 'resume', undefined, etag),
+  /** Endgültig widerrufen (F37) – nicht umkehrbar. */
+  revokePermanently: (name: string, etag?: string | null) => action<ApiKey>('api-keys', name, 'revoke', undefined, etag),
+  /**
+   * Bisherige Aufrufe der Seiten („Sperren“/„Entsperren“, umkehrbar gemeint) – bis zur Umstellung der Seiten
+   * (AIGW-77) auf die vorübergehende Sperre abgebildet, damit kein Key versehentlich endgültig widerrufen wird.
+   */
+  revoke: (name: string, etag?: string | null) => action<ApiKey>('api-keys', name, 'suspend', undefined, etag),
+  reactivate: (name: string, etag?: string | null) => action<ApiKey>('api-keys', name, 'resume', undefined, etag),
   rotate: (name: string, body: S['RotateApiKeyRequest'], etag?: string | null) => action<S['RotatedApiKey']>('api-keys', name, 'rotate', body, etag),
 };
 
@@ -45,12 +55,24 @@ export const credentials = {
   patch: (name: string, body: S['ProviderCredentialPatch'], etag?: string | null) => patch<Credential>('provider-credentials', name, body, etag),
 };
 
+const ADMIN_KEY = '/admin/api/v1/admin-api-keys/{name}';
 export const adminKeys = {
   list: async () => (await unwrap<S['AdminApiKeyList']>(api.GET('/admin/api/v1/admin-api-keys'))).items,
   create: (input: S['AdminApiKeyInput']) => unwrap<S['CreatedAdminApiKey']>(api.POST('/admin/api/v1/admin-api-keys', { body: input })),
-  update: (name: string, input: S['AdminApiKeyUpdate']) =>
-    unwrap<AdminApiKey>(api.PUT('/admin/api/v1/admin-api-keys/{name}', { params: { path: { name } }, body: input })),
-  remove: (name: string) => unwrap<void>(api.DELETE('/admin/api/v1/admin-api-keys/{name}', { params: { path: { name } } })),
+  get: (name: string) => unwrapVersioned<AdminApiKey>(api.GET('/admin/api/v1/admin-api-keys/{name}', { params: { path: { name } } })),
+  update: async (name: string, input: S['AdminApiKeyUpdate'], etag?: string | null) =>
+    unwrap<AdminApiKey>(
+      api.PUT('/admin/api/v1/admin-api-keys/{name}', {
+        params: { path: { name }, header: { 'If-Match': await etagFor(ADMIN_KEY, name, etag) } },
+        body: input,
+      }),
+    ),
+  remove: async (name: string, etag?: string | null) =>
+    unwrap<void>(
+      api.DELETE('/admin/api/v1/admin-api-keys/{name}', {
+        params: { path: { name }, header: { 'If-Match': await etagFor(ADMIN_KEY, name, etag) } },
+      }),
+    ),
 };
 
 export type { Versioned };

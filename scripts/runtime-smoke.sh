@@ -330,7 +330,14 @@ test "$FOUND" = 1
 cat "$TMP/pb3.json"; echo
 grep -q '"finish_reason":"content_filter"' "$TMP/pb3.json"
 if grep -q '4111' "$TMP/pb3.json"; then exit 1; fi
-curl -fsS -X DELETE "$CBASE/admin/api/v1/plugin-bindings/smoke-pii" -H "authorization: Bearer $TOKEN"
+echo "--- DELETE ohne If-Match → 428 (F38), mit ETag aus GET → 204"
+test "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$CBASE/admin/api/v1/plugin-bindings/smoke-pii" \
+  -H "authorization: Bearer $TOKEN")" = 428
+ETAG=$(curl -fsS -D - -o /dev/null "$CBASE/admin/api/v1/plugin-bindings/smoke-pii" \
+  -H "authorization: Bearer $TOKEN" | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: //p')
+test -n "$ETAG"
+curl -fsS -X DELETE "$CBASE/admin/api/v1/plugin-bindings/smoke-pii" -H "authorization: Bearer $TOKEN" \
+  -H "if-match: $ETAG"
 echo "--- Antwort-Cache (AIGW-39): zweite gleiche Anfrage mit temperature 0 = hit-exact"
 for i in 1 2; do
   curl -fsS -D "$TMP/c$i.txt" -o "$TMP/c$i.json" "$BASE/v1/chat/completions" \

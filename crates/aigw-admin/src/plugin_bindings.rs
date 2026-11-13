@@ -12,18 +12,25 @@
 //! - **Wirksame Steuerung (F148):** Die gelesene Darstellung enthält `effective` – den
 //!   wirksamen Fehlermodus (mit Herkunft: Bindung oder Standard der Plugin-Art), das
 //!   Zeitlimit und `outputRejectMode`, damit die UI sie anzeigen kann.
-//! - **Rechte:** Plugin-Bindungen sind sicherheitsrelevant (Guardrails, Webhooks) – lesen darf
-//!   jede wirksame Rolle, schreiben nur ein globaler `admin` (wie der Modellkatalog).
+//! - **Rechte (F183):** lesen darf jede wirksame Rolle. Schreiben je Ebene: `global` und
+//!   `model-group` nur globaler `admin` (wie der Modellkatalog); `organization` O: `admin` im
+//!   Bereich und `org-admin` von O; `team` T: zusätzlich `team-admin` von T; `api-key`: wie
+//!   der Key selbst (Team bzw. Organisation des Keys, F193).
+//! - **`locked` von oben:** Eingeschränkte Rollen dürfen eine von außen gesperrte Bindung
+//!   (`locked: true` auf einer äußeren Ebene desselben Plugins) weder mit `inherit: override`
+//!   noch `disable` aushebeln (`403`); sie wäre ohnehin wirkungslos.
 
 // `#[utoipa::path(params(…))]` erzeugt für IntoParams-Typen qualifizierte Pfade.
 #![allow(unused_qualifications)]
 
 use std::sync::LazyLock;
 
-use aigw_core::resource::{Id, JsonObject, Object, ObjectMeta, PluginBindingSpec};
+use aigw_core::resource::{
+    Id, JsonObject, Object, ObjectMeta, PluginBindingSpec, ScopeLevel, TeamSpec,
+};
 use aigw_core::upstream::UpstreamPolicy;
 use aigw_proxy::PluginRegistry as Registry;
-use aigw_store::ListFilter;
+use aigw_store::{ListFilter, WriteExtras};
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Extension, Path, Query, State};
@@ -32,7 +39,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::AdminState;
-use crate::auth::{Principal, Target};
+use crate::auth::{Permission, Principal, Target};
+use crate::bounds::BoundsQuery;
 use crate::problem::Problem;
 use crate::resources::{
     AdminResource, ApiResult, ListArgs, St, create_impl, delete_impl, get_impl, json_with,
@@ -134,6 +142,7 @@ plain_resource!(
         put_plugin_binding,
         delete_plugin_binding
     ],
+    bounds = BoundsQuery,
     res_extra = [
         /// Wirksame Kettensteuerung (F148; fehlt bei ungültiger Bindung).
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,6 +157,10 @@ impl AdminResource for PluginBindingSpec {
 
     fn target(_name: &str, _spec: &Self) -> Target {
         Target::Catalog
+    }
+
+    async fn target_for(st: &AdminState, _name: &str, spec: &Self) -> Result<Target, Problem> {
+        binding_target(st, spec).await
     }
 
     fn list_args(q: &Self::Query) -> ListArgs<'_> {
@@ -167,6 +180,23 @@ impl AdminResource for PluginBindingSpec {
         Ok(f)
     }
 
+    async fn bounds(
+        st: &AdminState,
+        p: &Principal,
+        _name: &str,
+        spec: &Self,
+        _current: Option<&Object<Self>>,
+        q: &BoundsQuery,
+    ) -> Result<WriteExtras, Problem> {
+        if q.force.is_some() || q.cascade.is_some() {
+            return Err(Problem::bad_request(
+                "force/cascade gibt es bei Plugin-Bindungen nicht",
+            ));
+        }
+        respect_locked(st, p, spec).await?;
+        Ok(WriteExtras::default())
+    }
+
     async fn check(
         st: &AdminState,
         _name: &str,
@@ -174,6 +204,103 @@ impl AdminResource for PluginBindingSpec {
         _current: Option<&Object<Self>>,
     ) -> Result<(), Problem> {
         check(&st.upstreams, &spec.plugin, &spec.config).map_err(Problem::invalid)
+    }
+}
+
+/// RBAC-Ziel einer Bindung je Ebene (F183). Unbekanntes Ziel → `422`.
+async fn binding_target(st: &AdminState, spec: &PluginBindingSpec) -> Result<Target, Problem> {
+    let name = || {
+        spec.scope
+            .target
+            .clone()
+            .filter(|t| !t.is_empty())
+            .ok_or_else(|| Problem::invalid("scope.target: Pflicht auf dieser Ebene"))
+    };
+    match spec.scope.level {
+        ScopeLevel::Global | ScopeLevel::ModelGroup => Ok(Target::Catalog),
+        ScopeLevel::Organization => Ok(Target::InOrganization(name()?)),
+        ScopeLevel::Team => {
+            let t = name()?;
+            match st.store.get::<TeamSpec>(&t).await {
+                Ok(team) => Ok(Target::in_team(team.spec.organization, t)),
+                Err(aigw_store::StoreError::NotFound { .. }) => Err(Problem::invalid(format!(
+                    "scope.target: unbekanntes Team {t:?}"
+                ))),
+                Err(e) => Err(e.into()),
+            }
+        }
+        ScopeLevel::ApiKey => {
+            let k = name()?;
+            match st.store.get_api_key(&k).await {
+                Ok(key) => crate::resources::key_target(&st.store, &key.spec).await,
+                Err(aigw_store::StoreError::NotFound { .. }) => Err(Problem::invalid(format!(
+                    "scope.target: unbekannter API-Key {k:?}"
+                ))),
+                Err(e) => Err(e.into()),
+            }
+        }
+    }
+}
+
+/// `inherit` einer Bindung (`append` Standard).
+fn inherit_of(config: &JsonObject) -> &str {
+    config
+        .get("inherit")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("append")
+}
+
+/// F183: Eingeschränkte Rollen dürfen eine auf einer äußeren Ebene gesperrte Bindung desselben
+/// Plugins nicht per `override`/`disable` aushebeln. Äußere Ebenen: global, Organisation,
+/// Team (je nach Ziel der Bindung).
+async fn respect_locked(
+    st: &AdminState,
+    p: &Principal,
+    spec: &PluginBindingSpec,
+) -> Result<(), Problem> {
+    if p.can(Permission::Write, &Target::Catalog)
+        || !matches!(inherit_of(&spec.config), "override" | "disable")
+    {
+        return Ok(());
+    }
+    // Äußere Ebenen des Ziels (Ebene, Name).
+    let mut outer: Vec<(ScopeLevel, Option<String>)> = vec![(ScopeLevel::Global, None)];
+    match binding_target(st, spec).await? {
+        Target::InOrganization(o) if spec.scope.level == ScopeLevel::ApiKey => {
+            outer.push((ScopeLevel::Organization, Some(o)));
+        }
+        Target::InTeam { organization, team } => {
+            outer.push((ScopeLevel::Organization, Some(organization)));
+            if spec.scope.level == ScopeLevel::ApiKey {
+                outer.push((ScopeLevel::Team, Some(team)));
+            }
+        }
+        _ => {}
+    }
+    let locked: Vec<String> = st
+        .store
+        .list::<PluginBindingSpec>()
+        .await?
+        .into_iter()
+        .filter(|b| {
+            b.spec.plugin == spec.plugin
+                && b.spec.enabled
+                && b.spec.config.get("locked") == Some(&serde_json::Value::Bool(true))
+                && outer.iter().any(|(l, t)| {
+                    b.spec.scope.level == *l && (t.is_none() || b.spec.scope.target == *t)
+                })
+        })
+        .map(|b| b.metadata.name)
+        .collect();
+    if locked.is_empty() {
+        Ok(())
+    } else {
+        Err(Problem::forbidden(format!(
+            "Plugin {:?} ist auf einer äußeren Ebene gesperrt (locked: {locked:?}) – \
+             inherit: {} ist hier nicht erlaubt",
+            spec.plugin,
+            inherit_of(&spec.config)
+        )))
     }
 }
 

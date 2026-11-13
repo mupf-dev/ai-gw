@@ -121,6 +121,8 @@ pub struct UpstreamPolicy {
     private: Vec<HostRule>,
     /// `admin.allow_mock: false` (F85).
     deny_mock: bool,
+    /// `upstream.ca_dir` (F177): einziges Verzeichnis für `settings.caFile`.
+    ca_dir: Option<std::path::PathBuf>,
 }
 
 impl UpstreamPolicy {
@@ -140,7 +142,20 @@ impl UpstreamPolicy {
             insecure: parse("allow_insecure_upstreams", &cfg.allow_insecure_upstreams)?,
             private: parse("allow_private_upstreams", &cfg.allow_private_upstreams)?,
             deny_mock: !cfg.allow_mock,
+            ca_dir: None,
         })
+    }
+
+    /// Verzeichnis für `settings.caFile` (`upstream.ca_dir`, F177); ohne ist `caFile` verboten.
+    #[must_use]
+    pub fn with_ca_dir(mut self, dir: Option<std::path::PathBuf>) -> Self {
+        self.ca_dir = dir;
+        self
+    }
+
+    /// `upstream.ca_dir` (F177).
+    pub fn ca_dir(&self) -> Option<&std::path::Path> {
+        self.ca_dir.as_deref()
     }
 
     /// Sind Deployments mit `provider: mock` erlaubt (`admin.allow_mock`, F85)?

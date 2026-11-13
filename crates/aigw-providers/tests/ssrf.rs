@@ -146,9 +146,32 @@ async fn provider_connects_to_allowed_hosts() {
 async fn deployment_ca_file_must_be_readable() {
     let (addr, _) = fake_openai().await;
     let dep = deployment(addr.port(), json!({"caFile": "/nonexistent/aigw-ca.pem"}));
+    // Ohne upstream.ca_dir ist caFile verboten (F177).
     let err = Upstream::from_deployment(&dep, &Registry::with_builtin(), &client(policy(&[HOST])))
         .unwrap_err()
         .to_string();
     assert!(err.contains("settings.caFile"), "{err}");
-    assert!(err.contains("/nonexistent/aigw-ca.pem"), "{err}");
+    assert!(err.contains("ca_dir"), "{err}");
+    // Mit ca_dir: Datei außerhalb bzw. fehlend wird abgelehnt, Symlink hinaus ebenso.
+    let root = std::env::temp_dir().join(format!("aigw-ssrf-ca-{}", std::process::id()));
+    let dir = root.join("ca");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(root.join("outside.pem"), "x").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(root.join("outside.pem"), dir.join("link.pem")).unwrap();
+    let with_dir = client(policy(&[HOST])).with_ca_dir(Some(dir.clone()));
+    for (path, needle) in [
+        ("/nonexistent/aigw-ca.pem", "nicht im erlaubten Verzeichnis"),
+        ("fehlt.pem", "fehlt.pem"),
+        #[cfg(unix)]
+        ("link.pem", "Symlink"),
+    ] {
+        let dep = deployment(addr.port(), json!({ "caFile": path }));
+        let err = Upstream::from_deployment(&dep, &Registry::with_builtin(), &with_dir)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("settings.caFile"), "{err}");
+        assert!(err.contains(needle), "{path}: {err}");
+    }
+    std::fs::remove_dir_all(&root).unwrap();
 }

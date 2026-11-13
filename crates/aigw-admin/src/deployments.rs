@@ -117,6 +117,14 @@ impl AdminResource for DeploymentSpec {
         _current: Option<&Object<Self>>,
     ) -> Result<(), Problem> {
         validate::deployment(&st.upstreams, spec).map_err(Problem::invalid)?;
+        // F177: die CA-Datei muss (nach Auflösen von Symlinks) in upstream.ca_dir liegen und
+        // lesbar sein – geprüft auf dem Gateway selbst (GitOps per CLI prüft nur textuell).
+        if let (Some(dir), Some(serde_json::Value::String(ca))) =
+            (st.upstreams.ca_dir(), spec.settings.get("caFile"))
+        {
+            aigw_core::paths::resolve_within(dir, ca)
+                .map_err(|e| Problem::invalid(format!("settings.caFile: {e}")))?;
+        }
         if let Some(cred) = &spec.credential {
             // Unbekannte Zugangsdaten → 422 (wie andere Verweise).
             let c = st.store.get_credential(cred).await.map_err(|e| match e {

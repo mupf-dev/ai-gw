@@ -241,6 +241,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -304,8 +313,28 @@
               }
             }
           },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Ungültige Eingabe",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -339,6 +368,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -367,6 +405,26 @@
           },
           "404": {
             "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1225,13 +1283,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
@@ -1332,6 +1387,16 @@
                 }
               }
             }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1362,13 +1427,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -1415,6 +1477,16 @@
                 }
               }
             }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1427,13 +1499,13 @@
         ]
       }
     },
-    "/admin/api/v1/api-keys/{name}/reactivate": {
+    "/admin/api/v1/api-keys/{name}/resume": {
       "post": {
         "tags": [
           "api-keys"
         ],
-        "summary": "Entsperrt einen gesperrten API-Key.",
-        "operationId": "reactivate_api_key",
+        "summary": "Hebt die vorübergehende Sperre eines API-Keys auf (F37; widerrufene Keys: `409`).",
+        "operationId": "resume_api_key",
         "parameters": [
           {
             "name": "name",
@@ -1447,13 +1519,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -1506,8 +1575,28 @@
               }
             }
           },
+          "409": {
+            "description": "Key ist widerrufen (endgültig)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "412": {
             "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1532,7 +1621,7 @@
         "tags": [
           "api-keys"
         ],
-        "summary": "Sperrt einen API-Key (wirkt nach dem nächsten Snapshot-Neubau, i. d. R. < 1 s).",
+        "summary": "Widerruft einen API-Key **endgültig** (F37; wirkt nach dem nächsten Snapshot-Neubau,\ni. d. R. < 1 s). Ein widerrufener Key lässt sich weder fortsetzen noch ändern oder\nrotieren, nur löschen.",
         "operationId": "revoke_api_key",
         "parameters": [
           {
@@ -1547,19 +1636,16 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Gesperrt",
+            "description": "Widerrufen",
             "headers": {
               "ETag": {
                 "schema": {
@@ -1615,6 +1701,16 @@
                 }
               }
             }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1647,13 +1743,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -1739,6 +1832,133 @@
           },
           "412": {
             "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/api-keys/{name}/suspend": {
+      "post": {
+        "tags": [
+          "api-keys"
+        ],
+        "summary": "Sperrt einen API-Key vorübergehend (F37, umkehrbar mit `resume`).",
+        "operationId": "suspend_api_key",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gesperrt",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Neue Version"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKey"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Key ist widerrufen (endgültig)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1966,7 +2186,7 @@
           {
             "name": "apiKeys",
             "in": "query",
-            "description": "Umgang mit API-Keys (`include` | `ignore`).",
+            "description": "Umgang mit API-Keys (`ignore` = Standard, F4 | `include`).",
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/ApiKeyMode"
@@ -2067,7 +2287,7 @@
           {
             "name": "apiKeys",
             "in": "query",
-            "description": "`include` (Standard): API-Keys ohne Klartext exportieren; `ignore`: weglassen.",
+            "description": "`ignore` (Standard, F4): API-Keys weglassen; `include`: ohne Klartext exportieren.",
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/ApiKeyMode"
@@ -2454,13 +2674,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -2562,6 +2779,16 @@
                 }
               }
             }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2591,13 +2818,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -2647,6 +2871,16 @@
           },
           "412": {
             "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2989,13 +3223,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -3087,6 +3318,16 @@
                 }
               }
             }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3117,13 +3358,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -3163,6 +3401,16 @@
           },
           "412": {
             "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3501,13 +3749,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -3609,6 +3854,16 @@
                 }
               }
             }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3638,13 +3893,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -3694,6 +3946,16 @@
           },
           "412": {
             "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3815,6 +4077,26 @@
           "model-groups"
         ],
         "operationId": "create_model_group",
+        "parameters": [
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cascade",
+            "in": "query",
+            "description": "Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Cascade"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4005,13 +4287,28 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`).",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cascade",
+            "in": "query",
+            "description": "Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Cascade"
             }
           }
         ],
@@ -4113,6 +4410,16 @@
                 }
               }
             }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -4142,13 +4449,28 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`).",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cascade",
+            "in": "query",
+            "description": "Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Cascade"
             }
           }
         ],
@@ -4198,6 +4520,16 @@
           },
           "412": {
             "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4529,13 +4861,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
@@ -4655,6 +4984,16 @@
                 }
               }
             }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -4684,13 +5023,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -4740,6 +5076,16 @@
           },
           "412": {
             "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4888,6 +5234,26 @@
           "plugin-bindings"
         ],
         "operationId": "create_plugin_binding",
+        "parameters": [
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cascade",
+            "in": "query",
+            "description": "Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Cascade"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5078,13 +5444,28 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`).",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cascade",
+            "in": "query",
+            "description": "Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Cascade"
             }
           }
         ],
@@ -5186,6 +5567,16 @@
                 }
               }
             }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -5215,13 +5606,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -5271,6 +5659,16 @@
           },
           "412": {
             "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5610,13 +6008,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -5718,6 +6113,16 @@
                 }
               }
             }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -5747,13 +6152,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -5803,6 +6205,16 @@
           },
           "412": {
             "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6127,13 +6539,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -6235,6 +6644,16 @@
                 }
               }
             }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -6265,13 +6684,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -6328,6 +6744,16 @@
                 }
               }
             }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -6358,13 +6784,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -6459,6 +6882,16 @@
           },
           "422": {
             "description": "Ungültige Eingabe",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7195,13 +7628,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
@@ -7321,6 +7751,16 @@
                 }
               }
             }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -7350,13 +7790,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -7406,6 +7843,16 @@
           },
           "412": {
             "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7796,13 +8243,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -7904,6 +8348,16 @@
                 }
               }
             }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -7933,13 +8387,10 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
-            "required": false,
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -7989,6 +8440,225 @@
           },
           "412": {
             "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/users/{name}/invitation": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Zeigt die offene Einladung eines Nutzers (ohne Link).",
+        "operationId": "get_invitation",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name des Nutzers",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Offene Einladung",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invitation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nutzer oder Einladung nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Erstellt einen Einladungslink für einen vorab angelegten Nutzer (F90): einmalig, gültig\n`admin.auth.oidc.invite_ttl_secs`; ersetzt eine frühere Einladung. Beim Login über den Link\nwird die OIDC-Identität (Issuer + Kennung) mit dem Nutzer verknüpft.",
+        "operationId": "create_invitation",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name des Nutzers",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Einladung erstellt (Link nur in dieser Antwort)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedInvitation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nutzer nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "OIDC nicht konfiguriert oder Nutzer bereits verknüpft",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Widerruft die offene Einladung eines Nutzers.",
+        "operationId": "delete_invitation",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name des Nutzers",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Widerrufen"
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nutzer oder Einladung nicht gefunden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8076,7 +8746,7 @@
         ],
         "responses": {
           "303": {
-            "description": "Angemeldet (setzt das Session-Cookie) und weiter zu `returnTo`; bei Fehlern weiter zu `/admin/?auth_error=<code>` (`idp`, `state`, `token`, `no-access`, `internal`)"
+            "description": "Angemeldet (setzt das Session-Cookie) und weiter zu `returnTo`; bei Fehlern weiter zu `/admin/?auth_error=<code>` (`idp`, `state`, `token`, `invite`, `no-access`, `internal`)"
           }
         }
       }
@@ -8093,6 +8763,15 @@
             "name": "returnTo",
             "in": "query",
             "description": "Ziel nach dem Login (Pfad unter `/admin/`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "invite",
+            "in": "query",
+            "description": "Einladungs-Token (F90, aus dem Einladungslink).",
             "required": false,
             "schema": {
               "type": "string"
@@ -8548,6 +9227,7 @@
         "description": "Zustand eines API-Keys.",
         "enum": [
           "active",
+          "suspended",
           "revoked"
         ]
       },
@@ -8775,9 +9455,15 @@
         "type": "object",
         "description": "Anmeldeverfahren und – falls angemeldet – der Principal (ohne Anmeldung abrufbar, immer\n`200`; so prüft die UI beim Start ohne `401` in der Browser-Konsole).",
         "required": [
-          "oidc"
+          "oidc",
+          "readOnly",
+          "bootstrap"
         ],
         "properties": {
+          "bootstrap": {
+            "type": "boolean",
+            "description": "Das Bootstrap-Token ist aktiv (F56) – die UI zeigt einen Warnhinweis (Notfallzugang\nabschalten: OIDC-Admin anmelden bzw. Admin-API-Key mit Rolle `admin` anlegen)."
+          },
           "loginUrl": {
             "type": [
               "string",
@@ -8788,6 +9474,10 @@
           "oidc": {
             "type": "boolean",
             "description": "OIDC-Login konfiguriert."
+          },
+          "readOnly": {
+            "type": "boolean",
+            "description": "Modus „nur YAML“ (`gitops.read_only_admin`, F56): Schreibrouten antworten mit `403`,\nÄnderungen nur per GitOps – die UI blendet Schreibaktionen aus."
           },
           "session": {
             "oneOf": [
@@ -9013,7 +9703,8 @@
         "description": "Umgang mit bestehenden Objekten über einer gesenkten Grenze.",
         "enum": [
           "reject",
-          "clamp"
+          "clamp",
+          "remove"
         ]
       },
       "Change": {
@@ -9098,6 +9789,24 @@
           "secret": {
             "type": "string",
             "description": "Klartext `sk-aigw-…` (nicht wiederherstellbar)."
+          }
+        }
+      },
+      "CreatedInvitation": {
+        "type": "object",
+        "description": "Neu erstellte Einladung samt Link (nur in dieser Antwort).",
+        "required": [
+          "invitation",
+          "url"
+        ],
+        "properties": {
+          "invitation": {
+            "$ref": "#/components/schemas/Invitation",
+            "description": "Einladung."
+          },
+          "url": {
+            "type": "string",
+            "description": "Einladungslink (einmalig, bis `expiresAt`): an den Nutzer weitergeben."
           }
         }
       },
@@ -9399,6 +10108,41 @@
           "secret": {
             "type": "boolean",
             "description": "Geheimer Wert: nur „geändert“, nie der Inhalt."
+          }
+        }
+      },
+      "Invitation": {
+        "type": "object",
+        "description": "Einladung eines Nutzers (ohne Token).",
+        "required": [
+          "user",
+          "createdBy",
+          "createdAt",
+          "expiresAt",
+          "expired"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Erstellt."
+          },
+          "createdBy": {
+            "type": "string",
+            "description": "Erstellt von (Audit-Akteur)."
+          },
+          "expired": {
+            "type": "boolean",
+            "description": "Abgelaufen (nicht mehr einlösbar)."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Gültig bis."
+          },
+          "user": {
+            "type": "string",
+            "description": "Nutzer (Name)."
           }
         }
       },
@@ -10855,7 +11599,8 @@
           "org-admin",
           "team-admin",
           "viewer",
-          "auditor"
+          "auditor",
+          "gitops"
         ]
       },
       "RoleBinding": {
@@ -11636,7 +12381,7 @@
               "string",
               "null"
             ],
-            "description": "OIDC-Subjekt (`sub`)."
+            "description": "Unveränderliche OIDC-Kennung beim Issuer: Wert des Claims\n`admin.auth.oidc.identity_claim` (Standard `sub`; Profil `entra`: `oid`, F90). Kann vorab\ngesetzt werden (Nutzer anlegen, bevor er sich das erste Mal anmeldet)."
           },
           "roles": {
             "type": "array",

@@ -146,7 +146,7 @@ pub struct AuditEvent {
 }
 
 /// `INSERT` eines Ereignisses mit der Konfigurationsversion `version`.
-fn event_query(ev: &AuditEvent, version: i64) -> Q {
+pub(crate) fn event_query(ev: &AuditEvent, version: i64) -> Q {
     Q::new(
         "INSERT INTO audit_log (id, at, actor, action, kind, object_id, object_name, config_version,
                                 before_json, after_json)

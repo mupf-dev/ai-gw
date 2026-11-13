@@ -40,14 +40,16 @@ async fn app(read_only_mode: bool) -> (Router, Store) {
     store.migrate().await.unwrap();
     let (master, _) = MasterKey::generate().unwrap();
     let auth: Arc<dyn AdminAuthenticator> = Arc::new(BootstrapToken::new(TOKEN).unwrap());
-    let router = router_with(AdminState::new(store.clone(), Arc::clone(&auth))).merge(
-        gitops_router(GitopsState {
-            store: store.clone(),
-            keyring: Arc::new(Keyring::new(master)),
-            auth,
-            upstreams: aigw_admin::UpstreamPolicy::strict(),
-        }),
-    );
+    let router = router_with(
+        AdminState::new(store.clone(), Arc::clone(&auth)).with_read_only(read_only_mode),
+    )
+    .merge(gitops_router(GitopsState {
+        store: store.clone(),
+        keyring: Arc::new(Keyring::new(master)),
+        auth,
+        upstreams: aigw_admin::UpstreamPolicy::strict(),
+        secret_dir: None,
+    }));
     (read_only::apply(router, read_only_mode), store)
 }
 
@@ -69,7 +71,11 @@ async fn call(
         }
         None => Body::empty(),
     };
-    let res = app.clone().oneshot(req.body(body).unwrap()).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(with_if_match(req).body(body).unwrap())
+        .await
+        .unwrap();
     let status = res.status();
     let ct = res
         .headers()
@@ -223,4 +229,33 @@ async fn read_only_mode_blocks_admin_writes_but_not_gitops() {
     let (s, _, b) = call(&app, Method::GET, "/admin/api/v1/organizations", None, true).await;
     assert_eq!(s, StatusCode::OK);
     assert!(b.contains("acme"));
+    // F56: die UI erfährt den Modus über auth/info (ohne Anmeldung abrufbar).
+    let (s, _, b) = call(&app, Method::GET, "/admin/api/v1/auth/info", None, false).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(json(&b)["readOnly"], true);
+    assert_eq!(json(&b)["bootstrap"], false);
+}
+
+/// F38: `If-Match` ist Pflicht – Anfragen ohne eigenen ETag schreiben hier mit `If-Match: *`
+/// (eigene Tests prüfen 428/412 ausdrücklich).
+fn with_if_match(req: axum::http::request::Builder) -> axum::http::request::Builder {
+    use axum::http::Method as M;
+    let action = req.uri_ref().is_some_and(|u| {
+        let p = u.path();
+        ["/revoke", "/suspend", "/resume", "/rotate"]
+            .iter()
+            .any(|s| p.ends_with(s))
+    });
+    let write = req
+        .method_ref()
+        .is_some_and(|m| matches!(*m, M::PUT | M::PATCH | M::DELETE) || (*m == M::POST && action));
+    if write
+        && !req
+            .headers_ref()
+            .is_some_and(|h| h.contains_key("if-match"))
+    {
+        req.header("if-match", "*")
+    } else {
+        req
+    }
 }

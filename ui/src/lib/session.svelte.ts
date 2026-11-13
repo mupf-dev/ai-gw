@@ -36,6 +36,7 @@ const AUTH_ERRORS: Record<string, string> = {
   token: 'Der Identitätsanbieter hat kein gültiges Token geliefert.',
   idp: 'Der Identitätsanbieter hat die Anmeldung abgelehnt.',
   internal: 'Interner Fehler – Details im Server-Log.',
+  invite: 'Einladungslink ungültig, abgelaufen oder bereits verwendet.',
 };
 
 export const ROLE_LABEL: Record<RoleBinding['role'], string> = {
@@ -44,6 +45,7 @@ export const ROLE_LABEL: Record<RoleBinding['role'], string> = {
   'team-admin': 'Team-Admin',
   viewer: 'Betrachter',
   auditor: 'Auditor',
+  gitops: 'GitOps (CI)',
 };
 
 export const METHOD_LABEL: Record<string, string> = {

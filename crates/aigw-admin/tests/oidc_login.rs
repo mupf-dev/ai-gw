@@ -155,6 +155,8 @@ struct IdpUser {
     name: Option<String>,
     username: Option<String>,
     groups: Vec<String>,
+    /// Weitere Claims (z. B. `oid`, `tid` für Entra, F90).
+    extra: Vec<(String, String)>,
 }
 
 fn user(sub: &str, groups: &[&str]) -> IdpUser {
@@ -165,6 +167,7 @@ fn user(sub: &str, groups: &[&str]) -> IdpUser {
         name: Some(sub.to_uppercase()),
         username: Some(sub.into()),
         groups: groups.iter().map(|g| (*g).to_owned()).collect(),
+        extra: Vec::new(),
     }
 }
 
@@ -244,6 +247,9 @@ impl Idp {
         }
         if let Some(n) = &g.user.username {
             c["preferred_username"] = json!(n);
+        }
+        for (k, v) in &g.user.extra {
+            c[k.as_str()] = json!(v);
         }
         match tamper {
             Tamper::WrongAud => c["aud"] = json!("someone-else"),
@@ -374,6 +380,17 @@ impl Resp {
         })
     }
 
+    fn header(&self, name: &str) -> String {
+        self.headers
+            .get(name)
+            .map(|v| v.to_str().unwrap().to_owned())
+            .unwrap_or_default()
+    }
+
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.body).into_owned()
+    }
+
     fn location(&self) -> String {
         self.headers
             .get("location")
@@ -429,7 +446,7 @@ async fn send(method: Method, url: &str, headers: &[(&str, &str)], body: Option<
         None => Bytes::new(),
     };
     let res = client
-        .request(req.body(Full::new(body)).unwrap())
+        .request(with_if_match(req).body(Full::new(body)).unwrap())
         .await
         .unwrap();
     let status = res.status();
@@ -489,10 +506,21 @@ fn group_roles() -> Vec<GroupRoleMapping> {
 
 impl Gw {
     async fn start(store: Store, db_url: &str, idp: &Idp, mode: BootstrapMode) -> Self {
+        // Die Szenarien prüfen auch die (seit F90 abgeschaltete) E-Mail-Verknüpfung.
+        Self::start_with(store, db_url, idp, mode, |c| c.oidc.link_by_email = true).await
+    }
+
+    async fn start_with(
+        store: Store,
+        db_url: &str,
+        idp: &Idp,
+        mode: BootstrapMode,
+        adjust: impl FnOnce(&mut AdminAuthConfig),
+    ) -> Self {
         store.migrate().await.unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let cfg = AdminAuthConfig {
+        let mut cfg = AdminAuthConfig {
             bootstrap: mode,
             oidc: OidcConfig {
                 issuer: Some(idp.issuer.clone()),
@@ -503,6 +531,7 @@ impl Gw {
             },
             ..AdminAuthConfig::default()
         };
+        adjust(&mut cfg);
         let (token, secret) = aigw_admin::BootstrapToken::generate().unwrap();
         let state =
             AdminState::from_config(store.clone(), &cfg, Some(token), Some(CLIENT_SECRET.into()))
@@ -573,18 +602,33 @@ impl Gw {
         u: IdpUser,
         return_to: &str,
     ) -> Result<(Session, String), String> {
+        let path = format!(
+            "/admin/auth/login?returnTo={}",
+            url::form_urlencoded::byte_serialize(return_to.as_bytes()).collect::<String>()
+        );
+        self.login_path(idp, u, &path).await
+    }
+
+    /// Login über einen Einladungslink (F90).
+    async fn login_invite(&self, idp: &Idp, u: IdpUser, token: &str) -> Result<Session, String> {
+        self.login_path(idp, u, &format!("/admin/auth/login?invite={token}"))
+            .await
+            .map(|(s, _)| s)
+    }
+
+    async fn login_path(
+        &self,
+        idp: &Idp,
+        u: IdpUser,
+        path: &str,
+    ) -> Result<(Session, String), String> {
         idp.set_user(u);
-        let r = send(
-            Method::GET,
-            &self.url(&format!(
-                "/admin/auth/login?returnTo={}",
-                url::form_urlencoded::byte_serialize(return_to.as_bytes()).collect::<String>()
-            )),
-            &[],
-            None,
-        )
-        .await
-        .expect(StatusCode::SEE_OTHER);
+        let r = send(Method::GET, &self.url(path), &[], None)
+            .await
+            .expect(StatusCode::SEE_OTHER);
+        if let Some(code) = r.location().strip_prefix("/admin/?auth_error=") {
+            return Err(code.to_owned());
+        }
         let (login_cookie, full) = r.cookie("__Secure-aigw-login").expect("Login-Cookie");
         for part in ["HttpOnly", "Secure", "SameSite=Lax", "Path=/admin/auth"] {
             assert!(full.contains(part), "{full}");
@@ -745,7 +789,11 @@ async fn scenario(store: Store, db_url: &str) {
         .await
         .expect(StatusCode::OK)
         .json();
-    assert_eq!(info, json!({"oidc": true, "loginUrl": "/admin/auth/login"}));
+    // F56: readOnly + bootstrap (Bootstrap-Token aktiv, solange kein OIDC-Admin angemeldet war)
+    assert_eq!(
+        info,
+        json!({"oidc": true, "loginUrl": "/admin/auth/login", "readOnly": false, "bootstrap": true})
+    );
     send(Method::GET, &gw.url("/admin/api/v1/session"), &[], None)
         .await
         .expect(StatusCode::UNAUTHORIZED);
@@ -1505,6 +1553,305 @@ async fn oidc_login_postgres() {
         .unwrap();
 }
 
+/// F90 (Identität = Issuer + Kennung, vorab angelegte Nutzer, Einladungslinks, Entra-Profil,
+/// E-Mail-Verknüpfung standardmäßig aus) und F113 (Login/Logout nur mit Audit-Eintrag).
+async fn identity_scenario(store: Store, db_url: &str) {
+    let idp = Idp::start(Alg::Es256).await;
+    // Standardkonfiguration: link_by_email aus, audit_required an.
+    let gw = Gw::start_with(store.clone(), db_url, &idp, BootstrapMode::On, |_| {}).await;
+    let viewer = json!([{"role": "viewer"}]);
+    let mk_user = |name: &str, spec: Value| json!({"metadata": {"name": name}, "spec": spec});
+
+    // Vorab angelegt mit Issuer + Kennung → erster Login trifft diesen Nutzer.
+    gw.boot(
+        Method::POST,
+        "/users",
+        Some(mk_user(
+            "bob",
+            json!({"oidcIssuer": idp.issuer, "oidcSubject": "bob-sub", "roles": viewer}),
+        )),
+    )
+    .await
+    .expect(StatusCode::CREATED);
+    // Nur eine Hälfte der Identität → 422.
+    gw.boot(
+        Method::POST,
+        "/users",
+        Some(mk_user("halb", json!({"oidcSubject": "x"}))),
+    )
+    .await
+    .expect(StatusCode::UNPROCESSABLE_ENTITY);
+    let bob = gw.login(&idp, user("bob-sub", &[])).await.unwrap();
+    assert_eq!(bob.info["subject"], "user:bob");
+
+    // E-Mail-Verknüpfung ist standardmäßig aus: vorab angelegt nur mit E-Mail → kein Zugang.
+    gw.boot(
+        Method::POST,
+        "/users",
+        Some(mk_user(
+            "carol",
+            json!({"email": "carol@example.org", "roles": viewer}),
+        )),
+    )
+    .await
+    .expect(StatusCode::CREATED);
+    assert_eq!(
+        gw.login(&idp, user("carol", &[])).await.unwrap_err(),
+        "no-access"
+    );
+
+    // Einladungslink: einmalig, verknüpft die Identität mit carol.
+    let inv = gw
+        .boot(Method::POST, "/users/carol/invitation", None)
+        .await
+        .expect(StatusCode::CREATED);
+    assert_eq!(inv.header("cache-control"), "no-store");
+    let inv = inv.json();
+    let url = inv["url"].as_str().unwrap().to_owned();
+    assert!(
+        url.starts_with(&gw.url("/admin/auth/login?invite=")),
+        "{url}"
+    );
+    let token = url.rsplit_once("invite=").unwrap().1.to_owned();
+    assert_eq!(inv["invitation"]["user"], "carol");
+    assert_eq!(inv["invitation"]["expired"], false);
+    let shown = gw
+        .boot(Method::GET, "/users/carol/invitation", None)
+        .await
+        .expect(StatusCode::OK);
+    assert!(!shown.text().contains(&token));
+    let carol = gw
+        .login_invite(&idp, user("carol-sub", &[]), &token)
+        .await
+        .unwrap();
+    assert_eq!(carol.info["subject"], "user:carol");
+    let u = gw
+        .boot(Method::GET, "/users/carol", None)
+        .await
+        .expect(StatusCode::OK)
+        .json();
+    assert_eq!(u["spec"]["oidcSubject"], "carol-sub");
+    assert_eq!(u["spec"]["oidcIssuer"], json!(idp.issuer));
+    // einmalig; verknüpfter Nutzer bekommt keine neue Einladung
+    assert_eq!(
+        gw.login_invite(&idp, user("carol-sub", &[]), &token)
+            .await
+            .unwrap_err(),
+        "invite"
+    );
+    gw.boot(Method::POST, "/users/carol/invitation", None)
+        .await
+        .expect(StatusCode::CONFLICT);
+    // danach normaler Login über die Identität
+    gw.login(&idp, user("carol-sub", &[])).await.unwrap();
+
+    // Einladung, aber die Identität gehört schon einem anderen Nutzer → abgelehnt.
+    gw.boot(
+        Method::POST,
+        "/users",
+        Some(mk_user("dave", json!({"roles": viewer}))),
+    )
+    .await
+    .expect(StatusCode::CREATED);
+    let dave_url = gw
+        .boot(Method::POST, "/users/dave/invitation", None)
+        .await
+        .expect(StatusCode::CREATED)
+        .json()["url"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let dave_token = dave_url.rsplit_once("invite=").unwrap().1.to_owned();
+    assert_eq!(
+        gw.login_invite(&idp, user("bob-sub", &[]), &dave_token)
+            .await
+            .unwrap_err(),
+        "invite"
+    );
+
+    // Abgelaufene bzw. widerrufene Einladung → auth_error=invite schon beim Start.
+    gw.boot(
+        Method::POST,
+        "/users",
+        Some(mk_user("erin", json!({"roles": viewer}))),
+    )
+    .await
+    .expect(StatusCode::CREATED);
+    let erin_url = gw
+        .boot(Method::POST, "/users/erin/invitation", None)
+        .await
+        .expect(StatusCode::CREATED)
+        .json()["url"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let erin_token = erin_url.rsplit_once("invite=").unwrap().1.to_owned();
+    gw.sql("UPDATE admin_invitation SET expires_at = {PAST}")
+        .await;
+    assert_eq!(
+        gw.login_invite(&idp, user("erin-sub", &[]), &erin_token)
+            .await
+            .unwrap_err(),
+        "invite"
+    );
+    let r = gw
+        .boot(Method::GET, "/users/erin/invitation", None)
+        .await
+        .expect(StatusCode::OK)
+        .json();
+    assert_eq!(r["expired"], true);
+    gw.boot(Method::DELETE, "/users/erin/invitation", None)
+        .await
+        .expect(StatusCode::NO_CONTENT);
+    gw.boot(Method::DELETE, "/users/erin/invitation", None)
+        .await
+        .expect(StatusCode::NOT_FOUND);
+    // Einladungen verwalten nur globale Admins.
+    gw.sess(&bob, Method::POST, "/users/erin/invitation", None, true)
+        .await
+        .expect(StatusCode::FORBIDDEN);
+    let audit = gw.store.audit_log(500).await.unwrap();
+    assert!(
+        audit
+            .iter()
+            .any(|e| e.kind == "admin-invitation" && e.action == "create")
+    );
+    let text = serde_json::to_string(&audit).unwrap();
+    assert!(!text.contains(&token) && !text.contains(&erin_token));
+
+    // F113: Ohne Audit-Eintrag kein Login und kein Logout.
+    let frank_cookie;
+    {
+        gw.boot(
+            Method::POST,
+            "/users",
+            Some(mk_user(
+                "frank",
+                json!({"oidcIssuer": idp.issuer, "oidcSubject": "frank-sub", "roles": viewer}),
+            )),
+        )
+        .await
+        .expect(StatusCode::CREATED);
+        let frank = gw.login(&idp, user("frank-sub", &[])).await.unwrap();
+        frank_cookie = (format!("__Secure-aigw-session={}", frank.cookie), frank);
+    }
+    let sessions_before = gw.count("SELECT COUNT(*) FROM admin_session").await;
+    gw.sql("ALTER TABLE audit_log RENAME TO audit_log_weg")
+        .await;
+    assert_eq!(
+        gw.login(&idp, user("bob-sub", &[])).await.unwrap_err(),
+        "internal"
+    );
+    assert_eq!(
+        gw.count("SELECT COUNT(*) FROM admin_session").await,
+        sessions_before
+    );
+    send(
+        Method::POST,
+        &gw.url("/admin/auth/logout"),
+        &[
+            ("cookie", &frank_cookie.0),
+            ("x-csrf-token", &frank_cookie.1.csrf),
+        ],
+        None,
+    )
+    .await
+    .expect(StatusCode::INTERNAL_SERVER_ERROR);
+    gw.sess(&frank_cookie.1, Method::GET, "/session", None, false)
+        .await
+        .expect(StatusCode::OK);
+    gw.sql("ALTER TABLE audit_log_weg RENAME TO audit_log")
+        .await;
+    send(
+        Method::POST,
+        &gw.url("/admin/auth/logout"),
+        &[
+            ("cookie", &frank_cookie.0),
+            ("x-csrf-token", &frank_cookie.1.csrf),
+        ],
+        None,
+    )
+    .await
+    .expect(StatusCode::OK);
+    gw.sess(&frank_cookie.1, Method::GET, "/session", None, false)
+        .await
+        .expect(StatusCode::UNAUTHORIZED);
+
+    // Mit audit_required: false wird trotz fehlendem Audit angemeldet (Warnung im Log).
+    let lax = Gw::start_with(store.clone(), db_url, &idp, BootstrapMode::On, |c| {
+        c.audit_required = false;
+    })
+    .await;
+    lax.sql("ALTER TABLE audit_log RENAME TO audit_log_weg")
+        .await;
+    lax.login(&idp, user("bob-sub", &[])).await.unwrap();
+    lax.sql("ALTER TABLE audit_log_weg RENAME TO audit_log")
+        .await;
+
+    // Profil entra: Kennung = oid, Tenant (tid) muss passen.
+    let entra = Gw::start_with(store, db_url, &idp, BootstrapMode::On, |c| {
+        c.oidc.profile = aigw_core::config::OidcProfile::Entra;
+        c.oidc.tenant_id = Some("tenant-1".into());
+    })
+    .await;
+    entra
+        .boot(
+            Method::POST,
+            "/users",
+            Some(mk_user(
+                "olga",
+                json!({"oidcIssuer": idp.issuer, "oidcSubject": "oid-olga", "roles": viewer}),
+            )),
+        )
+        .await
+        .expect(StatusCode::CREATED);
+    let with = |tid: &str| IdpUser {
+        extra: vec![
+            ("oid".into(), "oid-olga".into()),
+            ("tid".into(), tid.into()),
+        ],
+        ..user("pairwise-sub-olga", &[])
+    };
+    let olga = entra.login(&idp, with("tenant-1")).await.unwrap();
+    assert_eq!(olga.info["subject"], "user:olga");
+    assert_eq!(
+        entra.login(&idp, with("tenant-2")).await.unwrap_err(),
+        "token"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn identity_sqlite() {
+    let dir = std::env::temp_dir().join(format!("aigw-oidc-identity-{}", new_id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let url = format!("sqlite://{}/aigw.db?mode=rwc", dir.display());
+    identity_scenario(Store::connect(&url).await.unwrap(), &url).await;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn identity_postgres() {
+    let Ok(base) = std::env::var("AIGW_TEST_POSTGRES_URL") else {
+        eprintln!("AIGW_TEST_POSTGRES_URL nicht gesetzt – Postgres-Test übersprungen");
+        return;
+    };
+    let db = format!("aigw_oidc_ident_{}", new_id().simple());
+    let admin = sqlx::PgPool::connect(&base).await.unwrap();
+    sqlx::query(AssertSqlSafe(format!("CREATE DATABASE {db}")))
+        .execute(&admin)
+        .await
+        .unwrap();
+    let (prefix, _) = base.rsplit_once('/').expect("URL mit Datenbankpfad");
+    let url = format!("{prefix}/{db}");
+    let store = Store::connect(&url).await.unwrap();
+    identity_scenario(store.clone(), &url).await;
+    store.close().await;
+    sqlx::query(AssertSqlSafe(format!("DROP DATABASE {db} WITH (FORCE)")))
+        .execute(&admin)
+        .await
+        .unwrap();
+}
+
 /// Alle drei Signaturverfahren mit vollständigem Login.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn all_signature_algorithms() {
@@ -1590,5 +1937,29 @@ async fn bootstrap_modes() {
         .await
         .expect(StatusCode::CREATED);
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// F38: `If-Match` ist Pflicht – Anfragen ohne eigenen ETag schreiben hier mit `If-Match: *`
+/// (eigene Tests prüfen 428/412 ausdrücklich).
+fn with_if_match(req: axum::http::request::Builder) -> axum::http::request::Builder {
+    use axum::http::Method as M;
+    let action = req.uri_ref().is_some_and(|u| {
+        let p = u.path();
+        ["/revoke", "/suspend", "/resume", "/rotate"]
+            .iter()
+            .any(|s| p.ends_with(s))
+    });
+    let write = req
+        .method_ref()
+        .is_some_and(|m| matches!(*m, M::PUT | M::PATCH | M::DELETE) || (*m == M::POST && action));
+    if write
+        && !req
+            .headers_ref()
+            .is_some_and(|h| h.contains_key("if-match"))
+    {
+        req.header("if-match", "*")
+    } else {
+        req
     }
 }

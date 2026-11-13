@@ -14,10 +14,14 @@
 //! | `team-admin` (Team T) | T, Keys in T, die Org von T (falls angegeben), Katalog | Keys in T |
 //! | `viewer` | alles im Geltungsbereich, Katalog | – |
 //! | `auditor` | wie `viewer` (Audit-Log folgt) | – |
+//! | `gitops` (nur global) | `config:export` | `config:apply` (auch Trockenlauf) |
 //!
-//! `org-admin` ohne Organisation und `team-admin` ohne Team verleihen keine Rechte.
-//! Globale Ziele (Nutzer, Admin-API-Keys, Anlegen von Organisationen) erfordern eine
-//! globale Zuweisung; schreiben darf dort nur `admin`.
+//! `org-admin` ohne Organisation und `team-admin` ohne Team verleihen keine Rechte, ebenso
+//! `gitops` mit Einschränkung. Globale Ziele (Nutzer, Admin-API-Keys, Anlegen von
+//! Organisationen) erfordern eine globale Zuweisung; schreiben darf dort nur `admin`.
+//! `org-admin` verwaltet zusätzlich Objekte direkt in seiner Organisation
+//! ([`Target::InOrganization`]: Keys ohne Team (F193), Plugin-Bindungen der Organisation
+//! (F183)).
 
 use aigw_core::config::GroupRoleMapping;
 use aigw_core::resource::{Role, RoleBinding};
@@ -58,6 +62,13 @@ pub enum Target {
         /// Team.
         team: String,
     },
+    /// Etwas direkt in einer Organisation, ohne Team: API-Keys ohne Team (F193),
+    /// Plugin-Bindungen auf Organisationsebene (F183). Schreiben: `admin` im Bereich und
+    /// `org-admin`; `team-admin` hat hier keine Rechte.
+    InOrganization(String),
+    /// GitOps-Routen (`config:export` = Lesen, `config:apply` = Schreiben, F55): globale
+    /// Rollen wie bisher und zusätzlich `gitops`.
+    GitOps,
 }
 
 impl Target {
@@ -80,13 +91,14 @@ impl Target {
     fn organization(&self) -> Option<&str> {
         match self {
             Self::Organization(o)
+            | Self::InOrganization(o)
             | Self::Team {
                 organization: o, ..
             }
             | Self::InTeam {
                 organization: o, ..
             } => Some(o),
-            Self::Global | Self::Catalog => None,
+            Self::Global | Self::Catalog | Self::GitOps => None,
         }
     }
 
@@ -120,12 +132,35 @@ pub fn is_effective(b: &RoleBinding) -> bool {
         Role::Admin | Role::Viewer | Role::Auditor => true,
         Role::OrgAdmin => b.organization.is_some() || b.team.is_some(),
         Role::TeamAdmin => b.team.is_some(),
+        // Nur global: eine CI-Rolle ohne Bereich.
+        Role::Gitops => b.organization.is_none() && b.team.is_none(),
     }
+}
+
+/// `true`, wenn die Zuweisung Ressourcen lesen darf (alle wirksamen Rollen außer `gitops`,
+/// die nur die GitOps-Routen erreicht).
+pub fn grants_read(b: &RoleBinding) -> bool {
+    is_effective(b) && b.role != Role::Gitops
 }
 
 /// Prüft eine einzelne Zuweisung.
 pub fn binding_allows(b: &RoleBinding, perm: Permission, target: &Target) -> bool {
     if !is_effective(b) {
+        return false;
+    }
+    // GitOps (F55): globale Lese-/Schreibrollen wie bisher, dazu `gitops`; nichts sonst.
+    if *target == Target::GitOps {
+        let global = matches!(scope(b), Scope::Global);
+        return global
+            && matches!(
+                (b.role, perm),
+                (
+                    Role::Gitops | Role::Admin,
+                    Permission::Read | Permission::Write
+                ) | (Role::Viewer | Role::Auditor, Permission::Read)
+            );
+    }
+    if b.role == Role::Gitops {
         return false;
     }
     // Katalog: lesen darf jede wirksame Rolle, schreiben nur ein globaler Admin.
@@ -145,7 +180,8 @@ pub fn binding_allows(b: &RoleBinding, perm: Permission, target: &Target) -> boo
             }
             // Die Organisation des eigenen Teams lesen (nur wenn die Zuweisung sie nennt).
             Target::Organization(org) => perm != Permission::Write && o == Some(org.as_str()),
-            Target::Global | Target::Catalog => false,
+            // Objekte ohne Team (Keys, Bindungen der Organisation) gehören nicht zum Team.
+            Target::InOrganization(_) | Target::Global | Target::Catalog | Target::GitOps => false,
         },
     };
     if !covers {
@@ -156,11 +192,12 @@ pub fn binding_allows(b: &RoleBinding, perm: Permission, target: &Target) -> boo
         | (Role::Admin, Permission::Write)
         | (Role::Admin | Role::Auditor, Permission::ReadPayload) => true,
         (_, Permission::ReadPayload) => false,
-        (Role::OrgAdmin, Permission::Write) => {
-            matches!(target, Target::Team { .. } | Target::InTeam { .. })
-        }
+        (Role::OrgAdmin, Permission::Write) => matches!(
+            target,
+            Target::Team { .. } | Target::InTeam { .. } | Target::InOrganization(_)
+        ),
         (Role::TeamAdmin, Permission::Write) => matches!(target, Target::InTeam { .. }),
-        (Role::Viewer | Role::Auditor, Permission::Write) => false,
+        (Role::Viewer | Role::Auditor | Role::Gitops, Permission::Write) => false,
     }
 }
 
@@ -312,6 +349,62 @@ mod tests {
         assert!(!allows(&a, P, &Target::Global));
         assert!(allows(&[rb(Role::Auditor, None, None)], P, &Target::Global));
         assert!(!allows(&[rb(Role::Admin, None, None)], P, &Target::Catalog));
+    }
+
+    #[test]
+    fn gitops_role_only_reaches_gitops() {
+        let g = [rb(Role::Gitops, None, None)];
+        assert!(allows(&g, R, &Target::GitOps));
+        assert!(allows(&g, W, &Target::GitOps));
+        for t in [
+            Target::Global,
+            Target::Catalog,
+            Target::Organization("o".into()),
+            Target::InOrganization("o".into()),
+            Target::in_team("o", "t"),
+        ] {
+            assert!(!allows(&g, R, &t), "{t:?}");
+            assert!(!allows(&g, W, &t), "{t:?}");
+        }
+        assert!(!grants_read(&g[0]));
+        // eingeschränkt wirkungslos
+        let scoped = rb(Role::Gitops, Some("o"), None);
+        assert!(!is_effective(&scoped));
+        assert!(!allows(&[scoped], R, &Target::GitOps));
+        // globale Rollen wie bisher: admin schreibt, viewer/auditor lesen
+        assert!(allows(&[rb(Role::Admin, None, None)], W, &Target::GitOps));
+        assert!(allows(&[rb(Role::Viewer, None, None)], R, &Target::GitOps));
+        assert!(!allows(&[rb(Role::Viewer, None, None)], W, &Target::GitOps));
+        assert!(!allows(
+            &[rb(Role::Admin, Some("o"), None)],
+            R,
+            &Target::GitOps
+        ));
+        assert!(!allows(
+            &[rb(Role::OrgAdmin, Some("o"), None)],
+            R,
+            &Target::GitOps
+        ));
+    }
+
+    #[test]
+    fn in_organization_for_teamless_objects() {
+        let t = Target::InOrganization("acme".into());
+        let org_admin = [rb(Role::OrgAdmin, Some("acme"), None)];
+        assert!(allows(&org_admin, R, &t) && allows(&org_admin, W, &t));
+        assert!(!allows(
+            &org_admin,
+            R,
+            &Target::InOrganization("other".into())
+        ));
+        let team_admin = [rb(Role::TeamAdmin, Some("acme"), Some("platform"))];
+        assert!(!allows(&team_admin, R, &t) && !allows(&team_admin, W, &t));
+        let viewer = [rb(Role::Viewer, Some("acme"), None)];
+        assert!(allows(&viewer, R, &t) && !allows(&viewer, W, &t));
+        let admin = [rb(Role::Admin, Some("acme"), None)];
+        assert!(allows(&admin, W, &t));
+        assert!(allows(&[rb(Role::Admin, None, None)], W, &t));
+        assert!(!allows(&[rb(Role::Admin, Some("other"), None)], R, &t));
     }
 
     #[test]
