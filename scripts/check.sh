@@ -5,7 +5,7 @@
 # Ein Einstieg für alle Qualitätsprüfungen (lokal mit Toolchain, auf der Buildbox, in CI):
 #   Rust: fmt, clippy (-D warnings), Tests, cargo-deny
 #   UI:   pnpm install, OpenAPI-Abgleich, TS-Typen, svelte-check, vite build
-#   REUSE-Lint (falls `reuse` installiert ist)
+#   REUSE-Lint (fehlt `reuse`, wird es in ein venv unter ${XDG_CACHE_HOME:-~/.cache}/aigw-reuse-venv installiert)
 #
 # Umgebungsvariablen:
 #   AIGW_SKIP_UI=1     UI-Schritte überspringen
@@ -88,6 +88,22 @@ if [[ "${AIGW_SKIP_UI:-0}" != 1 ]]; then
 fi
 
 step "REUSE-Lint"
+if ! command -v reuse >/dev/null 2>&1; then
+  # Vorhandenes venv (Buildbox: /opt/reuse-venv) nutzen oder einmalig eines anlegen.
+  REUSE_VENV="${XDG_CACHE_HOME:-$HOME/.cache}/aigw-reuse-venv"
+  for v in /opt/reuse-venv "$REUSE_VENV"; do
+    if [[ -x "$v/bin/reuse" ]]; then
+      PATH="$v/bin:$PATH"
+      break
+    fi
+  done
+  if ! command -v reuse >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+    echo "reuse fehlt – installiere es in $REUSE_VENV" >&2
+    if python3 -m venv "$REUSE_VENV" && "$REUSE_VENV/bin/pip" install -q reuse; then
+      PATH="$REUSE_VENV/bin:$PATH"
+    fi
+  fi
+fi
 if ! command -v reuse >/dev/null 2>&1; then
   missing reuse
 elif git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
