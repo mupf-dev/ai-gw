@@ -339,3 +339,9 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 192. [x] Folgearbeiten: Tokenizer für Embedding/Bild/Audio-Schätzung, abgebrochene Cache-Embeddings erfassen, settings.tokenizer in Admin/GitOps validieren → Folgeticket
 - F191/F192: request_log.parent_request_id; Log-Explorer/Analytics-Filter cache-embedding; TokenizerSetting::parse in GroupPolicy-Validierung; Tokenizer für weitere Endpunkte
 - Hinweis Lizenz: tiktoken-Rang-Tabellen als MIT (tiktoken) ausgewiesen; Dateien selbst ohne eigene Lizenzangabe – vor öffentlichem Release juristisch bestätigen
+
+## AIGW-73 – Empfehlungen übernommen (2026-11-13)
+193. [x] Neues RBAC-Ziel „in Organisation“ für Keys ohne Team (Org-Admins verwalten sie) → Empfehlung übernommen (Umsetzung nötig, mit F146)
+194. [x] Team-Umzug: Keys ziehen per ON UPDATE CASCADE mit → Empfehlung übernommen
+- F193: RBAC-Target InOrganisation für teamlose Keys (Lesen/Schreiben für org-admin/org-gebundene Rollen), Analytics-Sichtbarkeit (F146)
+- Achtung: Test aigw-billing strict_parallel_never_exceeds_locally schlägt auf main fehl – Fix beauftragt (AIGW-71-Agent)
