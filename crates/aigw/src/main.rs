@@ -3,8 +3,12 @@
 
 //! `aigw` – Einstiegspunkt des Gateways.
 //!
-//! - `aigw serve --config <pfad>` startet Gateway, Admin-API und Admin-UI auf einem Port.
+//! - `aigw serve --config <pfad>` startet Datenebene (`server.data.listen`, Standard `:4000`)
+//!   sowie Admin-API und Admin-UI (`server.control.listen`, Standard `:4001`); bei gleicher
+//!   Adresse auf einem gemeinsamen Port.
 //! - `aigw openapi` gibt die OpenAPI-Spezifikation der Admin-API aus (für `ui/` → TS-Typen).
+
+mod server;
 
 use std::io::{IsTerminal as _, Write as _};
 use std::path::PathBuf;
@@ -103,17 +107,24 @@ fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         .enable_all()
         .build()?;
     runtime.block_on(async move {
-        let app = aigw_proxy::router().merge(aigw_admin::router());
-        let listener = tokio::net::TcpListener::bind(config.server.listen).await?;
+        let listeners = server::Listeners::bind(&config.server).await?;
+        let (data, control) = listeners.local_addrs()?;
         tracing::info!(
-            listen = %listener.local_addr()?,
+            data = %data,
+            control = %control,
+            combined = config.server.is_combined(),
             version = aigw_core::VERSION,
             ui = aigw_admin::ui::KIND,
             "ai-gw gestartet"
         );
-        axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal())
-            .await?;
+        // Bis die Anbieter-Adapter (AIGW-15) und die Key-Prüfung (AIGW-28) da sind, bedient
+        // der eingebaute Mock-Anbieter die Datenebene.
+        tracing::warn!("Datenebene nutzt den Mock-Anbieter (echo), keine Schlüsselprüfung");
+        let state = aigw_proxy::ProxyState {
+            config: aigw_proxy::ProxyConfig::from(&config.server.data),
+            ..aigw_proxy::ProxyState::mock()
+        };
+        server::run(listeners, state, shutdown_signal()).await?;
         tracing::info!("ai-gw beendet");
         Ok(())
     })

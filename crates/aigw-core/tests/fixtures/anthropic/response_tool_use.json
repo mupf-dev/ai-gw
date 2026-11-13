@@ -1,0 +1,22 @@
+{
+  "id": "msg_01ABC",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [
+    { "type": "thinking", "thinking": "", "signature": "sigA" },
+    { "type": "text", "text": "Ich rufe das Tool auf." },
+    { "type": "tool_use", "id": "toolu_9", "name": "get_weather", "input": { "city": "Berlin" } }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 20,
+    "cache_creation_input_tokens": 5,
+    "cache_read_input_tokens": 100,
+    "output_tokens": 40,
+    "service_tier": "standard",
+    "cache_creation": { "ephemeral_5m_input_tokens": 5, "ephemeral_1h_input_tokens": 0 }
+  },
+  "stop_details": null
+}

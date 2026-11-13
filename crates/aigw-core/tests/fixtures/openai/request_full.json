@@ -1,0 +1,65 @@
+{
+  "model": "gpt-4o",
+  "messages": [
+    { "role": "system", "content": "Du bist ein hilfreicher Assistent." },
+    { "role": "developer", "content": "Antworte knapp." },
+    {
+      "role": "user",
+      "name": "anna",
+      "x_trace": "t-1",
+      "content": [
+        { "type": "text", "text": "Wie ist das Wetter in Berlin? Und was zeigt dieses Bild?" },
+        { "type": "image_url", "image_url": { "url": "data:image/png;base64,iVBORw0KGgo=", "detail": "high" } },
+        { "type": "image_url", "image_url": { "url": "https://example.org/bild.jpg" } },
+        { "type": "input_audio", "input_audio": { "data": "UklGRg==", "format": "wav" } },
+        { "type": "file", "file": { "file_data": "data:application/pdf;base64,JVBERi0=", "filename": "doc.pdf" } },
+        { "type": "input_custom", "foo": 1 }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        { "id": "call_1", "type": "function", "function": { "name": "get_weather", "arguments": "{\"city\":\"Berlin\"}" } },
+        { "id": "call_2", "type": "function", "function": { "name": "get_time", "arguments": "{}" } }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "call_1", "content": "12 °C, bewölkt" },
+    { "role": "tool", "tool_call_id": "call_2", "content": "14:00" },
+    { "role": "assistant", "content": "In Berlin sind es 12 °C." },
+    { "role": "user", "content": "Danke!" }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Aktuelles Wetter",
+        "parameters": { "type": "object", "properties": { "city": { "type": "string" } }, "required": ["city"] },
+        "strict": true
+      }
+    },
+    { "type": "function", "function": { "name": "get_time", "parameters": { "type": "object", "properties": {} } } }
+  ],
+  "tool_choice": "auto",
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "frequency_penalty": 0.1,
+  "presence_penalty": 0.2,
+  "seed": 42,
+  "max_completion_tokens": 512,
+  "stop": ["\n\n", "ENDE"],
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": { "name": "antwort", "schema": { "type": "object", "properties": { "text": { "type": "string" } } }, "strict": true }
+  },
+  "reasoning_effort": "medium",
+  "user": "user-42",
+  "metadata": { "tenant": "a" },
+  "stream": true,
+  "stream_options": { "include_usage": true },
+  "n": 1,
+  "logprobs": false,
+  "service_tier": "auto",
+  "store": false
+}

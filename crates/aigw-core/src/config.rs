@@ -169,18 +169,59 @@ fn set_path(
     Ok(())
 }
 
-/// Einstellungen des HTTP-Servers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Einstellungen des HTTP-Servers: getrennte Listener für Daten- und Steuerebene.
+///
+/// Sind beide Adressen gleich, läuft nur ein Listener mit beiden Routern.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ServerConfig {
-    /// Adresse, auf der Gateway und Admin-API lauschen.
-    pub listen: SocketAddr,
+    /// Datenebene: `/v1/*` (OpenAI, Anthropic) und `/healthz`.
+    pub data: DataListenerConfig,
+    /// Steuerebene: Admin-API, Admin-UI und `/healthz`.
+    pub control: ControlListenerConfig,
 }
 
-impl Default for ServerConfig {
+impl ServerConfig {
+    /// `true`, wenn Daten- und Steuerebene auf derselben Adresse laufen.
+    pub fn is_combined(&self) -> bool {
+        self.data.listen == self.control.listen
+    }
+}
+
+/// Standardgrenze für Request-Bodies der Datenebene (32 MiB, wie die Anthropic-API).
+pub const DEFAULT_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+
+/// Listener der Datenebene.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DataListenerConfig {
+    /// Adresse (Standard `127.0.0.1:4000`).
+    pub listen: SocketAddr,
+    /// Maximale Größe eines Request-Bodys in Bytes (Standard 32 MiB); größere → `413`.
+    pub max_body_bytes: usize,
+}
+
+impl Default for DataListenerConfig {
     fn default() -> Self {
         Self {
             listen: SocketAddr::from(([127, 0, 0, 1], 4000)),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+        }
+    }
+}
+
+/// Listener der Steuerebene.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ControlListenerConfig {
+    /// Adresse (Standard `127.0.0.1:4001`).
+    pub listen: SocketAddr,
+}
+
+impl Default for ControlListenerConfig {
+    fn default() -> Self {
+        Self {
+            listen: SocketAddr::from(([127, 0, 0, 1], 4001)),
         }
     }
 }
@@ -302,13 +343,17 @@ mod tests {
         let cfg = Config::from_yaml(
             r#"
 server:
-  listen: "0.0.0.0:8080"
+  data:
+    listen: "0.0.0.0:8080"
 counters:
   backend: postgres-sync
 "#,
         )
         .unwrap();
-        assert_eq!(cfg.server.listen.port(), 8080);
+        assert_eq!(cfg.server.data.listen.port(), 8080);
+        assert_eq!(cfg.server.control.listen.port(), 4001);
+        assert!(!cfg.server.is_combined());
+        assert_eq!(cfg.server.data.max_body_bytes, DEFAULT_MAX_BODY_BYTES);
         assert_eq!(cfg.counters.backend, CounterBackendKind::PostgresSync);
         assert_eq!(cfg.store, StoreConfig::default());
         assert_eq!(cfg.secrets.master_key_env, "AIGW_MASTER_KEY");
@@ -326,6 +371,9 @@ counters:
     #[test]
     fn rejects_unknown_fields() {
         assert!(Config::from_yaml("server:\n  listen_typo: 1\n").is_err());
+        // `server.listen` (vor AIGW-13) wird bewusst nicht mehr akzeptiert.
+        assert!(Config::from_yaml("server:\n  listen: \"127.0.0.1:4000\"\n").is_err());
+        assert!(Config::from_yaml("server:\n  control:\n    max_body_bytes: 1\n").is_err());
         assert!(Config::from_yaml("unknown_section: {}\n").is_err());
         assert!(Config::from_yaml("counters:\n  backend: memcached\n").is_err());
     }
@@ -347,7 +395,9 @@ counters:
             env(&[
                 ("AIGW_STORE__URL", "postgres://db/aigw"),
                 ("AIGW_STORE__MAX_CONNECTIONS", "42"),
-                ("AIGW_SERVER__LISTEN", "0.0.0.0:9000"),
+                ("AIGW_SERVER__DATA__LISTEN", "0.0.0.0:9000"),
+                ("AIGW_SERVER__DATA__MAX_BODY_BYTES", "1024"),
+                ("AIGW_SERVER__CONTROL__LISTEN", "0.0.0.0:9001"),
                 ("AIGW_COUNTERS__BACKEND", "redis"),
                 ("AIGW_COUNTERS__REDIS_URL", "redis://r:6379"),
                 ("AIGW_SECRETS__MASTER_KEY_FILE", "/run/secrets/aigw-key"),
@@ -362,7 +412,9 @@ counters:
         .unwrap();
         assert_eq!(cfg.store.url, "postgres://db/aigw");
         assert_eq!(cfg.store.max_connections, 42);
-        assert_eq!(cfg.server.listen.port(), 9000);
+        assert_eq!(cfg.server.data.listen.port(), 9000);
+        assert_eq!(cfg.server.data.max_body_bytes, 1024);
+        assert_eq!(cfg.server.control.listen.port(), 9001);
         assert_eq!(cfg.counters.backend, CounterBackendKind::Redis);
         assert_eq!(cfg.counters.redis_url.as_deref(), Some("redis://r:6379"));
         assert_eq!(

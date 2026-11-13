@@ -1,0 +1,25 @@
+{
+  "model": "llama3",
+  "messages": [
+    { "role": "user", "content": [{ "type": "text", "text": "Rufe das Tool auf." }] },
+    {
+      "role": "assistant",
+      "content": "Mache ich.",
+      "tool_calls": [
+        { "id": "c1", "type": "function", "function": { "name": "get_weather", "arguments": "{\"city\":\"Köln\"}" } }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "c1", "content": [{ "type": "text", "text": "9 °C" }] },
+    { "role": "assistant", "content": null, "refusal": "Das kann ich nicht." }
+  ],
+  "tools": [
+    { "type": "function", "function": { "name": "get_weather", "parameters": { "type": "object" } } }
+  ],
+  "tool_choice": { "type": "function", "function": { "name": "get_weather" } },
+  "parallel_tool_calls": false,
+  "max_tokens": 100,
+  "stop": "ENDE",
+  "response_format": { "type": "json_object" },
+  "stream": false,
+  "top_k": 20
+}

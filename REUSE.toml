@@ -25,6 +25,7 @@ path = [
     "ui/tsconfig.json",
     "ui/openapi.json",
     "ui/src/lib/api/schema.d.ts",
+    "crates/*/tests/fixtures/**",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 ai-gw contributors"

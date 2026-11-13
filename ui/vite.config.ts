@@ -21,7 +21,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/admin/api': { target: process.env.AIGW_DEV_API ?? 'http://127.0.0.1:4000' },
+      '/admin/api': { target: process.env.AIGW_DEV_API ?? 'http://127.0.0.1:4001' },
     },
   },
 });

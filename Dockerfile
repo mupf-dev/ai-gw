@@ -4,7 +4,7 @@
 #
 # Mehrstufiger Build: UI (Node/pnpm) → Binary (Rust, UI eingebettet) → distroless, nicht-root.
 #   docker build -t ai-gw .
-#   docker run --rm -p 4000:4000 ai-gw
+#   docker run --rm -p 4000:4000 -p 4001:4001 ai-gw   (4000 Daten, 4001 Steuerung)
 
 # --- 1. Admin-UI ---------------------------------------------------------------------------
 FROM node:24-bookworm-slim AS ui
@@ -35,6 +35,6 @@ FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=build /out/aigw /usr/local/bin/aigw
 COPY config/aigw.container.yaml /etc/aigw/aigw.yaml
 USER nonroot:nonroot
-EXPOSE 4000
+EXPOSE 4000 4001
 ENTRYPOINT ["/usr/local/bin/aigw"]
 CMD ["serve", "--config", "/etc/aigw/aigw.yaml"]

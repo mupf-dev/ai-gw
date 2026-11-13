@@ -24,13 +24,18 @@ Entscheidungen: [docs/konzept/00-entscheidungen.md](docs/konzept/00-entscheidung
 | `config/` | Beispielkonfigurationen |
 | `scripts/` | `check.sh` (alle Prüfungen), `gen-api.sh`, `runtime-smoke.sh`, `setup-tools.sh` |
 
-Endpunkte (ein Port, Standard `127.0.0.1:4000`):
+Endpunkte – Datenebene (`server.data.listen`, Standard `127.0.0.1:4000`):
+
+- `POST /v1/chat/completions`, `POST /v1/messages`, `GET /v1/models` – OpenAI- und
+  Anthropic-kompatibel (vorerst Mock-Anbieter `echo`, siehe `docs/konzept/03-ir-und-formate.md`)
+- `GET /healthz` – Liveness
+
+Steuerebene (`server.control.listen`, Standard `127.0.0.1:4001`; gleiche Adresse → ein Port):
 
 - `GET /healthz` – Liveness
 - `GET /admin/api/v1/version` – Version
 - `GET /admin/api/openapi.json` – OpenAPI-Spezifikation der Admin-API
 - `GET /admin/` – Admin-UI (SPA)
-- `/v1/*` – OpenAI-kompatible Endpunkte (noch `501 Not Implemented`)
 
 ## Entwicklung
 
@@ -74,7 +79,7 @@ Hinweise:
   eingebettet (`crates/aigw-admin/ui-fallback`). Pfad überschreibbar mit `AIGW_UI_DIST`.
 - Logging: `AIGW_LOG` (Syntax wie `RUST_LOG`, Standard `info`), `--log-format json`.
 - UI-Entwicklung: `pnpm -C ui dev` leitet `/admin/api` an ein laufendes `aigw` weiter
-  (`AIGW_DEV_API`, Standard `http://127.0.0.1:4000`).
+  (`AIGW_DEV_API`, Standard `http://127.0.0.1:4001`, Steuerebene).
 - npm-Lieferkette: `ignoreScripts`, `minimumReleaseAge` 7 Tage, `--frozen-lockfile`
   (`ui/pnpm-workspace.yaml`).
 

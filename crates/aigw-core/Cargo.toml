@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 [package]
 name = "aigw-core"
-description = "Gemeinsame Typen, Fehler und Konfigurationsmodell von ai-gw"
+description = "Gemeinsame Typen, Fehler, IR, Wire-Formate und Konfigurationsmodell von ai-gw"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,6 +19,13 @@ thiserror.workspace = true
 time.workspace = true
 utoipa.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+divan.workspace = true
+
+[[bench]]
+name = "ir"
+harness = false
 
 [lints]
 workspace = true

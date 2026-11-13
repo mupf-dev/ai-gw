@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-xyz",
+  "object": "chat.completion",
+  "created": 1763000001,
+  "model": "gpt-4o-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": { "role": "assistant", "content": "Hallo! Wie kann ich helfen?", "refusal": null, "annotations": [] },
+      "logprobs": null,
+      "finish_reason": "stop"
+    },
+    {
+      "index": 1,
+      "message": { "role": "assistant", "content": "Guten Tag!", "refusal": null, "annotations": [] },
+      "logprobs": null,
+      "finish_reason": "length"
+    }
+  ],
+  "usage": { "prompt_tokens": 9, "completion_tokens": 12, "total_tokens": 21 }
+}

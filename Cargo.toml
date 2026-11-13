@@ -55,6 +55,12 @@ utoipa = { version = "6.0.0", default-features = false, features = ["macros", "u
 # Eingebettete Admin-UI (ui/dist bzw. Fallback, siehe crates/aigw-admin/build.rs).
 rust-embed = { version = "8.14", default-features = false, features = ["debug-embed", "interpolate-folder-path", "mime-guess"] }
 
+bytes = "1.12"
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["tokio", "client", "client-legacy", "http1"] }
+# Mikro-Benchmarks (nur dev).
+divan = "0.1.21"
+
 clap = { version = "4.6", default-features = false, features = ["std", "derive", "env", "help", "usage", "error-context"] }
 serde = { version = "1.0.220", features = ["derive"] }
 serde_json = "1.0.140"

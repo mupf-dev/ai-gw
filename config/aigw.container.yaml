@@ -6,7 +6,10 @@
 # oder als Datei (AIGW_SECRETS__MASTER_KEY_FILE=/run/secrets/…).
 
 server:
-  listen: "0.0.0.0:4000"
+  data:
+    listen: "0.0.0.0:4000"
+  control:
+    listen: "0.0.0.0:4001"
 
 store:
   url: "sqlite:///data/aigw.db?mode=rwc"

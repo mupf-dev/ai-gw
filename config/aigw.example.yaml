@@ -10,8 +10,15 @@
 # Modelle, Keys, Teams, Plugins usw. stehen NICHT hier, sondern in der Datenbank
 # (Admin-API/UI) bzw. als GitOps-Ressourcen (`apiVersion: aigw/v1alpha1`).
 
+# Datenebene (/v1/*, /healthz) und Steuerebene (Admin-API, UI, /healthz).
+# Gleiche Adresse → ein gemeinsamer Listener.
 server:
-  listen: "127.0.0.1:4000"
+  data:
+    listen: "127.0.0.1:4000"
+    # Maximale Request-Größe (32 MiB); größere Anfragen → 413
+    max_body_bytes: 33554432
+  control:
+    listen: "127.0.0.1:4001"
 
 store:
   # SQLite (Standard) oder postgres://benutzer@host/datenbank
