@@ -133,12 +133,12 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 100. [x] trace_id im Request-Log (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 101. [x] gen_ai.provider.name zusätzlich (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 102. [x] OTLP-Retry ja, App-Logs eigenes Ticket (Empf.)  → Empfehlung übernommen (2026-11-13)
-103. [ ] Gegentest mit offiziellem OTel-Collector (Docker) freigeben?
+103. [x] OTel-Collector-Gegentest: A freigegeben – otel/opentelemetry-collector-contrib (feste Version) in check.sh über Schalter (Umsetzung nötig)
 
 ## AIGW-30/31 Limits/Budgets
 104. [x] budget_exceeded 429 statt 402 (Empf. 429)  → Empfehlung übernommen (2026-11-13)
 105. [x] Retry-After bis nächster Zeitraum (Empf. ja)  → Empfehlung übernommen (2026-11-13)
-106. [ ] Parallele Überschreitung von Budgets akzeptieren (Empf. ja)
+106. [x] Budgets: B Kosten vorab reservieren, enforcement strict (Std.)|soft je Budget (Umsetzung nötig)
 107. [x] Zeitzone global (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 108. [x] Ersatzpreise cached→input, reasoning→output (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 109. [x] Deployment-TPM vorab reservieren (Empf. ja)  → Empfehlung übernommen (2026-11-13)
@@ -147,7 +147,7 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 
 ## AIGW-66 Audit
 112. [x] Eingeschränkte admin/auditor sehen Bereich, viewer nichts (Empf. ja)  → Empfehlung übernommen (2026-11-13)
-113. [ ] Audit-Ausfall beim Login fail-open (Empf. ja)
+113. [x] Audit beim Login: B admin.auth.audit_required (Std. true = fail-closed) (Umsetzung nötig)
 114. [x] Fehlgeschlagene Bearer-Logins nur Metrik (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 115. [x] Arten-Schreibweise vereinheitlichen (Empf. ja)  → Empfehlung übernommen (2026-11-13)
 116. [x] Aufbewahrung + Hash-Kette als nächstes Paket (Empf. ja)  → Empfehlung übernommen (2026-11-13)
@@ -302,3 +302,6 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 174. [x] Cache für Embeddings/Responses als Folgeaufgabe → Empfehlung übernommen
 175. [x] ef_search 64 Standard, 128 dokumentiert → Empfehlung übernommen
 - F169/F173/F174: Embedding-Kosten des Caches auf Key buchen; redis-stack-server-Image versionieren; Cache für Embeddings (exakt) + Responses
+- F103: check.sh: AIGW_TEST_OTELCOL=docker startet otel/opentelemetry-collector-contrib:<feste Version>, Export von Traces/Logs prüfen (Collector-Debug-Exporter/Datei)
+- F106: Budget-Reservierung vor Upstream (geschätzte Kosten aus Prompt-Tokens+max_tokens×Preis), Abgleich nach Usage; Budget.enforcement strict|soft (Std. strict); Redis exakt, sonst Abgleich-Takt
+- F113: admin.auth.audit_required (Std. true): Login/Logout scheitert, wenn Audit-Eintrag nicht geschrieben werden kann (gleiche Transaktion wie Session)
