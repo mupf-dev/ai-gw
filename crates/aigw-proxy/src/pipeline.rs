@@ -55,6 +55,8 @@ pub(crate) struct Pipeline<'a> {
     auth: Option<AuthContext>,
     /// Format der Fehlerantworten und Rate-Limit-Header (Chat: OpenAI oder Anthropic).
     format: ErrorFormat,
+    /// Eingangsformat (für Plugins).
+    ingress: WireFormat,
 }
 
 impl<'a> Pipeline<'a> {
@@ -80,6 +82,7 @@ impl<'a> Pipeline<'a> {
             est: TokenEstimate::default(),
             auth: None,
             format: ErrorFormat::OpenAi,
+            ingress,
         }
     }
 
@@ -196,6 +199,45 @@ impl<'a> Pipeline<'a> {
         }
         self.est = est;
         Ok(route)
+    }
+
+    /// Anfrage-Haken der Plugin-Kette auf den Eingabetexten eines Endpunkts ohne Chat-Ausgabe
+    /// (nach der Admission, vor dem Routing; siehe
+    /// [`PluginRun::check_input`](crate::plugins::PluginRun::check_input)). Liefert die ggf.
+    /// veränderten Texte.
+    pub(crate) async fn input_plugins(
+        &mut self,
+        auth: &AuthContext,
+        route: &GroupRoute,
+        model: &str,
+        texts: Vec<String>,
+        headers: &HeaderMap,
+    ) -> Result<Vec<String>, UpstreamError> {
+        let mut plugins = crate::plugins::PluginRun::new(
+            self.st,
+            auth,
+            Some(route.name()),
+            &self.rid.0,
+            self.ingress,
+            false,
+        );
+        let hooks = plugins.hooks(crate::plugins::PluginPhase::Request);
+        if hooks == 0 {
+            return Ok(texts);
+        }
+        if let Some(hits) = plugins.guardrail_hits() {
+            self.rec.set_guardrails(hits);
+        }
+        let span = crate::trace::plugins_span("request", hooks);
+        let out = {
+            use tracing::Instrument as _;
+            plugins
+                .check_input(model, texts, headers, &mut self.info.plugin_headers)
+                .instrument(span.clone())
+                .await
+                .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?
+        };
+        Ok(out)
     }
 
     /// Führt die Anfrage über das Routing aus (Retries, Fallbacks, Breaker).

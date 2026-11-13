@@ -134,6 +134,46 @@ impl PluginRun {
         }
     }
 
+    /// Anfrage-Haken für Endpunkte ohne Chat-Ausgabe (Embeddings, Bilder, Sprachausgabe;
+    /// AIGW-21-Folge): Die Eingabetexte laufen als Nutzernachrichten einer Chat-Sicht durch
+    /// die Kette. Ablehnungen (Guardrails, Webhook-`reject`) gelten, geänderte Texte (z. B.
+    /// maskierte PII) werden übernommen; eine Plugin-Antwort (`Respond`) ist hier nicht
+    /// möglich (`400`). Antwort-Haken gibt es für diese Endpunkte nicht.
+    pub(crate) async fn check_input(
+        &mut self,
+        model: &str,
+        texts: Vec<String>,
+        client_headers: &HeaderMap,
+        response_headers: &mut ResponseHeaders,
+    ) -> Result<Vec<String>, ApiError> {
+        if self.info.is_none() || !self.chain.has_request() || texts.is_empty() {
+            return Ok(texts);
+        }
+        let n = texts.len();
+        let view = ChatRequest {
+            model: model.to_owned(),
+            messages: texts
+                .iter()
+                .map(|t| aigw_core::ir::Message::text(aigw_core::ir::Role::User, t.clone()))
+                .collect(),
+            ..ChatRequest::default()
+        };
+        match self
+            .run_pre_plugins(view, client_headers, response_headers)
+            .await?
+        {
+            Pre::Continue(req) if req.messages.len() == n => {
+                Ok(req.messages.iter().map(|m| m.content.text()).collect())
+            }
+            // Struktur verändert (Nachrichten ergänzt/entfernt): Eingabe unverändert lassen.
+            Pre::Continue(_) => Ok(texts),
+            Pre::Respond(_) => Err(ApiError::invalid_request(
+                "Plugin-Antwort ist für diesen Endpunkt nicht möglich",
+            )
+            .with_code("plugin_respond_unsupported")),
+        }
+    }
+
     /// Wirksame Cache-Richtlinie (Plugin `cache`, AIGW-39/40) oder `None` ohne Bindung.
     pub(crate) fn cache_policy(&self) -> Option<Arc<aigw_plugins::builtin::cache::CachePolicy>> {
         if self.chain.is_empty() {

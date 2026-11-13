@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use aigw_core::ir::audio::{AudioTask, SpeechRequest, TranscriptionRequest, TranscriptionResponse};
-use aigw_core::ir::embeddings::{EmbeddingsRequest, EmbeddingsResponse};
+use aigw_core::ir::embeddings::{EmbeddingInput, EmbeddingsRequest, EmbeddingsResponse};
 use aigw_core::ir::images::{ImageRequest, ImageResponse};
 use aigw_core::ir::{ApiError, ErrorKind, UpstreamError, Usage};
 use aigw_core::wire::openai::responses::{
@@ -193,6 +193,14 @@ async fn embeddings_inner(
     let route = p
         .route(&auth, &req.model, Capability::Embeddings, est)
         .await?;
+    // Anfrage-Haken der Plugin-Kette auf den Texten (Guardrails, Webhooks; AIGW-78).
+    let mut req = req;
+    if let EmbeddingInput::Text(texts) = &mut req.input {
+        let input = std::mem::take(texts);
+        *texts = p
+            .input_plugins(&auth, &route, &req.model, input, headers)
+            .await?;
+    }
     let Outcome::Json(resp) = p.execute(route, &EmbeddingsOp, req).await? else {
         return Err(unexpected_stream());
     };
@@ -259,6 +267,14 @@ async fn images_inner(
         output: 0,
     };
     let route = p.route(&auth, &req.model, Capability::Images, est).await?;
+    let mut req = req;
+    let prompt = std::mem::take(&mut req.prompt);
+    req.prompt = p
+        .input_plugins(&auth, &route, &req.model, vec![prompt], headers)
+        .await?
+        .into_iter()
+        .next()
+        .unwrap_or_default();
     let Outcome::Json(resp) = p.execute(route, &ImagesOp, req).await? else {
         return Err(unexpected_stream());
     };
@@ -405,6 +421,14 @@ async fn speech_inner(
     let route = p
         .route(&auth, &req.model, Capability::AudioSpeech, est)
         .await?;
+    let mut req = req;
+    let input = std::mem::take(&mut req.input);
+    req.input = p
+        .input_plugins(&auth, &route, &req.model, vec![input], headers)
+        .await?
+        .into_iter()
+        .next()
+        .unwrap_or_default();
     let Outcome::Json(speech) = p.execute(route, &SpeechOp, req).await? else {
         return Err(unexpected_stream());
     };
