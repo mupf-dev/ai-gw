@@ -637,7 +637,7 @@ bei Rollenänderung/Löschen, Logout. `oidc_login.rs` prüft zusätzlich die Log
 **Arten (F115):** einheitlich kebab-case – `organization`, `team`, `user`, `api-key`,
 `provider-credential`, `secret`, `model-group`, `deployment`, `price`, `plugin-binding`,
 `mcp-server`, `mcp-grant`, dazu `admin-api-key`, `admin-session`, `bootstrap-token`,
-`audit-log`. Migration 0004 schreibt ältere Einträge um; Filter akzeptieren weiter die
+`audit-log`. Migration 0005 schreibt ältere Einträge um; Filter akzeptieren weiter die
 YAML-Schreibweise (`kind=ApiKey`).
 
 **Manipulationsschutz (F116):** Jeder Eintrag trägt eine fortlaufende Nummer (`seq`), den Hash

@@ -383,7 +383,7 @@ async fn run(store: Store, raw: Raw) {
             .await
             .unwrap();
     }
-    // Ein unverketteter Alteintrag (vor Migration 0004).
+    // Ein unverketteter Alteintrag (vor Migration 0005).
     let old_at = match &raw {
         Raw::Sqlite(_) => "1000".to_owned(),
         Raw::Pg(_) => "TIMESTAMPTZ '1970-01-01 00:00:01+00'".to_owned(),

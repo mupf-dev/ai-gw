@@ -221,6 +221,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/audit-log/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Prüft die Hash-Kette des Audit-Logs (F116) – nur globaler `admin`/`auditor`.
+         * @description Liefert immer `200` mit dem Prüfbericht (`ok: false` bei Abweichungen). `headHash` kann
+         *     extern gesichert und später verglichen werden (Schutz gegen Neuberechnung der ganzen
+         *     Kette durch jemanden mit Schreibrechten auf die Datenbank).
+         */
+        get: operations["verify_audit_log"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/auth/info": {
         parameters: {
             query?: never;
@@ -371,6 +393,23 @@ export interface paths {
         put: operations["put_mcp_server"];
         post?: never;
         delete: operations["delete_mcp_server"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/mcp-servers:status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Zustand der Upstream-MCP-Server. */
+        get: operations["mcp_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -594,6 +633,44 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/secrets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listet Geheimnisse (ohne Werte). */
+        get: operations["list_secrets"];
+        put?: never;
+        /** Legt ein Geheimnis an (Werte werden verschlüsselt, Antwort ohne Werte). */
+        post: operations["create_secret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/secrets/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Liest ein Geheimnis (ohne Werte). */
+        get: operations["get_secret"];
+        /** Ersetzt Labels, Beschreibung und **alle** Werte. */
+        put: operations["put_secret"];
+        post?: never;
+        /** Löscht ein Geheimnis (`409`, solange MCP-Server es nutzen). */
+        delete: operations["delete_secret"];
+        options?: never;
+        head?: never;
+        /** Ändert einzelne Felder (JSON Merge Patch). */
+        patch: operations["patch_secret"];
         trace?: never;
     };
     "/admin/api/v1/session": {
@@ -1022,6 +1099,50 @@ export interface components {
              */
             upstreamStatus?: number | null;
         };
+        /** @description Abweichung bei der Prüfung. */
+        AuditChainIssue: {
+            /**
+             * Format: uuid
+             * @description ID des Eintrags (fehlt bei fehlenden Einträgen).
+             */
+            id?: string | null;
+            /** @description Beschreibung. */
+            problem: string;
+            /**
+             * Format: int64
+             * @description Nummer in der Kette (bei fehlenden Einträgen: die erwartete).
+             */
+            seq: number;
+        };
+        /** @description Ergebnis von [`Store::verify_audit_chain`]. */
+        AuditChainReport: {
+            /**
+             * Format: int64
+             * @description Anker (Nummer des letzten durch Aufbewahrung gelöschten Eintrags, sonst 0).
+             */
+            anchorSeq: number;
+            /**
+             * Format: int64
+             * @description Geprüfte Einträge.
+             */
+            checked: number;
+            /** @description Hash des Kettenkopfs – zum Abgleich mit einer extern gesicherten Kopie. */
+            headHash: string;
+            /**
+             * Format: int64
+             * @description Letzte Nummer laut Kettenkopf.
+             */
+            headSeq: number;
+            /** @description Abweichungen (höchstens 100). */
+            issues: components["schemas"]["AuditChainIssue"][];
+            /** @description Kette unversehrt? */
+            ok: boolean;
+            /**
+             * Format: int64
+             * @description Einträge ohne Kettenfelder (aus der Zeit vor der Hash-Kette) – nicht prüfbar.
+             */
+            unchained: number;
+        };
         /** @description Eintrag im Audit-Log. */
         AuditEntry: {
             /**
@@ -1054,8 +1175,10 @@ export interface components {
              */
             id: string;
             /**
-             * @description Art (`Organization`, `Team`, `User`, `ApiKey`, `ModelGroup`, `Deployment`,
-             *     `ProviderCredential`, `Price` …, `admin-api-key`, `admin-session`, `bootstrap-token`).
+             * @description Art, einheitlich kebab-case (F115): `organization`, `team`, `user`, `api-key`,
+             *     `model-group`, `deployment`, `provider-credential`, `secret`, `price`, `plugin-binding`,
+             *     `mcp-server`, `mcp-grant`, `admin-api-key`, `admin-session`, `bootstrap-token`,
+             *     `audit-log`.
              */
             kind: string;
             /**
@@ -1480,6 +1603,11 @@ export interface components {
             /** @description Hierhin navigieren (Logout beim IdP oder die Admin-UI). */
             redirectUrl: string;
         };
+        /**
+         * @description Verbindungszustand eines Servers.
+         * @enum {string}
+         */
+        McpConnectionState: "up" | "down" | "idle" | "disabled";
         /** @description MCP-Freigabe (gelesen). */
         McpGrant: {
             /**
@@ -1540,16 +1668,41 @@ export interface components {
         };
         /** @description Upstream-MCP-Server. */
         McpServerSpec: {
-            /** @description Zugangsdaten (Name einer `ProviderCredential`). */
+            /** @description Zugangsdaten (Name einer `ProviderCredential`; älterer Weg, bevorzugt `secret`). */
             credential?: string | null;
             /** @description Aktiv? */
             enabled?: boolean;
+            /** @description Geheimnis (Name eines `Secret`, F149); höchstens eines von `credential`/`secret`. */
+            secret?: string | null;
             /** @description Weitere Einstellungen (Header, Timeouts …). */
             settings?: Record<string, never>;
             /** @description Transport. */
             transport?: components["schemas"]["McpTransport"];
             /** @description URL (HTTP-Transporte) bzw. Befehl (stdio). */
             url: string;
+        };
+        /** @description Zustand eines Upstream-MCP-Servers. */
+        McpServerState: {
+            /** @description Letzter Fehler (bei `down`). */
+            error?: string | null;
+            /**
+             * Format: int32
+             * @description Aufeinanderfolgende Fehlversuche.
+             */
+            failures: number;
+            /** @description Name des Servers. */
+            name: string;
+            /** @description Zustand. */
+            state: components["schemas"]["McpConnectionState"];
+            /** @description Transport. */
+            transport: components["schemas"]["McpTransport"];
+        };
+        /** @description Antwort von `GET /mcp-servers:status`. */
+        McpStatusList: {
+            /** @description MCP-Gateway eingeschaltet (`mcp.enabled`). */
+            gatewayEnabled: boolean;
+            /** @description Server (nach Name sortiert). */
+            items: components["schemas"]["McpServerState"][];
         };
         /**
          * @description Transport zu einem Upstream-MCP-Server.
@@ -1561,6 +1714,11 @@ export interface components {
          * @enum {string}
          */
         Metric: "requests" | "tokens" | "input_tokens" | "output_tokens" | "cost" | "errors" | "error_rate" | "latency_avg" | "latency_p50" | "latency_p95" | "latency_p99" | "ttft_p95" | "cache_hit_rate";
+        /**
+         * @description Art von Anfragen, die eine Modellgruppe annimmt (F123, AIGW-21).
+         * @enum {string}
+         */
+        ModelCapability: "chat" | "embeddings" | "images" | "audio-transcription" | "audio-speech";
         ModelGroup: {
             /**
              * Format: uuid
@@ -1584,10 +1742,17 @@ export interface components {
             /** @description Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite. */
             nextCursor?: string | null;
         };
-        /** @description Modellgruppe: öffentlicher Modellname mit Deployments dahinter. */
+        /**
+         * @description Modellgruppe: öffentlicher Modellname mit Deployments dahinter.
+         *
+         *     Abwärtskompatibilität (F123): `settings.capabilities` (Form vor dem typisierten Feld) wird
+         *     beim Lesen in `capabilities` übernommen.
+         */
         ModelGroupSpec: {
             /** @description Weitere Namen, unter denen Clients die Gruppe ansprechen. */
             aliases?: string[];
+            /** @description Arten von Anfragen, die die Gruppe annimmt (F123); leer = nur `chat`. */
+            capabilities?: components["schemas"]["ModelCapability"][];
             /** @description Fallback-Kette in Reihenfolge. */
             fallbacks?: components["schemas"]["Fallback"][];
             /** @description Globale Limits der Modellgruppe. */
@@ -1657,6 +1822,12 @@ export interface components {
             payloadMode?: components["schemas"]["PayloadMode"] | null;
         };
         /**
+         * @description Wirkung einer Guardrail-Ablehnung **der Ausgabe** (F160). Eingabe-Ablehnungen sind immer
+         *     Fehler (`400`).
+         * @enum {string}
+         */
+        OutputRejectMode: "finish" | "error";
+        /**
          * @description Umfang des Payload-Loggings.
          * @enum {string}
          */
@@ -1708,22 +1879,49 @@ export interface components {
             /** @description Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite. */
             nextCursor?: string | null;
         };
-        /** @description Plugin-Bindung: ein Plugin mit Konfiguration auf einer Ebene. */
+        /**
+         * @description Plugin-Bindung: ein Plugin mit Konfiguration auf einer Ebene.
+         *
+         *     Die Kettensteuerung (`inherit`, `locked`, `failMode`, `timeoutMs`, `outputRejectMode`)
+         *     steht in eigenen Feldern (F117). Abwärtskompatibilität: Stehen diese Schlüssel (wie vor
+         *     F117) in `config`, werden sie beim Lesen in die Felder übernommen; steht derselbe Schlüssel
+         *     in beiden mit verschiedenen Werten, ist die Eingabe ungültig.
+         */
         PluginBindingSpec: {
             /** @description Plugin-Konfiguration (Schema je Plugin). */
             config?: Record<string, never>;
             /** @description Aktiv? */
             enabled?: boolean;
+            failMode?: components["schemas"]["PluginFailMode"] | null;
+            inherit?: components["schemas"]["PluginInherit"] | null;
+            /** @description Innere Ebenen dürfen diese Bindung weder ersetzen noch abschalten. */
+            locked?: boolean;
             /**
              * Format: int32
              * @description Reihenfolge innerhalb der Ebene (aufsteigend).
              */
             order?: number;
+            outputRejectMode?: components["schemas"]["OutputRejectMode"] | null;
             /** @description Plugin-Name (z. B. `pii`, `webhook`). */
             plugin: string;
             /** @description Geltungsbereich. */
             scope: components["schemas"]["Scope"];
+            /**
+             * Format: int64
+             * @description Zeitlimit asynchroner Haken in Millisekunden (1–60000; Standard je Plugin-Art).
+             */
+            timeoutMs?: number | null;
         };
+        /**
+         * @description Verhalten bei Fehlern eines Plugins.
+         * @enum {string}
+         */
+        PluginFailMode: "open" | "closed";
+        /**
+         * @description Verhältnis einer Plugin-Bindung zu Bindungen desselben Plugins auf äußeren Ebenen.
+         * @enum {string}
+         */
+        PluginInherit: "append" | "override" | "disable";
         /** @description Ein Punkt einer Zeitreihe. */
         Point: {
             amount?: components["schemas"]["Amount"] | null;
@@ -1762,7 +1960,9 @@ export interface components {
         PriceSpec: {
             /** @description Modellname beim Anbieter (wie `Deployment.providerModel`). */
             model: string;
+            perAudioMinute?: components["schemas"]["Amount"] | null;
             perImage?: components["schemas"]["Amount"] | null;
+            perMillionCharacters?: components["schemas"]["Amount"] | null;
             /** @description Preise je 1 Mio. Tokens. */
             perMillionTokens?: components["schemas"]["TokenPrices"];
             perRequest?: components["schemas"]["Amount"] | null;
@@ -1993,7 +2193,7 @@ export interface components {
          * @description Art einer Ressource (`kind` in YAML).
          * @enum {string}
          */
-        ResourceKind: "Organization" | "Team" | "User" | "ApiKey" | "ProviderCredential" | "ModelGroup" | "Deployment" | "Price" | "PluginBinding" | "McpServer" | "McpGrant";
+        ResourceKind: "Organization" | "Team" | "User" | "ApiKey" | "ProviderCredential" | "Secret" | "ModelGroup" | "Deployment" | "Price" | "PluginBinding" | "McpServer" | "McpGrant";
         /**
          * @description Rolle eines Nutzers (§15).
          * @enum {string}
@@ -2042,6 +2242,71 @@ export interface components {
          * @enum {string}
          */
         ScopeLevel: "global" | "organization" | "team" | "api-key" | "model-group";
+        /** @description Geheimnis (gelesen) – **ohne** Werte. */
+        Secret: {
+            /**
+             * Format: uuid
+             * @description ID (UUIDv7).
+             */
+            id: string;
+            /** @description Metadaten. */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Beschreibung und Feldnamen. */
+            spec: components["schemas"]["SecretSummary"];
+            /** @description Vom Server verwaltete Angaben. */
+            status: components["schemas"]["SecretStatus"];
+        };
+        /** @description Geheimnis (Eingabe für Anlegen und Ersetzen). */
+        SecretInput: {
+            /** @description Metadaten (`name`, `labels`). */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Beschreibung und Werte. */
+            spec: components["schemas"]["SecretInputSpec"];
+        };
+        /** @description Spezifikation beim Anlegen/Ersetzen. */
+        SecretInputSpec: {
+            /** @description Felder, z. B. `{"value": {"value": "…"}}`. */
+            data: {
+                [key: string]: components["schemas"]["SecretValue"];
+            };
+            /** @description Beschreibung (Zweck, Besitzer). */
+            description?: string | null;
+        };
+        /** @description Seite einer Liste: Geheimnisse. */
+        SecretList: {
+            /** @description Einträge (nach Name sortiert). */
+            items: components["schemas"]["Secret"][];
+            /** @description Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite. */
+            nextCursor?: string | null;
+        };
+        /** @description Teiländerung (JSON Merge Patch). */
+        SecretPatch: {
+            metadata?: components["schemas"]["SecretPatchMeta"] | null;
+            spec?: components["schemas"]["SecretPatchSpec"] | null;
+        };
+        /** @description Metadaten im `PATCH`. */
+        SecretPatchMeta: {
+            /** @description Ersetzt die Labels vollständig (weglassen = unverändert). */
+            labels?: {
+                [key: string]: string;
+            } | null;
+            /** @description Muss, falls angegeben, zum Pfad passen. */
+            name?: string | null;
+        };
+        /** @description Spezifikation im `PATCH`. */
+        SecretPatchSpec: {
+            /** @description Zu ändernde Felder: Wert setzt, `null` entfernt; nicht genannte Felder bleiben. */
+            data?: {
+                [key: string]: components["schemas"]["SecretValue"];
+            };
+            /** @description Neue Beschreibung (`null` entfernt sie, weglassen = unverändert). */
+            description?: string | null;
+        };
+        /** @description Status eines Geheimnisses. */
+        SecretStatus: {
+            /** @description ID des Master-Keys, mit dem verschlüsselt ist (Rotation). */
+            keyId: string;
+        };
         /**
          * Format: password
          * @description Geheimer Klartext (z. B. API-Key eines Anbieters).
@@ -2051,6 +2316,18 @@ export interface components {
          *     Admin-API).
          */
         SecretString: string;
+        /** @description Beschreibung und Namen der gespeicherten Felder. */
+        SecretSummary: {
+            /** @description Beschreibung. */
+            description?: string | null;
+            /** @description Namen der gespeicherten Felder (sortiert), z. B. `["value"]`. */
+            fields: string[];
+        };
+        /** @description Ein Geheimwert in der Eingabe. */
+        SecretValue: {
+            /** @description Klartext (wird sofort verschlüsselt, nie wieder ausgegeben). */
+            value: components["schemas"]["SecretString"];
+        };
         /** @description Eine Reihe (Gruppe). */
         Series: {
             /**
@@ -3668,6 +3945,44 @@ export interface operations {
             };
         };
     };
+    verify_audit_log: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Prüfbericht */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditChainReport"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nur globaler admin/auditor */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     auth_info: {
         parameters: {
             query?: never;
@@ -4897,6 +5212,44 @@ export interface operations {
             };
             /** @description If-Match fehlt (F38) */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    mcp_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Zustand je Server */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpStatusList"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7063,6 +7416,455 @@ export interface operations {
             };
             /** @description Anfrage unbekannt oder kein Payload gespeichert */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_secrets: {
+        parameters: {
+            query?: {
+                /** @description Seitengröße (1–500, Standard 50). */
+                limit?: number;
+                /** @description Fortsetzung (`nextCursor` der vorigen Seite). */
+                cursor?: string;
+                /** @description Teilstring im Namen. */
+                q?: string;
+                /** @description Label-Selektor `k=v,k2`. */
+                label?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Seite */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretList"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_secret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecretInput"];
+            };
+        };
+        responses: {
+            /** @description Angelegt (ohne Werte) */
+            201: {
+                headers: {
+                    /** @description Version */
+                    ETag?: string;
+                    /** @description Pfad */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Secret"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Name bereits vergeben */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_secret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gefunden */
+            200: {
+                headers: {
+                    /** @description Version für If-Match */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Secret"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    put_secret: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecretInput"];
+            };
+        };
+        responses: {
+            /** @description Ersetzt (ohne Werte) */
+            200: {
+                headers: {
+                    /** @description Neue Version */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Secret"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_secret: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gelöscht */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Wird noch verwendet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    patch_secret: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/merge-patch+json": components["schemas"]["SecretPatch"];
+            };
+        };
+        responses: {
+            /** @description Geändert (ohne Werte) */
+            200: {
+                headers: {
+                    /** @description Neue Version */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Secret"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };

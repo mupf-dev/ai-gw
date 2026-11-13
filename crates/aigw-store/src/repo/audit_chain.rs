@@ -20,7 +20,7 @@
 //! Anker (`anchor_seq`, `anchor_hash`); die Prüfung beginnt dort. Die Löschung selbst steht
 //! als Eintrag (`audit-log`/`prune`) in der Kette.
 //!
-//! Einträge aus der Zeit vor der Hash-Kette (Migration 0004) haben keine Nummer; sie werden
+//! Einträge aus der Zeit vor der Hash-Kette (Migration 0005) haben keine Nummer; sie werden
 //! als „unverkettet“ gezählt, aber nicht geprüft.
 
 use std::fmt::Write as _;

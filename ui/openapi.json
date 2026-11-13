@@ -2163,6 +2163,56 @@
         ]
       }
     },
+    "/admin/api/v1/audit-log/verify": {
+      "get": {
+        "tags": [
+          "audit-log"
+        ],
+        "summary": "Prüft die Hash-Kette des Audit-Logs (F116) – nur globaler `admin`/`auditor`.",
+        "description": "Liefert immer `200` mit dem Prüfbericht (`ok: false` bei Abweichungen). `headHash` kann\nextern gesichert und später verglichen werden (Schutz gegen Neuberechnung der ganzen\nKette durch jemanden mit Schreibrechten auf die Datenbank).",
+        "operationId": "verify_audit_log",
+        "responses": {
+          "200": {
+            "description": "Prüfbericht",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditChainReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nur globaler admin/auditor",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/auth/info": {
       "get": {
         "tags": [
@@ -3983,6 +4033,55 @@
           },
           "428": {
             "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/mcp-servers:status": {
+      "get": {
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "Zustand der Upstream-MCP-Server.",
+        "operationId": "mcp_status",
+        "responses": {
+          "200": {
+            "description": "Zustand je Server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpStatusList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7322,6 +7421,654 @@
         ]
       }
     },
+    "/admin/api/v1/secrets": {
+      "get": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Listet Geheimnisse (ohne Werte).",
+        "operationId": "list_secrets",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Seitengröße (1–500, Standard 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Fortsetzung (`nextCursor` der vorigen Seite).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Teilstring im Namen.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "description": "Label-Selektor `k=v,k2`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Legt ein Geheimnis an (Werte werden verschlüsselt, Antwort ohne Werte).",
+        "operationId": "create_secret",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Angelegt (ohne Werte)",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version"
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Pfad"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Secret"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name bereits vergeben",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/secrets/{name}": {
+      "get": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Liest ein Geheimnis (ohne Werte).",
+        "operationId": "get_secret",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gefunden",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version für If-Match"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Secret"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Ersetzt Labels, Beschreibung und **alle** Werte.",
+        "operationId": "put_secret",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ersetzt (ohne Werte)",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Neue Version"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Secret"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Löscht ein Geheimnis (`409`, solange MCP-Server es nutzen).",
+        "operationId": "delete_secret",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Gelöscht"
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Wird noch verwendet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Ändert einzelne Felder (JSON Merge Patch).",
+        "operationId": "patch_secret",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/merge-patch+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Geändert (ohne Werte)",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Neue Version"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Secret"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/session": {
       "get": {
         "tags": [
@@ -9446,6 +10193,85 @@
           }
         }
       },
+      "AuditChainIssue": {
+        "type": "object",
+        "description": "Abweichung bei der Prüfung.",
+        "required": [
+          "seq",
+          "problem"
+        ],
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "ID des Eintrags (fehlt bei fehlenden Einträgen)."
+          },
+          "problem": {
+            "type": "string",
+            "description": "Beschreibung."
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Nummer in der Kette (bei fehlenden Einträgen: die erwartete)."
+          }
+        }
+      },
+      "AuditChainReport": {
+        "type": "object",
+        "description": "Ergebnis von [`Store::verify_audit_chain`].",
+        "required": [
+          "ok",
+          "checked",
+          "unchained",
+          "anchorSeq",
+          "headSeq",
+          "headHash",
+          "issues"
+        ],
+        "properties": {
+          "anchorSeq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Anker (Nummer des letzten durch Aufbewahrung gelöschten Eintrags, sonst 0)."
+          },
+          "checked": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Geprüfte Einträge.",
+            "minimum": 0
+          },
+          "headHash": {
+            "type": "string",
+            "description": "Hash des Kettenkopfs – zum Abgleich mit einer extern gesicherten Kopie."
+          },
+          "headSeq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Letzte Nummer laut Kettenkopf."
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditChainIssue"
+            },
+            "description": "Abweichungen (höchstens 100)."
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "Kette unversehrt?"
+          },
+          "unchained": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Einträge ohne Kettenfelder (aus der Zeit vor der Hash-Kette) – nicht prüfbar.",
+            "minimum": 0
+          }
+        }
+      },
       "AuditEntry": {
         "type": "object",
         "description": "Eintrag im Audit-Log.",
@@ -9497,7 +10323,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "Art (`Organization`, `Team`, `User`, `ApiKey`, `ModelGroup`, `Deployment`,\n`ProviderCredential`, `Price` …, `admin-api-key`, `admin-session`, `bootstrap-token`)."
+            "description": "Art, einheitlich kebab-case (F115): `organization`, `team`, `user`, `api-key`,\n`model-group`, `deployment`, `provider-credential`, `secret`, `price`, `plugin-binding`,\n`mcp-server`, `mcp-grant`, `admin-api-key`, `admin-session`, `bootstrap-token`,\n`audit-log`."
           },
           "objectId": {
             "type": [
@@ -10486,6 +11312,16 @@
           }
         }
       },
+      "McpConnectionState": {
+        "type": "string",
+        "description": "Verbindungszustand eines Servers.",
+        "enum": [
+          "up",
+          "down",
+          "idle",
+          "disabled"
+        ]
+      },
       "McpGrant": {
         "type": "object",
         "description": "MCP-Freigabe (gelesen).",
@@ -10653,11 +11489,18 @@
               "string",
               "null"
             ],
-            "description": "Zugangsdaten (Name einer `ProviderCredential`)."
+            "description": "Zugangsdaten (Name einer `ProviderCredential`; älterer Weg, bevorzugt `secret`)."
           },
           "enabled": {
             "type": "boolean",
             "description": "Aktiv?"
+          },
+          "secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Geheimnis (Name eines `Secret`, F149); höchstens eines von `credential`/`secret`."
           },
           "settings": {
             "type": "object",
@@ -10673,6 +11516,64 @@
           }
         },
         "additionalProperties": false
+      },
+      "McpServerState": {
+        "type": "object",
+        "description": "Zustand eines Upstream-MCP-Servers.",
+        "required": [
+          "name",
+          "transport",
+          "state",
+          "failures"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Letzter Fehler (bei `down`)."
+          },
+          "failures": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Aufeinanderfolgende Fehlversuche.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "Name des Servers."
+          },
+          "state": {
+            "$ref": "#/components/schemas/McpConnectionState",
+            "description": "Zustand."
+          },
+          "transport": {
+            "$ref": "#/components/schemas/McpTransport",
+            "description": "Transport."
+          }
+        }
+      },
+      "McpStatusList": {
+        "type": "object",
+        "description": "Antwort von `GET /mcp-servers:status`.",
+        "required": [
+          "gatewayEnabled",
+          "items"
+        ],
+        "properties": {
+          "gatewayEnabled": {
+            "type": "boolean",
+            "description": "MCP-Gateway eingeschaltet (`mcp.enabled`)."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpServerState"
+            },
+            "description": "Server (nach Name sortiert)."
+          }
+        }
       },
       "McpTransport": {
         "type": "string",
@@ -10700,6 +11601,17 @@
           "latency_p99",
           "ttft_p95",
           "cache_hit_rate"
+        ]
+      },
+      "ModelCapability": {
+        "type": "string",
+        "description": "Art von Anfragen, die eine Modellgruppe annimmt (F123, AIGW-21).",
+        "enum": [
+          "chat",
+          "embeddings",
+          "images",
+          "audio-transcription",
+          "audio-speech"
         ]
       },
       "ModelGroup": {
@@ -10767,7 +11679,7 @@
       },
       "ModelGroupSpec": {
         "type": "object",
-        "description": "Modellgruppe: öffentlicher Modellname mit Deployments dahinter.",
+        "description": "Modellgruppe: öffentlicher Modellname mit Deployments dahinter.\n\nAbwärtskompatibilität (F123): `settings.capabilities` (Form vor dem typisierten Feld) wird\nbeim Lesen in `capabilities` übernommen.",
         "properties": {
           "aliases": {
             "type": "array",
@@ -10775,6 +11687,13 @@
               "type": "string"
             },
             "description": "Weitere Namen, unter denen Clients die Gruppe ansprechen."
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelCapability"
+            },
+            "description": "Arten von Anfragen, die die Gruppe annimmt (F123); leer = nur `chat`."
           },
           "fallbacks": {
             "type": "array",
@@ -10958,6 +11877,14 @@
         },
         "additionalProperties": false
       },
+      "OutputRejectMode": {
+        "type": "string",
+        "description": "Wirkung einer Guardrail-Ablehnung **der Ausgabe** (F160). Eingabe-Ablehnungen sind immer\nFehler (`400`).",
+        "enum": [
+          "finish",
+          "error"
+        ]
+      },
       "PayloadMode": {
         "type": "string",
         "description": "Umfang des Payload-Loggings.",
@@ -11098,7 +12025,7 @@
       },
       "PluginBindingSpec": {
         "type": "object",
-        "description": "Plugin-Bindung: ein Plugin mit Konfiguration auf einer Ebene.",
+        "description": "Plugin-Bindung: ein Plugin mit Konfiguration auf einer Ebene.\n\nDie Kettensteuerung (`inherit`, `locked`, `failMode`, `timeoutMs`, `outputRejectMode`)\nsteht in eigenen Feldern (F117). Abwärtskompatibilität: Stehen diese Schlüssel (wie vor\nF117) in `config`, werden sie beim Lesen in die Felder übernommen; steht derselbe Schlüssel\nin beiden mit verschiedenen Werten, ist die Eingabe ungültig.",
         "required": [
           "scope",
           "plugin"
@@ -11112,10 +12039,47 @@
             "type": "boolean",
             "description": "Aktiv?"
           },
+          "failMode": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PluginFailMode",
+                "description": "Fehlermodus (Standard je Plugin-Art, F148)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "inherit": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PluginInherit",
+                "description": "Verhältnis zu Bindungen desselben Plugins auf äußeren Ebenen (Standard `append`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "locked": {
+            "type": "boolean",
+            "description": "Innere Ebenen dürfen diese Bindung weder ersetzen noch abschalten."
+          },
           "order": {
             "type": "integer",
             "format": "int32",
             "description": "Reihenfolge innerhalb der Ebene (aufsteigend)."
+          },
+          "outputRejectMode": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OutputRejectMode",
+                "description": "Wirkung einer Ausgabe-Ablehnung (Standard `finish`, F160)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "plugin": {
             "type": "string",
@@ -11124,9 +12088,35 @@
           "scope": {
             "$ref": "#/components/schemas/Scope",
             "description": "Geltungsbereich."
+          },
+          "timeoutMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Zeitlimit asynchroner Haken in Millisekunden (1–60000; Standard je Plugin-Art).",
+            "minimum": 0
           }
         },
         "additionalProperties": false
+      },
+      "PluginFailMode": {
+        "type": "string",
+        "description": "Verhalten bei Fehlern eines Plugins.",
+        "enum": [
+          "open",
+          "closed"
+        ]
+      },
+      "PluginInherit": {
+        "type": "string",
+        "description": "Verhältnis einer Plugin-Bindung zu Bindungen desselben Plugins auf äußeren Ebenen.",
+        "enum": [
+          "append",
+          "override",
+          "disable"
+        ]
       },
       "Point": {
         "type": "object",
@@ -11234,11 +12224,33 @@
             "type": "string",
             "description": "Modellname beim Anbieter (wie `Deployment.providerModel`)."
           },
+          "perAudioMinute": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Preis je Minute Audio-Eingabe (Transkription/Übersetzung, z. B. Whisper); anteilig\nje Millisekunde abgerechnet."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "perImage": {
             "oneOf": [
               {
                 "$ref": "#/components/schemas/Amount",
-                "description": "Preis je erzeugtem Bild."
+                "description": "Preis je erzeugtem Bild (`/v1/images/generations`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "perMillionCharacters": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Preis je 1 Mio. Zeichen Text-Eingabe einer Sprachausgabe (`/v1/audio/speech`)."
               },
               {
                 "type": "null"
@@ -11852,6 +12864,7 @@
           "User",
           "ApiKey",
           "ProviderCredential",
+          "Secret",
           "ModelGroup",
           "Deployment",
           "Price",
@@ -11983,10 +12996,238 @@
           "model-group"
         ]
       },
+      "Secret": {
+        "type": "object",
+        "description": "Geheimnis (gelesen) – **ohne** Werte.",
+        "required": [
+          "id",
+          "metadata",
+          "spec",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID (UUIDv7)."
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/SecretSummary",
+            "description": "Beschreibung und Feldnamen."
+          },
+          "status": {
+            "$ref": "#/components/schemas/SecretStatus",
+            "description": "Vom Server verwaltete Angaben."
+          }
+        }
+      },
+      "SecretInput": {
+        "type": "object",
+        "description": "Geheimnis (Eingabe für Anlegen und Ersetzen).",
+        "required": [
+          "metadata",
+          "spec"
+        ],
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten (`name`, `labels`)."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/SecretInputSpec",
+            "description": "Beschreibung und Werte."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SecretInputSpec": {
+        "type": "object",
+        "description": "Spezifikation beim Anlegen/Ersetzen.",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "description": "Felder, z. B. `{\"value\": {\"value\": \"…\"}}`.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SecretValue"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Beschreibung (Zweck, Besitzer)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SecretList": {
+        "type": "object",
+        "description": "Seite einer Liste: Geheimnisse.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Secret"
+            },
+            "description": "Einträge (nach Name sortiert)."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite."
+          }
+        }
+      },
+      "SecretPatch": {
+        "type": "object",
+        "description": "Teiländerung (JSON Merge Patch).",
+        "properties": {
+          "metadata": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SecretPatchMeta",
+                "description": "Metadaten."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spec": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SecretPatchSpec",
+                "description": "Spezifikation."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "SecretPatchMeta": {
+        "type": "object",
+        "description": "Metadaten im `PATCH`.",
+        "properties": {
+          "labels": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Ersetzt die Labels vollständig (weglassen = unverändert).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Muss, falls angegeben, zum Pfad passen."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SecretPatchSpec": {
+        "type": "object",
+        "description": "Spezifikation im `PATCH`.",
+        "properties": {
+          "data": {
+            "type": "object",
+            "description": "Zu ändernde Felder: Wert setzt, `null` entfernt; nicht genannte Felder bleiben.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SecretValue"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Neue Beschreibung (`null` entfernt sie, weglassen = unverändert)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SecretStatus": {
+        "type": "object",
+        "description": "Status eines Geheimnisses.",
+        "required": [
+          "keyId"
+        ],
+        "properties": {
+          "keyId": {
+            "type": "string",
+            "description": "ID des Master-Keys, mit dem verschlüsselt ist (Rotation)."
+          }
+        }
+      },
       "SecretString": {
         "type": "string",
         "format": "password",
         "description": "Geheimer Klartext (z. B. API-Key eines Anbieters).\n\n`Debug`, `Display` und `Serialize` geben nur [`REDACTED`] aus; der Wert ist ausschließlich\nüber [`SecretString::expose`] erreichbar. Deserialisieren ist erlaubt (Eingabe über die\nAdmin-API)."
+      },
+      "SecretSummary": {
+        "type": "object",
+        "description": "Beschreibung und Namen der gespeicherten Felder.",
+        "required": [
+          "fields"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Beschreibung."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Namen der gespeicherten Felder (sortiert), z. B. `[\"value\"]`."
+          }
+        }
+      },
+      "SecretValue": {
+        "type": "object",
+        "description": "Ein Geheimwert in der Eingabe.",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "value": {
+            "$ref": "#/components/schemas/SecretString",
+            "description": "Klartext (wird sofort verschlüsselt, nie wieder ausgegeben)."
+          }
+        },
+        "additionalProperties": false
       },
       "Series": {
         "type": "object",
@@ -12813,6 +14054,10 @@
     {
       "name": "provider-credentials",
       "description": "Zugangsdaten der Anbieter (Werte nur schreibbar)"
+    },
+    {
+      "name": "secrets",
+      "description": "Allgemeine Geheimnisse für Webhooks, Guardrail-Dienste und MCP-Server (Werte nur schreibbar)"
     },
     {
       "name": "prices",
