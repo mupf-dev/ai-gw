@@ -701,7 +701,7 @@ export interface components {
         AuditEntry: {
             /**
              * @description `create` | `update` | `delete` | `rotate` | `revoke` | `reactivate` | `login` |
-             *     `login-failed` | `logout` | `first-use` | `disable`.
+             *     `login-failed` | `logout` | `first-use` | `disable` | `clamp` | `force` (AIGW-67).
              */
             action: string;
             /**
@@ -848,6 +848,11 @@ export interface components {
              */
             tpm?: number | null;
         };
+        /**
+         * @description Umgang mit bestehenden Objekten über einer gesenkten Grenze.
+         * @enum {string}
+         */
+        Cascade: "reject" | "clamp";
         /** @description Eine Ressource im Plan. */
         Change: {
             /** @description Aktion. */
@@ -977,6 +982,11 @@ export interface components {
             /** @description Geheimer Wert: nur „geändert“, nie der Inhalt. */
             secret?: boolean;
         };
+        /**
+         * @description Ebene der Mandantenhierarchie.
+         * @enum {string}
+         */
+        Level: "organization" | "team" | "api-key";
         /**
          * @description Gemessene Größe eines Limits.
          * @enum {string}
@@ -1167,6 +1177,11 @@ export interface components {
             title: string;
             /** @description Problemtyp (`urn:aigw:problem:<code>`). */
             type: string;
+            /**
+             * @description Einzelne Grenzverstöße (AIGW-67: `422` beim Objekt selbst, `409` bei betroffenen
+             *     bestehenden Keys/Teams); fehlt sonst. Geboxt, damit `Result<_, Problem>` klein bleibt.
+             */
+            violations?: components["schemas"]["Violation"][] | null;
         };
         /** @description Zugangsdaten (gelesen) – **ohne** Werte. */
         ProviderCredential: {
@@ -1413,6 +1428,17 @@ export interface components {
             ui: string;
             /** @description Version (SemVer). */
             version: string;
+        };
+        /** @description Ein Verstoß gegen eine Grenze. */
+        Violation: {
+            /** @description Feld, z. B. `limits[0]`, `budget`, `allowedModels`. */
+            field: string;
+            /** @description Ebene des betroffenen Objekts. */
+            level: components["schemas"]["Level"];
+            /** @description Verständliche Meldung. */
+            message: string;
+            /** @description Name des betroffenen Objekts. */
+            name: string;
         };
     };
     responses: never;
@@ -1768,7 +1794,10 @@ export interface operations {
     };
     create_api_key: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`). */
+                force?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1893,7 +1922,10 @@ export interface operations {
     };
     put_api_key: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`). */
+                force?: boolean;
+            };
             header?: {
                 /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
                 "If-Match"?: string | null;
@@ -2732,6 +2764,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Konflikt (z. B. bestehende Objekte über neuen Grenzen) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description ETag passt nicht */
             412: {
                 headers: {
@@ -3068,6 +3109,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Konflikt (z. B. bestehende Objekte über neuen Grenzen) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description ETag passt nicht */
             412: {
                 headers: {
@@ -3215,7 +3265,12 @@ export interface operations {
     };
     create_organization: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`). */
+                force?: boolean;
+                /** @description Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`. */
+                cascade?: components["schemas"]["Cascade"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3340,7 +3395,12 @@ export interface operations {
     };
     put_organization: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`). */
+                force?: boolean;
+                /** @description Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`. */
+                cascade?: components["schemas"]["Cascade"];
+            };
             header?: {
                 /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
                 "If-Match"?: string | null;
@@ -3397,6 +3457,15 @@ export interface operations {
             };
             /** @description Nicht gefunden */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Konflikt (z. B. bestehende Objekte über neuen Grenzen) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3739,6 +3808,15 @@ export interface operations {
             };
             /** @description Nicht gefunden */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Konflikt (z. B. bestehende Objekte über neuen Grenzen) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4366,7 +4444,12 @@ export interface operations {
     };
     create_team: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`). */
+                force?: boolean;
+                /** @description Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`. */
+                cascade?: components["schemas"]["Cascade"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4491,7 +4574,12 @@ export interface operations {
     };
     put_team: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`). */
+                force?: boolean;
+                /** @description Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`. */
+                cascade?: components["schemas"]["Cascade"];
+            };
             header?: {
                 /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
                 "If-Match"?: string | null;
@@ -4548,6 +4636,15 @@ export interface operations {
             };
             /** @description Nicht gefunden */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Konflikt (z. B. bestehende Objekte über neuen Grenzen) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4936,6 +5033,15 @@ export interface operations {
             };
             /** @description Nicht gefunden */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Konflikt (z. B. bestehende Objekte über neuen Grenzen) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

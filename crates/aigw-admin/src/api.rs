@@ -45,7 +45,7 @@ use crate::{admin_keys as ak, session as s};
         crate::usage::list_budgets,
         crate::audit::audit_log,
     ),
-    components(schemas(VersionInfo, Problem)),
+    components(schemas(VersionInfo, Problem, crate::bounds::Cascade)),
     modifiers(&SecuritySchemes),
     tags(
         (name = "system", description = "Systeminformationen"),

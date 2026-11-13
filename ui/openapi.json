@@ -526,6 +526,17 @@
         ],
         "summary": "Legt einen API-Key an. Der Klartext (`secret`) steht **nur** in dieser Antwort.",
         "operationId": "create_api_key",
+        "parameters": [
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -725,6 +736,15 @@
                 "string",
                 "null"
               ]
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -2017,6 +2037,16 @@
               }
             }
           },
+          "409": {
+            "description": "Konflikt (z. B. bestehende Objekte über neuen Grenzen)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "412": {
             "description": "ETag passt nicht",
             "content": {
@@ -2511,6 +2541,16 @@
               }
             }
           },
+          "409": {
+            "description": "Konflikt (z. B. bestehende Objekte über neuen Grenzen)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "412": {
             "description": "ETag passt nicht",
             "content": {
@@ -2736,6 +2776,26 @@
           "organizations"
         ],
         "operationId": "create_organization",
+        "parameters": [
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cascade",
+            "in": "query",
+            "description": "Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Cascade"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -2934,6 +2994,24 @@
                 "null"
               ]
             }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cascade",
+            "in": "query",
+            "description": "Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Cascade"
+            }
           }
         ],
         "requestBody": {
@@ -2997,6 +3075,16 @@
           },
           "404": {
             "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt (z. B. bestehende Objekte über neuen Grenzen)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3519,6 +3607,16 @@
           },
           "404": {
             "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt (z. B. bestehende Objekte über neuen Grenzen)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4456,6 +4554,26 @@
           "teams"
         ],
         "operationId": "create_team",
+        "parameters": [
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cascade",
+            "in": "query",
+            "description": "Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Cascade"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4654,6 +4772,24 @@
                 "null"
               ]
             }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Grenzverstöße bewusst zulassen (nur globaler `admin`; Audit-Eintrag `force`).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cascade",
+            "in": "query",
+            "description": "Bestehende Keys/Teams über den neuen Grenzen: `reject` (Standard, `409`) oder `clamp`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Cascade"
+            }
           }
         ],
         "requestBody": {
@@ -4717,6 +4853,16 @@
           },
           "404": {
             "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt (z. B. bestehende Objekte über neuen Grenzen)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5290,6 +5436,16 @@
           },
           "404": {
             "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt (z. B. bestehende Objekte über neuen Grenzen)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5963,7 +6119,7 @@
         "properties": {
           "action": {
             "type": "string",
-            "description": "`create` | `update` | `delete` | `rotate` | `revoke` | `reactivate` | `login` |\n`login-failed` | `logout` | `first-use` | `disable`."
+            "description": "`create` | `update` | `delete` | `rotate` | `revoke` | `reactivate` | `login` |\n`login-failed` | `logout` | `first-use` | `disable` | `clamp` | `force` (AIGW-67)."
           },
           "actor": {
             "type": "string",
@@ -6294,6 +6450,14 @@
           }
         },
         "additionalProperties": false
+      },
+      "Cascade": {
+        "type": "string",
+        "description": "Umgang mit bestehenden Objekten über einer gesenkten Grenze.",
+        "enum": [
+          "reject",
+          "clamp"
+        ]
       },
       "Change": {
         "type": "object",
@@ -6636,6 +6800,15 @@
             "description": "Geheimer Wert: nur „geändert“, nie der Inhalt."
           }
         }
+      },
+      "Level": {
+        "type": "string",
+        "description": "Ebene der Mandantenhierarchie.",
+        "enum": [
+          "organization",
+          "team",
+          "api-key"
+        ]
       },
       "LimitMetric": {
         "type": "string",
@@ -7146,6 +7319,16 @@
           "type": {
             "type": "string",
             "description": "Problemtyp (`urn:aigw:problem:<code>`)."
+          },
+          "violations": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Violation"
+            },
+            "description": "Einzelne Grenzverstöße (AIGW-67: `422` beim Objekt selbst, `409` bei betroffenen\nbestehenden Keys/Teams); fehlt sonst. Geboxt, damit `Result<_, Problem>` klein bleibt."
           }
         }
       },
@@ -7873,6 +8056,34 @@
           "version": {
             "type": "string",
             "description": "Version (SemVer)."
+          }
+        }
+      },
+      "Violation": {
+        "type": "object",
+        "description": "Ein Verstoß gegen eine Grenze.",
+        "required": [
+          "level",
+          "name",
+          "field",
+          "message"
+        ],
+        "properties": {
+          "field": {
+            "type": "string",
+            "description": "Feld, z. B. `limits[0]`, `budget`, `allowedModels`."
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level",
+            "description": "Ebene des betroffenen Objekts."
+          },
+          "message": {
+            "type": "string",
+            "description": "Verständliche Meldung."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name des betroffenen Objekts."
           }
         }
       }
