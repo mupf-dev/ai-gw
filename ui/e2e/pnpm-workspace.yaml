@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Eigenes pnpm-Projekt nur für Browser-Tests (nicht Teil des UI-Bundles). Gleiche Lieferketten-Härtung
+# wie ui/: keine Lifecycle-Skripte, Versionen erst nach 7 Tagen, Lockfile-Pflicht.
+packages:
+  - "."
+ignoreScripts: true
+onlyBuiltDependencies: []
+minimumReleaseAge: 10080

@@ -1,13 +1,123 @@
 /* SPDX-FileCopyrightText: 2026 ai-gw contributors */
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
 @import 'tailwindcss';
+@import './styles/tokens.css';
 
-/* Minimaler Rahmen; das Design-System folgt mit AIGW-48. */
+/* dark:-Variante folgt dem wirksamen Schema am <html> (prefs.svelte.ts), nicht nur der Medienabfrage. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *, .scheme-dark, .scheme-dark *));
+
 @layer base {
   html {
-    color-scheme: light dark;
+    font-family: var(--font-sans);
+    -webkit-text-size-adjust: 100%;
   }
   body {
-    @apply bg-white text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+    @apply bg-bg text-base text-fg antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-soft-fg);
+  }
+  h1:focus {
+    outline: none;
+  }
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+  }
+  /* Bits-UI-Popover/Dialog liegen im <body>; Überlagerungen bekommen dieselben Grundfarben. */
+  [data-dialog-overlay],
+  [data-alert-dialog-overlay] {
+    background: var(--color-overlay);
+  }
+}
+
+@layer utilities {
+  /* Zahlen: Monospace + Tabellenziffern (Variante C) */
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .label-caps {
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+  }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+  /* Einblende-Animationen für Bits-UI-Inhalte (data-state), nur ohne reduzierte Bewegung */
+  @media (prefers-reduced-motion: no-preference) {
+    .anim-pop[data-state='open'] {
+      animation: gw-pop 140ms var(--ease-out);
+    }
+    .anim-fade[data-state='open'] {
+      animation: gw-fade 160ms var(--ease-out);
+    }
+    .anim-dialog[data-state='open'] {
+      animation: gw-dialog 180ms var(--ease-out);
+    }
+    .anim-sheet-right[data-state='open'] {
+      animation: gw-sheet-right 240ms var(--ease-out);
+    }
+    .anim-sheet-left[data-state='open'] {
+      animation: gw-sheet-left 240ms var(--ease-out);
+    }
+    .anim-toast {
+      animation: gw-toast 220ms var(--ease-out);
+    }
+  }
+}
+
+@keyframes gw-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+@keyframes gw-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes gw-dialog {
+  from {
+    opacity: 0;
+    /* Tailwind 4 zentriert über die Eigenschaft `translate`, die Animation nutzt `transform` zusätzlich. */
+    transform: translateY(8px) scale(0.98);
+  }
+}
+@keyframes gw-sheet-right {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes gw-sheet-left {
+  from {
+    transform: translateX(-100%);
+  }
+}
+@keyframes gw-toast {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
   }
 }

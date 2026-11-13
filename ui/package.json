@@ -9,7 +9,9 @@
     "dev": "vite",
     "build": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json --threshold error",
-    "gen:api": "openapi-typescript openapi.json -o src/lib/api/schema.d.ts"
+    "sizes": "node scripts/sizes.mjs dist",
+    "e2e": "e2e/run.sh",
+    "gen:api":"openapi-typescript openapi.json -o src/lib/api/schema.d.ts"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
@@ -24,6 +26,7 @@
   "dependencies": {
     "@internationalized/date": "^3.10.0",
     "bits-ui": "^2.20.0",
-    "openapi-fetch": "^0.17.0"
+    "openapi-fetch": "^0.17.0",
+    "uplot": "1.6.32"
   }
 }
