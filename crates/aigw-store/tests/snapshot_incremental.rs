@@ -5,9 +5,12 @@
 //!
 //! * Property-Test: zufällige Folgen von Admin-Änderungen über alle Ressourcenarten (inkl.
 //!   Team-Umzug mit `ON UPDATE CASCADE`, Löschungen mit mitgelöschten Bindungen/Freigaben,
-//!   Key-Rotation, Zugangsdaten-Wechsel); nach jedem Schritt-Block muss der inkrementell
+//!   Key-Rotation, Zugangsdaten-Wechsel, Löschen + gleichnamige Neuanlage von Key,
+//!   Modellgruppe, Team und Organisation); nach jedem Schritt-Block muss der inkrementell
 //!   fortgeschriebene Snapshot exakt dem vollständigen Neubau entsprechen. SQLite immer,
 //!   Postgres mit `AIGW_TEST_POSTGRES_URL`.
+//! * Löschen + gleichnamige Neuanlage gezielt (Schritt für Schritt bzw. alles in einem Neubau,
+//!   laufender Reloader mit Debounce).
 //! * Rückfälle (Lücke, zu viele Änderungen), Reloader-Metriken, Konsistenzprüfung.
 //! * Platten-Cache: Rundreise, kaputter/fremder Cache wird verworfen, Kaltstart ohne Datenbank.
 //!
@@ -26,15 +29,15 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use aigw_core::resource::{
-    ApiKeySpec, ApiKeyState, DeploymentSpec, McpGrantSpec, McpServerSpec, ModelGroupSpec,
+    ApiKeySpec, ApiKeyState, DeploymentSpec, Id, McpGrantSpec, McpServerSpec, ModelGroupSpec,
     ObjectMeta, OrganizationSpec, PluginBindingSpec, PriceSpec, ProviderCredentialSpec,
     ResourceKind, Scope, ScopeLevel, SecretRef, TeamSpec, new_id,
 };
-use aigw_core::snapshot::{Snapshot, SnapshotHandle, SnapshotSource};
+use aigw_core::snapshot::{KeyHash, Snapshot, SnapshotHandle, SnapshotSource};
 use aigw_core::types::ProviderKind;
 use aigw_store::{
-    Fallback, Incremental, Keyring, MasterKey, ReloadOptions, Reloader, SnapshotCache, Store,
-    load_incremental, load_snapshot,
+    Fallback, Incremental, Keyring, MasterKey, PlainResource, ReloadOptions, Reloader,
+    SnapshotCache, Store, hash_api_key, load_incremental, load_snapshot,
 };
 use sqlx::AssertSqlSafe;
 use time::OffsetDateTime;
@@ -87,7 +90,7 @@ async fn random_change(store: &Store, keyring: &Keyring, rng: &mut Rng) {
     let group = rng.name("g", 4);
     let models =
         |rng: &mut Rng| -> Vec<String> { (0..rng.below(3)).map(|_| rng.name("g", 4)).collect() };
-    match rng.below(26) {
+    match rng.below(30) {
         0 => drop(
             store
                 .create(ACTOR, ObjectMeta::named(&org), OrganizationSpec::default())
@@ -377,7 +380,7 @@ async fn random_change(store: &Store, keyring: &Keyring, rng: &mut Rng) {
                 }
             }
         }
-        _ => {
+        25 => {
             let meta = ObjectMeta::named(rng.name("r", 5));
             if rng.chance(20) {
                 drop(
@@ -411,6 +414,159 @@ async fn random_change(store: &Store, keyring: &Keyring, rng: &mut Rng) {
                 }
             }
         }
+        // Löschen + sofortige Neuanlage unter demselben Namen (Verdacht aus dem UI-e2e).
+        26 | 27 => recreate_key(store, rng, &key, &org, &team).await,
+        28 => recreate_group(store, rng, &group).await,
+        _ => recreate_team_or_org(store, rng, &team, &org).await,
+    }
+}
+
+/// Key löschen und gleichnamig neu anlegen – im selben oder einem anderen Scope, mit oder
+/// ohne Team.
+async fn recreate_key(store: &Store, rng: &mut Rng, key: &str, org: &str, team: &str) {
+    if store
+        .delete(ACTOR, ResourceKind::ApiKey, key)
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let with_team = rng.chance(50);
+    let org = match store.get::<TeamSpec>(team).await {
+        Ok(t) if with_team => t.spec.organization,
+        _ => org.to_owned(),
+    };
+    drop(
+        store
+            .create_api_key(
+                ACTOR,
+                ObjectMeta::named(key),
+                ApiKeySpec {
+                    organization: org,
+                    team: with_team.then(|| team.to_owned()),
+                    ..Default::default()
+                },
+            )
+            .await,
+    );
+}
+
+/// Modellgruppe samt Deployments löschen und gleichnamig neu anlegen (Deployments mit denselben
+/// Namen, teils geändert).
+async fn recreate_group(store: &Store, rng: &mut Rng, group: &str) {
+    let Ok(all) = store.list::<DeploymentSpec>().await else {
+        return;
+    };
+    let deps: Vec<_> = all
+        .into_iter()
+        .filter(|d| d.spec.model_group == group)
+        .collect();
+    for d in &deps {
+        drop(
+            store
+                .delete(ACTOR, ResourceKind::Deployment, &d.metadata.name)
+                .await,
+        );
+    }
+    if store
+        .delete(ACTOR, ResourceKind::ModelGroup, group)
+        .await
+        .is_ok()
+    {
+        let aliases: Vec<String> = (0..rng.below(3)).map(|_| rng.name("a", 5)).collect();
+        drop(
+            store
+                .create(
+                    ACTOR,
+                    ObjectMeta::named(group),
+                    ModelGroupSpec {
+                        aliases,
+                        ..Default::default()
+                    },
+                )
+                .await,
+        );
+    }
+    for d in deps {
+        let mut spec = d.spec;
+        spec.priority = u32::try_from(rng.below(3)).unwrap();
+        spec.enabled = rng.chance(80);
+        drop(
+            store
+                .create(ACTOR, ObjectMeta::named(&d.metadata.name), spec)
+                .await,
+        );
+    }
+}
+
+/// Team (samt seiner Keys) bzw. Organisation löschen und gleichnamig neu anlegen; das Team
+/// ggf. in einer anderen Organisation, die Keys unter ihren alten Namen.
+async fn recreate_team_or_org(store: &Store, rng: &mut Rng, team: &str, org: &str) {
+    if rng.chance(30) {
+        // Organisation (geht nur ohne Teams/Keys).
+        if store
+            .delete(ACTOR, ResourceKind::Organization, org)
+            .await
+            .is_ok()
+        {
+            drop(
+                store
+                    .create(ACTOR, ObjectMeta::named(org), OrganizationSpec::default())
+                    .await,
+            );
+        }
+        return;
+    }
+    let Ok(keys) = store.list_api_keys().await else {
+        return;
+    };
+    let keys: Vec<_> = keys
+        .into_iter()
+        .filter(|k| k.spec.team.as_deref() == Some(team))
+        .collect();
+    for k in &keys {
+        drop(
+            store
+                .delete(ACTOR, ResourceKind::ApiKey, &k.metadata.name)
+                .await,
+        );
+    }
+    if store.delete(ACTOR, ResourceKind::Team, team).await.is_err() {
+        return;
+    }
+    let new_org = if rng.chance(50) {
+        org.to_owned()
+    } else {
+        rng.name("o", 3)
+    };
+    if store
+        .create(
+            ACTOR,
+            ObjectMeta::named(team),
+            TeamSpec {
+                organization: new_org.clone(),
+                ..Default::default()
+            },
+        )
+        .await
+        .is_err()
+    {
+        return;
+    }
+    for k in keys {
+        drop(
+            store
+                .create_api_key(
+                    ACTOR,
+                    ObjectMeta::named(&k.metadata.name),
+                    ApiKeySpec {
+                        organization: new_org.clone(),
+                        team: Some(team.to_owned()),
+                        ..Default::default()
+                    },
+                )
+                .await,
+        );
     }
 }
 
@@ -995,4 +1151,440 @@ async fn bench_incremental_vs_full_100k_keys() {
              (davon Kopie/Einarbeitung ohne DB ≈ {amed:?})"
         );
     }
+}
+
+// --- Löschen + gleichnamige Neuanlage ----------------------------------------------------------
+//
+// Verdacht aus dem UI-e2e: Ein API-Key, der gelöscht und sofort unter demselben Namen neu
+// angelegt wurde, lieferte an der Datenebene 401. Die Szenarien prüfen den inkrementellen
+// Snapshot dafür über alle betroffenen Arten – Schritt für Schritt (ein Neubau je Version) und
+// gesammelt (alle Versionen in einem Neubau, wie in einem Debounce-Fenster).
+
+/// Inkrementell fortgeschriebener Snapshot, bei jedem Abgleich mit dem vollständigen Neubau
+/// verglichen.
+struct Probe<'a> {
+    store: &'a Store,
+    keyring: Arc<Keyring>,
+    /// `true`: nach jeder Änderung einarbeiten; `false`: erst bei [`Probe::sync`].
+    step: bool,
+    snap: Snapshot,
+}
+
+impl<'a> Probe<'a> {
+    async fn new(store: &'a Store, keyring: Arc<Keyring>, step: bool) -> Self {
+        let snap = load_snapshot(store, &keyring).await.unwrap();
+        Self {
+            store,
+            keyring,
+            step,
+            snap,
+        }
+    }
+
+    async fn advance(&mut self) {
+        match load_incremental(self.store, &self.keyring, &self.snap, 10_000)
+            .await
+            .unwrap()
+        {
+            Incremental::UpToDate => {}
+            Incremental::Built { snapshot, .. } => self.snap = *snapshot,
+            Incremental::NeedFull(f) => panic!("unerwarteter Rückfall {f:?}"),
+        }
+    }
+
+    /// Nach einer Änderung (im Schrittmodus sofort einarbeiten).
+    async fn changed(&mut self) {
+        if self.step {
+            self.advance().await;
+        }
+    }
+
+    /// Einarbeiten, mit dem vollständigen Neubau vergleichen und den Stand liefern.
+    async fn sync(&mut self, what: &str) -> &Snapshot {
+        self.advance().await;
+        let full = load_snapshot(self.store, &self.keyring).await.unwrap();
+        assert_eq!(self.snap.version, full.version, "{what}");
+        if self.snap != full {
+            panic!(
+                "{what} (step={}): inkrementell ≠ vollständig\n\
+                 inkrementell: {:#?}\nvollständig: {:#?}",
+                self.step,
+                self.snap.to_parts(),
+                full.to_parts()
+            );
+        }
+        &self.snap
+    }
+
+    async fn create_key(&mut self, name: &str, org: &str, team: Option<&str>) -> (Id, KeyHash) {
+        let created = self
+            .store
+            .create_api_key(
+                ACTOR,
+                ObjectMeta::named(name),
+                ApiKeySpec {
+                    organization: org.into(),
+                    team: team.map(Into::into),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        self.changed().await;
+        (created.key.id, hash_api_key(&created.secret))
+    }
+
+    async fn delete(&mut self, kind: ResourceKind, name: &str) {
+        self.store.delete(ACTOR, kind, name).await.unwrap();
+        self.changed().await;
+    }
+
+    async fn create<R: PlainResource>(&mut self, name: &str, spec: R) -> Id {
+        let id = self
+            .store
+            .create(ACTOR, ObjectMeta::named(name), spec)
+            .await
+            .unwrap()
+            .id;
+        self.changed().await;
+        id
+    }
+}
+
+fn team_spec(org: &str) -> TeamSpec {
+    TeamSpec {
+        organization: org.into(),
+        ..Default::default()
+    }
+}
+
+fn deployment_spec(group: &str, model: &str) -> DeploymentSpec {
+    DeploymentSpec {
+        model_group: group.into(),
+        provider: ProviderKind::OpenAi,
+        endpoint: None,
+        provider_model: model.into(),
+        credential: None,
+        weight: 1,
+        priority: 0,
+        capacity: Default::default(),
+        enabled: true,
+        settings: Default::default(),
+    }
+}
+
+fn key_binding(key: &str) -> PluginBindingSpec {
+    PluginBindingSpec {
+        inherit: None,
+        locked: false,
+        fail_mode: None,
+        timeout_ms: None,
+        output_reject_mode: None,
+        scope: Scope {
+            level: ScopeLevel::ApiKey,
+            target: Some(key.into()),
+        },
+        plugin: "header".into(),
+        order: 0,
+        enabled: true,
+        config: Default::default(),
+    }
+}
+
+/// Alle Varianten „löschen und gleichnamig neu anlegen“ auf einem frischen Store.
+async fn recreate_same_name(store: &Store, step: bool) {
+    let keyring = ring();
+    org(store, "acme").await;
+    org(store, "beta").await;
+    store
+        .create(ACTOR, ObjectMeta::named("platform"), team_spec("acme"))
+        .await
+        .unwrap();
+    store
+        .create(ACTOR, ObjectMeta::named("ops"), team_spec("beta"))
+        .await
+        .unwrap();
+    store
+        .create(
+            ACTOR,
+            ObjectMeta::named("gpt"),
+            ModelGroupSpec {
+                aliases: vec!["gpt-latest".into()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .create(
+            ACTOR,
+            ObjectMeta::named("gpt-openai"),
+            deployment_spec("gpt", "gpt-4o"),
+        )
+        .await
+        .unwrap();
+    let mut p = Probe::new(store, Arc::clone(&keyring), step).await;
+    let tag = |s: &str| format!("{s} (step={step})");
+
+    // 1. Key löschen und sofort unter demselben Namen (gleicher Scope) neu anlegen.
+    let (_, h1) = p.create_key("ci", "acme", Some("platform")).await;
+    assert!(p.sync(&tag("Key angelegt")).await.key(&h1).is_some());
+    p.delete(ResourceKind::ApiKey, "ci").await;
+    let (id2, h2) = p.create_key("ci", "acme", Some("platform")).await;
+    let s = p.sync(&tag("Key gelöscht + neu (gleicher Scope)")).await;
+    assert!(s.key(&h1).is_none(), "alter Key wirkt nicht mehr");
+    let ctx = s.key(&h2).expect("neu angelegter Key fehlt im Snapshot");
+    assert_eq!(ctx.key.id, id2);
+    assert_eq!(s.key_ids.get(&id2), Some(&h2));
+    assert_eq!(ctx.team.as_ref().unwrap().metadata.name, "platform");
+
+    // 2. Gleicher Name, andere Organisation/Team – und ohne Team.
+    p.delete(ResourceKind::ApiKey, "ci").await;
+    let (id3, h3) = p.create_key("ci", "beta", Some("ops")).await;
+    let s = p.sync(&tag("Key neu in anderer Org/Team")).await;
+    assert!(s.key(&h2).is_none());
+    let ctx = s.key(&h3).expect("Key in anderer Org fehlt");
+    assert_eq!(ctx.key.id, id3);
+    assert_eq!(ctx.organization.as_ref().unwrap().metadata.name, "beta");
+    assert_eq!(ctx.team.as_ref().unwrap().metadata.name, "ops");
+    p.delete(ResourceKind::ApiKey, "ci").await;
+    let (_, h4) = p.create_key("ci", "acme", None).await;
+    let s = p.sync(&tag("Key neu ohne Team")).await;
+    assert!(s.key(&h3).is_none());
+    let ctx = s.key(&h4).expect("Key ohne Team fehlt");
+    assert!(ctx.team.is_none());
+    assert_eq!(ctx.organization.as_ref().unwrap().metadata.name, "acme");
+
+    // 3. Rotation: alter Key bleibt bis zum Ablauf gültig; danach alten löschen und unter
+    //    seinem Namen neu anlegen, ebenso den rotierten Namen.
+    let (rotated, _) = store
+        .rotate_api_key(
+            ACTOR,
+            "ci",
+            ObjectMeta::named("ci-next"),
+            OffsetDateTime::now_utc() + time::Duration::hours(1),
+            aigw_store::Expect::Any,
+        )
+        .await
+        .unwrap();
+    p.changed().await;
+    let h_next = hash_api_key(&rotated.secret);
+    let s = p.sync(&tag("Rotation")).await;
+    assert!(s.key(&h4).is_some() && s.key(&h_next).is_some());
+    p.delete(ResourceKind::ApiKey, "ci").await;
+    let (_, h5) = p.create_key("ci", "acme", None).await;
+    p.delete(ResourceKind::ApiKey, "ci-next").await;
+    let (_, h6) = p.create_key("ci-next", "beta", None).await;
+    let s = p.sync(&tag("nach Rotation gelöscht + neu")).await;
+    assert!(s.key(&h4).is_none() && s.key(&h_next).is_none());
+    assert!(s.key(&h5).is_some(), "Neuanlage unter altem Namen fehlt");
+    assert!(
+        s.key(&h6).is_some(),
+        "Neuanlage unter rotiertem Namen fehlt"
+    );
+
+    // 4. Widerrufener Key gelöscht und gleichnamig neu.
+    store
+        .set_api_key_state(ACTOR, "ci", ApiKeyState::Revoked, aigw_store::Expect::Any)
+        .await
+        .unwrap();
+    p.changed().await;
+    p.delete(ResourceKind::ApiKey, "ci").await;
+    let (_, h7) = p.create_key("ci", "acme", Some("platform")).await;
+    let s = p.sync(&tag("widerrufen, gelöscht + neu")).await;
+    assert!(s.key(&h5).is_none());
+    assert!(s.key(&h7).is_some());
+
+    // 5. Key mit Plugin-Bindung gelöscht (Bindung fällt mit), gleichnamig neu samt Bindung.
+    p.create("ci-hdr", key_binding("ci")).await;
+    let old_binding = p.sync(&tag("Bindung")).await.plugin_bindings[0].id;
+    p.delete(ResourceKind::ApiKey, "ci").await;
+    let (_, h8) = p.create_key("ci", "acme", Some("platform")).await;
+    let b8 = p.create("ci-hdr", key_binding("ci")).await;
+    let s = p.sync(&tag("Key + Bindung neu")).await;
+    assert!(s.key(&h7).is_none());
+    assert!(s.key(&h8).is_some());
+    assert_eq!(s.plugin_bindings.len(), 1);
+    assert_eq!(s.plugin_bindings[0].id, b8);
+    assert_ne!(b8, old_binding);
+
+    // 6. Modellgruppe (samt Deployment) löschen und gleichnamig neu anlegen.
+    p.delete(ResourceKind::Deployment, "gpt-openai").await;
+    p.delete(ResourceKind::ModelGroup, "gpt").await;
+    let g2 = p
+        .create(
+            "gpt",
+            ModelGroupSpec {
+                aliases: vec!["gpt-neu".into()],
+                ..Default::default()
+            },
+        )
+        .await;
+    let d2 = p
+        .create("gpt-openai", deployment_spec("gpt", "gpt-4.1"))
+        .await;
+    let s = p.sync(&tag("Modellgruppe neu")).await;
+    let g = s.model_groups.get("gpt").expect("Gruppe fehlt");
+    assert_eq!(g.group.id, g2);
+    assert_eq!(g.deployments.len(), 1);
+    assert_eq!(g.deployments[0].deployment.id, d2);
+    assert_eq!(g.deployments[0].deployment.spec.provider_model, "gpt-4.1");
+    assert!(s.model_groups.contains_key("gpt-neu"));
+    assert!(!s.model_groups.contains_key("gpt-latest"), "alter Alias");
+    p.delete(ResourceKind::Deployment, "gpt-openai").await;
+    p.delete(ResourceKind::ModelGroup, "gpt").await;
+    let g3 = p.create("gpt", ModelGroupSpec::default()).await;
+    let s = p.sync(&tag("Modellgruppe ohne Deployments neu")).await;
+    let g = s.model_groups.get("gpt").expect("Gruppe fehlt");
+    assert_eq!(g.group.id, g3);
+    assert!(
+        g.deployments.is_empty(),
+        "Deployments der alten Gruppe übernommen"
+    );
+
+    // 7. Team löschen und gleichnamig in einer anderen Organisation neu, Key gleichnamig neu.
+    p.delete(ResourceKind::ApiKey, "ci").await;
+    p.delete(ResourceKind::Team, "platform").await;
+    let t2 = p.create("platform", team_spec("beta")).await;
+    let (_, h9) = p.create_key("ci", "beta", Some("platform")).await;
+    let s = p.sync(&tag("Team neu in anderer Org")).await;
+    assert!(s.key(&h8).is_none());
+    let ctx = s.key(&h9).expect("Key im neuen Team fehlt");
+    assert_eq!(ctx.team.as_ref().unwrap().id, t2);
+    assert_eq!(ctx.organization.as_ref().unwrap().metadata.name, "beta");
+
+    // 8. Organisation löschen und gleichnamig neu; Key gleichnamig in der neuen Org.
+    p.delete(ResourceKind::ApiKey, "ci").await;
+    p.delete(ResourceKind::ApiKey, "ci-next").await;
+    p.delete(ResourceKind::Team, "platform").await;
+    p.delete(ResourceKind::Team, "ops").await;
+    p.delete(ResourceKind::Organization, "beta").await;
+    let o2 = p.create("beta", OrganizationSpec::default()).await;
+    let (_, h10) = p.create_key("ci", "beta", None).await;
+    let s = p.sync(&tag("Organisation neu")).await;
+    assert!(s.key(&h9).is_none() && s.key(&h6).is_none());
+    let ctx = s.key(&h10).expect("Key in neuer Org fehlt");
+    assert_eq!(ctx.organization.as_ref().unwrap().id, o2);
+}
+
+#[tokio::test]
+async fn recreate_same_name_sqlite() {
+    for step in [true, false] {
+        let store = Store::connect("sqlite::memory:").await.unwrap();
+        store.migrate().await.unwrap();
+        recreate_same_name(&store, step).await;
+        store.close().await;
+    }
+}
+
+#[tokio::test]
+async fn recreate_same_name_postgres() {
+    for step in [true, false] {
+        let Some((store, admin, db)) = pg_store("snaprecreate").await else {
+            return;
+        };
+        recreate_same_name(&store, step).await;
+        pg_drop(store, admin, db).await;
+    }
+}
+
+/// Wie im Betrieb: laufender Reloader (Debounce), Löschen + Neuanlage innerhalb eines
+/// Debounce-Fensters bzw. über zwei Fenster verteilt.
+async fn reloader_recreate(store: Store) {
+    let keyring = ring();
+    org(&store, "acme").await;
+    let opts = ReloadOptions {
+        poll_interval: None,
+        debounce: Duration::from_millis(150),
+        verify_interval: None,
+        ..ReloadOptions::default()
+    };
+    let reloader = Reloader::bootstrap(store.clone(), Arc::clone(&keyring), opts)
+        .await
+        .unwrap();
+    let handle = reloader.handle().clone();
+    let metrics = reloader.metrics();
+    let task = reloader.spawn();
+    let wait = |want: i64| {
+        let handle = handle.clone();
+        async move {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while handle.version() < want {
+                assert!(Instant::now() < deadline, "Snapshot {want} nicht erreicht");
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
+    };
+    let create = |name: &'static str| {
+        let store = store.clone();
+        async move {
+            let c = store
+                .create_api_key(
+                    ACTOR,
+                    ObjectMeta::named(name),
+                    ApiKeySpec {
+                        organization: "acme".into(),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+            hash_api_key(&c.secret)
+        }
+    };
+    let mut hash = create("ci").await;
+    wait(store.config_version().await.unwrap()).await;
+    assert!(handle.load().key(&hash).is_some());
+    for round in 0..10 {
+        store
+            .delete(ACTOR, ResourceKind::ApiKey, "ci")
+            .await
+            .unwrap();
+        if round % 2 == 1 {
+            // Über zwei Fenster verteilt.
+            wait(store.config_version().await.unwrap()).await;
+            assert!(
+                handle.load().key(&hash).is_none(),
+                "gelöschter Key wirkt noch"
+            );
+        }
+        let old = hash;
+        hash = create("ci").await;
+        wait(store.config_version().await.unwrap()).await;
+        let snap = handle.load();
+        assert!(
+            snap.key(&old).is_none(),
+            "Runde {round}: alter Key wirkt noch"
+        );
+        assert!(
+            snap.key(&hash).is_some(),
+            "Runde {round}: neu angelegter Key fehlt (Version {})",
+            snap.version
+        );
+    }
+    assert_eq!(metrics.incremental_fallbacks.load(Ordering::Relaxed), 0);
+    assert!(metrics.reloads_incremental.load(Ordering::Relaxed) > 0);
+    let full = load_snapshot(&store, &keyring).await.unwrap();
+    assert_eq!(*handle.load(), full);
+    task.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reloader_recreate_same_name_sqlite() {
+    let dir = temp_dir("snaprecreate");
+    let url = format!("sqlite://{}/aigw.db?mode=rwc", dir.display());
+    let store = Store::connect(&url).await.unwrap();
+    store.migrate().await.unwrap();
+    reloader_recreate(store.clone()).await;
+    store.close().await;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reloader_recreate_same_name_postgres() {
+    let Some((store, admin, db)) = pg_store("snaprecreatereload").await else {
+        return;
+    };
+    reloader_recreate(store.clone()).await;
+    pg_drop(store, admin, db).await;
 }

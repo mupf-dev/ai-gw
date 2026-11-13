@@ -128,6 +128,19 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 curl -fsS "$BASE/v1/models" -H "authorization: Bearer $KEY"; echo
+echo "--- Key löschen und sofort gleichnamig neu anlegen → neuer Key gilt nach dem Hot Reload, alter 401"
+curl -fsS -X DELETE "$CBASE/admin/api/v1/api-keys/smoke" -H "authorization: Bearer $TOKEN" -H 'if-match: *'
+OLD_KEY=$KEY
+KEY=$(curl -fsS "$CBASE/admin/api/v1/api-keys" -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{"metadata":{"name":"smoke"},"spec":{"organization":"smoke-org"}}' |
+  grep -o '"secret":"sk-aigw-[^"]*"' | cut -d'"' -f4)
+test -n "$KEY" && test "$KEY" != "$OLD_KEY"
+for _ in $(seq 1 50); do
+  curl -fsS "$BASE/v1/models" -H "authorization: Bearer $KEY" >/dev/null 2>&1 && break
+  sleep 0.1
+done
+curl -fsS -o /dev/null "$BASE/v1/models" -H "authorization: Bearer $KEY"
+test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/v1/models" -H "authorization: Bearer $OLD_KEY")" = 401
 echo "--- POST /admin/api/v1/config:apply (Modellgruppe mock mit zwei Mock-Deployments)"
 apply() {
   curl -fsS "$CBASE/admin/api/v1/config:apply" -H "authorization: Bearer $TOKEN" \
