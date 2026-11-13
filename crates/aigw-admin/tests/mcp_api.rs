@@ -192,14 +192,23 @@ impl Env {
         let gateway = Arc::new(McpGateway::new(&McpConfig::default(), policy.clone()).unwrap());
         let task = gateway.spawn(snapshot.clone());
         let (token, secret) = BootstrapToken::generate().unwrap();
-        let chain = AuthChain::new()
-            .bearer(Arc::new(AdminKeyAuthenticator::new(store.clone())))
-            .bearer(Arc::new(token));
+        let chain: Arc<dyn aigw_admin::AdminAuthenticator> = Arc::new(
+            AuthChain::new()
+                .bearer(Arc::new(AdminKeyAuthenticator::new(store.clone())))
+                .bearer(Arc::new(token)),
+        );
         let admin = aigw_admin::router_with(
-            AdminState::new(store.clone(), Arc::new(chain))
+            AdminState::new(store.clone(), Arc::clone(&chain))
                 .with_keyring(Arc::clone(&keyring))
                 .with_upstream_policy(policy),
-        );
+        )
+        .merge(aigw_admin::mcp_status::router(
+            aigw_admin::mcp_status::McpStatusState {
+                store: store.clone(),
+                auth: chain,
+                gateway: Some(Arc::clone(&gateway)),
+            },
+        ));
         let app = aigw_proxy::mcp::router(proxy, gateway).merge(admin);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -514,6 +523,22 @@ async fn scenario(store: Store) {
     );
     let r = env.mcp(&key_solo, Some(&sid), "/mcp/fake", json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "drop_db"}})).await;
     assert!(r.text().contains("\"status\":403"), "{}", r.text());
+    // Zustand der Upstreams (AIGW-41-Folge): fake ist verbunden.
+    let st = env
+        .admin(Method::GET, "/mcp-servers:status", None)
+        .await
+        .expect(StatusCode::OK)
+        .json();
+    assert_eq!(st["gatewayEnabled"], true, "{st}");
+    let fake = st["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["name"] == "fake")
+        .cloned()
+        .unwrap();
+    assert_eq!(fake["state"], "up", "{st}");
+    assert_eq!(fake["failures"], 0);
 
     // Team-Key: Key-Freigabe allein genügt nicht, Team-Freigabe schon.
     env.admin(Method::POST, "/mcp-grants", Some(json!({"metadata": {"name": "member-fake"}, "spec": {"server": "fake", "subject": {"level": "api-key", "target": "member"}}})))

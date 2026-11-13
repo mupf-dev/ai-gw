@@ -35,6 +35,7 @@ pub mod credentials;
 pub mod deployments;
 pub mod gitops;
 pub mod mcp;
+pub mod mcp_status;
 pub mod oidc;
 pub mod plugin_bindings;
 pub mod prices;

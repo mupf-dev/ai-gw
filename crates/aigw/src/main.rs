@@ -281,6 +281,19 @@ fn serve(
         // F177: settings.caFile nur aus upstream.ca_dir (Admin-API, GitOps, Routing).
         let upstreams = aigw_admin::UpstreamPolicy::from_config(&config.admin)?
             .with_ca_dir(config.upstream.ca_dir.clone());
+        // MCP-Gateway (AIGW-41): `/mcp`, `/mcp/{server}` auf der Datenebene; Zustand der
+        // Upstreams über die Admin-API (`/mcp-servers:status`).
+        let gateway = if config.mcp.enabled {
+            Some(std::sync::Arc::new(
+                aigw_proxy::McpGateway::new(
+                    &config.mcp,
+                    aigw_admin::UpstreamPolicy::from_config(&config.admin)?,
+                )
+                .map_err(|e| format!("MCP-Gateway: {e}"))?,
+            ))
+        } else {
+            None
+        };
         let control = aigw_admin::router_with(
             admin
                 .with_keyring(std::sync::Arc::clone(&runtime_state.keyring))
@@ -312,23 +325,22 @@ fn serve(
                 rollups: config.observe.rollups,
             },
         ))
+        .merge(aigw_admin::mcp_status::router(
+            aigw_admin::mcp_status::McpStatusState {
+                store: runtime_state.store.clone(),
+                auth: std::sync::Arc::clone(&auth),
+                gateway: gateway.clone(),
+            },
+        ))
         .merge(observe::metrics_router(observe::MetricsSources {
             cache: Some(std::sync::Arc::clone(&cache_rt.cache)),
             plugins: Some(plugin_metrics),
             ..runtime_state.metrics_sources()
         }));
         let control = aigw_admin::read_only::apply(control, config.gitops.read_only_admin);
-        // MCP-Gateway (AIGW-41): `/mcp`, `/mcp/{server}` auf der Datenebene.
         let mut data_router = aigw_proxy::router(state.clone());
         let mut mcp_task = None;
-        if config.mcp.enabled {
-            let gateway = std::sync::Arc::new(
-                aigw_proxy::McpGateway::new(
-                    &config.mcp,
-                    aigw_admin::UpstreamPolicy::from_config(&config.admin)?,
-                )
-                .map_err(|e| format!("MCP-Gateway: {e}"))?,
-            );
+        if let Some(gateway) = gateway {
             mcp_task = Some(gateway.spawn(runtime_state.snapshot.clone()));
             data_router = data_router.merge(aigw_proxy::mcp::router(state, gateway));
         }
