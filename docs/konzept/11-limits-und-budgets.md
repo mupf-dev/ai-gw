@@ -64,6 +64,7 @@ spec:
     period: month            # day | week | month | total
     warnAtPercent: [50, 80, 100]
     hardLimit: true          # false = nur warnen
+    enforcement: strict      # strict (Std.): Kosten vorab reservieren | soft (F106)
 ---
 kind: ModelGroup
 metadata: {name: gpt-4o}
@@ -87,6 +88,7 @@ counters:
 limits:
   default_max_tokens: 4096    # Reservierung ohne max_tokens
   response_headers: true      # Rate-Limit-Header auch bei Erfolg (bei 429 immer)
+  tokenizer_dir: /etc/aigw/tokenizers   # tokenizer.json für settings.tokenizer: hf:<datei>
 billing:
   timezone: UTC               # IANA-Name, z. B. Europe/Berlin
   budget_sync_ms: 1000        # Abgleich mit budget_usage
@@ -119,9 +121,10 @@ billing:
   (bei Redis atomar in einem Lua-Skript, sonst unter Slot-Sperren, 05 §3).
 - Menge je Metrik: `requests` = 1 (nie korrigiert), `tokens` = geschätzte Eingabe +
   `max_tokens`, `input-tokens` = geschätzte Eingabe, `output-tokens` = `max_tokens`.
-  Ohne `max_tokens` gilt `limits.default_max_tokens` (Standard 4096). Die Eingabe wird wie
-  im Recorder geschätzt (≈ 1 Token je 4 Bytes Text, Tool-Aufrufe und -Ergebnisse
-  eingeschlossen).
+  Ohne `max_tokens` gilt `limits.default_max_tokens` (Standard 4096). Die Eingabe zählt der
+  Tokenizer der Modellgruppe (§9, F46): Texte, Tool-Aufrufe/-Ergebnisse, Reasoning, Namen,
+  Tool-Definitionen und Antwort-Schema (als JSON), je Nachricht 3 Tokens, 3 Tokens
+  Antworteinleitung, je Bild 765 (`detail: low`: 85).
 - **Abgleich** (`settle`) mit der tatsächlichen Usage am Ende der Anfrage, je Metrik mit dem
   passenden Wert (Summe, Eingabe, Ausgabe). Dafür wird die eine Reservierung mit
   `Reservation::split_off` (neu in `aigw-counters`) nach Metrik geteilt. Der Abgleich läuft
@@ -213,7 +216,25 @@ Anfragestarts.
   und Instanz einmal ein `BudgetEvent` aus. Empfänger ist ein `BudgetEventSink`; Standard ist
   das Log (`warn`, Felder level/target/period/percent/used/amount). Mit `events.webhooks`
   gehen die Ereignisse zusätzlich als Webhook hinaus (§6.5, AIGW-61).
-- Es wird **keine** geschätzte Kostenreservierung vorgenommen: Gleichzeitig laufende Anfragen
+- **Reservierung (F106, AIGW-71):** Bei `enforcement: strict` (Standard) reserviert `admit` die
+  geschätzten Kosten = (Prompt-Schätzung + `max_tokens` bzw. `limits.default_max_tokens`) ×
+  Preis des **teuersten** aktiven Deployments der Gruppe. Abgelehnt (`429 budget_exceeded`) wird,
+  wenn Verbrauch ≥ Betrag (`Retry-After` bis Zeitraumende), Verbrauch + Schätzung > Betrag
+  („max_tokens verringern“, Zeitraumende) oder Verbrauch + laufende Reservierungen + Schätzung >
+  Betrag (`Retry-After: 1`). Im Abschluss wird die Reservierung gegen die tatsächlichen Kosten
+  getauscht (`Budgets::settle`); Fehler ohne Verbrauch geben sie frei. Ohne Preis wird nichts
+  reserviert (nur geprüft). `soft` verhält sich wie vor F106 (Ablehnung erst bei erreichtem
+  Verbrauch, gleichzeitige Anfragen können überziehen).
+- **Genauigkeit strict:** je Instanz keine Überschreitung, solange die tatsächlichen Kosten die
+  Schätzung nicht übersteigen (Schätzung zu niedrig, z. B. Ausgabe > `default_max_tokens` ohne
+  `max_tokens`: Überschreitung um die Differenz). Mit `counters.backend: redis` hält ein
+  Lua-Skript Verbrauch + Reservierungen aller Instanzen je Budgetstand
+  (`aigw:b:{aigw-budget}:<ebene>:<ziel>:<zeitraum>:<beginn>`, Startwert aus dem Ledger, Ablauf
+  Zeitraumende + 1 Tag) → im Cluster exakt. Sonst (local, postgres-sync) gleichen sich Instanzen
+  im Takt `billing.budget_sync_ms` ab: Überschreitung höchstens um die Kosten, die andere
+  Instanzen innerhalb eines Abgleich-Zyklus buchen (fremdes Schreiben + eigenes Rücklesen, also
+  ≤ 2 × `budget_sync_ms`; Test `strict_without_shared_overshoot_bounded_by_sync_period`). Redis-Ausfall: lokal weiter (`warn`).
+- Bisheriges Verhalten (nur `soft`): Gleichzeitig laufende Anfragen
   können ein Budget um ihre Kosten überschreiten (wie bei LiteLLM). Siehe offene Fragen.
 
 ### 6.3 Persistenz und Genauigkeit
@@ -398,11 +419,36 @@ zusätzlich je Budget einen Map-Zugriff und eine Mutex-Sperre (keine I/O).
   gemeinsamem Limit über Redis (`AIGW_TEST_REDIS_URL`) und `postgres-sync`
   (`AIGW_TEST_POSTGRES_URL`).
 
+## 8a. Token-Zählung (F46, AIGW-71)
+
+Crate `aigw-tokenizer` (Eigenentwicklung, keine fremde Tokenizer-Bibliothek):
+
+| Tokenizer | Umfang | Genauigkeit |
+|---|---|---|
+| `o200k_base`, `cl100k_base` | BPE wie tiktoken; Rangtabellen eingebettet (`data/*.bin`, 0,7 + 1,6 MB, eigenes Längenpräfix-Format aus den von OpenAI veröffentlichten `*.tiktoken`, MIT, SHA-256 geprüft, `tools/gen_tables.py`); Pre-Tokenizer als Zustandsautomat | exakt: Token-IDs identisch mit tiktoken 0.14 (436 Fixture-Texte inkl. 400 Zufallstexte) |
+| `hf:<datei>` | `tokenizer.json` (BPE mit Merges/byte_fallback/ignore_merges, Unigram; Normalizer Prepend/Replace/Lowercase; Pre-Tokenizer Split/ByteLevel/Metaspace/Digits) | exakt ohne Spezial-Tokens: Llama 3.2, Mistral 7B v0.3, Mistral Nemo, TinyLlama (1744 Vergleiche, `AIGW_TOKENIZER_HF_DIR`) und 6 eingecheckte Mini-Tokenizer |
+| `heuristic[:claude\|:gemini]` | Zeichen je Token nach Sprache (EN/DE/Code), CJK/andere Schriften/Emojis getrennt | Schätzung (`generic` −20 %/+35 % von o200k) |
+
+- **Zuordnung:** `settings.tokenizer` der Modellgruppe (`auto` Standard, `o200k_base`,
+  `cl100k_base`, `heuristic`, `heuristic:claude`, `heuristic:gemini`, `hf:<datei>` relativ zu
+  `limits.tokenizer_dir`, ohne `..`). `auto` nach Anbieter/Modell des ersten Deployments:
+  gpt-4o/4.1/5/o-Serie → o200k, gpt-4/3.5/Embeddings → cl100k, Llama 3 → cl100k (Näherung),
+  Claude bzw. Anbieter `anthropic` → Heuristik claude, Gemini/Gemma → gemini, sonst generic.
+  `hf:`-Dateien werden beim ersten Bedarf im Hintergrund geladen (bis dahin bzw. bei Fehlern:
+  `auto`).
+- **Nutzung:** Prompt-Schätzung für Token-Limits, Deployment-Kapazität und Budget-Reservierung
+  (`Limiter::estimate`); Usage-Schätzung bei Abbruch/fehlender Usage im Recorder (Eingabe =
+  Prompt-Schätzung, Ausgabe = gestreamter Text, bis 64 KiB gepuffert, darüber hochgerechnet).
+  Andere Endpunkte (Embeddings, Bilder, Audio) schätzen weiter ≈ 4 Bytes je Token.
+- **Messwerte** (Release, Buildbox AMD EPYC, `cargo bench -p aigw-tokenizer`): 4 KB Prompt
+  (EN/DE/Code gemischt) o200k 36 µs (schnellster Lauf; Median 36–50 µs auf der geteilten Box),
+  cl100k 39 µs (Ziel < 50 µs); 64 KB 0,6 ms; 4 KB CJK (lange Stücke, Heap-Pfad) 170 µs;
+  Heuristik 4 KB 9 µs. Tabellen laden ≈ 20 ms (beim Start im Hintergrund).
+
 ## 9. Offene Punkte
 
 - `concurrency`-Limits (gleichzeitig offene Anfragen) sind im Ressourcenmodell vorgesehen, aber
   nicht umgesetzt (brauchen einen eigenen Zählertyp ohne Fenster bzw. mit Lease-Ablauf).
-- Budgets ohne Reservierung geschätzter Kosten (siehe Fragen).
 - Budget-Ereignisse tragen nur die Ziel-ID (kein Name); Anreicherung aus dem Snapshot folgt bei Bedarf.
 - Audio-/Bildpreise, sobald die IR-Usage diese Mengen führt.
 - Budgets je Nutzer (`user`) und je Modellgruppe sind im Ressourcenmodell nicht vorgesehen.

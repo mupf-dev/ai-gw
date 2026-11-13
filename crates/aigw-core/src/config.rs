@@ -366,6 +366,9 @@ pub struct LimitsConfig {
     /// Antwort-Header `x-ratelimit-*` bzw. `anthropic-ratelimit-*` auch bei Erfolg setzen
     /// (bei `429` immer).
     pub response_headers: bool,
+    /// Verzeichnis der Hugging-Face-`tokenizer.json`-Dateien für `settings.tokenizer:
+    /// hf:<datei>` einer Modellgruppe (F46; ohne Angabe ist `hf:` wirkungslos).
+    pub tokenizer_dir: Option<String>,
 }
 
 impl Default for LimitsConfig {
@@ -373,6 +376,7 @@ impl Default for LimitsConfig {
         Self {
             default_max_tokens: 4096,
             response_headers: true,
+            tokenizer_dir: None,
         }
     }
 }

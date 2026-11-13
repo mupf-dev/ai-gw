@@ -66,7 +66,7 @@ pub use auth::{
     AllowAll, ApiKey, AuthContext, Authenticator, KeySource, SnapshotAuthenticator, extract_api_key,
 };
 pub use error::ErrorFormat;
-pub use limits::{Limiter, TokenEstimate};
+pub use limits::{Limiter, RedisBudgets, TokenEstimate};
 pub use provider::{BoxFuture, ChatProvider, Describe, EventStream};
 pub use request_id::{REQUEST_ID_HEADER, RequestId, RequestStart};
 pub use routes::{ModelRoutes, StaticRoutes};

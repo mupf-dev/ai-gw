@@ -152,6 +152,7 @@ impl CacheStep {
         cache: Option<&Arc<ResponseCache>>,
         policy: Option<Arc<CachePolicy>>,
         auth: &AuthContext,
+        request_id: &str,
         model_group: &str,
         req: &ChatRequest,
         headers: &HeaderMap,
@@ -196,6 +197,11 @@ impl CacheStep {
             }),
             _ => None,
         };
+        // Auslöser des Embedding-Aufrufs: Kosten trägt der anfragende Key (F169).
+        let embed_ctx = semantic.as_ref().map(|_| aigw_cache::EmbedContext {
+            request_id: request_id.to_owned(),
+            caller: Some(Arc::new(auth.clone()) as Arc<dyn std::any::Any + Send + Sync>),
+        });
         let lookup = cache
             .lookup(&LookupRequest {
                 scope: resolve_scope(policy.scope, auth),
@@ -203,6 +209,7 @@ impl CacheStep {
                 request: req,
                 semantic,
                 skip_lookup: ctl.no_cache,
+                embed_ctx: embed_ctx.as_ref(),
             })
             .await;
         match lookup {
@@ -319,42 +326,86 @@ impl Stream for CacheTee {
 
 /// Embedder des semantischen Caches über das **interne Routing** des Gateways: die
 /// Embedding-Modellgruppe wird wie `POST /v1/embeddings` (AIGW-21) geroutet – Auswahl,
-/// Retries, Fallbacks, Circuit Breaker, Deployment-Kapazität –, aber ohne Key-Prüfung und
-/// ohne Abrechnung auf den anfragenden Key (siehe offene Fragen in `docs/konzept/14-cache.md`).
+/// Retries, Fallbacks, Circuit Breaker, Deployment-Kapazität –, ohne Key-Prüfung.
+///
+/// **Abrechnung (F169):** Mit [`RoutedEmbedder::with_billing`] (Standard über
+/// [`RoutedEmbedder::for_state`]) wird jeder Aufruf aus einer Anfrage als eigener
+/// [`RequestRecord`](aigw_core::observe::RequestRecord) erfasst – Endpunkt `embeddings`,
+/// `cache = cache-embedding`, Key/Team/Organisation der auslösenden Anfrage,
+/// `client_request_id` = deren Request-ID – und seine Kosten werden auf die Budgets des
+/// anfragenden Keys gebucht (ohne Reservierung; Rate-Limits zählen ihn nicht).
 pub struct RoutedEmbedder {
     routes: Arc<dyn crate::ModelRoutes>,
     counters: Arc<dyn aigw_counters::CounterBackend>,
+    billing: Option<Billing>,
+}
+
+/// Abrechnung der Embedding-Aufrufe (F169).
+struct Billing {
+    observer: Arc<dyn aigw_core::observe::RequestObserver>,
+    limits: Arc<crate::Limiter>,
 }
 
 impl std::fmt::Debug for RoutedEmbedder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RoutedEmbedder").finish_non_exhaustive()
+        f.debug_struct("RoutedEmbedder")
+            .field("billing", &self.billing.is_some())
+            .finish_non_exhaustive()
     }
 }
 
 impl RoutedEmbedder {
-    /// Embedder über `routes`; `counters` = Backend der Deployment-Kapazität.
+    /// Embedder über `routes`; `counters` = Backend der Deployment-Kapazität. Ohne
+    /// Abrechnung (siehe [`RoutedEmbedder::with_billing`]).
     pub fn new(
         routes: Arc<dyn crate::ModelRoutes>,
         counters: Arc<dyn aigw_counters::CounterBackend>,
     ) -> Self {
-        Self { routes, counters }
+        Self {
+            routes,
+            counters,
+            billing: None,
+        }
     }
 
-    /// Embedder für den Zustand der Datenebene.
+    /// Erfasst Embedding-Aufrufe als eigene Einträge bei `observer` und bucht ihre Kosten
+    /// über die Budgets von `limits` auf den anfragenden Key (F169).
+    #[must_use]
+    pub fn with_billing(
+        mut self,
+        observer: Arc<dyn aigw_core::observe::RequestObserver>,
+        limits: Arc<crate::Limiter>,
+    ) -> Self {
+        self.billing = Some(Billing { observer, limits });
+        self
+    }
+
+    /// Embedder für den Zustand der Datenebene (mit Abrechnung).
     pub fn for_state(st: &crate::ProxyState) -> Self {
         Self::new(Arc::clone(&st.routes), Arc::clone(st.limits.counters()))
+            .with_billing(Arc::clone(&st.observer), Arc::clone(&st.limits))
     }
-}
 
-#[async_trait::async_trait]
-impl aigw_cache::Embedder for RoutedEmbedder {
-    async fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String> {
+    async fn run(
+        &self,
+        model: &str,
+        text: &str,
+    ) -> crate::routing::exec::Routed<aigw_core::ir::embeddings::EmbeddingsResponse> {
         use aigw_core::ir::embeddings::{EmbeddingInput, EmbeddingsRequest};
-        let route = self
-            .routes
-            .route(model)
-            .ok_or_else(|| format!("Embedding-Modellgruppe {model:?} ist nicht konfiguriert"))?;
+        let Some(route) = self.routes.route(model) else {
+            return crate::routing::exec::Routed {
+                result: Err(aigw_core::ir::UpstreamError::from(
+                    aigw_core::ir::ApiError::new(
+                        aigw_core::ir::ErrorKind::NotFound,
+                        format!("Embedding-Modellgruppe {model:?} ist nicht konfiguriert"),
+                    ),
+                )),
+                attempts: Vec::new(),
+                last: None,
+                fallback: None,
+                fallback_skipped: Vec::new(),
+            };
+        };
         let req = EmbeddingsRequest {
             model: model.to_owned(),
             input: EmbeddingInput::Text(vec![text.to_owned()]),
@@ -365,7 +416,7 @@ impl aigw_cache::Embedder for RoutedEmbedder {
             extra: Default::default(),
             source: None,
         };
-        let routed = crate::routing::exec::execute_op(
+        crate::routing::exec::execute_op(
             self.routes.as_ref(),
             route,
             &crate::endpoints::EmbeddingsOp,
@@ -376,7 +427,118 @@ impl aigw_cache::Embedder for RoutedEmbedder {
                 grants: None,
             },
         )
-        .await;
+        .await
+    }
+
+    /// Eigener Eintrag und Budgetbuchung für einen Embedding-Aufruf (F169).
+    #[allow(clippy::too_many_arguments)]
+    fn bill(
+        billing: &Billing,
+        caller: &AuthContext,
+        ctx: &aigw_cache::EmbedContext,
+        model: &str,
+        text: &str,
+        routed: &crate::routing::exec::Routed<aigw_core::ir::embeddings::EmbeddingsResponse>,
+        started_at: std::time::SystemTime,
+        start: std::time::Instant,
+    ) {
+        use aigw_core::observe::RequestRecord;
+        use aigw_core::wire::WireFormat;
+        let mut r = RequestRecord::new(
+            uuid::Uuid::now_v7().to_string(),
+            WireFormat::OpenAiEmbeddings,
+            200,
+        );
+        r.started_at = started_at;
+        r.duration = start.elapsed();
+        r.model_alias = Some(model.to_owned());
+        r.cache = Some(CacheOutcome::Embedding);
+        r.client_request_id = Some(ctx.request_id.clone());
+        r.api_key_id = caller.api_key_id();
+        r.team_id = caller.team_id();
+        r.organization_id = caller.organization_id();
+        r.attempts.clone_from(&routed.attempts);
+        if let Some(m) = &routed.last {
+            let d = m.provider().describe();
+            r.deployment_id = d.deployment_id;
+            r.model_group = d.model_group.map(str::to_owned);
+            r.provider = d.provider;
+            r.provider_model = Some(d.provider_model.to_owned());
+        }
+        let group = caller
+            .snapshot
+            .as_ref()
+            .and_then(|s| s.model_group(model).cloned());
+        match &routed.result {
+            Ok(crate::routing::exec::Outcome::Json(resp)) => {
+                r.usage = resp.usage.clone();
+                r.usage_estimated = resp.usage_estimated;
+                if r.usage.input_tokens == 0 {
+                    // Anbieter ohne Usage: mit dem Tokenizer der Embedding-Gruppe schätzen.
+                    r.usage.input_tokens = billing.limits.tokenizer(group.as_deref()).count(text);
+                    r.usage_estimated = true;
+                }
+            }
+            Ok(crate::routing::exec::Outcome::Stream(_)) => {}
+            Err(e) => {
+                r.status = e.error.status();
+                r.error_kind = Some(e.error.kind);
+            }
+        }
+        if !r.is_error()
+            && let (Some(snap), Some(provider), Some(pm)) = (
+                caller.snapshot.as_ref(),
+                r.provider,
+                r.provider_model.as_deref(),
+            )
+        {
+            r.cost = aigw_billing::cost_at(
+                snap,
+                provider,
+                pm,
+                time::OffsetDateTime::from(started_at),
+                &r.usage,
+            );
+        }
+        if let (Some(cost), Some(budgets), Some(k)) =
+            (r.cost, billing.limits.budgets(), caller.key.as_ref())
+        {
+            budgets.charge(
+                &crate::limits::budget_targets(k),
+                cost,
+                crate::limits::unix_ms(started_at),
+            );
+        }
+        billing.observer.record(r);
+    }
+}
+
+#[async_trait::async_trait]
+impl aigw_cache::Embedder for RoutedEmbedder {
+    async fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String> {
+        self.embed_for(model, text, &aigw_cache::EmbedContext::default())
+            .await
+    }
+
+    async fn embed_for(
+        &self,
+        model: &str,
+        text: &str,
+        ctx: &aigw_cache::EmbedContext,
+    ) -> Result<Vec<f32>, String> {
+        let started_at = std::time::SystemTime::now();
+        let start = std::time::Instant::now();
+        let routed = self.run(model, text).await;
+        if let (Some(billing), Some(caller)) = (
+            &self.billing,
+            ctx.caller
+                .as_ref()
+                .and_then(|c| c.downcast_ref::<AuthContext>()),
+        ) {
+            Self::bill(
+                billing, caller, ctx, model, text, &routed, started_at, start,
+            );
+        }
         match routed.result.map_err(|e| e.to_string())? {
             crate::routing::exec::Outcome::Json(resp) => resp
                 .data

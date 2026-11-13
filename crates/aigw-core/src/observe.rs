@@ -86,6 +86,10 @@ pub enum CacheOutcome {
     /// Cache für diese Anfrage umgangen (Client-Steuerung `Cache-Control: no-cache`, nicht
     /// cachebare Anfrage, z. B. `temperature > 0`).
     Bypass,
+    /// Kein Lookup, sondern der Embedding-Aufruf des semantischen Caches selbst – eigener
+    /// Eintrag, dem anfragenden Key berechnet (F169).
+    #[serde(rename = "cache-embedding")]
+    Embedding,
 }
 
 impl CacheOutcome {
@@ -101,6 +105,7 @@ impl CacheOutcome {
             Self::HitSemantic => "hit-semantic",
             Self::Miss => "miss",
             Self::Bypass => "bypass",
+            Self::Embedding => "cache-embedding",
         }
     }
 }

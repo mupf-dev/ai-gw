@@ -218,4 +218,9 @@ ENV-Overrides wie üblich, z. B. `AIGW_CACHE__SEMANTIC__HNSW__EF_SEARCH=128`.
 - **Embedder:** `aigw_proxy::cache::RoutedEmbedder` routet die Embedding-Modellgruppe wie
   `POST /v1/embeddings` (AIGW-21: Auswahl, Retries, Fallbacks, Breaker, Kapazität), ohne
   Key-Prüfung; die Gruppe braucht die Fähigkeit `embeddings`.
-- Embedding-Aufrufe des Caches werden noch nicht als eigene Anfrage geloggt/abgerechnet.
+- **Abrechnung (F169, AIGW-71):** Jeder Embedding-Aufruf aus einer Anfrage wird als eigener
+  `RequestRecord` geloggt (Endpunkt `embeddings`, `cache = cache-embedding`, Key/Team/Org der
+  auslösenden Anfrage, `client_request_id` = deren Request-ID, Kosten aus der Preistabelle) und
+  auf die Budgets des Keys gebucht (ohne Reservierung, zählt nicht für Rate-Limits). Ein durch
+  `embed_timeout_ms` abgebrochener Aufruf wird nicht erfasst. Offen: eigene Spalte
+  `parent_request_id` statt `client_request_id`, Filter `cache=cache-embedding` im Log-Explorer.

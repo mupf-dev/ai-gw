@@ -19,7 +19,7 @@ use tracing::Instrument as _;
 use crate::ProxyState;
 use crate::auth::extract_api_key;
 use crate::error::ErrorFormat;
-use crate::limits::{RateHeaders, TokenEstimate, retry_after_secs};
+use crate::limits::{RateHeaders, retry_after_secs};
 use crate::observe::{ObservedStream, Recorder};
 use crate::plugins::{PluginPhase, PluginRun, Pre, response_stream};
 use crate::provider::EventStream;
@@ -368,7 +368,8 @@ async fn chat_inner(
     // Limits und Budgets (Architektur §3, Schritt 4; AIGW-30/31): genau eine Reservierung je
     // Client-Anfrage – Retries und Fallbacks laufen darin. Abgeschlossen wird im Recorder
     // (Kosten, Budget, Abgleich mit der tatsächlichen Usage).
-    let est = TokenEstimate::of(&req, st.limits.default_max_tokens());
+    // Prompt-Tokens mit dem Tokenizer der Modellgruppe (F46).
+    let est = st.limits.estimate(&req, group.as_ref());
     match st
         .limits
         .admit(&auth, group.as_ref(), est, std::time::SystemTime::now())
@@ -468,6 +469,7 @@ async fn chat_inner(
                 Some(c),
                 plugins.cache_policy(),
                 &auth,
+                &rid.0,
                 model_group,
                 &req,
                 headers,

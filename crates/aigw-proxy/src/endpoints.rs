@@ -474,7 +474,9 @@ async fn responses_inner(
     }
     crate::handlers::validate_choices(&req)?;
     p.rec.set_request(&req);
-    let est = TokenEstimate::of(&req, p.state().limits.default_max_tokens());
+    // Prompt-Tokens mit dem Tokenizer der Modellgruppe (F46); die Freigabe prüft `route`.
+    let group = auth.authorize_model(&req.model).ok().flatten();
+    let est = p.state().limits.estimate(&req, group.as_ref());
     let route = p.route(&auth, &req.model, Capability::Chat, est).await?;
     let response_model = route.policy().response_model;
     let requested = req.model.clone();

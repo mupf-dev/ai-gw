@@ -269,16 +269,19 @@ dependencies = [
  "aigw-plugins",
  "aigw-providers",
  "aigw-store",
+ "aigw-tokenizer",
  "aigw-webhook",
  "arc-swap",
  "async-trait",
  "aws-lc-rs",
  "axum",
  "bytes",
+ "dashmap",
  "futures-util",
  "http-body-util",
  "hyper",
  "hyper-util",
+ "redis",
  "serde",
  "serde_json",
  "sqlx",
@@ -310,6 +313,17 @@ dependencies = [
  "tracing",
  "utoipa",
  "uuid",
+]
+
+[[package]]
+name = "aigw-tokenizer"
+version = "0.1.0"
+dependencies = [
+ "divan",
+ "regex",
+ "regex-syntax",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

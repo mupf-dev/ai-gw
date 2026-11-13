@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "aigw-tokenizer"
+description = "Token-Zählung von ai-gw: eigene BPE für o200k_base/cl100k_base (eingebettete Tabellen), HF-tokenizer.json (BPE/Unigram) und Heuristik mit Sprachfaktor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+# Rangtabellen von OpenAI (MIT, siehe data/*.license) liegen im Crate.
+include = ["src/**", "data/**", "Cargo.toml"]
+
+[dependencies]
+# Generischer Split-Pre-Tokenizer aus tokenizer.json (Llama 3, Tekken …) braucht die
+# Unicode-Kategorien (\p{L}, \p{Lu} …); regex-syntax liefert dieselben Tabellen für die
+# handgeschriebenen o200k/cl100k-Pre-Tokenizer (gleiche Unicode-Version wie tiktoken/fancy-regex).
+regex = { workspace = true, features = ["unicode-gencat"] }
+regex-syntax.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+divan.workspace = true
+
+[[bench]]
+name = "count"
+harness = false
+
+[lints]
+workspace = true

@@ -385,6 +385,7 @@ mod tests {
             period,
             warn_at_percent: vec![],
             hard_limit: true,
+            enforcement: Default::default(),
         }
     }
 

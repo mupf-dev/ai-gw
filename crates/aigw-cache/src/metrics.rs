@@ -64,7 +64,8 @@ fn outcome_index(o: CacheOutcome) -> usize {
         CacheOutcome::HitExact => 0,
         CacheOutcome::HitSemantic => 1,
         CacheOutcome::Miss => 2,
-        CacheOutcome::Bypass => 3,
+        // Embedding-Einträge (F169) sind keine Lookups; zählen nie als solche.
+        CacheOutcome::Bypass | CacheOutcome::Embedding => 3,
     }
 }
 

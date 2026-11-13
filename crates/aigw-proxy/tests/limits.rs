@@ -429,7 +429,8 @@ async fn post(addr: SocketAddr, path: &str, body: Value) -> Resp {
     }
 }
 
-/// OpenAI-Anfrage: „hello“ (≈ 2 Tokens) + `max_tokens` 10 → Reservierung 12 Tokens.
+/// OpenAI-Anfrage: „hello“ (Heuristik: 2 Tokens, + 3 je Nachricht + 3 Antworteinleitung = 8)
+/// + `max_tokens` 10 → Reservierung 18 Tokens.
 async fn chat(addr: SocketAddr) -> Resp {
     post(
         addr,
@@ -578,9 +579,9 @@ async fn tokens_are_reserved_and_settled_per_metric() {
     .await;
     let r = chat(gw.addr).await;
     assert_eq!(r.status, StatusCode::OK);
-    // Bei Erfolg: knappster Token-Rest nach der Reservierung (1000 − 12).
+    // Bei Erfolg: knappster Token-Rest nach der Reservierung (1000 − 18).
     assert_eq!(r.header("x-ratelimit-limit-tokens"), Some("1000"));
-    assert_eq!(r.header("x-ratelimit-remaining-tokens"), Some("988"));
+    assert_eq!(r.header("x-ratelimit-remaining-tokens"), Some("982"));
     let k = format!("key:{}", ids.key);
     wait_counter(&gw.counters, &format!("{k}:tokens"), 10).await;
     wait_counter(&gw.counters, &format!("{k}:input-tokens"), 7).await;
@@ -605,7 +606,7 @@ async fn anthropic_clients_get_anthropic_headers_and_errors() {
     let r = post(gw.addr, "/v1/messages", body.clone()).await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
     assert_eq!(r.header("anthropic-ratelimit-tokens-limit"), Some("20"));
-    assert_eq!(r.header("anthropic-ratelimit-tokens-remaining"), Some("8"));
+    assert_eq!(r.header("anthropic-ratelimit-tokens-remaining"), Some("2"));
     assert_eq!(r.header("anthropic-ratelimit-requests-limit"), Some("100"));
     let reset = r.header("anthropic-ratelimit-tokens-reset").unwrap();
     assert!(
@@ -614,7 +615,7 @@ async fn anthropic_clients_get_anthropic_headers_and_errors() {
     );
     assert!(r.header("x-ratelimit-limit-tokens").is_none());
 
-    // Zweite Anfrage: 10 (abgeglichen) bzw. 12 (noch reserviert) + 12 > 20.
+    // Zweite Anfrage: 10 (abgeglichen) bzw. 18 (noch reserviert) + 18 > 20.
     let r = post(gw.addr, "/v1/messages", body).await;
     assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
     let v = r.json();
@@ -658,8 +659,8 @@ async fn stream_abort_settles_with_estimated_usage() {
     let res = client.request(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let key = format!("key:{}:tokens", ids.key);
-    // Während des Streams: volle Reservierung (2 + 1000).
-    assert_eq!(counters.current(&key, Window::Minute), 1002);
+    // Während des Streams: volle Reservierung (8 + 1000).
+    assert_eq!(counters.current(&key, Window::Minute), 1008);
     let mut body = res.into_body();
     for _ in 0..5 {
         body.frame().await.unwrap().unwrap();
@@ -671,7 +672,7 @@ async fn stream_abort_settles_with_estimated_usage() {
     assert!(rec.client_aborted);
     assert!(rec.usage_estimated);
     let actual = rec.usage.total_tokens();
-    assert!((3..1002).contains(&actual), "geschätzt {actual}");
+    assert!((9..1008).contains(&actual), "geschätzt {actual}");
     wait_counter(&counters, &key, actual).await;
 }
 
@@ -816,6 +817,7 @@ async fn cost_and_budget_with_warnings_and_hard_limit() {
                 period: BudgetPeriod::Month,
                 warn_at_percent: vec![50],
                 hard_limit: true,
+                enforcement: aigw_core::resource::BudgetEnforcement::Soft,
             }),
             ..ApiKeySpec::default()
         },
@@ -826,6 +828,7 @@ async fn cost_and_budget_with_warnings_and_hard_limit() {
                 period: BudgetPeriod::Day,
                 warn_at_percent: vec![],
                 hard_limit: false,
+                enforcement: Default::default(),
             }),
             ..TeamSpec::default()
         },
@@ -882,6 +885,7 @@ async fn cost_and_budget_with_warnings_and_hard_limit() {
         period: BudgetPeriod::Day,
         warn_at_percent: vec![],
         hard_limit: false,
+        enforcement: Default::default(),
     };
     let (key, _) = budgets.key(
         &aigw_billing::BudgetTarget {
@@ -1112,7 +1116,7 @@ async fn plugin_reject_and_respond_release_the_token_reservation() {
         .await;
         assert_eq!(r.status, status, "{text}");
     }
-    // Drei Anfragen zählen, die Token-Reservierungen (je ≈ 12) sind vollständig freigegeben.
+    // Drei Anfragen zählen, die Token-Reservierungen (je 18) sind vollständig freigegeben.
     wait_counter(&counters, &format!("{k}:requests"), 3).await;
     wait_counter(&counters, &format!("{k}:tokens"), 0).await;
     assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
@@ -1120,4 +1124,196 @@ async fn plugin_reject_and_respond_release_the_token_reservation() {
     // Normale Anfrage: Reservierung wird mit der echten Usage abgeglichen (wie ohne Plugin).
     assert_eq!(chat(addr).await.status, StatusCode::OK);
     wait_counter(&counters, &format!("{k}:tokens"), 10).await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// AIGW-71 (F106): strikte Budgets – geschätzte Kosten vorab reservieren
+// ---------------------------------------------------------------------------------------------
+
+/// Snapshot mit Team-Budget 0,1 (strict) und Preis 1000 je 1 Mio. Tokens; die Gruppe „m“
+/// erhält ein Deployment (OpenAI „gpt-test“), damit die Reservierung einen Preis findet.
+/// Schätzung je Anfrage: (8 + 10) Tokens = 0,018; tatsächlich 10 Tokens = 0,01.
+fn strict_snapshot() -> (SnapshotHandle, Ids) {
+    let now = time::OffsetDateTime::now_utc();
+    let (snap, ids) = Fixture {
+        team: TeamSpec {
+            budget: Some(Budget {
+                amount: amount("0.1"),
+                period: BudgetPeriod::Month,
+                warn_at_percent: vec![],
+                hard_limit: true,
+                enforcement: aigw_core::resource::BudgetEnforcement::Strict,
+            }),
+            ..TeamSpec::default()
+        },
+        prices: vec![price(now - time::Duration::hours(1), "1000")],
+        ..Fixture::default()
+    }
+    .build();
+    let mut s = (*snap.load()).clone();
+    let g = s.model_groups.get("m").unwrap();
+    let mut g = (**g).clone();
+    g.deployments.push(aigw_core::snapshot::DeploymentCtx {
+        deployment: Object {
+            id: new_id(),
+            metadata: ObjectMeta::named("d"),
+            spec: r::DeploymentSpec {
+                model_group: "m".into(),
+                provider: ProviderKind::OpenAi,
+                endpoint: None,
+                provider_model: "gpt-test".into(),
+                credential: None,
+                weight: 1,
+                priority: 0,
+                capacity: Capacity::default(),
+                enabled: true,
+                settings: JsonObject::new(),
+            },
+        },
+        credential: None,
+    });
+    s.model_groups.insert("m".into(), Arc::new(g));
+    (SnapshotHandle::new(s), ids)
+}
+
+/// `n` parallele Anfragen gegen alle `addrs` (reihum); liefert (zugelassen, abgelehnt).
+async fn parallel_chats(addrs: &[SocketAddr], n: usize) -> (usize, usize) {
+    let mut tasks = Vec::new();
+    for i in 0..n {
+        let addr = addrs[i % addrs.len()];
+        tasks.push(tokio::spawn(async move { chat(addr).await }));
+    }
+    let (mut ok, mut rej) = (0, 0);
+    for t in tasks {
+        let r = t.await.unwrap();
+        if r.status == StatusCode::OK {
+            ok += 1;
+        } else {
+            assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+            assert_eq!(r.json()["error"]["code"], "budget_exceeded");
+            rej += 1;
+        }
+    }
+    (ok, rej)
+}
+
+fn total_cost(recs: &[RequestRecord]) -> Amount {
+    Amount::from_nanos(recs.iter().filter_map(|r| r.cost).map(|c| c.nanos()).sum())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn strict_budget_parallel_requests_never_exceed_locally() {
+    let (snap, _) = strict_snapshot();
+    let budgets = Arc::new(Budgets::new(Calendar::utc(), None));
+    let (addr, capture) = gateway(
+        &snap,
+        single_route(TestProvider::new("d")),
+        Arc::new(LocalCounters::new()),
+        Some(budgets),
+    )
+    .await;
+    let (ok, rej) = parallel_chats(&[addr], 40).await;
+    let recs = capture.wait(40).await;
+    let total = total_cost(&recs);
+    assert!(total <= amount("0.1"), "{total} ({ok} zugelassen)");
+    assert!(ok >= 5 && rej > 0, "{ok}/{rej}");
+    // Nach dem Abgleich passt eine weitere Anfrage nur, solange der Rest die Schätzung trägt.
+    let r = chat(addr).await;
+    if total.nanos() + amount("0.018").nanos() > amount("0.1").nanos() {
+        assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    }
+}
+
+async fn strict_two_instances(shared: Arc<dyn aigw_billing::SharedBudgets>) {
+    let (snap, _) = strict_snapshot();
+    let ledger = Arc::new(aigw_billing::MemoryLedger::default());
+    let mk = || {
+        Arc::new(
+            Budgets::new(Calendar::utc(), Some(ledger.clone())).with_shared(Arc::clone(&shared)),
+        )
+    };
+    let (a1, c1) = gateway(
+        &snap,
+        single_route(TestProvider::new("d")),
+        Arc::new(LocalCounters::new()),
+        Some(mk()),
+    )
+    .await;
+    let (a2, c2) = gateway(
+        &snap,
+        single_route(TestProvider::new("d")),
+        Arc::new(LocalCounters::new()),
+        Some(mk()),
+    )
+    .await;
+    let (ok, _) = parallel_chats(&[a1, a2], 40).await;
+    for _ in 0..200 {
+        if c1.wait(0).await.len() + c2.wait(0).await.len() >= 40 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let mut recs = c1.wait(0).await;
+    recs.extend(c2.wait(0).await);
+    let total = total_cost(&recs);
+    assert!(total <= amount("0.1"), "{total} ({ok} zugelassen)");
+    assert!(ok >= 5, "{ok}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn strict_budget_exact_across_instances_with_shared_counter() {
+    strict_two_instances(Arc::new(aigw_billing::MemoryShared::default())).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn strict_budget_exact_across_instances_with_redis() {
+    let Ok(url) = std::env::var("AIGW_TEST_REDIS_URL") else {
+        eprintln!("AIGW_TEST_REDIS_URL nicht gesetzt – Redis-Budget-Test übersprungen");
+        return;
+    };
+    let prefix = format!("aigwbudget:{}:", new_id().simple());
+    strict_two_instances(Arc::new(
+        aigw_proxy::RedisBudgets::new(&url, &prefix).unwrap(),
+    ))
+    .await;
+}
+
+#[tokio::test]
+async fn redis_budgets_reserve_and_adjust() {
+    use aigw_billing::{BudgetKey, BudgetLevel, SharedBudgets, SharedItem, SharedReserve};
+    let Ok(url) = std::env::var("AIGW_TEST_REDIS_URL") else {
+        eprintln!("AIGW_TEST_REDIS_URL nicht gesetzt – übersprungen");
+        return;
+    };
+    let rb =
+        aigw_proxy::RedisBudgets::new(&url, &format!("aigwrb:{}:", new_id().simple())).unwrap();
+    let key = BudgetKey {
+        level: BudgetLevel::Team,
+        target: new_id(),
+        period: BudgetPeriod::Total,
+        period_start_ms: 0,
+    };
+    let item = |amount| SharedItem {
+        key,
+        base: 40,
+        limit: 100,
+        amount,
+        expire_at_ms: None,
+    };
+    assert_eq!(
+        rb.reserve(&[item(50)]).await.unwrap(),
+        SharedReserve::Reserved
+    );
+    assert_eq!(
+        rb.reserve(&[item(20)]).await.unwrap(),
+        SharedReserve::Rejected {
+            index: 0,
+            current: 90
+        }
+    );
+    rb.adjust(&[(key, -30)]).await.unwrap();
+    assert_eq!(
+        rb.reserve(&[item(20)]).await.unwrap(),
+        SharedReserve::Reserved
+    );
 }

@@ -110,6 +110,25 @@ pub struct Budget {
     /// Bei Erreichen ablehnen (`budget_exceeded`); `false` = nur warnen.
     #[serde(default = "default_true")]
     pub hard_limit: bool,
+    /// Durchsetzung der harten Grenze (F106): `strict` (Standard) reserviert die geschätzten
+    /// Kosten vor dem Upstream-Aufruf, `soft` lehnt erst ab, wenn der Verbrauch den Betrag
+    /// erreicht hat.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub enforcement: BudgetEnforcement,
+}
+
+/// Durchsetzung der harten Grenze eines Budgets (F106, AIGW-71).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum BudgetEnforcement {
+    /// Geschätzte Kosten (Prompt-Tokens + `max_tokens` × Preis) werden vor dem Aufruf
+    /// reserviert und nach der Usage abgeglichen; abgelehnt wird, wenn Verbrauch, laufende
+    /// Reservierungen und Schätzung den Betrag überschreiten würden.
+    #[default]
+    Strict,
+    /// Abgelehnt wird erst, wenn der bekannte Verbrauch den Betrag erreicht hat; gleichzeitig
+    /// laufende Anfragen können das Budget um ihre Kosten überschreiten.
+    Soft,
 }
 
 fn default_true() -> bool {

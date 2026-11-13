@@ -1,0 +1,1744 @@
+{"tokenizer": "llama3", "text": "Hello, world!", "count": 4}
+{"tokenizer": "llama3", "text": "The quick brown fox jumps over the lazy dog.", "count": 10}
+{"tokenizer": "llama3", "text": "I'm sure they'll say it's fine, but we've seen what you'd do. DON'T SHOUT! It'S ok.", "count": 28}
+{"tokenizer": "llama3", "text": "Die Bundesregierung hat am Mittwoch beschlossen, die Förderung für Wärmepumpen zu verlängern. Größere Unternehmen müssen außerdem Berichte über ihre Energieeffizienz vorlegen.", "count": 50}
+{"tokenizer": "llama3", "text": "Donaudampfschifffahrtsgesellschaftskapitänsmütze und Rindfleischetikettierungsüberwachungsaufgabenübertragungsgesetz", "count": 43}
+{"tokenizer": "llama3", "text": "fn main() {\n    let v: Vec<u32> = (0..10).map(|x| x * 2).collect();\n    println!(\"{:?}\", v);\n}\n", "count": 37}
+{"tokenizer": "llama3", "text": "def fib(n):\n\tif n < 2:\n\t\treturn n\n\treturn fib(n - 1) + fib(n - 2)\n\n\nprint([fib(i) for i in range(20)])  \n", "count": 41}
+{"tokenizer": "llama3", "text": "{\"model\": \"gpt-4o\", \"messages\": [{\"role\": \"user\", \"content\": \"Hi\"}], \"max_tokens\": 1024}", "count": 34}
+{"tokenizer": "llama3", "text": "SELECT id, name FROM users WHERE created_at >= '2024-01-01' ORDER BY id DESC LIMIT 100;", "count": 26}
+{"tokenizer": "llama3", "text": "<html>\n  <body class=\"main\">\n    <p>Text &amp; more</p>\n  </body>\n</html>", "count": 28}
+{"tokenizer": "llama3", "text": "日本語のテキストをトークン化します。東京は日本の首都です。", "count": 21}
+{"tokenizer": "llama3", "text": "我们今天去公园散步，天气非常好。人工智能正在改变世界。", "count": 20}
+{"tokenizer": "llama3", "text": "한국어 문장도 토큰화합니다. 서울은 대한민국의 수도입니다.", "count": 19}
+{"tokenizer": "llama3", "text": "Привет, как дела? Это тест на русском языке.", "count": 15}
+{"tokenizer": "llama3", "text": "مرحبا بالعالم، هذا اختبار.", "count": 11}
+{"tokenizer": "llama3", "text": "नमस्ते दुनिया, यह एक परीक्षण है।", "count": 16}
+{"tokenizer": "llama3", "text": "Emojis: 😀😃😄 👩‍👩‍👧‍👦 🇩🇪 ❤️ 👍🏽", "count": 35}
+{"tokenizer": "llama3", "text": "Combining: é ä ñ कि Z͓͑͒", "count": 18}
+{"tokenizer": "llama3", "text": "Numbers: 1234567890 3.14159 1,000,000 2024-11-13 0x1F 1e-9", "count": 35}
+{"tokenizer": "llama3", "text": "   leading spaces and trailing spaces   ", "count": 7}
+{"tokenizer": "llama3", "text": "line1\n\nline2\r\n\r\nline3\n   \n\tindented\n", "count": 13}
+{"tokenizer": "llama3", "text": "trailing newline and spaces \n  ", "count": 7}
+{"tokenizer": "llama3", "text": "tabs\t\tand nbsp em-space　ideographic", "count": 10}
+{"tokenizer": "llama3", "text": "a/b/c http://example.com/path?q=1&r=2#frag ../../etc/passwd", "count": 20}
+{"tokenizer": "llama3", "text": "CamelCaseIdentifier snake_case_identifier SCREAMING_CASE kebab-case-id", "count": 15}
+{"tokenizer": "llama3", "text": "ABCdef DEFghi GHIjklMNO XMLHttpRequest iPhone eBay McDonald's", "count": 15}
+{"tokenizer": "llama3", "text": "'s 't 're 've 'm 'll 'd 'S 'T 'RE 'VE 'M 'LL 'D ſ 'ſ", "count": 32}
+{"tokenizer": "llama3", "text": "!!!??? ... --- ___ *** ### $$$ %%% ^^^ &&& ((( ))) [[[ ]]] {{{ }}}", "count": 21}
+{"tokenizer": "llama3", "text": "\n\n\n\n", "count": 1}
+{"tokenizer": "llama3", "text": " ", "count": 1}
+{"tokenizer": "llama3", "text": "", "count": 0}
+{"tokenizer": "llama3", "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "count": 38}
+{"tokenizer": "llama3", "text": "ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ", "count": 101}
+{"tokenizer": "llama3", "text": "Mixed: Straße 東京 Москва 123 abc!? 🙂\n", "count": 12}
+{"tokenizer": "llama3", "text": "Ǆemal ǅemal ǆemal ᾈ ᾉ Ǳ ǲ ǳ", "count": 29}
+{"tokenizer": "llama3", "text": "ʰʲʷ ˠˤ ᵃᵇᶜ ꜱ", "count": 23}
+{"tokenizer": "llama3", "text": "'reらh.\t \nm f", "count": 7}
+{"tokenizer": "llama3", "text": " \n국 UOj어東!V_ᵃAÜ7eJGz  bbñFM~E", "count": 26}
+{"tokenizer": "llama3", "text": "~\\らHひFèzHÄé z.Пひ ä", "count": 15}
+{"tokenizer": "llama3", "text": ";X文ǅ がö 東́ р }sᵃ\"", "count": 17}
+{"tokenizer": "llama3", "text": "0ら^8ᵃ東ᵃt{d4m1kz\r\nü東'reOв pक7l6qがि\r ^_ß文Rgö \n", "count": 42}
+{"tokenizer": "llama3", "text": "_|ÜʰAな-w_京# 🇩🇪uカx", "count": 19}
+{"tokenizer": "llama3", "text": "]~KÄy >,ら! pStraßeD\r8еП^ p👍🏽}Gt#中िP", "count": 32}
+{"tokenizer": "llama3", "text": "n{C\rв 語aᵃi", "count": 12}
+{"tokenizer": "llama3", "text": "]ʰf`M", "count": 6}
+{"tokenizer": "llama3", "text": "\n\n日tなकт)　東PSFS", "count": 11}
+{"tokenizer": "llama3", "text": "öG(|w 東ſ日 вEカ*_文ナIE'd+'~UV が;Oy", "count": 23}
+{"tokenizer": "llama3", "text": "ら#= DS're  u,Q カW?क日4", "count": 14}
+{"tokenizer": "llama3", "text": ";vwвmLd국-京らLW_П +fFQ-Ü\n2 Ü. ᵃ)O\"\\🇩🇪É?́#2LS東hÖd Irn中 X京'LL😀R", "count": 57}
+{"tokenizer": "llama3", "text": "ö어*Zи}1한еv]$ſ語<A ZCが |\tHello\n\n}!ʰB👍🏽еがNナ=어x derIt( ́", "count": 45}
+{"tokenizer": "llama3", "text": "Hello\t 한QG　 文D1SY\"в+E: the?JG\r\n?G\n👍🏽 ;", "count": 29}
+{"tokenizer": "llama3", "text": "& yg~ o中fタñ\r\n|Zè7 \nJW`", "count": 17}
+{"tokenizer": "llama3", "text": "-ら the]   szÄzな~Méᵃ日Uि8ü der worldAyʰ> \r\\Qひ\n", "count": 32}
+{"tokenizer": "llama3", "text": "r  {mT2中 Äカ,3k\nナf- D　X\rПt % der \nRit국Y😀\"東🇩🇪Xü9r- ПStraßeè  l語$Za3😀👍🏽", "count": 62}
+{"tokenizer": "llama3", "text": "KüM] der\"Mタタ語\\", "count": 10}
+{"tokenizer": "llama3", "text": " ^東ä,कNकな:qeLП京MeÄ  \"CZtß  ß~e\"", "count": 27}
+{"tokenizer": "llama3", "text": "カら　- theUカ4{ßU　 \r the ̈%иöèFo^m日\nS#ら&aJ \"'sHelloH어文NF&ナカ17s'\"j🇩🇪P\n👍🏽", "count": 58}
+{"tokenizer": "llama3", "text": "bDMar \n'вカ(", "count": 8}
+{"tokenizer": "llama3", "text": "  't京  W Ö*^Bz\n", "count": 13}
+{"tokenizer": "llama3", "text": "(GW?カStraße語QBП4 中Nk9", "count": 14}
+{"tokenizer": "llama3", "text": "5 なHelloтT9 'smA*oタ t京m't中/P =1=éSA] .'jт E", "count": 29}
+{"tokenizer": "llama3", "text": "?Fmeñ\n\nwなStraße0 \\ derb]r~n어ſな{ (カZlП$?", "count": 31}
+{"tokenizer": "llama3", "text": "(국日s] world; Lらü~öQт(ि'LL", "count": 18}
+{"tokenizer": "llama3", "text": "ナFBz=}/ühG  -?7カK2=5's\n\n", "count": 18}
+{"tokenizer": "llama3", "text": "'LLP 국YZ E 🇩🇪ſcらеo\nG6Üナ1u東　 'sら京\rQ 　😀P the worldA9.z ʰ", "count": 46}
+{"tokenizer": "llama3", "text": "t", "count": 1}
+{"tokenizer": "llama3", "text": "E`ß;L ナ🇩🇪MpL the ne'reśL한😀G: a,Straße7 nナ-CN̈GHellogÄ/i👍🏽", "count": 45}
+{"tokenizer": "llama3", "text": "~;)wJúǅǅが😀Y  ~Jn3'dkिHW:3 >ʰStraßevrSYカ7 ZHelloXJ[🇩🇪N&が", "count": 48}
+{"tokenizer": "llama3", "text": "iтd국ñ\rᵃs'rec+! ", "count": 15}
+{"tokenizer": "llama3", "text": "YL?р9　ら%D \r\nがaf'töſ", "count": 14}
+{"tokenizer": "llama3", "text": "  lmが\"'dyQ?!  語0 %Z  /:S {z-вü<タJ", "count": 23}
+{"tokenizer": "llama3", "text": "文98̈8}\r👍🏽がſт", "count": 16}
+{"tokenizer": "llama3", "text": "'tuиLтm*/rERſ　M8su🇩🇪ßieHᵃèY中Straße ſ,sらक中èXgC F<\t'dв0?~", "count": 51}
+{"tokenizer": "llama3", "text": "_YBт", "count": 3}
+{"tokenizer": "llama3", "text": "なs P`qв:", "count": 7}
+{"tokenizer": "llama3", "text": "_t _👍🏽국タ,w~UYQ'tQzu+'t P\n\n 🇩🇪вK T2 ナYq語タFT KI /YAzfl", "count": 43}
+{"tokenizer": "llama3", "text": "0Hellohw#\n\n f=ら\\|.7\\ß東Y文<=RV world \t\\  👍🏽a world 1Hellol\rÄ", "count": 37}
+{"tokenizer": "llama3", "text": "[ 4qGCévAunms# ><Hello+nр'LLStraßeひ́<1(日국& Dßytр As>=\r\noвÖwteR=語é'taMO", "count": 45}
+{"tokenizer": "llama3", "text": "'d7т本 .C5'LLg\r京4\r\n8ÿe👍🏽  .lр g\\C3П京　 😀Kひx", "count": 41}
+{"tokenizer": "llama3", "text": "k^,", "count": 3}
+{"tokenizer": "llama3", "text": "z-s  wS어jçV)タ", "count": 11}
+{"tokenizer": "llama3", "text": ":X  5Üタvひ! L\t^-<%*本'd'dl東`vmi A 'tеJXカвjvZStraße =Mt;カ😀2", "count": 43}
+{"tokenizer": "llama3", "text": "  ç한s", "count": 4}
+{"tokenizer": "llama3", "text": "& é!Ö`é .hE3~{'n👍🏽\rq　mが~\r\nA Zz&ln", "count": 31}
+{"tokenizer": "llama3", "text": "cxè's0ÜXÄf|xSひt'П< \r\nèN1\nm't 6文C  2", "count": 29}
+{"tokenizer": "llama3", "text": "|らなVr| 文+", "count": 8}
+{"tokenizer": "llama3", "text": "中́ひCв]M;'s$'re\nu\r\n'rec日", "count": 18}
+{"tokenizer": "llama3", "text": "'LLе  üG`ǅ한😀y7 N3カ　Hello -[N1カ  world thehq.55", "count": 30}
+{"tokenizer": "llama3", "text": "ひlがiナÄ  é😀öW😀_\tQ{@;6WCvTy \\<'>\t A v*AD{\nI JssR\r\n=\n\n+ &  ", "count": 40}
+{"tokenizer": "llama3", "text": " vſ]  ひDB'sO/́3Fñä?('NX /4rç\n the;[本日ud'LLpU*g文1 Tp@😀=", "count": 42}
+{"tokenizer": "llama3", "text": "v<6cA👍🏽がStraße hǅßm~4中}g(In&<ç\n!ʰ", "count": 32}
+{"tokenizer": "llama3", "text": "nz'LLäAéh한H'tक \\&@73́.  we\rタä#N+ ひ🇩🇪l}EP \nr'dC 5ि", "count": 43}
+{"tokenizer": "llama3", "text": "AGv$fh\"_　어?ep# Lтm4@ᵃAlz'LL?bX>П`z", "count": 29}
+{"tokenizer": "llama3", "text": "NImzJ", "count": 4}
+{"tokenizer": "llama3", "text": "東üqzpナ the' worldhyStraßec文П\\Be(R京カ\n\nなhç국?c~]ug HelloYR日", "count": 34}
+{"tokenizer": "llama3", "text": "aDGU1FsDi日\r\nJ　'dTM中Z5ñ한\"O%`иrP0Q pᵃ日00 è東:é?l \nʰ@", "count": 42}
+{"tokenizer": "llama3", "text": "カらéᵃ@R's👍🏽カ/Ac한 вT~́еF\r}- world8なひ*　_-\\\\;.>%'LLF1ynе ", "count": 44}
+{"tokenizer": "llama3", "text": "👍🏽CääY東g derᵃI東/$ZYK6<ç9\tr/Ü", "count": 27}
+{"tokenizer": "llama3", "text": "ᵃAN's{ä🇩🇪u's", "count": 15}
+{"tokenizer": "llama3", "text": "|\t ÖJCिBX本\nA語[b:рDカX5+b어🇩🇪äJ theиタ derHǅvHY]в the\tПYら Vp👍🏽iカ{+", "count": 55}
+{"tokenizer": "llama3", "text": "국 rHello@ſ[D  o*:r국yg　2 \n\n'Zf\n%Z}本=ǅiX[ iCOſS;8 b-", "count": 39}
+{"tokenizer": "llama3", "text": "еbq&한's#'s>=kf'sénoQ\\р<o~tिKПS ら", "count": 26}
+{"tokenizer": "llama3", "text": "pTि́ひ국>g е/한r+ナ)е8ᵃg어文 'reudE!в ! +P文Yc本👍🏽рg!T*n", "count": 48}
+{"tokenizer": "llama3", "text": "'rerß \n,😀 ̈geな\n1nzN'd !c東ç[6C_i%", "count": 25}
+{"tokenizer": "llama3", "text": "B京 derNRHello5%Eカ der\\b ?\n9D_'sひLOStraßeXP 😀क Nなカva$ Iタ", "count": 29}
+{"tokenizer": "llama3", "text": "文C ナd)nR~&>s .\r^uſ'ds7^OuT日 e k|́'s̈U# W\rd9jNn[ひが \\#4中Nb", "count": 50}
+{"tokenizer": "llama3", "text": "G[\"N\n京िв日東 \n L@l{ jbJ're|7 ら OʰzJYväǅ{ÖÄ", "count": 33}
+{"tokenizer": "llama3", "text": "{ theççрD \nが7😀&äoß%BÖPBG 국P\n\nè/09b?ǅnK K3\r<", "count": 34}
+{"tokenizer": "llama3", "text": "6q EDu👍🏽F~어日b the.т🇩🇪\r\nᵃ  (aéв5本ǅǅM$%*6なWä're 文&な語 èQ vM", "count": 58}
+{"tokenizer": "llama3", "text": "語51[ら~xP Aи'LL>カ本g]fK>f-ре東 >3}j StraßeG?ナYjDе'd 국7한nÖ der한z", "count": 44}
+{"tokenizer": "llama3", "text": "u&Ẅ  \tカ?ナ한g FG%5 bтVü  #1q)F\r\nèazq中@p=q", "count": 31}
+{"tokenizer": "llama3", "text": "́A< the öü0Mǅ🇩🇪 p本е .wら어i\r7:FÜW .文SDÖ東ſu が日", "count": 39}
+{"tokenizer": "llama3", "text": "A'LLKé ;HelloW'LLʰa\\F n😀ие't@PᵃR)>\r\n0ナ the한.4  \n　 \rÜ~:и\t}6 \n京 çkſ\nU", "count": 51}
+{"tokenizer": "llama3", "text": "어~,@!　o:@I  d\\ %;6Ü2ひRらq ÖÄ\\'re カ9xひ한4#bᵃß world2k- \nSI worldf", "count": 45}
+{"tokenizer": "llama3", "text": "Ew&2Qg-!क,StraßeX}iwc )ö-k👍🏽 Ö", "count": 26}
+{"tokenizer": "llama3", "text": "& \n'sÜqHelloVX日h1 'LLF한)Xs',(,ееä😀ᵃがnzw|>)'LLèñ9_日 'dr", "count": 41}
+{"tokenizer": "llama3", "text": "b>l'LL 0uᵃe%がLr -<_}Jタl9कAcタH어wр\rz東i\n\n0", "count": 36}
+{"tokenizer": "llama3", "text": ":文がt   Dт?́#कM|9कLBW 't本dd1T \"\n\nᵃ1語& derᵃ", "count": 35}
+{"tokenizer": "llama3", "text": "X(kP#국 \" fक1,국è한\\ 文.1M東@<́é~9S r uj<<タ$QH\tè\r2क7🇩🇪:dßक[rH(🇩🇪F", "count": 60}
+{"tokenizer": "llama3", "text": "한^Bé(TK　ÜpQVög\n\ntタ한京88ytL x'd!ʰ2(и🇩🇪QиタStraße", "count": 39}
+{"tokenizer": "llama3", "text": "e?\nn\td`DU本5 Hi6ナ~本W", "count": 14}
+{"tokenizer": "llama3", "text": "국-4국,ナが ZиJcXD der={ö😀ひYи3G|\n't", "count": 24}
+{"tokenizer": "llama3", "text": "JQ.OülStraßeвẃfLcḧ😀\\́한^😀어\r\nRHellow_x 국x1oр2Straße~'d文한StraßeH", "count": 43}
+{"tokenizer": "llama3", "text": " %カE日<h 한ö\tsвoVTS \n\n어WñYm/YिnвStraßeU i` NQ̈Z)@Пि", "count": 35}
+{"tokenizer": "llama3", "text": "oo)j^　HellohеI本}がQgt3[P한[が", "count": 19}
+{"tokenizer": "llama3", "text": "z\" S", "count": 3}
+{"tokenizer": "llama3", "text": "}ПOÄ\r`U😀g~Oナ<4-がJXр#è.8Straßeひ カl|&ÖEʰ derd日ü-i5Av", "count": 42}
+{"tokenizer": "llama3", "text": " 9 thee 👍🏽>,иjOП東y2Q'sqSK̈[d A` Ü어  $क '日Hello тN_qカ👍🏽어 タVv", "count": 47}
+{"tokenizer": "llama3", "text": "/E`287äiw어bRm京vu", "count": 11}
+{"tokenizer": "llama3", "text": "|文j \r\ne| िnक&WV어f TिéStraßeʰ,한ら", "count": 24}
+{"tokenizer": "llama3", "text": "がПödrFひ\"}è東g kF$üw)ひRQtmÖſ. theXひ", "count": 27}
+{"tokenizer": "llama3", "text": ";👍🏽\t 語,bk 국+1xm!,タ", "count": 18}
+{"tokenizer": "llama3", "text": "　B's'LL がX're5क,yFwßL-Z中3ᵃq$ ENÖ+ßр G#Fᵃタy🇩🇪; ^-어'sZHello+6 П", "count": 53}
+{"tokenizer": "llama3", "text": "р!　語A\"*$어Qv한d  '+ {'s\"<~Hr 😀　タñrUtfK文N な4 H8?zHello%|f ", "count": 40}
+{"tokenizer": "llama3", "text": "URz@ 5ᵃo!\\中ñG `日т\r\nL>ÄV't'LLßт\rvg worldStraßeA", "count": 32}
+{"tokenizer": "llama3", "text": "PS7ʰ京\t ひ derj%v?ä<),тF~р5*l국h X中, >ひ(V\t🇩🇪nſHelloo|語s京ʰ", "count": 49}
+{"tokenizer": "llama3", "text": "x)'tU g: theöᵃß*  р иit語~~tj🇩🇪ß　タStraßejè", "count": 34}
+{"tokenizer": "llama3", "text": "6ввタStraße\r1中👍🏽|S ПO1京Straßeü$g👍🏽-ら+ が'LL어nt　]bʰ{|िum\"DäカfQ$", "count": 55}
+{"tokenizer": "llama3", "text": "  ?ナG'\r\n]AJsÄ ÜиF'tV3\r\nGDな>%/:Dな8文}\t'reFF東StraßeX,\"🇩🇪#2국Ü국вN", "count": 47}
+{"tokenizer": "llama3", "text": "^LʰOHFカm日̈한 der5e5", "count": 15}
+{"tokenizer": "llama3", "text": "9Hello\"éU京\r\n[ derеYH", "count": 13}
+{"tokenizer": "llama3", "text": " P{0G  本и!국%k(ñRʰ́ Ä6東Twpt}'NQ&'t@ 한MgSタñ  KQ _'文>Yy&", "count": 45}
+{"tokenizer": "llama3", "text": "^тcf7=Aि'tiQA0tS=_-|が 'sè /ि日1d &'t=ᵃa? derナfq/ Kカ", "count": 37}
+{"tokenizer": "llama3", "text": "&K|'sG_вN\n\n-u=ſSQ рc語", "count": 18}
+{"tokenizer": "llama3", "text": "9=語 h cらиStraße=中<SéRUö { ö 京's8dт어%\tkhE/u Qdकक\r\\ç", "count": 36}
+{"tokenizer": "llama3", "text": "東らStraßerhB[OſoS;] \n한", "count": 15}
+{"tokenizer": "llama3", "text": "'tEjÄV's'sä{b4{文́カY", "count": 16}
+{"tokenizer": "llama3", "text": "scO`SxJz9chW9Straße\n.j京V~JaTüqL\tなj　京}c's+ǅ\njʰ ^ひ👍🏽京*h u(/ǅ I0\rS>f", "count": 57}
+{"tokenizer": "llama3", "text": " the어3tиカöèjw5S der|Ö9äF  東bがZ 👍🏽&>̈pB Lि中́n!wc9K/京が worldÖ6B deriaQカM derǅ", "count": 57}
+{"tokenizer": "llama3", "text": "\"qがeéひqなL96F $2DDk2\n derеB`", "count": 21}
+{"tokenizer": "llama3", "text": "<  \n\n ᵃ65%タ derk'tʰ\r\n京京`\"/국StraßeIf/W world Ö%京", "count": 27}
+{"tokenizer": "llama3", "text": "ñcM　한 #カ  ʰеuaᵃ2n w\nがि'recな 京_lYʰü", "count": 31}
+{"tokenizer": "llama3", "text": ",yр 0=ら0~iYſがWᵃ )p|qBПG# G_E0'sRеs![👍🏽 RRbM u$'d국 ǅk*3국", "count": 54}
+{"tokenizer": "llama3", "text": "😀zHellöö5)京/bJ .\"0ü<7Straße\\ 中本Ä/ worldFN\r7y{東Y b3`q$é5VX", "count": 40}
+{"tokenizer": "llama3", "text": "G,е\tY!p рLpWр;F;äè3 vqx국5", "count": 22}
+{"tokenizer": "llama3", "text": " 0rKF çПLÖnO-[< worldH국'dſ ", "count": 19}
+{"tokenizer": "llama3", "text": "n5е_ dery", "count": 6}
+{"tokenizer": "llama3", "text": "Öひ're　bタG#Apß!zеBf'sV カG京PösoZ\n\nüſ", "count": 28}
+{"tokenizer": "llama3", "text": " der m \n[ö theな _M  ", "count": 11}
+{"tokenizer": "llama3", "text": "I ?Qäᵃ der文pи1H1な[Vǅ4{", "count": 20}
+{"tokenizer": "llama3", "text": "  world[öV7'reिʰ U👍🏽в", "count": 18}
+{"tokenizer": "llama3", "text": "Y-カ der\r\nA 　9VI0}*$'LLJqWकv \nタSoらü👍🏽~(HelloeTなè8mI{ g'LL.Пf+П", "count": 49}
+{"tokenizer": "llama3", "text": "fS국ナG:B0,ü", "count": 9}
+{"tokenizer": "llama3", "text": "̈'dñ8  I|京̈'d5,カe~XüZカ😀=한ナHello'LL ;i'reçèöÖ2O", "count": 38}
+{"tokenizer": "llama3", "text": "a,ᵃ%r3FK~Nि\" derML[らр\"j+jJ&ud\t'd\t7", "count": 28}
+{"tokenizer": "llama3", "text": "한: è\tG Straße東!nç3tñ́(한 \n't[ uüKXUら", "count": 25}
+{"tokenizer": "llama3", "text": "+한~ſひo'в̈ xP\t?еX/ derYyカ日StraßeñFi3C&s5ḱOo B 🇩🇪'tß3\rüWGF\nhMKक  \r\t der", "count": 57}
+{"tokenizer": "llama3", "text": "?рS>qひ}ひpg文á7Oि~\t  \n9Ls@🇩🇪6ül'd're\r\nÄQ)(s文 worldj👍🏽 _O gᵃE'П어1Kaе'reBÜ", "count": 62}
+{"tokenizer": "llama3", "text": "H the(ǅAPñ7 |2Uひ\n\nカ/̈{/  1🇩🇪ßL'dnsHPt!е7;2!국6 %S本i", "count": 44}
+{"tokenizer": "llama3", "text": "NöPÜHellol[1,Y}ᵃs>ZR🇩🇪ßÖ vтF\tタ AEU $#'LL  o derTIcsе$и\n\n日Q", "count": 45}
+{"tokenizer": "llama3", "text": "hな*usिकеoQ Öwm😀 p", "count": 14}
+{"tokenizer": "llama3", "text": "qиが&7ä'reि0\r\n}uʰ der't👍🏽QX.本%>ſſyKIñV  B 😀è3ि$　в > deŕ\\# A", "count": 51}
+{"tokenizer": "llama3", "text": "T) 日", "count": 3}
+{"tokenizer": "llama3", "text": "\n\n NXв어xn한 éd &  wd^タ'reWр9", "count": 19}
+{"tokenizer": "llama3", "text": " [J`(,wकönÄᵃ}  タGKB7 カFकв京C 文7C*\n िǅKP", "count": 33}
+{"tokenizer": "llama3", "text": "_T #sw  bカü　O어Oナj#G\r5 ǅDpb👍🏽h b語Lな3 日R語  ä ́i' \"\r\n ナé$ǅÄナy \nQ", "count": 55}
+{"tokenizer": "llama3", "text": "  G6   the京`_wǅ]f] the#語YaQJM`}😀ǅ", "count": 25}
+{"tokenizer": "llama3", "text": "8  7,😀ǅ🇩🇪カ'dh中ǅ!$I4<\re\"ら4tç der\\\n\nHa worldt@N", "count": 41}
+{"tokenizer": "llama3", "text": "$5?Hello어한\\y'tjカな!J-HP=   ^TRJナ/\tÜH語 C", "count": 28}
+{"tokenizer": "llama3", "text": "<*rkLDß😀̈é44ǅ日東иèिeusナ7 ;한9d/ü\\京Mßk 😀%", "count": 34}
+{"tokenizer": "llama3", "text": "w@@タ'sカ\r\n!\r\n中ÄтQ文]D0 Ö@[fÜ eвñ h=0{HStraßeA Mm😀MF( \nZ ẅe'LL", "count": 43}
+{"tokenizer": "llama3", "text": "4W 4\r\n'reS!'re) ", "count": 11}
+{"tokenizer": "llama3", "text": "S  'dナ語 the ),VकHkèdв  \n<̈2xрǅ%", "count": 24}
+{"tokenizer": "llama3", "text": "  L[L'LLв  т$Straße#0?🇩🇪)т", "count": 23}
+{"tokenizer": "llama3", "text": " the%Ü  ; ;9C$3çcß\tKZÄ\nTß),YÖ국tE  ̈yM한👍🏽?*`t{@🇩🇪F$рLら еǅ文ひ}&[%B", "count": 61}
+{"tokenizer": "llama3", "text": "nDXKOGक^국Qo LÜo<+^dED}w2'so%👍🏽ktñеStraßeÖ京h", "count": 37}
+{"tokenizer": "llama3", "text": "1 カ?7tßр!g's`OñhX/}8", "count": 19}
+{"tokenizer": "llama3", "text": "+な.がl(&çAd#nXu+　're)Na:　日:Пᵃ82[güqStraße \n^un東и東\n文|z \ns#'dHello2", "count": 47}
+{"tokenizer": "llama3", "text": ".~한  worldE 어pNld", "count": 10}
+{"tokenizer": "llama3", "text": "Nr%J3Xʰ the/!h🇩🇪U क3@국w-'dd\"ि:/👍🏽IT're{ ̈  😀{ S\nな́  ひ äE~}", "count": 54}
+{"tokenizer": "llama3", "text": ">[Ä🇩🇪8=", "count": 10}
+{"tokenizer": "llama3", "text": "'dK[n\rVG \\D *F _ Pな😀wタ^~eकwiе+97qDNV̈ナE<éü! O\r", "count": 37}
+{"tokenizer": "llama3", "text": "कwhカxFd}어(0-~2", "count": 12}
+{"tokenizer": "llama3", "text": "(=́{ `6中%rJHellobN world", "count": 13}
+{"tokenizer": "llama3", "text": "hA本*rſn è東DcKBÄM東京\\ R語'dCらSП=  YM`국'sе:'t 5T", "count": 35}
+{"tokenizer": "llama3", "text": "cWb", "count": 3}
+{"tokenizer": "llama3", "text": "uがPRgMVhèvxLL@J;ǅHello'reFR語StraßegAな|év9're", "count": 27}
+{"tokenizer": "llama3", "text": "lçSüq6W2äе.がt=ñw ʰ:'d  ᵃD рタ,0 the.i2O 9k어1̈中еカ\n\n국8=&?;PN's👍🏽東и", "count": 59}
+{"tokenizer": "llama3", "text": "8 HelloäC dern\r\n_7ſカ \nLd@x]\r日O1M　еタJ", "count": 27}
+{"tokenizer": "llama3", "text": " ü G'tGä語#M3O},zQ?fmy worldQWç theEſq5Ö в&ñ\r~5OX)H2語8't", "count": 39}
+{"tokenizer": "llama3", "text": "中?g2вUYеxがd", "count": 10}
+{"tokenizer": "llama3", "text": "  D😀éR ʰ derFQひなеHello`", "count": 17}
+{"tokenizer": "llama3", "text": "t#1nVV xJカ s ひrC=👍🏽SMÄb{ZÄе>어yNJ\n derカQカ[ре's30Ywकä日5än ?èo,{O", "count": 51}
+{"tokenizer": "llama3", "text": " *Eßç world", "count": 5}
+{"tokenizer": "llama3", "text": "'🇩🇪カПが the👍🏽fвfеx X$  P \ns|Dナᵃ ", "count": 35}
+{"tokenizer": "llama3", "text": "\r\nがſStraßeᵃǵタJ@dö '\\&👍🏽", "count": 24}
+{"tokenizer": "llama3", "text": "v\n\nK] Qö]&Hらひ", "count": 10}
+{"tokenizer": "llama3", "text": "JU<\t derEひtW>е PKi/本な4\nÄTTè's京6öHbrdMöな  ナS日NäÄD2な R8_7`xGÜ<日=;'t", "count": 55}
+{"tokenizer": "llama3", "text": ".d P", "count": 2}
+{"tokenizer": "llama3", "text": "}RStraßeе'カ#}_カ the2 derि't[\"Äj{W\rdr% =k xEm TU語ʰGVQY3ßBt!\\ç'LL der<日%w?", "count": 49}
+{"tokenizer": "llama3", "text": "がv7Sc日0W'S' ̈ # theら7カ", "count": 17}
+{"tokenizer": "llama3", "text": "👍🏽@M&ナzिd 🇩🇪 the&'👍🏽рW本本s the ç*р中_~вZ&V>вT8-OX", "count": 51}
+{"tokenizer": "llama3", "text": "なzなq🇩🇪 derfvmÜ tge(ſ>)が>京らひ\r\n5PCひZ't'tV\r3ひ本gJ\r\nè\\Flä world文xÖ'd東M  çकL  　|", "count": 58}
+{"tokenizer": "llama3", "text": "YBg854nрſvb the^ö\r\n.ि語@ b 9~3т", "count": 22}
+{"tokenizer": "llama3", "text": "京語l :6\tタᵃÄHfwПPʰ$東é'd%q(D", "count": 24}
+{"tokenizer": "llama3", "text": "+Straße!M̈и+Y*^\tv'sт", "count": 14}
+{"tokenizer": "llama3", "text": "П&KIQdHÖkXCs*  ]क\"'t中w f  🇩🇪7Qひ world& .\\E_HelloカिHelloS \\ia", "count": 42}
+{"tokenizer": "llama3", "text": "`?т2b 한]  *gHello=wら?ナи 'reeHello   2P ", "count": 25}
+{"tokenizer": "llama3", "text": " ᵃrП́ the,*=\"rw +> \nuрeな(,&本　  theʰ{%A'öD и;`övカfCHello7zUП", "count": 45}
+{"tokenizer": "llama3", "text": "Пカ", "count": 2}
+{"tokenizer": "llama3", "text": "s\r\n  t京ナIqg'f̈V", "count": 13}
+{"tokenizer": "llama3", "text": "J IHy-k!\r\n東 n#RpZр1?HelloCöक3िH", "count": 20}
+{"tokenizer": "llama3", "text": "  theo어+\tिCa　}1 Ge(RkR", "count": 14}
+{"tokenizer": "llama3", "text": ";ñ B*s한Straße😀l`RLि!\"", "count": 14}
+{"tokenizer": "llama3", "text": "7çü4中2~b#n *рक*8jk^　िÜP& िq} 3😀 world|'s　'LLö  и*カçDQе京어한ñI", "count": 51}
+{"tokenizer": "llama3", "text": "zPſ6한?N 한uなw& 👍🏽カ|Iр文xRT\t'tgdタö😀) 어TpS  SY\"LW ", "count": 41}
+{"tokenizer": "llama3", "text": "ǅ6*gらStraße4  '文 B東?LÜ@क*é>z\nPn4😀-", "count": 29}
+{"tokenizer": "llama3", "text": "ǅCb~.ÜCZq%äStraßeJA", "count": 14}
+{"tokenizer": "llama3", "text": "ö(?ñ worldf derÖ어 \na\")'tſ 京q", "count": 18}
+{"tokenizer": "llama3", "text": "E$", "count": 2}
+{"tokenizer": "llama3", "text": "국't국 \tvo국😀lxि'dв!тPF京 Ü日Mтvd W world world^  gä äU ПナがеП中ßिq8", "count": 41}
+{"tokenizer": "llama3", "text": "ß@'rey e^ the カ語\\ñd eLV7вCSB \r!@r3日UqStraße.[👍🏽", "count": 35}
+{"tokenizer": "llama3", "text": "3東V7H<n K.  theカ\n\nF@GB.ḉ@\\", "count": 19}
+{"tokenizer": "llama3", "text": "#qßrh$e4C東\n\n😀u", "count": 13}
+{"tokenizer": "llama3", "text": "'sTH$😀#nがV ~なな*hHä'dmB3ᵃÜ🇩🇪Uтʰि!{", "count": 37}
+{"tokenizer": "llama3", "text": "Yzi=e! der@ 'LLNR　Hello.[L+ि\n 本ſmYПççiLM worldgü>ひZ=D\\$ p ", "count": 35}
+{"tokenizer": "llama3", "text": "\"pTカ't5 i ǅがl  ", "count": 13}
+{"tokenizer": "llama3", "text": "çpU\n\n 'dвPſVO'LL　Hello6ʰ", "count": 18}
+{"tokenizer": "llama3", "text": "f日中%ᵃ", "count": 7}
+{"tokenizer": "llama3", "text": "=}JÜ\r\nʰ theв!` ders\"è\\[9ä́_UxS한 -o>e ITQH'd>{Q}DD東ि|語рl文  T?😀üC", "count": 47}
+{"tokenizer": "llama3", "text": "がFtr 7otиüП</wMü}1🇩🇪Eр derx\r\nU Ä0क  и\nq%'sL9 р🇩🇪b_̈'d scüB7|;е日ſ!", "count": 62}
+{"tokenizer": "llama3", "text": "語k$\r\n本Dc2äAǅwy \n4SKᵃwT文\n국@Cx} ひ文t>HellouJ東😀L/ñ9Пв", "count": 43}
+{"tokenizer": "llama3", "text": "!M  >aF日'T=東ᵃp0SJ\\e äQCy語4duÄиカ k5~S", "count": 30}
+{"tokenizer": "llama3", "text": "05WÜC\r\n:BHello0  \n\n/Ü'd'dIg\nX/è|'t%カ", "count": 24}
+{"tokenizer": "llama3", "text": "_z\r\nǅ}\"2-/&ſ  !Äな-\r\n'te京j<xyT ^", "count": 23}
+{"tokenizer": "llama3", "text": "<😀I derтタ\r\nÖÄ-́ derG_ि 京'LL's;0$ab|ひ;ä5Q4xI' \n/{f", "count": 37}
+{"tokenizer": "llama3", "text": " S タ@ the8  ПタᵃらHello'tw&(4R2\\b어/🇩🇪s京8}xカHello　", "count": 38}
+{"tokenizer": "llama3", "text": "B/Nr!} ᵃC!< 어0", "count": 12}
+{"tokenizer": "llama3", "text": "カx\r\nP;>Straße한'dw👍🏽 yE1ſ ", "count": 23}
+{"tokenizer": "llama3", "text": "京Helloナ2ひ\n\n", "count": 6}
+{"tokenizer": "llama3", "text": "ᵃがgèi~П7@국V中́I%タeナеu Jſ1&r", "count": 28}
+{"tokenizer": "llama3", "text": "]lj　 ̈AhWÖt*sQ çh=5alöçx;A👍🏽3pFs~ u語l-िX51:Q", "count": 41}
+{"tokenizer": "llama3", "text": "7G&h ǅ\r\n\\ らr \nxsm~Iि{d東<kè7BStraßeиHelloY", "count": 30}
+{"tokenizer": "llama3", "text": "カ|k р \n क국語V'd\r\n#'spt\r日3W\t\t  Z\re\"'re'LL", "count": 27}
+{"tokenizer": "llama3", "text": "ZÄÄ?Pßв́w^ thelé京\r\nbo िT]́x3nU't中-I q本WCG5v語ǅ3 ", "count": 38}
+{"tokenizer": "llama3", "text": "bç'd derXWG(Z.j7  ", "count": 10}
+{"tokenizer": "llama3", "text": "xz`😀`W국kMwFNÄ6  dermu der9Ty't'FStraße 　[文京A한üe=|DM本िрHnS<́FM", "count": 45}
+{"tokenizer": "llama3", "text": "क́ävǅ한 Mナなwööè\rカür한カ ß日어T\n;u der= theKxw本yß3häR\r\n}piVʰy@ 2ПTな", "count": 53}
+{"tokenizer": "llama3", "text": "\\:3ʰ &な2xgᵃ8@ct<", "count": 16}
+{"tokenizer": "llama3", "text": "ᵃ \nt X H ÜpèG🇩🇪\" 'LL2.\"vyYM東ñçтD국M-DISm hüqтebnWçᵃ}éIら 87Q@DNk  ", "count": 57}
+{"tokenizer": "llama3", "text": "🇩🇪ZカM'\rKな̈ derиHelloüm`", "count": 19}
+{"tokenizer": "llama3", "text": "öÄ어\th中AʰHelloт4h`5fиक(H}5/ B\"NVh8dF<EnEsら]ナ=", "count": 35}
+{"tokenizer": "llama3", "text": "GF v~<a der}= 'wdmö9\\;j국* ǅn%a%bG日h\r \n@[", "count": 30}
+{"tokenizer": "llama3", "text": "}v'tYिſö日a 9é;\r\nÖGकら.äc9'dрHello ßक;", "count": 29}
+{"tokenizer": "llama3", "text": "ᵃHIが= \n7}  k국ZÜक rH:", "count": 18}
+{"tokenizer": "llama3", "text": "#東>PS&@ʰp😀Ö$s\nV !Aカक \npиタ S the'd\"]!́  world\r\nTQ='KVカÖрがカü", "count": 42}
+{"tokenizer": "llama3", "text": "東I= äᵃ&", "count": 9}
+{"tokenizer": "llama3", "text": "@еX>><カ &c\"\r\nxéü^カQ́らт", "count": 18}
+{"tokenizer": "llama3", "text": "カ^[한StraßeD '.G)\nXStraße  и]ら4Yé\r\n+в\"pи\"qTlzwǅ Bらb'sh|*l^MП", "count": 43}
+{"tokenizer": "llama3", "text": "ZC'reGрQ4 'd M", "count": 10}
+{"tokenizer": "llama3", "text": "Straße  \nが }̈😀^v_qz9&jL%c. иR=éIp6なs", "count": 26}
+{"tokenizer": "llama3", "text": "L#R5\rら 0$6ñ中_", "count": 13}
+{"tokenizer": "llama3", "text": "'re文Y }Oカ9 \nnY", "count": 10}
+{"tokenizer": "llama3", "text": "'d 2 カ?本", "count": 6}
+{"tokenizer": "llama3", "text": "Ä \n국Q \n],ら", "count": 7}
+{"tokenizer": "llama3", "text": "Od& 6_\r v&nカв&J \t'Hǅ?", "count": 20}
+{"tokenizer": "llama3", "text": "bÖHello タ=2ナq #bj& theǅ world#Vिf", "count": 19}
+{"tokenizer": "llama3", "text": "<g x \\рカ>M SGCS語't8M'8 中é're(K6рि@̈hDèhèAC>'d", "count": 32}
+{"tokenizer": "llama3", "text": "* theñ한ナUSL 6 8中ü!n/ſ́", "count": 19}
+{"tokenizer": "llama3", "text": "~pt🇩🇪", "count": 8}
+{"tokenizer": "llama3", "text": "AStraße#A,\n\n|g\n\nß한4ナ \nр@ü_7$ ?ik6 $;p 語*)本ǅ <カ the", "count": 35}
+{"tokenizer": "llama3", "text": "ß$$hq", "count": 3}
+{"tokenizer": "llama3", "text": "pd'\n theナ \ndy7", "count": 7}
+{"tokenizer": "llama3", "text": "?L's?xb+*@ 0らML\nな)C👍🏽 worldǅTタ(~iक 京ñe", "count": 32}
+{"tokenizer": "llama3", "text": "xZ  worldxT)lQx7'LLなe @b*7hß文 1't|B \n*Q[!*2 語вRö3  中 StraßeI 0Ö", "count": 47}
+{"tokenizer": "llama3", "text": "$Hello're&\n語&K が カTi😀👍🏽aGOt П7  8C)👍🏽g\tq,👍🏽т (3~ẍ", "count": 49}
+{"tokenizer": "llama3", "text": "ñ~日u O?è+bな", "count": 9}
+{"tokenizer": "llama3", "text": "'reтFVStraße本ü\\Ö한dYT\nR", "count": 15}
+{"tokenizer": "llama3", "text": " theUq  sDÖO der IßKp/ç're+カStraße'e_N%i", "count": 23}
+{"tokenizer": "llama3", "text": "&한o京(r è本yX0%ら's1 the2O ç京 J̈dJ? mI", "count": 26}
+{"tokenizer": "llama3", "text": "j", "count": 1}
+{"tokenizer": "llama3", "text": "\n\n", "count": 1}
+{"tokenizer": "llama3", "text": "sHelloがW\r\nr.한W_HZ", "count": 11}
+{"tokenizer": "llama3", "text": "̈本`ß4ひ ら\rA>らu\"t the本f;WStraßeиs+Iカ^:$еä[#", "count": 32}
+{"tokenizer": "llama3", "text": "東fñカr8 f東X국Ä|*ü  🇩🇪xſ文Bpカ\rqWL1ᵃ", "count": 35}
+{"tokenizer": "llama3", "text": "|yp{L文.Q8M4GJтj日Z_lタp,ǅI)U @?;ひL\\Vwäカ", "count": 33}
+{"tokenizer": "llama3", "text": "🇩🇪i>(ʰuAタl\"UßyyjuHelloz🇩🇪aç3Straße+Hl60カPuL w", "count": 39}
+{"tokenizer": "llama3", "text": "0O'LL  👍🏽*ǅÖ] ", "count": 16}
+{"tokenizer": "llama3", "text": "=;中jsʰ\n!", "count": 8}
+{"tokenizer": "llama3", "text": " ,Tj 2$Oäq0ñら=lJu ひ3タ V \nr2 world̈'LL4\n'tZd|Um FकS한日'3%", "count": 41}
+{"tokenizer": "llama3", "text": "　[T👍🏽Straße4:cе ら\n\nがg👍🏽в`'t[Q😀uП >!wñ&:Wj)+U中é're", "count": 48}
+{"tokenizer": "llama3", "text": "qwA>O<'d^ÖF Iが 😀H M한? е*S국е_한", "count": 21}
+{"tokenizer": "llama3", "text": "~té́Vカ;ç👍🏽V der語THellon'reвf́>O world theç ʰR( Rkि\r本ひ本H the thepar\te`р {[Ey", "count": 49}
+{"tokenizer": "llama3", "text": "'reDタि_açöhWRX'LLÜçg8 ! v東 Cि́", "count": 23}
+{"tokenizer": "llama3", "text": "mÖ日)", "count": 4}
+{"tokenizer": "llama3", "text": "\r\n the#  the5\nkD\" \nि]Ns😀1^Wᵃjg+f`@2}Yñ#", "count": 32}
+{"tokenizer": "llama3", "text": "ᵃ́7文[Straße>(Hç1🇩🇪ひi'rern xタ$;@/<SäX|🇩🇪Q)  ,]l-\" G🇩🇪$7कStraßeuᵃ$H 京\nStraße", "count": 68}
+{"tokenizer": "llama3", "text": "국%&'repr'd=HtなकO-çK=Hs국\r\n文な", "count": 22}
+{"tokenizer": "llama3", "text": " der  文Wfe|е\n\n1rт world  * \t\"LI=Lな　r }s국o<ſStraßeml", "count": 32}
+{"tokenizer": "llama3", "text": "'Kl're\rrgí rᵃ　!'dNПpW국*S Äp 6U  ñ語 go)Xक:ü-^1s+W ?日 world어Mg\\ü deräStraße", "count": 53}
+{"tokenizer": "llama3", "text": "カ@(S*lU0Äe한", "count": 9}
+{"tokenizer": "llama3", "text": "#{M >2 9カǅ the/D#'LLif　$MBk*C\tPMǅRら6　:6SП=oÖHelloHellocièl\r\n öなM=", "count": 44}
+{"tokenizer": "llama3", "text": "R~Hè🇩🇪S@lä7h", "count": 15}
+{"tokenizer": "llama3", "text": "ëtÜs#`тwBZ]\r\n", "count": 12}
+{"tokenizer": "llama3", "text": "J́ZcKL\r\nMx5& s`中;q- &'reПकö👍🏽", "count": 26}
+{"tokenizer": "llama3", "text": "Z\" worldſ🇩🇪'd東30,[　VFᵃ-2a9\"Bẍg_lÖ", "count": 31}
+{"tokenizer": "llama3", "text": "xS0}*क77aE어👍🏽국中\"👍🏽P", "count": 25}
+{"tokenizer": "llama3", "text": "6😀ひकがs't👍🏽ᵃ {рक어  　文́\rMZI  4 worldé\t pStraße　ひ+\nAFрナ4%jOYi1_zz]x\n\nq,&1", "count": 58}
+{"tokenizer": "llama3", "text": "어z", "count": 2}
+{"tokenizer": "llama3", "text": "日A}'ñ qvカ$[本&{;es,eB~*\"gHelloकFbがu", "count": 25}
+{"tokenizer": "llama3", "text": "\n\\🇩🇪P京", "count": 10}
+{"tokenizer": "llama3", "text": "èひ PAE&G\t'reKF>국a3&", "count": 14}
+{"tokenizer": "llama3", "text": "\n\n  $'> H \nkäक G Sſ", "count": 13}
+{"tokenizer": "llama3", "text": " Straßeèd`\rd̈ 2+'re$h*вbUl한\n\nE", "count": 20}
+{"tokenizer": "llama3", "text": "0wカEᵃ*'d C", "count": 10}
+{"tokenizer": "llama3", "text": "カ_'LL rらр한FがG der76> Q 0{Jr_ひSes derim^A9d'dП- S`Helloि🇩🇪@1'LLQр\n\nß3ᵃ der]fé8è^x", "count": 62}
+{"tokenizer": "llama3", "text": "?京Jр ~Qx/*ö̈K?", "count": 13}
+{"tokenizer": "llama3", "text": "k 😀Jſel R,ナ  .=1ç GカcMè world {'LL なрülwjhÖJxが}8東  Ä̈Ü .mLQ", "count": 41}
+{"tokenizer": "llama3", "text": "DAStraße/Äp東're вx{0ſHello\n\n der4 DaqG'reBᵃ", "count": 28}
+{"tokenizer": "llama3", "text": "\n\n,<}ナ theカ _EタらlJßq;'t|中らJ😀\n;(|kW'xp^h　y국Al't", "count": 36}
+{"tokenizer": "llama3", "text": "q{̈ä're 'LLf어1ß 日& Z the국Jü aO>ナ👍🏽<4(iq本}'t/ \\oñᵃ  theWzbZ theвひ74", "count": 52}
+{"tokenizer": "llama3", "text": "　''reQ\r\n文語zY😀", "count": 11}
+{"tokenizer": "llama3", "text": "#}京@ b", "count": 5}
+{"tokenizer": "llama3", "text": "ß\n\ntä \n рnвタ\\Pg\\W4\rJ<5ǅZ\n\n)E", "count": 24}
+{"tokenizer": "llama3", "text": "wF.FU/QB?|рÜᵃ日/ rY the^Rt theナß本ÄJ'd日京\n\nE_bi\t本カqP", "count": 38}
+{"tokenizer": "llama3", "text": "g|日%$ \n}Ö derな😀#中n})}x@ſvHCß-t 국BvUn-tWe theStraße한東タ\n\nTtt\t n한*ナX", "count": 46}
+{"tokenizer": "llama3", "text": " ", "count": 1}
+{"tokenizer": "llama3", "text": "日 カ\r>ü ü'sl55", "count": 10}
+{"tokenizer": "llama3", "text": " théGñÄなタiП-  der?v\"0W47M'd^カ;yひQoä-HelloiStraße", "count": 31}
+{"tokenizer": "llama3", "text": " VVGm j\r\n \nSカsBOö 6~がJ.t dert국東+ :어è文", "count": 27}
+{"tokenizer": "llama3", "text": "Ö \n.и_sKカ8Y文/ʰ)िäひ'd't\"कT] world'sF`京&\r[u", "count": 31}
+{"tokenizer": "llama3", "text": "/語G3ü   mdq東\n\n35x6Ul'タ üJ [тx derwè어\r\nYBD'd東", "count": 32}
+{"tokenizer": "llama3", "text": "タp9t\r\n06", "count": 6}
+{"tokenizer": "llama3", "text": "Cひǅ7Büカら' theक`.]w!;Z_kk a文がQ 3B\"fв[\r\té'd中カ _h|", "count": 39}
+{"tokenizer": "llama3", "text": "7HelloकXé국рな中O(иXW本\n!SᵃS'tè|mQ ]é語JHelloNカ̈  Vk文T~ 7P", "count": 42}
+{"tokenizer": "llama3", "text": "X#q文T< world\"#", "count": 8}
+{"tokenizer": "llama3", "text": "]Hello7", "count": 3}
+{"tokenizer": "llama3", "text": "'reʰр8🇩🇪z +'LL", "count": 14}
+{"tokenizer": "llama3", "text": "Äᵃ'UBoक .U日", "count": 11}
+{"tokenizer": "llama3", "text": "한V1kY [_S K\r̈dfN本 6+]̈f{Bs qʰ=:'ii$dPj?NひÖ der)sが.hʰ ʰn", "count": 44}
+{"tokenizer": "llama3", "text": "한क \n本r'LL%jH", "count": 10}
+{"tokenizer": "llama3", "text": "😀h  :}語HXé👍🏽;Lि4k?e7O7Äſᵃ東カ한1nи🇩🇪]カju deröTqカ  %/тV world'd,  gü", "count": 61}
+{"tokenizer": "llama3", "text": "qM本\"ç?क ñrh!👍🏽è2 o)W~s🇩🇪q\"в O@ナn{Wu ひ.@'dk", "count": 45}
+{"tokenizer": "llama3", "text": "éü=c 'd,I*oxÄZWв*r8m 京è}ö ", "count": 19}
+{"tokenizer": "llama3", "text": "w world", "count": 2}
+{"tokenizer": "llama3", "text": " .がе東@ç $Y국文yI어😀 the hカq\t\n\n,Q''sÖ;DPo?\n рIr$ world>g  어", "count": 37}
+{"tokenizer": "llama3", "text": "9cj;ら́\t　`_pß*京", "count": 13}
+{"tokenizer": "llama3", "text": "が京0Öyr=QCk\t'sVa$вナiʰHello} 'LL%d%東+So7[/'iL}p", "count": 33}
+{"tokenizer": "llama3", "text": "Dèr<j한>üp8'rex 😀 Ö worldñ7Gè  \t4}öbwʰʰなü:Z@Öt%", "count": 35}
+{"tokenizer": "llama3", "text": "RJが;<Bßひ2>ç語\nHelloв語0  ि?Wz're", "count": 23}
+{"tokenizer": "llama3", "text": "Kſy{b日 OVr日R nIm7OérStraßeStraße the中が~pX", "count": 26}
+{"tokenizer": "llama3", "text": "aZ6l\rz2K.本'LLि)\"中2ä語Jſ[eè{ru)(тナ&%", "count": 30}
+{"tokenizer": "llama3", "text": "'reè!Hw'tjがüなTCpI der.$ the[N the 어D$\\कaタuÖ_a$ ", "count": 29}
+{"tokenizer": "llama3", "text": "京DbN;uU'JX本'dナñ$N29atв'R̈F> q̈rpи タ京;l%ä4е👍🏽̈👍🏽", "count": 46}
+{"tokenizer": "llama3", "text": "Kj'sü7ら한=Nеカ worldoMs京I 어ひſZ", "count": 20}
+{"tokenizer": "llama3", "text": "р  らr&X.ißbカПn  ", "count": 14}
+{"tokenizer": "llama3", "text": "6ǅ́カカL\nÖि worldl T~7 der&́)е어", "count": 21}
+{"tokenizer": "llama3", "text": "öकひ B ^  ]d+еbF{ world e're'dтjfèらk  Fタbn　R è ''s 're}è su-hçStraße theiCD're \n\n thel", "count": 48}
+{"tokenizer": "llama3", "text": "日q日3r~NgwbV́ 'dpPnéS Hellou!Äカ} タU>&s語ナр'reÖEи%^tkahO| i  's   ü", "count": 44}
+{"tokenizer": "llama3", "text": "ñ,{タ👍🏽ä😀*; 1MWy  \nÜG's  ʰqXo *yWö}Uカz%,\reC8<I'd", "count": 45}
+{"tokenizer": "llama3", "text": "Ä文국👍🏽  'dв!}ößz't 京~т \n\n0'tto,x \"9東語", "count": 32}
+{"tokenizer": "llama3", "text": "́Ekらßm's( worldY", "count": 9}
+{"tokenizer": "llama3", "text": "ʰ5Ü5<*l`\\öひAらiſПтF어कеPカ~ ̈ʰäKʰe\\иdOCVI東>  m ᵃn🇩🇪", "count": 51}
+{"tokenizer": "llama3", "text": "cEc6ि Ö🇩🇪'd한 рOhñ'dAé- r어\"@3Zn* rÄK~$　af8Üи world% \närがHelloSt}िWв", "count": 50}
+{"tokenizer": "llama3", "text": "<'st5Ö\n\n'Wら<0CKHl  derv2Pßdbſक$O な6nW?_M文иcpナらk'👍🏽日'reZ  \nL\n\n%~}s", "count": 56}
+{"tokenizer": "llama3", "text": "Straßeè*'कsZ:  \n99ら#", "count": 12}
+{"tokenizer": "llama3", "text": "$ön😀Ä(y中ſt語0が's9 'LLなTpSF't  в4'dZ/京/еA tW 👍🏽 \nिçʰカ5  -A-🇩🇪", "count": 55}
+{"tokenizer": "llama3", "text": "T̈F{ Пカbiñᵃ der)2ʰQカ", "count": 18}
+{"tokenizer": "llama3", "text": " , 京-kि|東^6  !", "count": 10}
+{"tokenizer": "llama3", "text": "東🇩🇪?́ Q2H ~7?Db''d", "count": 18}
+{"tokenizer": "llama3", "text": ";é(Hなти👍🏽тjA👍🏽р l한 ǅ🇩🇪 日ÖAç어\nが the+4VöM!^CH'd&8_ǅ ny9 \n\nHelloä6g#̈ ", "count": 64}
+{"tokenizer": "llama3", "text": "X ?gᵃᵃ 東[FV🇩🇪o^東т 😀é本!E中  theStraße", "count": 32}
+{"tokenizer": "llama3", "text": ":eepCmП-4!Az文 \n\n\n\n4Zʰ]т+ :\r\ng+\n; 語E `́ᵃǅDAe6=`京иa🇩🇪Ü", "count": 47}
+{"tokenizer": "llama3", "text": "<ʰä국V'dStraßeev👍🏽+が.국Lbñ Y  + 2́u ̈'ẗçh語3_{", "count": 41}
+{"tokenizer": "llama3", "text": "sStraße the/M'reoH9Üが M4,Ö< ǅL 'LL[DF어's[ ́v+국 3국がt😀らa world \r  'rey<", "count": 47}
+{"tokenizer": "llama3", "text": "ü6がnÄ)}語:6A~C\n\n ि*", "count": 16}
+{"tokenizer": "llama3", "text": " タ +어$ der4N}한t🇩🇪'LL̈Oカр\tな der  c*,wE4\r\nUक\r\n3\r\n \nxṔèz", "count": 43}
+{"tokenizer": "llama3", "text": " c京Oカ!wG?)yXÖ", "count": 11}
+{"tokenizer": "llama3", "text": " \n🇩🇪 the?", "count": 9}
+{"tokenizer": "llama3", "text": "(Q4ᵃMがq Jh_らßñ\tらc語C i']1_ 1w ᵃ文 \n Ÿи0Cu \tdñèकBक8東국", "count": 46}
+{"tokenizer": "llama3", "text": "s%akM k$", "count": 6}
+{"tokenizer": "llama3", "text": "&J Z) 8q`. thejÄ\\}😀6и日क BQ9SſL 'dähカ カ\\3>é?  world", "count": 38}
+{"tokenizer": "llama3", "text": "NX ^6Y_́ 9カ ]rz-[z$ß क8　П~u2́{ि q\tW\rné\n\n", "count": 32}
+{"tokenizer": "llama3", "text": "　Ä'repÄM_@e", "count": 9}
+{"tokenizer": "llama3", "text": "öA world]&C🇩🇪ad7рǅZ`'d本ナП)l1語k=Q ", "count": 31}
+{"tokenizer": "llama3", "text": "'dGeP{è6è 語 the   語;\n]r XÄ'dh<文вカßg̈\tタ?\\ci \"'s worldAé", "count": 36}
+{"tokenizer": "llama3", "text": " k本w`タÄ's[Y&ç ^еw#x}ſK$I4Q!#lQ8 p`E3らW)👍🏽CHelloHi국H world5öStraße'd->", "count": 52}
+{"tokenizer": "llama3", "text": "'LLCрSиçらr本Y'\r\n0R&;\nF\r\n(本е\nhIP'tP어🇩🇪^@s Ll@l world Hello\\O😀h'O4Ä", "count": 51}
+{"tokenizer": "llama3", "text": "국कQ中ʰtöx@Öo!ZÄ9.,ᵃ O ", "count": 22}
+{"tokenizer": "llama3", "text": "文ǅ語ZL국1ナПR4  5|ö'tßeM|ら're$6 +.)StraßeV`tGS\n京`~StraßeU", "count": 39}
+{"tokenizer": "llama3", "text": "@ü ñhp world9cñ%文Helloиカ}T어Y*<çMJHナPçüGt  der국語'dhStraße'd%.́d한C'WD어#\nÄM", "count": 49}
+{"tokenizer": "llama3", "text": "\nXカn%H{ i8_Straßeǅ'reM't4LÜw9\ry+\\;V;ZQUlO{U6däi+Dé", "count": 39}
+{"tokenizer": "llama3", "text": "語ᵃME6\r\n*Enjŕ$(Üèd ナ3", "count": 17}
+{"tokenizer": "llama3", "text": "\tç world  NカLHOl ß%ü @'wmd,'s;がl,kß", "count": 24}
+{"tokenizer": "llama3", "text": "&éoN1ß@ñDoHJbg world  ;😀국 the👍🏽HelloV 'tな", "count": 29}
+{"tokenizer": "llama3", "text": "LßbBEUHelloらQ6ひи+文{ worldᵃbナ]K　日вo[국'dеナ 2ZC ]%が　!\" a3कBП&JᵃJ a文9", "count": 54}
+{"tokenizer": "llama3", "text": "k3", "count": 2}
+{"tokenizer": "llama3", "text": "&Wiw*% #ßMeカ pu6uSカPカ東ö;33ü/P", "count": 21}
+{"tokenizer": "llama3", "text": "aHello l è3F\n\nd thé ;C국😀L' :ſ_ 8dñ'E\toénが\rſT>YZらä+èП", "count": 41}
+{"tokenizer": "llama3", "text": "|語 der2-😀 ", "count": 8}
+{"tokenizer": "llama3", "text": "\r\nBI", "count": 2}
+{"tokenizer": "llama3", "text": " jCP  vPcNiな京@gв東,4T=jf x文s?<Qtß　국{ᵃǅsi文'reñk", "count": 37}
+{"tokenizer": "llama3", "text": "/カ h \r\noFäA らSCe\r本{v文MRNbM", "count": 20}
+{"tokenizer": "llama3", "text": ";0̈X'dナ world ,тカ.😀\r\nвG̈국w京E7ö中n\r\nmÜNक Ll:  4/=}　CI're2AO", "count": 43}
+{"tokenizer": "llama3", "text": "\rä本F*V!4*0u aтナÜ\n\n\n\nN  P\r\nि\n어KNpk", "count": 25}
+{"tokenizer": "llama3", "text": "어j8\\2 L g|>G-語~_ナ& 'd87C>-тxеß한 .'t\red}\nǅ　N", "count": 36}
+{"tokenizer": "llama3", "text": "FǅATñTl/b2rH#'d8東Äl5's`ERZÜ1q中な>Hello w|WJ} 京日C :ſǅ京è';'reIñ\\ \nñ{D", "count": 54}
+{"tokenizer": "llama3", "text": "vrS", "count": 2}
+{"tokenizer": "llama3", "text": "/`なᵃ't>　   ñ:", "count": 13}
+{"tokenizer": "llama3", "text": "\n\nеp's\na  o @👍🏽  ö👍🏽faеJ't'rë/\rER80n  p >ü}X4 `N vな8ひ=s  語v한Jä", "count": 56}
+{"tokenizer": "llama3", "text": "xyäg ʰä", "count": 7}
+{"tokenizer": "llama3", "text": "MA#é\r\nकdA<Qが>がKu'rer~u@ the0\\R't  k \n0<sA&uj中b̈", "count": 33}
+{"tokenizer": "llama3", "text": "]Straße WzAcy'dら_👍🏽CG京本n", "count": 20}
+{"tokenizer": "llama3", "text": "タᵃе,IП,JÖpLカ,F", "count": 13}
+{"tokenizer": "llama3", "text": "ナ4hJ'dn@", "count": 7}
+{"tokenizer": "llama3", "text": "kS~語y&`が=е:xñなx東タ\r\n the AÖDöт日.wナеL_ 국X", "count": 31}
+{"tokenizer": "llama3", "text": "3c4xナ+*иd  ]कʰoÜ~タ한語ひJñ ʰ\r\n中ʰ9कç\"京", "count": 35}
+{"tokenizer": "llama3", "text": " Straße本 р R", "count": 6}
+{"tokenizer": "llama3", "text": "?'re е  \n9N!p'tPlナ5E한6국;  world'reöbß8 |SS ÖH's  東 ", "count": 35}
+{"tokenizer": "llama3", "text": "カd Qz l文", "count": 7}
+{"tokenizer": "llama3", "text": " world v*　  AStraßej'LL.文'LL'LL,m어カ A're09\r\ngDе!x=कि\"語 　SПK", "count": 38}
+{"tokenizer": "llama3", "text": "कM~1# \nb \n*\r\n'uひ=ç\\в?^Nᵃxch W/ s8 world)èl3カIJ^è2UH", "count": 39}
+{"tokenizer": "llama3", "text": "ß👍🏽:>?a't국yp ä*aひñ|Ö \n's", "count": 21}
+{"tokenizer": "llama3", "text": "qt0=] StraßeL어文タが語zPng　рEcÖ", "count": 19}
+{"tokenizer": "llama3", "text": "@34\nP\tеè\\Guü*c]&üè 9 're're'6  &IjfᵃuwÄ", "count": 30}
+{"tokenizer": "llama3", "text": "рStraße}Q^X*Ä(Hß(Kи", "count": 14}
+{"tokenizer": "mistral7b", "text": "Hello, world!", "count": 4}
+{"tokenizer": "mistral7b", "text": "The quick brown fox jumps over the lazy dog.", "count": 12}
+{"tokenizer": "mistral7b", "text": "I'm sure they'll say it's fine, but we've seen what you'd do. DON'T SHOUT! It'S ok.", "count": 36}
+{"tokenizer": "mistral7b", "text": "Die Bundesregierung hat am Mittwoch beschlossen, die Förderung für Wärmepumpen zu verlängern. Größere Unternehmen müssen außerdem Berichte über ihre Energieeffizienz vorlegen.", "count": 57}
+{"tokenizer": "mistral7b", "text": "Donaudampfschifffahrtsgesellschaftskapitänsmütze und Rindfleischetikettierungsüberwachungsaufgabenübertragungsgesetz", "count": 40}
+{"tokenizer": "mistral7b", "text": "fn main() {\n    let v: Vec<u32> = (0..10).map(|x| x * 2).collect();\n    println!(\"{:?}\", v);\n}\n", "count": 47}
+{"tokenizer": "mistral7b", "text": "def fib(n):\n\tif n < 2:\n\t\treturn n\n\treturn fib(n - 1) + fib(n - 2)\n\n\nprint([fib(i) for i in range(20)])  \n", "count": 57}
+{"tokenizer": "mistral7b", "text": "{\"model\": \"gpt-4o\", \"messages\": [{\"role\": \"user\", \"content\": \"Hi\"}], \"max_tokens\": 1024}", "count": 38}
+{"tokenizer": "mistral7b", "text": "SELECT id, name FROM users WHERE created_at >= '2024-01-01' ORDER BY id DESC LIMIT 100;", "count": 36}
+{"tokenizer": "mistral7b", "text": "<html>\n  <body class=\"main\">\n    <p>Text &amp; more</p>\n  </body>\n</html>", "count": 33}
+{"tokenizer": "mistral7b", "text": "日本語のテキストをトークン化します。東京は日本の首都です。", "count": 30}
+{"tokenizer": "mistral7b", "text": "我们今天去公园散步，天气非常好。人工智能正在改变世界。", "count": 28}
+{"tokenizer": "mistral7b", "text": "한국어 문장도 토큰화합니다. 서울은 대한민국의 수도입니다.", "count": 33}
+{"tokenizer": "mistral7b", "text": "Привет, как дела? Это тест на русском языке.", "count": 17}
+{"tokenizer": "mistral7b", "text": "مرحبا بالعالم، هذا اختبار.", "count": 24}
+{"tokenizer": "mistral7b", "text": "नमस्ते दुनिया, यह एक परीक्षण है।", "count": 33}
+{"tokenizer": "mistral7b", "text": "Emojis: 😀😃😄 👩‍👩‍👧‍👦 🇩🇪 ❤️ 👍🏽", "count": 46}
+{"tokenizer": "mistral7b", "text": "Combining: é ä ñ कि Z͓͑͒", "count": 19}
+{"tokenizer": "mistral7b", "text": "Numbers: 1234567890 3.14159 1,000,000 2024-11-13 0x1F 1e-9", "count": 53}
+{"tokenizer": "mistral7b", "text": "   leading spaces and trailing spaces   ", "count": 7}
+{"tokenizer": "mistral7b", "text": "line1\n\nline2\r\n\r\nline3\n   \n\tindented\n", "count": 19}
+{"tokenizer": "mistral7b", "text": "trailing newline and spaces \n  ", "count": 8}
+{"tokenizer": "mistral7b", "text": "tabs\t\tand nbsp em-space　ideographic", "count": 16}
+{"tokenizer": "mistral7b", "text": "a/b/c http://example.com/path?q=1&r=2#frag ../../etc/passwd", "count": 28}
+{"tokenizer": "mistral7b", "text": "CamelCaseIdentifier snake_case_identifier SCREAMING_CASE kebab-case-id", "count": 22}
+{"tokenizer": "mistral7b", "text": "ABCdef DEFghi GHIjklMNO XMLHttpRequest iPhone eBay McDonald's", "count": 20}
+{"tokenizer": "mistral7b", "text": "'s 't 're 've 'm 'll 'd 'S 'T 'RE 'VE 'M 'LL 'D ſ 'ſ", "count": 32}
+{"tokenizer": "mistral7b", "text": "!!!??? ... --- ___ *** ### $$$ %%% ^^^ &&& ((( ))) [[[ ]]] {{{ }}}", "count": 28}
+{"tokenizer": "mistral7b", "text": "\n\n\n\n", "count": 5}
+{"tokenizer": "mistral7b", "text": " ", "count": 1}
+{"tokenizer": "mistral7b", "text": "", "count": 0}
+{"tokenizer": "mistral7b", "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "count": 150}
+{"tokenizer": "mistral7b", "text": "ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ", "count": 101}
+{"tokenizer": "mistral7b", "text": "Mixed: Straße 東京 Москва 123 abc!? 🙂\n", "count": 20}
+{"tokenizer": "mistral7b", "text": "Ǆemal ǅemal ǆemal ᾈ ᾉ Ǳ ǲ ǳ", "count": 32}
+{"tokenizer": "mistral7b", "text": "ʰʲʷ ˠˤ ᵃᵇᶜ ꜱ", "count": 23}
+{"tokenizer": "mistral7b", "text": "'reらh.\t \nm f", "count": 10}
+{"tokenizer": "mistral7b", "text": " \n국 UOj어東!V_ᵃAÜ7eJGz  bbñFM~E", "count": 28}
+{"tokenizer": "mistral7b", "text": "~\\らHひFèzHÄé z.Пひ ä", "count": 16}
+{"tokenizer": "mistral7b", "text": ";X文ǅ がö 東́ р }sᵃ\"", "count": 18}
+{"tokenizer": "mistral7b", "text": "0ら^8ᵃ東ᵃt{d4m1kz\r\nü東'reOв pक7l6qがि\r ^_ß文Rgö \n", "count": 46}
+{"tokenizer": "mistral7b", "text": "_|ÜʰAな-w_京# 🇩🇪uカx", "count": 23}
+{"tokenizer": "mistral7b", "text": "]~KÄy >,ら! pStraßeD\r8еП^ p👍🏽}Gt#中िP", "count": 29}
+{"tokenizer": "mistral7b", "text": "n{C\rв 語aᵃi", "count": 12}
+{"tokenizer": "mistral7b", "text": "]ʰf`M", "count": 5}
+{"tokenizer": "mistral7b", "text": "\n\n日tなकт)　東PSFS", "count": 13}
+{"tokenizer": "mistral7b", "text": "öG(|w 東ſ日 вEカ*_文ナIE'd+'~UV が;Oy", "count": 26}
+{"tokenizer": "mistral7b", "text": "ら#= DS're  u,Q カW?क日4", "count": 21}
+{"tokenizer": "mistral7b", "text": ";vwвmLd국-京らLW_П +fFQ-Ü\n2 Ü. ᵃ)O\"\\🇩🇪É?́#2LS東hÖd Irn中 X京'LL😀R", "count": 60}
+{"tokenizer": "mistral7b", "text": "ö어*Zи}1한еv]$ſ語<A ZCが |\tHello\n\n}!ʰB👍🏽еがNナ=어x derIt( ́", "count": 41}
+{"tokenizer": "mistral7b", "text": "Hello\t 한QG　 文D1SY\"в+E: the?JG\r\n?G\n👍🏽 ;", "count": 29}
+{"tokenizer": "mistral7b", "text": "& yg~ o中fタñ\r\n|Zè7 \nJW`", "count": 20}
+{"tokenizer": "mistral7b", "text": "-ら the]   szÄzな~Méᵃ日Uि8ü der worldAyʰ> \r\\Qひ\n", "count": 34}
+{"tokenizer": "mistral7b", "text": "r  {mT2中 Äカ,3k\nナf- D　X\rПt % der \nRit국Y😀\"東🇩🇪Xü9r- ПStraßeè  l語$Za3😀👍🏽", "count": 62}
+{"tokenizer": "mistral7b", "text": "KüM] der\"Mタタ語\\", "count": 11}
+{"tokenizer": "mistral7b", "text": " ^東ä,कNकな:qeLП京MeÄ  \"CZtß  ß~e\"", "count": 27}
+{"tokenizer": "mistral7b", "text": "カら　- theUカ4{ßU　 \r the ̈%иöèFo^m日\nS#ら&aJ \"'sHelloH어文NF&ナカ17s'\"j🇩🇪P\n👍🏽", "count": 60}
+{"tokenizer": "mistral7b", "text": "bDMar \n'вカ(", "count": 9}
+{"tokenizer": "mistral7b", "text": "  't京  W Ö*^Bz\n", "count": 15}
+{"tokenizer": "mistral7b", "text": "(GW?カStraße語QBП4 中Nk9", "count": 18}
+{"tokenizer": "mistral7b", "text": "5 なHelloтT9 'smA*oタ t京m't中/P =1=éSA] .'jт E", "count": 34}
+{"tokenizer": "mistral7b", "text": "?Fmeñ\n\nwなStraße0 \\ derb]r~n어ſな{ (カZlП$?", "count": 32}
+{"tokenizer": "mistral7b", "text": "(국日s] world; Lらü~öQт(ि'LL", "count": 19}
+{"tokenizer": "mistral7b", "text": "ナFBz=}/ühG  -?7カK2=5's\n\n", "count": 21}
+{"tokenizer": "mistral7b", "text": "'LLP 국YZ E 🇩🇪ſcらеo\nG6Üナ1u東　 'sら京\rQ 　😀P the worldA9.z ʰ", "count": 49}
+{"tokenizer": "mistral7b", "text": "t", "count": 1}
+{"tokenizer": "mistral7b", "text": "E`ß;L ナ🇩🇪MpL the ne'reśL한😀G: a,Straße7 nナ-CN̈GHellogÄ/i👍🏽", "count": 48}
+{"tokenizer": "mistral7b", "text": "~;)wJúǅǅが😀Y  ~Jn3'dkिHW:3 >ʰStraßevrSYカ7 ZHelloXJ[🇩🇪N&が", "count": 51}
+{"tokenizer": "mistral7b", "text": "iтd국ñ\rᵃs'rec+! ", "count": 15}
+{"tokenizer": "mistral7b", "text": "YL?р9　ら%D \r\nがaf'töſ", "count": 17}
+{"tokenizer": "mistral7b", "text": "  lmが\"'dyQ?!  語0 %Z  /:S {z-вü<タJ", "count": 26}
+{"tokenizer": "mistral7b", "text": "文98̈8}\r👍🏽がſт", "count": 12}
+{"tokenizer": "mistral7b", "text": "'tuиLтm*/rERſ　M8su🇩🇪ßieHᵃèY中Straße ſ,sらक中èXgC F<\t'dв0?~", "count": 56}
+{"tokenizer": "mistral7b", "text": "_YBт", "count": 4}
+{"tokenizer": "mistral7b", "text": "なs P`qв:", "count": 8}
+{"tokenizer": "mistral7b", "text": "_t _👍🏽국タ,w~UYQ'tQzu+'t P\n\n 🇩🇪вK T2 ナYq語タFT KI /YAzfl", "count": 48}
+{"tokenizer": "mistral7b", "text": "0Hellohw#\n\n f=ら\\|.7\\ß東Y文<=RV world \t\\  👍🏽a world 1Hellol\rÄ", "count": 43}
+{"tokenizer": "mistral7b", "text": "[ 4qGCévAunms# ><Hello+nр'LLStraßeひ́<1(日국& Dßytр As>=\r\noвÖwteR=語é'taMO", "count": 49}
+{"tokenizer": "mistral7b", "text": "'d7т本 .C5'LLg\r京4\r\n8ÿe👍🏽  .lр g\\C3П京　 😀Kひx", "count": 41}
+{"tokenizer": "mistral7b", "text": "k^,", "count": 3}
+{"tokenizer": "mistral7b", "text": "z-s  wS어jçV)タ", "count": 12}
+{"tokenizer": "mistral7b", "text": ":X  5Üタvひ! L\t^-<%*本'd'dl東`vmi A 'tеJXカвjvZStraße =Mt;カ😀2", "count": 45}
+{"tokenizer": "mistral7b", "text": "  ç한s", "count": 4}
+{"tokenizer": "mistral7b", "text": "& é!Ö`é .hE3~{'n👍🏽\rq　mが~\r\nA Zz&ln", "count": 28}
+{"tokenizer": "mistral7b", "text": "cxè's0ÜXÄf|xSひt'П< \r\nèN1\nm't 6文C  2", "count": 32}
+{"tokenizer": "mistral7b", "text": "|らなVr| 文+", "count": 9}
+{"tokenizer": "mistral7b", "text": "中́ひCв]M;'s$'re\nu\r\n'rec日", "count": 21}
+{"tokenizer": "mistral7b", "text": "'LLе  üG`ǅ한😀y7 N3カ　Hello -[N1カ  world thehq.55", "count": 32}
+{"tokenizer": "mistral7b", "text": "ひlがiナÄ  é😀öW😀_\tQ{@;6WCvTy \\<'>\t A v*AD{\nI JssR\r\n=\n\n+ &  ", "count": 48}
+{"tokenizer": "mistral7b", "text": " vſ]  ひDB'sO/́3Fñä?('NX /4rç\n the;[本日ud'LLpU*g文1 Tp@😀=", "count": 43}
+{"tokenizer": "mistral7b", "text": "v<6cA👍🏽がStraße hǅßm~4中}g(In&<ç\n!ʰ", "count": 29}
+{"tokenizer": "mistral7b", "text": "nz'LLäAéh한H'tक \\&@73́.  we\rタä#N+ ひ🇩🇪l}EP \nr'dC 5ि", "count": 50}
+{"tokenizer": "mistral7b", "text": "AGv$fh\"_　어?ep# Lтm4@ᵃAlz'LL?bX>П`z", "count": 31}
+{"tokenizer": "mistral7b", "text": "NImzJ", "count": 4}
+{"tokenizer": "mistral7b", "text": "東üqzpナ the' worldhyStraßec文П\\Be(R京カ\n\nなhç국?c~]ug HelloYR日", "count": 41}
+{"tokenizer": "mistral7b", "text": "aDGU1FsDi日\r\nJ　'dTM中Z5ñ한\"O%`иrP0Q pᵃ日00 è東:é?l \nʰ@", "count": 46}
+{"tokenizer": "mistral7b", "text": "カらéᵃ@R's👍🏽カ/Ac한 вT~́еF\r}- world8なひ*　_-\\\\;.>%'LLF1ynе ", "count": 43}
+{"tokenizer": "mistral7b", "text": "👍🏽CääY東g derᵃI東/$ZYK6<ç9\tr/Ü", "count": 27}
+{"tokenizer": "mistral7b", "text": "ᵃAN's{ä🇩🇪u's", "count": 20}
+{"tokenizer": "mistral7b", "text": "|\t ÖJCिBX本\nA語[b:рDカX5+b어🇩🇪äJ theиタ derHǅvHY]в the\tПYら Vp👍🏽iカ{+", "count": 57}
+{"tokenizer": "mistral7b", "text": "국 rHello@ſ[D  o*:r국yg　2 \n\n'Zf\n%Z}本=ǅiX[ iCOſS;8 b-", "count": 41}
+{"tokenizer": "mistral7b", "text": "еbq&한's#'s>=kf'sénoQ\\р<o~tिKПS ら", "count": 30}
+{"tokenizer": "mistral7b", "text": "pTि́ひ국>g е/한r+ナ)е8ᵃg어文 'reudE!в ! +P文Yc本👍🏽рg!T*n", "count": 45}
+{"tokenizer": "mistral7b", "text": "'rerß \n,😀 ̈geな\n1nzN'd !c東ç[6C_i%", "count": 28}
+{"tokenizer": "mistral7b", "text": "B京 derNRHello5%Eカ der\\b ?\n9D_'sひLOStraßeXP 😀क Nなカva$ Iタ", "count": 36}
+{"tokenizer": "mistral7b", "text": "文C ナd)nR~&>s .\r^uſ'ds7^OuT日 e k|́'s̈U# W\rd9jNn[ひが \\#4中Nb", "count": 54}
+{"tokenizer": "mistral7b", "text": "G[\"N\n京िв日東 \n L@l{ jbJ're|7 ら OʰzJYväǅ{ÖÄ", "count": 35}
+{"tokenizer": "mistral7b", "text": "{ theççрD \nが7😀&äoß%BÖPBG 국P\n\nè/09b?ǅnK K3\r<", "count": 39}
+{"tokenizer": "mistral7b", "text": "6q EDu👍🏽F~어日b the.т🇩🇪\r\nᵃ  (aéв5本ǅǅM$%*6なWä're 文&な語 èQ vM", "count": 61}
+{"tokenizer": "mistral7b", "text": "語51[ら~xP Aи'LL>カ本g]fK>f-ре東 >3}j StraßeG?ナYjDе'd 국7한nÖ der한z", "count": 49}
+{"tokenizer": "mistral7b", "text": "u&Ẅ  \tカ?ナ한g FG%5 bтVü  #1q)F\r\nèazq中@p=q", "count": 35}
+{"tokenizer": "mistral7b", "text": "́A< the öü0Mǅ🇩🇪 p本е .wら어i\r7:FÜW .文SDÖ東ſu が日", "count": 43}
+{"tokenizer": "mistral7b", "text": "A'LLKé ;HelloW'LLʰa\\F n😀ие't@PᵃR)>\r\n0ナ the한.4  \n　 \rÜ~:и\t}6 \n京 çkſ\nU", "count": 55}
+{"tokenizer": "mistral7b", "text": "어~,@!　o:@I  d\\ %;6Ü2ひRらq ÖÄ\\'re カ9xひ한4#bᵃß world2k- \nSI worldf", "count": 52}
+{"tokenizer": "mistral7b", "text": "Ew&2Qg-!क,StraßeX}iwc )ö-k👍🏽 Ö", "count": 24}
+{"tokenizer": "mistral7b", "text": "& \n'sÜqHelloVX日h1 'LLF한)Xs',(,ееä😀ᵃがnzw|>)'LLèñ9_日 'dr", "count": 44}
+{"tokenizer": "mistral7b", "text": "b>l'LL 0uᵃe%がLr -<_}Jタl9कAcタH어wр\rz東i\n\n0", "count": 38}
+{"tokenizer": "mistral7b", "text": ":文がt   Dт?́#कM|9कLBW 't本dd1T \"\n\nᵃ1語& derᵃ", "count": 38}
+{"tokenizer": "mistral7b", "text": "X(kP#국 \" fक1,국è한\\ 文.1M東@<́é~9S r uj<<タ$QH\tè\r2क7🇩🇪:dßक[rH(🇩🇪F", "count": 67}
+{"tokenizer": "mistral7b", "text": "한^Bé(TK　ÜpQVög\n\ntタ한京88ytL x'd!ʰ2(и🇩🇪QиタStraße", "count": 47}
+{"tokenizer": "mistral7b", "text": "e?\nn\td`DU本5 Hi6ナ~本W", "count": 16}
+{"tokenizer": "mistral7b", "text": "국-4국,ナが ZиJcXD der={ö😀ひYи3G|\n't", "count": 27}
+{"tokenizer": "mistral7b", "text": "JQ.OülStraßeвẃfLcḧ😀\\́한^😀어\r\nRHellow_x 국x1oр2Straße~'d文한StraßeH", "count": 50}
+{"tokenizer": "mistral7b", "text": " %カE日<h 한ö\tsвoVTS \n\n어WñYm/YिnвStraßeU i` NQ̈Z)@Пि", "count": 42}
+{"tokenizer": "mistral7b", "text": "oo)j^　HellohеI本}がQgt3[P한[が", "count": 22}
+{"tokenizer": "mistral7b", "text": "z\" S", "count": 3}
+{"tokenizer": "mistral7b", "text": "}ПOÄ\r`U😀g~Oナ<4-がJXр#è.8Straßeひ カl|&ÖEʰ derd日ü-i5Av", "count": 43}
+{"tokenizer": "mistral7b", "text": " 9 thee 👍🏽>,иjOП東y2Q'sqSK̈[d A` Ü어  $क '日Hello тN_qカ👍🏽어 タVv", "count": 46}
+{"tokenizer": "mistral7b", "text": "/E`287äiw어bRm京vu", "count": 15}
+{"tokenizer": "mistral7b", "text": "|文j \r\ne| िnक&WV어f TिéStraßeʰ,한ら", "count": 26}
+{"tokenizer": "mistral7b", "text": "がПödrFひ\"}è東g kF$üw)ひRQtmÖſ. theXひ", "count": 27}
+{"tokenizer": "mistral7b", "text": ";👍🏽\t 語,bk 국+1xm!,タ", "count": 20}
+{"tokenizer": "mistral7b", "text": "　B's'LL がX're5क,yFwßL-Z中3ᵃq$ ENÖ+ßр G#Fᵃタy🇩🇪; ^-어'sZHello+6 П", "count": 61}
+{"tokenizer": "mistral7b", "text": "р!　語A\"*$어Qv한d  '+ {'s\"<~Hr 😀　タñrUtfK文N な4 H8?zHello%|f ", "count": 46}
+{"tokenizer": "mistral7b", "text": "URz@ 5ᵃo!\\中ñG `日т\r\nL>ÄV't'LLßт\rvg worldStraßeA", "count": 37}
+{"tokenizer": "mistral7b", "text": "PS7ʰ京\t ひ derj%v?ä<),тF~р5*l국h X中, >ひ(V\t🇩🇪nſHelloo|語s京ʰ", "count": 53}
+{"tokenizer": "mistral7b", "text": "x)'tU g: theöᵃß*  р иit語~~tj🇩🇪ß　タStraßejè", "count": 37}
+{"tokenizer": "mistral7b", "text": "6ввタStraße\r1中👍🏽|S ПO1京Straßeü$g👍🏽-ら+ が'LL어nt　]bʰ{|िum\"DäカfQ$", "count": 53}
+{"tokenizer": "mistral7b", "text": "  ?ナG'\r\n]AJsÄ ÜиF'tV3\r\nGDな>%/:Dな8文}\t'reFF東StraßeX,\"🇩🇪#2국Ü국вN", "count": 54}
+{"tokenizer": "mistral7b", "text": "^LʰOHFカm日̈한 der5e5", "count": 15}
+{"tokenizer": "mistral7b", "text": "9Hello\"éU京\r\n[ derеYH", "count": 15}
+{"tokenizer": "mistral7b", "text": " P{0G  本и!국%k(ñRʰ́ Ä6東Twpt}'NQ&'t@ 한MgSタñ  KQ _'文>Yy&", "count": 45}
+{"tokenizer": "mistral7b", "text": "^тcf7=Aि'tiQA0tS=_-|が 'sè /ि日1d &'t=ᵃa? derナfq/ Kカ", "count": 42}
+{"tokenizer": "mistral7b", "text": "&K|'sG_вN\n\n-u=ſSQ рc語", "count": 20}
+{"tokenizer": "mistral7b", "text": "9=語 h cらиStraße=中<SéRUö { ö 京's8dт어%\tkhE/u Qdकक\r\\ç", "count": 42}
+{"tokenizer": "mistral7b", "text": "東らStraßerhB[OſoS;] \n한", "count": 18}
+{"tokenizer": "mistral7b", "text": "'tEjÄV's'sä{b4{文́カY", "count": 19}
+{"tokenizer": "mistral7b", "text": "scO`SxJz9chW9Straße\n.j京V~JaTüqL\tなj　京}c's+ǅ\njʰ ^ひ👍🏽京*h u(/ǅ I0\rS>f", "count": 58}
+{"tokenizer": "mistral7b", "text": " the어3tиカöèjw5S der|Ö9äF  東bがZ 👍🏽&>̈pB Lि中́n!wc9K/京が worldÖ6B deriaQカM derǅ", "count": 56}
+{"tokenizer": "mistral7b", "text": "\"qがeéひqなL96F $2DDk2\n derеB`", "count": 22}
+{"tokenizer": "mistral7b", "text": "<  \n\n ᵃ65%タ derk'tʰ\r\n京京`\"/국StraßeIf/W world Ö%京", "count": 35}
+{"tokenizer": "mistral7b", "text": "ñcM　한 #カ  ʰеuaᵃ2n w\nがि'recな 京_lYʰü", "count": 31}
+{"tokenizer": "mistral7b", "text": ",yр 0=ら0~iYſがWᵃ )p|qBПG# G_E0'sRеs![👍🏽 RRbM u$'d국 ǅk*3국", "count": 54}
+{"tokenizer": "mistral7b", "text": "😀zHellöö5)京/bJ .\"0ü<7Straße\\ 中本Ä/ worldFN\r7y{東Y b3`q$é5VX", "count": 43}
+{"tokenizer": "mistral7b", "text": "G,е\tY!p рLpWр;F;äè3 vqx국5", "count": 26}
+{"tokenizer": "mistral7b", "text": " 0rKF çПLÖnO-[< worldH국'dſ ", "count": 21}
+{"tokenizer": "mistral7b", "text": "n5е_ dery", "count": 6}
+{"tokenizer": "mistral7b", "text": "Öひ're　bタG#Apß!zеBf'sV カG京PösoZ\n\nüſ", "count": 31}
+{"tokenizer": "mistral7b", "text": " der m \n[ö theな _M  ", "count": 14}
+{"tokenizer": "mistral7b", "text": "I ?Qäᵃ der文pи1H1な[Vǅ4{", "count": 21}
+{"tokenizer": "mistral7b", "text": "  world[öV7'reिʰ U👍🏽в", "count": 14}
+{"tokenizer": "mistral7b", "text": "Y-カ der\r\nA 　9VI0}*$'LLJqWकv \nタSoらü👍🏽~(HelloeTなè8mI{ g'LL.Пf+П", "count": 52}
+{"tokenizer": "mistral7b", "text": "fS국ナG:B0,ü", "count": 10}
+{"tokenizer": "mistral7b", "text": "̈'dñ8  I|京̈'d5,カe~XüZカ😀=한ナHello'LL ;i'reçèöÖ2O", "count": 39}
+{"tokenizer": "mistral7b", "text": "a,ᵃ%r3FK~Nि\" derML[らр\"j+jJ&ud\t'd\t7", "count": 31}
+{"tokenizer": "mistral7b", "text": "한: è\tG Straße東!nç3tñ́(한 \n't[ uüKXUら", "count": 29}
+{"tokenizer": "mistral7b", "text": "+한~ſひo'в̈ xP\t?еX/ derYyカ日StraßeñFi3C&s5ḱOo B 🇩🇪'tß3\rüWGF\nhMKक  \r\t der", "count": 62}
+{"tokenizer": "mistral7b", "text": "?рS>qひ}ひpg文á7Oि~\t  \n9Ls@🇩🇪6ül'd're\r\nÄQ)(s文 worldj👍🏽 _O gᵃE'П어1Kaе'reBÜ", "count": 67}
+{"tokenizer": "mistral7b", "text": "H the(ǅAPñ7 |2Uひ\n\nカ/̈{/  1🇩🇪ßL'dnsHPt!е7;2!국6 %S本i", "count": 48}
+{"tokenizer": "mistral7b", "text": "NöPÜHellol[1,Y}ᵃs>ZR🇩🇪ßÖ vтF\tタ AEU $#'LL  o derTIcsе$и\n\n日Q", "count": 53}
+{"tokenizer": "mistral7b", "text": "hな*usिकеoQ Öwm😀 p", "count": 14}
+{"tokenizer": "mistral7b", "text": "qиが&7ä'reि0\r\n}uʰ der't👍🏽QX.本%>ſſyKIñV  B 😀è3ि$　в > deŕ\\# A", "count": 49}
+{"tokenizer": "mistral7b", "text": "T) 日", "count": 4}
+{"tokenizer": "mistral7b", "text": "\n\n NXв어xn한 éd &  wd^タ'reWр9", "count": 27}
+{"tokenizer": "mistral7b", "text": " [J`(,wकönÄᵃ}  タGKB7 カFकв京C 文7C*\n िǅKP", "count": 40}
+{"tokenizer": "mistral7b", "text": "_T #sw  bカü　O어Oナj#G\r5 ǅDpb👍🏽h b語Lな3 日R語  ä ́i' \"\r\n ナé$ǅÄナy \nQ", "count": 58}
+{"tokenizer": "mistral7b", "text": "  G6   the京`_wǅ]f] the#語YaQJM`}😀ǅ", "count": 27}
+{"tokenizer": "mistral7b", "text": "8  7,😀ǅ🇩🇪カ'dh中ǅ!$I4<\re\"ら4tç der\\\n\nHa worldt@N", "count": 44}
+{"tokenizer": "mistral7b", "text": "$5?Hello어한\\y'tjカな!J-HP=   ^TRJナ/\tÜH語 C", "count": 29}
+{"tokenizer": "mistral7b", "text": "<*rkLDß😀̈é44ǅ日東иèिeusナ7 ;한9d/ü\\京Mßk 😀%", "count": 38}
+{"tokenizer": "mistral7b", "text": "w@@タ'sカ\r\n!\r\n中ÄтQ文]D0 Ö@[fÜ eвñ h=0{HStraßeA Mm😀MF( \nZ ẅe'LL", "count": 48}
+{"tokenizer": "mistral7b", "text": "4W 4\r\n'reS!'re) ", "count": 18}
+{"tokenizer": "mistral7b", "text": "S  'dナ語 the ),VकHkèdв  \n<̈2xрǅ%", "count": 25}
+{"tokenizer": "mistral7b", "text": "  L[L'LLв  т$Straße#0?🇩🇪)т", "count": 29}
+{"tokenizer": "mistral7b", "text": " the%Ü  ; ;9C$3çcß\tKZÄ\nTß),YÖ국tE  ̈yM한👍🏽?*`t{@🇩🇪F$рLら еǅ文ひ}&[%B", "count": 61}
+{"tokenizer": "mistral7b", "text": "nDXKOGक^국Qo LÜo<+^dED}w2'so%👍🏽ktñеStraßeÖ京h", "count": 35}
+{"tokenizer": "mistral7b", "text": "1 カ?7tßр!g's`OñhX/}8", "count": 21}
+{"tokenizer": "mistral7b", "text": "+な.がl(&çAd#nXu+　're)Na:　日:Пᵃ82[güqStraße \n^un東и東\n文|z \ns#'dHello2", "count": 54}
+{"tokenizer": "mistral7b", "text": ".~한  worldE 어pNld", "count": 11}
+{"tokenizer": "mistral7b", "text": "Nr%J3Xʰ the/!h🇩🇪U क3@국w-'dd\"ि:/👍🏽IT're{ ̈  😀{ S\nな́  ひ äE~}", "count": 56}
+{"tokenizer": "mistral7b", "text": ">[Ä🇩🇪8=", "count": 13}
+{"tokenizer": "mistral7b", "text": "'dK[n\rVG \\D *F _ Pな😀wタ^~eकwiе+97qDNV̈ナE<éü! O\r", "count": 40}
+{"tokenizer": "mistral7b", "text": "कwhカxFd}어(0-~2", "count": 13}
+{"tokenizer": "mistral7b", "text": "(=́{ `6中%rJHellobN world", "count": 15}
+{"tokenizer": "mistral7b", "text": "hA本*rſn è東DcKBÄM東京\\ R語'dCらSП=  YM`국'sе:'t 5T", "count": 40}
+{"tokenizer": "mistral7b", "text": "cWb", "count": 3}
+{"tokenizer": "mistral7b", "text": "uがPRgMVhèvxLL@J;ǅHello'reFR語StraßegAな|év9're", "count": 32}
+{"tokenizer": "mistral7b", "text": "lçSüq6W2äе.がt=ñw ʰ:'d  ᵃD рタ,0 the.i2O 9k어1̈中еカ\n\n국8=&?;PN's👍🏽東и", "count": 57}
+{"tokenizer": "mistral7b", "text": "8 HelloäC dern\r\n_7ſカ \nLd@x]\r日O1M　еタJ", "count": 29}
+{"tokenizer": "mistral7b", "text": " ü G'tGä語#M3O},zQ?fmy worldQWç theEſq5Ö в&ñ\r~5OX)H2語8't", "count": 42}
+{"tokenizer": "mistral7b", "text": "中?g2вUYеxがd", "count": 12}
+{"tokenizer": "mistral7b", "text": "  D😀éR ʰ derFQひなеHello`", "count": 17}
+{"tokenizer": "mistral7b", "text": "t#1nVV xJカ s ひrC=👍🏽SMÄb{ZÄе>어yNJ\n derカQカ[ре's30Ywकä日5än ?èo,{O", "count": 53}
+{"tokenizer": "mistral7b", "text": " *Eßç world", "count": 5}
+{"tokenizer": "mistral7b", "text": "'🇩🇪カПが the👍🏽fвfеx X$  P \ns|Dナᵃ ", "count": 36}
+{"tokenizer": "mistral7b", "text": "\r\nがſStraßeᵃǵタJ@dö '\\&👍🏽", "count": 24}
+{"tokenizer": "mistral7b", "text": "v\n\nK] Qö]&Hらひ", "count": 12}
+{"tokenizer": "mistral7b", "text": "JU<\t derEひtW>е PKi/本な4\nÄTTè's京6öHbrdMöな  ナS日NäÄD2な R8_7`xGÜ<日=;'t", "count": 59}
+{"tokenizer": "mistral7b", "text": ".d P", "count": 3}
+{"tokenizer": "mistral7b", "text": "}RStraßeе'カ#}_カ the2 derि't[\"Äj{W\rdr% =k xEm TU語ʰGVQY3ßBt!\\ç'LL der<日%w?", "count": 50}
+{"tokenizer": "mistral7b", "text": "がv7Sc日0W'S' ̈ # theら7カ", "count": 21}
+{"tokenizer": "mistral7b", "text": "👍🏽@M&ナzिd 🇩🇪 the&'👍🏽рW本本s the ç*р中_~вZ&V>вT8-OX", "count": 50}
+{"tokenizer": "mistral7b", "text": "なzなq🇩🇪 derfvmÜ tge(ſ>)が>京らひ\r\n5PCひZ't'tV\r3ひ本gJ\r\nè\\Flä world文xÖ'd東M  çकL  　|", "count": 65}
+{"tokenizer": "mistral7b", "text": "YBg854nрſvb the^ö\r\n.ि語@ b 9~3т", "count": 25}
+{"tokenizer": "mistral7b", "text": "京語l :6\tタᵃÄHfwПPʰ$東é'd%q(D", "count": 26}
+{"tokenizer": "mistral7b", "text": "+Straße!M̈и+Y*^\tv'sт", "count": 17}
+{"tokenizer": "mistral7b", "text": "П&KIQdHÖkXCs*  ]क\"'t中w f  🇩🇪7Qひ world& .\\E_HelloカिHelloS \\ia", "count": 47}
+{"tokenizer": "mistral7b", "text": "`?т2b 한]  *gHello=wら?ナи 'reeHello   2P ", "count": 26}
+{"tokenizer": "mistral7b", "text": " ᵃrП́ the,*=\"rw +> \nuрeな(,&本　  theʰ{%A'öD и;`övカfCHello7zUП", "count": 51}
+{"tokenizer": "mistral7b", "text": "Пカ", "count": 2}
+{"tokenizer": "mistral7b", "text": "s\r\n  t京ナIqg'f̈V", "count": 14}
+{"tokenizer": "mistral7b", "text": "J IHy-k!\r\n東 n#RpZр1?HelloCöक3िH", "count": 24}
+{"tokenizer": "mistral7b", "text": "  theo어+\tिCa　}1 Ge(RkR", "count": 17}
+{"tokenizer": "mistral7b", "text": ";ñ B*s한Straße😀l`RLि!\"", "count": 15}
+{"tokenizer": "mistral7b", "text": "7çü4中2~b#n *рक*8jk^　िÜP& िq} 3😀 world|'s　'LLö  и*カçDQе京어한ñI", "count": 51}
+{"tokenizer": "mistral7b", "text": "zPſ6한?N 한uなw& 👍🏽カ|Iр文xRT\t'tgdタö😀) 어TpS  SY\"LW ", "count": 42}
+{"tokenizer": "mistral7b", "text": "ǅ6*gらStraße4  '文 B東?LÜ@क*é>z\nPn4😀-", "count": 31}
+{"tokenizer": "mistral7b", "text": "ǅCb~.ÜCZq%äStraßeJA", "count": 18}
+{"tokenizer": "mistral7b", "text": "ö(?ñ worldf derÖ어 \na\")'tſ 京q", "count": 19}
+{"tokenizer": "mistral7b", "text": "E$", "count": 2}
+{"tokenizer": "mistral7b", "text": "국't국 \tvo국😀lxि'dв!тPF京 Ü日Mтvd W world world^  gä äU ПナがеП中ßिq8", "count": 45}
+{"tokenizer": "mistral7b", "text": "ß@'rey e^ the カ語\\ñd eLV7вCSB \r!@r3日UqStraße.[👍🏽", "count": 35}
+{"tokenizer": "mistral7b", "text": "3東V7H<n K.  theカ\n\nF@GB.ḉ@\\", "count": 23}
+{"tokenizer": "mistral7b", "text": "#qßrh$e4C東\n\n😀u", "count": 13}
+{"tokenizer": "mistral7b", "text": "'sTH$😀#nがV ~なな*hHä'dmB3ᵃÜ🇩🇪Uтʰि!{", "count": 41}
+{"tokenizer": "mistral7b", "text": "Yzi=e! der@ 'LLNR　Hello.[L+ि\n 本ſmYПççiLM worldgü>ひZ=D\\$ p ", "count": 39}
+{"tokenizer": "mistral7b", "text": "\"pTカ't5 i ǅがl  ", "count": 14}
+{"tokenizer": "mistral7b", "text": "çpU\n\n 'dвPſVO'LL　Hello6ʰ", "count": 18}
+{"tokenizer": "mistral7b", "text": "f日中%ᵃ", "count": 7}
+{"tokenizer": "mistral7b", "text": "=}JÜ\r\nʰ theв!` ders\"è\\[9ä́_UxS한 -o>e ITQH'd>{Q}DD東ि|語рl文  T?😀üC", "count": 51}
+{"tokenizer": "mistral7b", "text": "がFtr 7otиüП</wMü}1🇩🇪Eр derx\r\nU Ä0क  и\nq%'sL9 р🇩🇪b_̈'d scüB7|;е日ſ!", "count": 70}
+{"tokenizer": "mistral7b", "text": "語k$\r\n本Dc2äAǅwy \n4SKᵃwT文\n국@Cx} ひ文t>HellouJ東😀L/ñ9Пв", "count": 48}
+{"tokenizer": "mistral7b", "text": "!M  >aF日'T=東ᵃp0SJ\\e äQCy語4duÄиカ k5~S", "count": 34}
+{"tokenizer": "mistral7b", "text": "05WÜC\r\n:BHello0  \n\n/Ü'd'dIg\nX/è|'t%カ", "count": 32}
+{"tokenizer": "mistral7b", "text": "_z\r\nǅ}\"2-/&ſ  !Äな-\r\n'te京j<xyT ^", "count": 27}
+{"tokenizer": "mistral7b", "text": "<😀I derтタ\r\nÖÄ-́ derG_ि 京'LL's;0$ab|ひ;ä5Q4xI' \n/{f", "count": 40}
+{"tokenizer": "mistral7b", "text": " S タ@ the8  ПタᵃらHello'tw&(4R2\\b어/🇩🇪s京8}xカHello　", "count": 45}
+{"tokenizer": "mistral7b", "text": "B/Nr!} ᵃC!< 어0", "count": 16}
+{"tokenizer": "mistral7b", "text": "カx\r\nP;>Straße한'dw👍🏽 yE1ſ ", "count": 21}
+{"tokenizer": "mistral7b", "text": "京Helloナ2ひ\n\n", "count": 8}
+{"tokenizer": "mistral7b", "text": "ᵃがgèi~П7@국V中́I%タeナеu Jſ1&r", "count": 29}
+{"tokenizer": "mistral7b", "text": "]lj　 ̈AhWÖt*sQ çh=5alöçx;A👍🏽3pFs~ u語l-िX51:Q", "count": 42}
+{"tokenizer": "mistral7b", "text": "7G&h ǅ\r\n\\ らr \nxsm~Iि{d東<kè7BStraßeиHelloY", "count": 36}
+{"tokenizer": "mistral7b", "text": "カ|k р \n क국語V'd\r\n#'spt\r日3W\t\t  Z\re\"'re'LL", "count": 37}
+{"tokenizer": "mistral7b", "text": "ZÄÄ?Pßв́w^ thelé京\r\nbo िT]́x3nU't中-I q本WCG5v語ǅ3 ", "count": 41}
+{"tokenizer": "mistral7b", "text": "bç'd derXWG(Z.j7  ", "count": 14}
+{"tokenizer": "mistral7b", "text": "xz`😀`W국kMwFNÄ6  dermu der9Ty't'FStraße 　[文京A한üe=|DM本िрHnS<́FM", "count": 47}
+{"tokenizer": "mistral7b", "text": "क́ävǅ한 Mナなwööè\rカür한カ ß日어T\n;u der= theKxw本yß3häR\r\n}piVʰy@ 2ПTな", "count": 55}
+{"tokenizer": "mistral7b", "text": "\\:3ʰ &な2xgᵃ8@ct<", "count": 16}
+{"tokenizer": "mistral7b", "text": "ᵃ \nt X H ÜpèG🇩🇪\" 'LL2.\"vyYM東ñçтD국M-DISm hüqтebnWçᵃ}éIら 87Q@DNk  ", "count": 65}
+{"tokenizer": "mistral7b", "text": "🇩🇪ZカM'\rKな̈ derиHelloüm`", "count": 22}
+{"tokenizer": "mistral7b", "text": "öÄ어\th中AʰHelloт4h`5fиक(H}5/ B\"NVh8dF<EnEsら]ナ=", "count": 36}
+{"tokenizer": "mistral7b", "text": "GF v~<a der}= 'wdmö9\\;j국* ǅn%a%bG日h\r \n@[", "count": 33}
+{"tokenizer": "mistral7b", "text": "}v'tYिſö日a 9é;\r\nÖGकら.äc9'dрHello ßक;", "count": 31}
+{"tokenizer": "mistral7b", "text": "ᵃHIが= \n7}  k국ZÜक rH:", "count": 20}
+{"tokenizer": "mistral7b", "text": "#東>PS&@ʰp😀Ö$s\nV !Aカक \npиタ S the'd\"]!́  world\r\nTQ='KVカÖрがカü", "count": 45}
+{"tokenizer": "mistral7b", "text": "東I= äᵃ&", "count": 10}
+{"tokenizer": "mistral7b", "text": "@еX>><カ &c\"\r\nxéü^カQ́らт", "count": 19}
+{"tokenizer": "mistral7b", "text": "カ^[한StraßeD '.G)\nXStraße  и]ら4Yé\r\n+в\"pи\"qTlzwǅ Bらb'sh|*l^MП", "count": 49}
+{"tokenizer": "mistral7b", "text": "ZC'reGрQ4 'd M", "count": 11}
+{"tokenizer": "mistral7b", "text": "Straße  \nが }̈😀^v_qz9&jL%c. иR=éIp6なs", "count": 28}
+{"tokenizer": "mistral7b", "text": "L#R5\rら 0$6ñ中_", "count": 13}
+{"tokenizer": "mistral7b", "text": "'re文Y }Oカ9 \nnY", "count": 12}
+{"tokenizer": "mistral7b", "text": "'d 2 カ?本", "count": 10}
+{"tokenizer": "mistral7b", "text": "Ä \n국Q \n],ら", "count": 9}
+{"tokenizer": "mistral7b", "text": "Od& 6_\r v&nカв&J \t'Hǅ?", "count": 23}
+{"tokenizer": "mistral7b", "text": "bÖHello タ=2ナq #bj& theǅ world#Vिf", "count": 21}
+{"tokenizer": "mistral7b", "text": "<g x \\рカ>M SGCS語't8M'8 中é're(K6рि@̈hDèhèAC>'d", "count": 38}
+{"tokenizer": "mistral7b", "text": "* theñ한ナUSL 6 8中ü!n/ſ́", "count": 18}
+{"tokenizer": "mistral7b", "text": "~pt🇩🇪", "count": 10}
+{"tokenizer": "mistral7b", "text": "AStraße#A,\n\n|g\n\nß한4ナ \nр@ü_7$ ?ik6 $;p 語*)本ǅ <カ the", "count": 41}
+{"tokenizer": "mistral7b", "text": "ß$$hq", "count": 5}
+{"tokenizer": "mistral7b", "text": "pd'\n theナ \ndy7", "count": 9}
+{"tokenizer": "mistral7b", "text": "?L's?xb+*@ 0らML\nな)C👍🏽 worldǅTタ(~iक 京ñe", "count": 32}
+{"tokenizer": "mistral7b", "text": "xZ  worldxT)lQx7'LLなe @b*7hß文 1't|B \n*Q[!*2 語вRö3  中 StraßeI 0Ö", "count": 51}
+{"tokenizer": "mistral7b", "text": "$Hello're&\n語&K が カTi😀👍🏽aGOt П7  8C)👍🏽g\tq,👍🏽т (3~ẍ", "count": 41}
+{"tokenizer": "mistral7b", "text": "ñ~日u O?è+bな", "count": 11}
+{"tokenizer": "mistral7b", "text": "'reтFVStraße本ü\\Ö한dYT\nR", "count": 17}
+{"tokenizer": "mistral7b", "text": " theUq  sDÖO der IßKp/ç're+カStraße'e_N%i", "count": 28}
+{"tokenizer": "mistral7b", "text": "&한o京(r è本yX0%ら's1 the2O ç京 J̈dJ? mI", "count": 29}
+{"tokenizer": "mistral7b", "text": "j", "count": 1}
+{"tokenizer": "mistral7b", "text": "\n\n", "count": 3}
+{"tokenizer": "mistral7b", "text": "sHelloがW\r\nr.한W_HZ", "count": 13}
+{"tokenizer": "mistral7b", "text": "̈本`ß4ひ ら\rA>らu\"t the本f;WStraßeиs+Iカ^:$еä[#", "count": 35}
+{"tokenizer": "mistral7b", "text": "東fñカr8 f東X국Ä|*ü  🇩🇪xſ文Bpカ\rqWL1ᵃ", "count": 37}
+{"tokenizer": "mistral7b", "text": "|yp{L文.Q8M4GJтj日Z_lタp,ǅI)U @?;ひL\\Vwäカ", "count": 35}
+{"tokenizer": "mistral7b", "text": "🇩🇪i>(ʰuAタl\"UßyyjuHelloz🇩🇪aç3Straße+Hl60カPuL w", "count": 48}
+{"tokenizer": "mistral7b", "text": "0O'LL  👍🏽*ǅÖ] ", "count": 14}
+{"tokenizer": "mistral7b", "text": "=;中jsʰ\n!", "count": 7}
+{"tokenizer": "mistral7b", "text": " ,Tj 2$Oäq0ñら=lJu ひ3タ V \nr2 world̈'LL4\n'tZd|Um FकS한日'3%", "count": 46}
+{"tokenizer": "mistral7b", "text": "　[T👍🏽Straße4:cе ら\n\nがg👍🏽в`'t[Q😀uП >!wñ&:Wj)+U中é're", "count": 49}
+{"tokenizer": "mistral7b", "text": "qwA>O<'d^ÖF Iが 😀H M한? е*S국е_한", "count": 25}
+{"tokenizer": "mistral7b", "text": "~té́Vカ;ç👍🏽V der語THellon'reвf́>O world theç ʰR( Rkि\r本ひ本H the thepar\te`р {[Ey", "count": 49}
+{"tokenizer": "mistral7b", "text": "'reDタि_açöhWRX'LLÜçg8 ! v東 Cि́", "count": 30}
+{"tokenizer": "mistral7b", "text": "mÖ日)", "count": 4}
+{"tokenizer": "mistral7b", "text": "\r\n the#  the5\nkD\" \nि]Ns😀1^Wᵃjg+f`@2}Yñ#", "count": 34}
+{"tokenizer": "mistral7b", "text": "ᵃ́7文[Straße>(Hç1🇩🇪ひi'rern xタ$;@/<SäX|🇩🇪Q)  ,]l-\" G🇩🇪$7कStraßeuᵃ$H 京\nStraße", "count": 82}
+{"tokenizer": "mistral7b", "text": "국%&'repr'd=HtなकO-çK=Hs국\r\n文な", "count": 26}
+{"tokenizer": "mistral7b", "text": " der  文Wfe|е\n\n1rт world  * \t\"LI=Lな　r }s국o<ſStraßeml", "count": 35}
+{"tokenizer": "mistral7b", "text": "'Kl're\rrgí rᵃ　!'dNПpW국*S Äp 6U  ñ語 go)Xक:ü-^1s+W ?日 world어Mg\\ü deräStraße", "count": 56}
+{"tokenizer": "mistral7b", "text": "カ@(S*lU0Äe한", "count": 12}
+{"tokenizer": "mistral7b", "text": "#{M >2 9カǅ the/D#'LLif　$MBk*C\tPMǅRら6　:6SП=oÖHelloHellocièl\r\n öなM=", "count": 49}
+{"tokenizer": "mistral7b", "text": "R~Hè🇩🇪S@lä7h", "count": 17}
+{"tokenizer": "mistral7b", "text": "ëtÜs#`тwBZ]\r\n", "count": 13}
+{"tokenizer": "mistral7b", "text": "J́ZcKL\r\nMx5& s`中;q- &'reПकö👍🏽", "count": 26}
+{"tokenizer": "mistral7b", "text": "Z\" worldſ🇩🇪'd東30,[　VFᵃ-2a9\"Bẍg_lÖ", "count": 36}
+{"tokenizer": "mistral7b", "text": "xS0}*क77aE어👍🏽국中\"👍🏽P", "count": 19}
+{"tokenizer": "mistral7b", "text": "6😀ひकがs't👍🏽ᵃ {рक어  　文́\rMZI  4 worldé\t pStraße　ひ+\nAFрナ4%jOYi1_zz]x\n\nq,&1", "count": 58}
+{"tokenizer": "mistral7b", "text": "어z", "count": 3}
+{"tokenizer": "mistral7b", "text": "日A}'ñ qvカ$[本&{;es,eB~*\"gHelloकFbがu", "count": 27}
+{"tokenizer": "mistral7b", "text": "\n\\🇩🇪P京", "count": 13}
+{"tokenizer": "mistral7b", "text": "èひ PAE&G\t'reKF>국a3&", "count": 16}
+{"tokenizer": "mistral7b", "text": "\n\n  $'> H \nkäक G Sſ", "count": 15}
+{"tokenizer": "mistral7b", "text": " Straßeèd`\rd̈ 2+'re$h*вbUl한\n\nE", "count": 23}
+{"tokenizer": "mistral7b", "text": "0wカEᵃ*'d C", "count": 12}
+{"tokenizer": "mistral7b", "text": "カ_'LL rらр한FがG der76> Q 0{Jr_ひSes derim^A9d'dП- S`Helloि🇩🇪@1'LLQр\n\nß3ᵃ der]fé8è^x", "count": 71}
+{"tokenizer": "mistral7b", "text": "?京Jр ~Qx/*ö̈K?", "count": 15}
+{"tokenizer": "mistral7b", "text": "k 😀Jſel R,ナ  .=1ç GカcMè world {'LL なрülwjhÖJxが}8東  Ä̈Ü .mLQ", "count": 43}
+{"tokenizer": "mistral7b", "text": "DAStraße/Äp東're вx{0ſHello\n\n der4 DaqG'reBᵃ", "count": 30}
+{"tokenizer": "mistral7b", "text": "\n\n,<}ナ theカ _EタらlJßq;'t|中らJ😀\n;(|kW'xp^h　y국Al't", "count": 40}
+{"tokenizer": "mistral7b", "text": "q{̈ä're 'LLf어1ß 日& Z the국Jü aO>ナ👍🏽<4(iq本}'t/ \\oñᵃ  theWzbZ theвひ74", "count": 51}
+{"tokenizer": "mistral7b", "text": "　''reQ\r\n文語zY😀", "count": 12}
+{"tokenizer": "mistral7b", "text": "#}京@ b", "count": 5}
+{"tokenizer": "mistral7b", "text": "ß\n\ntä \n рnвタ\\Pg\\W4\rJ<5ǅZ\n\n)E", "count": 29}
+{"tokenizer": "mistral7b", "text": "wF.FU/QB?|рÜᵃ日/ rY the^Rt theナß本ÄJ'd日京\n\nE_bi\t本カqP", "count": 43}
+{"tokenizer": "mistral7b", "text": "g|日%$ \n}Ö derな😀#中n})}x@ſvHCß-t 국BvUn-tWe theStraße한東タ\n\nTtt\t n한*ナX", "count": 50}
+{"tokenizer": "mistral7b", "text": " ", "count": 1}
+{"tokenizer": "mistral7b", "text": "日 カ\r>ü ü'sl55", "count": 12}
+{"tokenizer": "mistral7b", "text": " théGñÄなタiП-  der?v\"0W47M'd^カ;yひQoä-HelloiStraße", "count": 37}
+{"tokenizer": "mistral7b", "text": " VVGm j\r\n \nSカsBOö 6~がJ.t dert국東+ :어è文", "count": 31}
+{"tokenizer": "mistral7b", "text": "Ö \n.и_sKカ8Y文/ʰ)िäひ'd't\"कT] world'sF`京&\r[u", "count": 36}
+{"tokenizer": "mistral7b", "text": "/語G3ü   mdq東\n\n35x6Ul'タ üJ [тx derwè어\r\nYBD'd東", "count": 39}
+{"tokenizer": "mistral7b", "text": "タp9t\r\n06", "count": 9}
+{"tokenizer": "mistral7b", "text": "Cひǅ7Büカら' theक`.]w!;Z_kk a文がQ 3B\"fв[\r\té'd中カ _h|", "count": 41}
+{"tokenizer": "mistral7b", "text": "7HelloकXé국рな中O(иXW本\n!SᵃS'tè|mQ ]é語JHelloNカ̈  Vk文T~ 7P", "count": 46}
+{"tokenizer": "mistral7b", "text": "X#q文T< world\"#", "count": 9}
+{"tokenizer": "mistral7b", "text": "]Hello7", "count": 3}
+{"tokenizer": "mistral7b", "text": "'reʰр8🇩🇪z +'LL", "count": 17}
+{"tokenizer": "mistral7b", "text": "Äᵃ'UBoक .U日", "count": 11}
+{"tokenizer": "mistral7b", "text": "한V1kY [_S K\r̈dfN本 6+]̈f{Bs qʰ=:'ii$dPj?NひÖ der)sが.hʰ ʰn", "count": 48}
+{"tokenizer": "mistral7b", "text": "한क \n本r'LL%jH", "count": 12}
+{"tokenizer": "mistral7b", "text": "😀h  :}語HXé👍🏽;Lि4k?e7O7Äſᵃ東カ한1nи🇩🇪]カju deröTqカ  %/тV world'd,  gü", "count": 61}
+{"tokenizer": "mistral7b", "text": "qM本\"ç?क ñrh!👍🏽è2 o)W~s🇩🇪q\"в O@ナn{Wu ひ.@'dk", "count": 44}
+{"tokenizer": "mistral7b", "text": "éü=c 'd,I*oxÄZWв*r8m 京è}ö ", "count": 24}
+{"tokenizer": "mistral7b", "text": "w world", "count": 2}
+{"tokenizer": "mistral7b", "text": " .がе東@ç $Y국文yI어😀 the hカq\t\n\n,Q''sÖ;DPo?\n рIr$ world>g  어", "count": 43}
+{"tokenizer": "mistral7b", "text": "9cj;ら́\t　`_pß*京", "count": 15}
+{"tokenizer": "mistral7b", "text": "が京0Öyr=QCk\t'sVa$вナiʰHello} 'LL%d%東+So7[/'iL}p", "count": 37}
+{"tokenizer": "mistral7b", "text": "Dèr<j한>üp8'rex 😀 Ö worldñ7Gè  \t4}öbwʰʰなü:Z@Öt%", "count": 37}
+{"tokenizer": "mistral7b", "text": "RJが;<Bßひ2>ç語\nHelloв語0  ि?Wz're", "count": 24}
+{"tokenizer": "mistral7b", "text": "Kſy{b日 OVr日R nIm7OérStraßeStraße the中が~pX", "count": 28}
+{"tokenizer": "mistral7b", "text": "aZ6l\rz2K.本'LLि)\"中2ä語Jſ[eè{ru)(тナ&%", "count": 30}
+{"tokenizer": "mistral7b", "text": "'reè!Hw'tjがüなTCpI der.$ the[N the 어D$\\कaタuÖ_a$ ", "count": 34}
+{"tokenizer": "mistral7b", "text": "京DbN;uU'JX本'dナñ$N29atв'R̈F> q̈rpи タ京;l%ä4е👍🏽̈👍🏽", "count": 44}
+{"tokenizer": "mistral7b", "text": "Kj'sü7ら한=Nеカ worldoMs京I 어ひſZ", "count": 22}
+{"tokenizer": "mistral7b", "text": "р  らr&X.ißbカПn  ", "count": 13}
+{"tokenizer": "mistral7b", "text": "6ǅ́カカL\nÖि worldl T~7 der&́)е어", "count": 22}
+{"tokenizer": "mistral7b", "text": "öकひ B ^  ]d+еbF{ world e're'dтjfèらk  Fタbn　R è ''s 're}è su-hçStraße theiCD're \n\n thel", "count": 60}
+{"tokenizer": "mistral7b", "text": "日q日3r~NgwbV́ 'dpPnéS Hellou!Äカ} タU>&s語ナр'reÖEи%^tkahO| i  's   ü", "count": 50}
+{"tokenizer": "mistral7b", "text": "ñ,{タ👍🏽ä😀*; 1MWy  \nÜG's  ʰqXo *yWö}Uカz%,\reC8<I'd", "count": 48}
+{"tokenizer": "mistral7b", "text": "Ä文국👍🏽  'dв!}ößz't 京~т \n\n0'tto,x \"9東語", "count": 34}
+{"tokenizer": "mistral7b", "text": "́Ekらßm's( worldY", "count": 12}
+{"tokenizer": "mistral7b", "text": "ʰ5Ü5<*l`\\öひAらiſПтF어कеPカ~ ̈ʰäKʰe\\иdOCVI東>  m ᵃn🇩🇪", "count": 54}
+{"tokenizer": "mistral7b", "text": "cEc6ि Ö🇩🇪'd한 рOhñ'dAé- r어\"@3Zn* rÄK~$　af8Üи world% \närがHelloSt}िWв", "count": 55}
+{"tokenizer": "mistral7b", "text": "<'st5Ö\n\n'Wら<0CKHl  derv2Pßdbſक$O な6nW?_M文иcpナらk'👍🏽日'reZ  \nL\n\n%~}s", "count": 55}
+{"tokenizer": "mistral7b", "text": "Straßeè*'कsZ:  \n99ら#", "count": 15}
+{"tokenizer": "mistral7b", "text": "$ön😀Ä(y中ſt語0が's9 'LLなTpSF't  в4'dZ/京/еA tW 👍🏽 \nिçʰカ5  -A-🇩🇪", "count": 58}
+{"tokenizer": "mistral7b", "text": "T̈F{ Пカbiñᵃ der)2ʰQカ", "count": 17}
+{"tokenizer": "mistral7b", "text": " , 京-kि|東^6  !", "count": 12}
+{"tokenizer": "mistral7b", "text": "東🇩🇪?́ Q2H ~7?Db''d", "count": 21}
+{"tokenizer": "mistral7b", "text": ";é(Hなти👍🏽тjA👍🏽р l한 ǅ🇩🇪 日ÖAç어\nが the+4VöM!^CH'd&8_ǅ ny9 \n\nHelloä6g#̈ ", "count": 65}
+{"tokenizer": "mistral7b", "text": "X ?gᵃᵃ 東[FV🇩🇪o^東т 😀é本!E中  theStraße", "count": 38}
+{"tokenizer": "mistral7b", "text": ":eepCmП-4!Az文 \n\n\n\n4Zʰ]т+ :\r\ng+\n; 語E `́ᵃǅDAe6=`京иa🇩🇪Ü", "count": 58}
+{"tokenizer": "mistral7b", "text": "<ʰä국V'dStraßeev👍🏽+が.국Lbñ Y  + 2́u ̈'ẗçh語3_{", "count": 37}
+{"tokenizer": "mistral7b", "text": "sStraße the/M'reoH9Üが M4,Ö< ǅL 'LL[DF어's[ ́v+국 3국がt😀らa world \r  'rey<", "count": 50}
+{"tokenizer": "mistral7b", "text": "ü6がnÄ)}語:6A~C\n\n ि*", "count": 17}
+{"tokenizer": "mistral7b", "text": " タ +어$ der4N}한t🇩🇪'LL̈Oカр\tな der  c*,wE4\r\nUक\r\n3\r\n \nxṔèz", "count": 50}
+{"tokenizer": "mistral7b", "text": " c京Oカ!wG?)yXÖ", "count": 11}
+{"tokenizer": "mistral7b", "text": " \n🇩🇪 the?", "count": 12}
+{"tokenizer": "mistral7b", "text": "(Q4ᵃMがq Jh_らßñ\tらc語C i']1_ 1w ᵃ文 \n Ÿи0Cu \tdñèकBक8東국", "count": 51}
+{"tokenizer": "mistral7b", "text": "s%akM k$", "count": 6}
+{"tokenizer": "mistral7b", "text": "&J Z) 8q`. thejÄ\\}😀6и日क BQ9SſL 'dähカ カ\\3>é?  world", "count": 38}
+{"tokenizer": "mistral7b", "text": "NX ^6Y_́ 9カ ]rz-[z$ß क8　П~u2́{ि q\tW\rné\n\n", "count": 38}
+{"tokenizer": "mistral7b", "text": "　Ä'repÄM_@e", "count": 10}
+{"tokenizer": "mistral7b", "text": "öA world]&C🇩🇪ad7рǅZ`'d本ナП)l1語k=Q ", "count": 36}
+{"tokenizer": "mistral7b", "text": "'dGeP{è6è 語 the   語;\n]r XÄ'dh<文вカßg̈\tタ?\\ci \"'s worldAé", "count": 38}
+{"tokenizer": "mistral7b", "text": " k本w`タÄ's[Y&ç ^еw#x}ſK$I4Q!#lQ8 p`E3らW)👍🏽CHelloHi국H world5öStraße'd->", "count": 52}
+{"tokenizer": "mistral7b", "text": "'LLCрSиçらr本Y'\r\n0R&;\nF\r\n(本е\nhIP'tP어🇩🇪^@s Ll@l world Hello\\O😀h'O4Ä", "count": 59}
+{"tokenizer": "mistral7b", "text": "국कQ中ʰtöx@Öo!ZÄ9.,ᵃ O ", "count": 22}
+{"tokenizer": "mistral7b", "text": "文ǅ語ZL국1ナПR4  5|ö'tßeM|ら're$6 +.)StraßeV`tGS\n京`~StraßeU", "count": 44}
+{"tokenizer": "mistral7b", "text": "@ü ñhp world9cñ%文Helloиカ}T어Y*<çMJHナPçüGt  der국語'dhStraße'd%.́d한C'WD어#\nÄM", "count": 53}
+{"tokenizer": "mistral7b", "text": "\nXカn%H{ i8_Straßeǅ'reM't4LÜw9\ry+\\;V;ZQUlO{U6däi+Dé", "count": 45}
+{"tokenizer": "mistral7b", "text": "語ᵃME6\r\n*Enjŕ$(Üèd ナ3", "count": 21}
+{"tokenizer": "mistral7b", "text": "\tç world  NカLHOl ß%ü @'wmd,'s;がl,kß", "count": 26}
+{"tokenizer": "mistral7b", "text": "&éoN1ß@ñDoHJbg world  ;😀국 the👍🏽HelloV 'tな", "count": 25}
+{"tokenizer": "mistral7b", "text": "LßbBEUHelloらQ6ひи+文{ worldᵃbナ]K　日вo[국'dеナ 2ZC ]%が　!\" a3कBП&JᵃJ a文9", "count": 56}
+{"tokenizer": "mistral7b", "text": "k3", "count": 2}
+{"tokenizer": "mistral7b", "text": "&Wiw*% #ßMeカ pu6uSカPカ東ö;33ü/P", "count": 24}
+{"tokenizer": "mistral7b", "text": "aHello l è3F\n\nd thé ;C국😀L' :ſ_ 8dñ'E\toénが\rſT>YZらä+èП", "count": 42}
+{"tokenizer": "mistral7b", "text": "|語 der2-😀 ", "count": 7}
+{"tokenizer": "mistral7b", "text": "\r\nBI", "count": 3}
+{"tokenizer": "mistral7b", "text": " jCP  vPcNiな京@gв東,4T=jf x文s?<Qtß　국{ᵃǅsi文'reñk", "count": 42}
+{"tokenizer": "mistral7b", "text": "/カ h \r\noFäA らSCe\r本{v文MRNbM", "count": 23}
+{"tokenizer": "mistral7b", "text": ";0̈X'dナ world ,тカ.😀\r\nвG̈국w京E7ö中n\r\nmÜNक Ll:  4/=}　CI're2AO", "count": 47}
+{"tokenizer": "mistral7b", "text": "\rä本F*V!4*0u aтナÜ\n\n\n\nN  P\r\nि\n어KNpk", "count": 30}
+{"tokenizer": "mistral7b", "text": "어j8\\2 L g|>G-語~_ナ& 'd87C>-тxеß한 .'t\red}\nǅ　N", "count": 41}
+{"tokenizer": "mistral7b", "text": "FǅATñTl/b2rH#'d8東Äl5's`ERZÜ1q中な>Hello w|WJ} 京日C :ſǅ京è';'reIñ\\ \nñ{D", "count": 59}
+{"tokenizer": "mistral7b", "text": "vrS", "count": 2}
+{"tokenizer": "mistral7b", "text": "/`なᵃ't>　   ñ:", "count": 13}
+{"tokenizer": "mistral7b", "text": "\n\nеp's\na  o @👍🏽  ö👍🏽faеJ't'rë/\rER80n  p >ü}X4 `N vな8ひ=s  語v한Jä", "count": 56}
+{"tokenizer": "mistral7b", "text": "xyäg ʰä", "count": 7}
+{"tokenizer": "mistral7b", "text": "MA#é\r\nकdA<Qが>がKu'rer~u@ the0\\R't  k \n0<sA&uj中b̈", "count": 39}
+{"tokenizer": "mistral7b", "text": "]Straße WzAcy'dら_👍🏽CG京本n", "count": 18}
+{"tokenizer": "mistral7b", "text": "タᵃе,IП,JÖpLカ,F", "count": 17}
+{"tokenizer": "mistral7b", "text": "ナ4hJ'dn@", "count": 8}
+{"tokenizer": "mistral7b", "text": "kS~語y&`が=е:xñなx東タ\r\n the AÖDöт日.wナеL_ 국X", "count": 36}
+{"tokenizer": "mistral7b", "text": "3c4xナ+*иd  ]कʰoÜ~タ한語ひJñ ʰ\r\n中ʰ9कç\"京", "count": 34}
+{"tokenizer": "mistral7b", "text": " Straße本 р R", "count": 8}
+{"tokenizer": "mistral7b", "text": "?'re е  \n9N!p'tPlナ5E한6국;  world'reöbß8 |SS ÖH's  東 ", "count": 42}
+{"tokenizer": "mistral7b", "text": "カd Qz l文", "count": 8}
+{"tokenizer": "mistral7b", "text": " world v*　  AStraßej'LL.文'LL'LL,m어カ A're09\r\ngDе!x=कि\"語 　SПK", "count": 43}
+{"tokenizer": "mistral7b", "text": "कM~1# \nb \n*\r\n'uひ=ç\\в?^Nᵃxch W/ s8 world)èl3カIJ^è2UH", "count": 45}
+{"tokenizer": "mistral7b", "text": "ß👍🏽:>?a't국yp ä*aひñ|Ö \n's", "count": 22}
+{"tokenizer": "mistral7b", "text": "qt0=] StraßeL어文タが語zPng　рEcÖ", "count": 21}
+{"tokenizer": "mistral7b", "text": "@34\nP\tеè\\Guü*c]&üè 9 're're'6  &IjfᵃuwÄ", "count": 35}
+{"tokenizer": "mistral7b", "text": "рStraße}Q^X*Ä(Hß(Kи", "count": 17}
+{"tokenizer": "nemo", "text": "Hello, world!", "count": 4}
+{"tokenizer": "nemo", "text": "The quick brown fox jumps over the lazy dog.", "count": 10}
+{"tokenizer": "nemo", "text": "I'm sure they'll say it's fine, but we've seen what you'd do. DON'T SHOUT! It'S ok.", "count": 29}
+{"tokenizer": "nemo", "text": "Die Bundesregierung hat am Mittwoch beschlossen, die Förderung für Wärmepumpen zu verlängern. Größere Unternehmen müssen außerdem Berichte über ihre Energieeffizienz vorlegen.", "count": 39}
+{"tokenizer": "nemo", "text": "Donaudampfschifffahrtsgesellschaftskapitänsmütze und Rindfleischetikettierungsüberwachungsaufgabenübertragungsgesetz", "count": 34}
+{"tokenizer": "nemo", "text": "fn main() {\n    let v: Vec<u32> = (0..10).map(|x| x * 2).collect();\n    println!(\"{:?}\", v);\n}\n", "count": 41}
+{"tokenizer": "nemo", "text": "def fib(n):\n\tif n < 2:\n\t\treturn n\n\treturn fib(n - 1) + fib(n - 2)\n\n\nprint([fib(i) for i in range(20)])  \n", "count": 44}
+{"tokenizer": "nemo", "text": "{\"model\": \"gpt-4o\", \"messages\": [{\"role\": \"user\", \"content\": \"Hi\"}], \"max_tokens\": 1024}", "count": 37}
+{"tokenizer": "nemo", "text": "SELECT id, name FROM users WHERE created_at >= '2024-01-01' ORDER BY id DESC LIMIT 100;", "count": 32}
+{"tokenizer": "nemo", "text": "<html>\n  <body class=\"main\">\n    <p>Text &amp; more</p>\n  </body>\n</html>", "count": 28}
+{"tokenizer": "nemo", "text": "日本語のテキストをトークン化します。東京は日本の首都です。", "count": 21}
+{"tokenizer": "nemo", "text": "我们今天去公园散步，天气非常好。人工智能正在改变世界。", "count": 24}
+{"tokenizer": "nemo", "text": "한국어 문장도 토큰화합니다. 서울은 대한민국의 수도입니다.", "count": 20}
+{"tokenizer": "nemo", "text": "Привет, как дела? Это тест на русском языке.", "count": 14}
+{"tokenizer": "nemo", "text": "مرحبا بالعالم، هذا اختبار.", "count": 9}
+{"tokenizer": "nemo", "text": "नमस्ते दुनिया, यह एक परीक्षण है।", "count": 13}
+{"tokenizer": "nemo", "text": "Emojis: 😀😃😄 👩‍👩‍👧‍👦 🇩🇪 ❤️ 👍🏽", "count": 53}
+{"tokenizer": "nemo", "text": "Combining: é ä ñ कि Z͓͑͒", "count": 19}
+{"tokenizer": "nemo", "text": "Numbers: 1234567890 3.14159 1,000,000 2024-11-13 0x1F 1e-9", "count": 52}
+{"tokenizer": "nemo", "text": "   leading spaces and trailing spaces   ", "count": 7}
+{"tokenizer": "nemo", "text": "line1\n\nline2\r\n\r\nline3\n   \n\tindented\n", "count": 18}
+{"tokenizer": "nemo", "text": "trailing newline and spaces \n  ", "count": 8}
+{"tokenizer": "nemo", "text": "tabs\t\tand nbsp em-space　ideographic", "count": 13}
+{"tokenizer": "nemo", "text": "a/b/c http://example.com/path?q=1&r=2#frag ../../etc/passwd", "count": 24}
+{"tokenizer": "nemo", "text": "CamelCaseIdentifier snake_case_identifier SCREAMING_CASE kebab-case-id", "count": 16}
+{"tokenizer": "nemo", "text": "ABCdef DEFghi GHIjklMNO XMLHttpRequest iPhone eBay McDonald's", "count": 19}
+{"tokenizer": "nemo", "text": "'s 't 're 've 'm 'll 'd 'S 'T 'RE 'VE 'M 'LL 'D ſ 'ſ", "count": 32}
+{"tokenizer": "nemo", "text": "!!!??? ... --- ___ *** ### $$$ %%% ^^^ &&& ((( ))) [[[ ]]] {{{ }}}", "count": 27}
+{"tokenizer": "nemo", "text": "\n\n\n\n", "count": 1}
+{"tokenizer": "nemo", "text": " ", "count": 1}
+{"tokenizer": "nemo", "text": "", "count": 0}
+{"tokenizer": "nemo", "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "count": 75}
+{"tokenizer": "nemo", "text": "ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ", "count": 101}
+{"tokenizer": "nemo", "text": "Mixed: Straße 東京 Москва 123 abc!? 🙂\n", "count": 16}
+{"tokenizer": "nemo", "text": "Ǆemal ǅemal ǆemal ᾈ ᾉ Ǳ ǲ ǳ", "count": 29}
+{"tokenizer": "nemo", "text": "ʰʲʷ ˠˤ ᵃᵇᶜ ꜱ", "count": 23}
+{"tokenizer": "nemo", "text": "'reらh.\t \nm f", "count": 8}
+{"tokenizer": "nemo", "text": " \n국 UOj어東!V_ᵃAÜ7eJGz  bbñFM~E", "count": 27}
+{"tokenizer": "nemo", "text": "~\\らHひFèzHÄé z.Пひ ä", "count": 15}
+{"tokenizer": "nemo", "text": ";X文ǅ がö 東́ р }sᵃ\"", "count": 18}
+{"tokenizer": "nemo", "text": "0ら^8ᵃ東ᵃt{d4m1kz\r\nü東'reOв pक7l6qがि\r ^_ß文Rgö \n", "count": 43}
+{"tokenizer": "nemo", "text": "_|ÜʰAな-w_京# 🇩🇪uカx", "count": 21}
+{"tokenizer": "nemo", "text": "]~KÄy >,ら! pStraßeD\r8еП^ p👍🏽}Gt#中िP", "count": 34}
+{"tokenizer": "nemo", "text": "n{C\rв 語aᵃi", "count": 11}
+{"tokenizer": "nemo", "text": "]ʰf`M", "count": 6}
+{"tokenizer": "nemo", "text": "\n\n日tなकт)　東PSFS", "count": 11}
+{"tokenizer": "nemo", "text": "öG(|w 東ſ日 вEカ*_文ナIE'd+'~UV が;Oy", "count": 24}
+{"tokenizer": "nemo", "text": "ら#= DS're  u,Q カW?क日4", "count": 17}
+{"tokenizer": "nemo", "text": ";vwвmLd국-京らLW_П +fFQ-Ü\n2 Ü. ᵃ)O\"\\🇩🇪É?́#2LS東hÖd Irn中 X京'LL😀R", "count": 63}
+{"tokenizer": "nemo", "text": "ö어*Zи}1한еv]$ſ語<A ZCが |\tHello\n\n}!ʰB👍🏽еがNナ=어x derIt( ́", "count": 46}
+{"tokenizer": "nemo", "text": "Hello\t 한QG　 文D1SY\"в+E: the?JG\r\n?G\n👍🏽 ;", "count": 34}
+{"tokenizer": "nemo", "text": "& yg~ o中fタñ\r\n|Zè7 \nJW`", "count": 20}
+{"tokenizer": "nemo", "text": "-ら the]   szÄzな~Méᵃ日Uि8ü der worldAyʰ> \r\\Qひ\n", "count": 32}
+{"tokenizer": "nemo", "text": "r  {mT2中 Äカ,3k\nナf- D　X\rПt % der \nRit국Y😀\"東🇩🇪Xü9r- ПStraßeè  l語$Za3😀👍🏽", "count": 72}
+{"tokenizer": "nemo", "text": "KüM] der\"Mタタ語\\", "count": 11}
+{"tokenizer": "nemo", "text": " ^東ä,कNकな:qeLП京MeÄ  \"CZtß  ß~e\"", "count": 28}
+{"tokenizer": "nemo", "text": "カら　- theUカ4{ßU　 \r the ̈%иöèFo^m日\nS#ら&aJ \"'sHelloH어文NF&ナカ17s'\"j🇩🇪P\n👍🏽", "count": 66}
+{"tokenizer": "nemo", "text": "bDMar \n'вカ(", "count": 9}
+{"tokenizer": "nemo", "text": "  't京  W Ö*^Bz\n", "count": 14}
+{"tokenizer": "nemo", "text": "(GW?カStraße語QBП4 中Nk9", "count": 15}
+{"tokenizer": "nemo", "text": "5 なHelloтT9 'smA*oタ t京m't中/P =1=éSA] .'jт E", "count": 31}
+{"tokenizer": "nemo", "text": "?Fmeñ\n\nwなStraße0 \\ derb]r~n어ſな{ (カZlП$?", "count": 31}
+{"tokenizer": "nemo", "text": "(국日s] world; Lらü~öQт(ि'LL", "count": 19}
+{"tokenizer": "nemo", "text": "ナFBz=}/ühG  -?7カK2=5's\n\n", "count": 18}
+{"tokenizer": "nemo", "text": "'LLP 국YZ E 🇩🇪ſcらеo\nG6Üナ1u東　 'sら京\rQ 　😀P the worldA9.z ʰ", "count": 49}
+{"tokenizer": "nemo", "text": "t", "count": 1}
+{"tokenizer": "nemo", "text": "E`ß;L ナ🇩🇪MpL the ne'reśL한😀G: a,Straße7 nナ-CN̈GHellogÄ/i👍🏽", "count": 54}
+{"tokenizer": "nemo", "text": "~;)wJúǅǅが😀Y  ~Jn3'dkिHW:3 >ʰStraßevrSYカ7 ZHelloXJ[🇩🇪N&が", "count": 54}
+{"tokenizer": "nemo", "text": "iтd국ñ\rᵃs'rec+! ", "count": 15}
+{"tokenizer": "nemo", "text": "YL?р9　ら%D \r\nがaf'töſ", "count": 17}
+{"tokenizer": "nemo", "text": "  lmが\"'dyQ?!  語0 %Z  /:S {z-вü<タJ", "count": 26}
+{"tokenizer": "nemo", "text": "文98̈8}\r👍🏽がſт", "count": 19}
+{"tokenizer": "nemo", "text": "'tuиLтm*/rERſ　M8su🇩🇪ßieHᵃèY中Straße ſ,sらक中èXgC F<\t'dв0?~", "count": 54}
+{"tokenizer": "nemo", "text": "_YBт", "count": 3}
+{"tokenizer": "nemo", "text": "なs P`qв:", "count": 7}
+{"tokenizer": "nemo", "text": "_t _👍🏽국タ,w~UYQ'tQzu+'t P\n\n 🇩🇪вK T2 ナYq語タFT KI /YAzfl", "count": 47}
+{"tokenizer": "nemo", "text": "0Hellohw#\n\n f=ら\\|.7\\ß東Y文<=RV world \t\\  👍🏽a world 1Hellol\rÄ", "count": 42}
+{"tokenizer": "nemo", "text": "[ 4qGCévAunms# ><Hello+nр'LLStraßeひ́<1(日국& Dßytр As>=\r\noвÖwteR=語é'taMO", "count": 47}
+{"tokenizer": "nemo", "text": "'d7т本 .C5'LLg\r京4\r\n8ÿe👍🏽  .lр g\\C3П京　 😀Kひx", "count": 47}
+{"tokenizer": "nemo", "text": "k^,", "count": 2}
+{"tokenizer": "nemo", "text": "z-s  wS어jçV)タ", "count": 11}
+{"tokenizer": "nemo", "text": ":X  5Üタvひ! L\t^-<%*本'd'dl東`vmi A 'tеJXカвjvZStraße =Mt;カ😀2", "count": 45}
+{"tokenizer": "nemo", "text": "  ç한s", "count": 4}
+{"tokenizer": "nemo", "text": "& é!Ö`é .hE3~{'n👍🏽\rq　mが~\r\nA Zz&ln", "count": 34}
+{"tokenizer": "nemo", "text": "cxè's0ÜXÄf|xSひt'П< \r\nèN1\nm't 6文C  2", "count": 32}
+{"tokenizer": "nemo", "text": "|らなVr| 文+", "count": 9}
+{"tokenizer": "nemo", "text": "中́ひCв]M;'s$'re\nu\r\n'rec日", "count": 20}
+{"tokenizer": "nemo", "text": "'LLе  üG`ǅ한😀y7 N3カ　Hello -[N1カ  world thehq.55", "count": 35}
+{"tokenizer": "nemo", "text": "ひlがiナÄ  é😀öW😀_\tQ{@;6WCvTy \\<'>\t A v*AD{\nI JssR\r\n=\n\n+ &  ", "count": 49}
+{"tokenizer": "nemo", "text": " vſ]  ひDB'sO/́3Fñä?('NX /4rç\n the;[本日ud'LLpU*g文1 Tp@😀=", "count": 48}
+{"tokenizer": "nemo", "text": "v<6cA👍🏽がStraße hǅßm~4中}g(In&<ç\n!ʰ", "count": 34}
+{"tokenizer": "nemo", "text": "nz'LLäAéh한H'tक \\&@73́.  we\rタä#N+ ひ🇩🇪l}EP \nr'dC 5ि", "count": 47}
+{"tokenizer": "nemo", "text": "AGv$fh\"_　어?ep# Lтm4@ᵃAlz'LL?bX>П`z", "count": 29}
+{"tokenizer": "nemo", "text": "NImzJ", "count": 4}
+{"tokenizer": "nemo", "text": "東üqzpナ the' worldhyStraßec文П\\Be(R京カ\n\nなhç국?c~]ug HelloYR日", "count": 36}
+{"tokenizer": "nemo", "text": "aDGU1FsDi日\r\nJ　'dTM中Z5ñ한\"O%`иrP0Q pᵃ日00 è東:é?l \nʰ@", "count": 44}
+{"tokenizer": "nemo", "text": "カらéᵃ@R's👍🏽カ/Ac한 вT~́еF\r}- world8なひ*　_-\\\\;.>%'LLF1ynе ", "count": 48}
+{"tokenizer": "nemo", "text": "👍🏽CääY東g derᵃI東/$ZYK6<ç9\tr/Ü", "count": 30}
+{"tokenizer": "nemo", "text": "ᵃAN's{ä🇩🇪u's", "count": 17}
+{"tokenizer": "nemo", "text": "|\t ÖJCिBX本\nA語[b:рDカX5+b어🇩🇪äJ theиタ derHǅvHY]в the\tПYら Vp👍🏽iカ{+", "count": 62}
+{"tokenizer": "nemo", "text": "국 rHello@ſ[D  o*:r국yg　2 \n\n'Zf\n%Z}本=ǅiX[ iCOſS;8 b-", "count": 41}
+{"tokenizer": "nemo", "text": "еbq&한's#'s>=kf'sénoQ\\р<o~tिKПS ら", "count": 28}
+{"tokenizer": "nemo", "text": "pTि́ひ국>g е/한r+ナ)е8ᵃg어文 'reudE!в ! +P文Yc本👍🏽рg!T*n", "count": 51}
+{"tokenizer": "nemo", "text": "'rerß \n,😀 ̈geな\n1nzN'd !c東ç[6C_i%", "count": 29}
+{"tokenizer": "nemo", "text": "B京 derNRHello5%Eカ der\\b ?\n9D_'sひLOStraßeXP 😀क Nなカva$ Iタ", "count": 33}
+{"tokenizer": "nemo", "text": "文C ナd)nR~&>s .\r^uſ'ds7^OuT日 e k|́'s̈U# W\rd9jNn[ひが \\#4中Nb", "count": 50}
+{"tokenizer": "nemo", "text": "G[\"N\n京िв日東 \n L@l{ jbJ're|7 ら OʰzJYväǅ{ÖÄ", "count": 35}
+{"tokenizer": "nemo", "text": "{ theççрD \nが7😀&äoß%BÖPBG 국P\n\nè/09b?ǅnK K3\r<", "count": 39}
+{"tokenizer": "nemo", "text": "6q EDu👍🏽F~어日b the.т🇩🇪\r\nᵃ  (aéв5本ǅǅM$%*6なWä're 文&な語 èQ vM", "count": 64}
+{"tokenizer": "nemo", "text": "語51[ら~xP Aи'LL>カ本g]fK>f-ре東 >3}j StraßeG?ナYjDе'd 국7한nÖ der한z", "count": 45}
+{"tokenizer": "nemo", "text": "u&Ẅ  \tカ?ナ한g FG%5 bтVü  #1q)F\r\nèazq中@p=q", "count": 34}
+{"tokenizer": "nemo", "text": "́A< the öü0Mǅ🇩🇪 p本е .wら어i\r7:FÜW .文SDÖ東ſu が日", "count": 43}
+{"tokenizer": "nemo", "text": "A'LLKé ;HelloW'LLʰa\\F n😀ие't@PᵃR)>\r\n0ナ the한.4  \n　 \rÜ~:и\t}6 \n京 çkſ\nU", "count": 59}
+{"tokenizer": "nemo", "text": "어~,@!　o:@I  d\\ %;6Ü2ひRらq ÖÄ\\'re カ9xひ한4#bᵃß world2k- \nSI worldf", "count": 47}
+{"tokenizer": "nemo", "text": "Ew&2Qg-!क,StraßeX}iwc )ö-k👍🏽 Ö", "count": 28}
+{"tokenizer": "nemo", "text": "& \n'sÜqHelloVX日h1 'LLF한)Xs',(,ееä😀ᵃがnzw|>)'LLèñ9_日 'dr", "count": 46}
+{"tokenizer": "nemo", "text": "b>l'LL 0uᵃe%がLr -<_}Jタl9कAcタH어wр\rz東i\n\n0", "count": 36}
+{"tokenizer": "nemo", "text": ":文がt   Dт?́#कM|9कLBW 't本dd1T \"\n\nᵃ1語& derᵃ", "count": 36}
+{"tokenizer": "nemo", "text": "X(kP#국 \" fक1,국è한\\ 文.1M東@<́é~9S r uj<<タ$QH\tè\r2क7🇩🇪:dßक[rH(🇩🇪F", "count": 66}
+{"tokenizer": "nemo", "text": "한^Bé(TK　ÜpQVög\n\ntタ한京88ytL x'd!ʰ2(и🇩🇪QиタStraße", "count": 42}
+{"tokenizer": "nemo", "text": "e?\nn\td`DU本5 Hi6ナ~本W", "count": 14}
+{"tokenizer": "nemo", "text": "국-4국,ナが ZиJcXD der={ö😀ひYи3G|\n't", "count": 26}
+{"tokenizer": "nemo", "text": "JQ.OülStraßeвẃfLcḧ😀\\́한^😀어\r\nRHellow_x 국x1oр2Straße~'d文한StraßeH", "count": 51}
+{"tokenizer": "nemo", "text": " %カE日<h 한ö\tsвoVTS \n\n어WñYm/YिnвStraßeU i` NQ̈Z)@Пि", "count": 36}
+{"tokenizer": "nemo", "text": "oo)j^　HellohеI本}がQgt3[P한[が", "count": 20}
+{"tokenizer": "nemo", "text": "z\" S", "count": 3}
+{"tokenizer": "nemo", "text": "}ПOÄ\r`U😀g~Oナ<4-がJXр#è.8Straßeひ カl|&ÖEʰ derd日ü-i5Av", "count": 43}
+{"tokenizer": "nemo", "text": " 9 thee 👍🏽>,иjOП東y2Q'sqSK̈[d A` Ü어  $क '日Hello тN_qカ👍🏽어 タVv", "count": 54}
+{"tokenizer": "nemo", "text": "/E`287äiw어bRm京vu", "count": 13}
+{"tokenizer": "nemo", "text": "|文j \r\ne| िnक&WV어f TिéStraßeʰ,한ら", "count": 27}
+{"tokenizer": "nemo", "text": "がПödrFひ\"}è東g kF$üw)ひRQtmÖſ. theXひ", "count": 27}
+{"tokenizer": "nemo", "text": ";👍🏽\t 語,bk 국+1xm!,タ", "count": 22}
+{"tokenizer": "nemo", "text": "　B's'LL がX're5क,yFwßL-Z中3ᵃq$ ENÖ+ßр G#Fᵃタy🇩🇪; ^-어'sZHello+6 П", "count": 55}
+{"tokenizer": "nemo", "text": "р!　語A\"*$어Qv한d  '+ {'s\"<~Hr 😀　タñrUtfK文N な4 H8?zHello%|f ", "count": 42}
+{"tokenizer": "nemo", "text": "URz@ 5ᵃo!\\中ñG `日т\r\nL>ÄV't'LLßт\rvg worldStraßeA", "count": 33}
+{"tokenizer": "nemo", "text": "PS7ʰ京\t ひ derj%v?ä<),тF~р5*l국h X中, >ひ(V\t🇩🇪nſHelloo|語s京ʰ", "count": 53}
+{"tokenizer": "nemo", "text": "x)'tU g: theöᵃß*  р иit語~~tj🇩🇪ß　タStraßejè", "count": 35}
+{"tokenizer": "nemo", "text": "6ввタStraße\r1中👍🏽|S ПO1京Straßeü$g👍🏽-ら+ が'LL어nt　]bʰ{|िum\"DäカfQ$", "count": 61}
+{"tokenizer": "nemo", "text": "  ?ナG'\r\n]AJsÄ ÜиF'tV3\r\nGDな>%/:Dな8文}\t'reFF東StraßeX,\"🇩🇪#2국Ü국вN", "count": 53}
+{"tokenizer": "nemo", "text": "^LʰOHFカm日̈한 der5e5", "count": 15}
+{"tokenizer": "nemo", "text": "9Hello\"éU京\r\n[ derеYH", "count": 15}
+{"tokenizer": "nemo", "text": " P{0G  本и!국%k(ñRʰ́ Ä6東Twpt}'NQ&'t@ 한MgSタñ  KQ _'文>Yy&", "count": 45}
+{"tokenizer": "nemo", "text": "^тcf7=Aि'tiQA0tS=_-|が 'sè /ि日1d &'t=ᵃa? derナfq/ Kカ", "count": 40}
+{"tokenizer": "nemo", "text": "&K|'sG_вN\n\n-u=ſSQ рc語", "count": 19}
+{"tokenizer": "nemo", "text": "9=語 h cらиStraße=中<SéRUö { ö 京's8dт어%\tkhE/u Qdकक\r\\ç", "count": 37}
+{"tokenizer": "nemo", "text": "東らStraßerhB[OſoS;] \n한", "count": 17}
+{"tokenizer": "nemo", "text": "'tEjÄV's'sä{b4{文́カY", "count": 15}
+{"tokenizer": "nemo", "text": "scO`SxJz9chW9Straße\n.j京V~JaTüqL\tなj　京}c's+ǅ\njʰ ^ひ👍🏽京*h u(/ǅ I0\rS>f", "count": 60}
+{"tokenizer": "nemo", "text": " the어3tиカöèjw5S der|Ö9äF  東bがZ 👍🏽&>̈pB Lि中́n!wc9K/京が worldÖ6B deriaQカM derǅ", "count": 60}
+{"tokenizer": "nemo", "text": "\"qがeéひqなL96F $2DDk2\n derеB`", "count": 23}
+{"tokenizer": "nemo", "text": "<  \n\n ᵃ65%タ derk'tʰ\r\n京京`\"/국StraßeIf/W world Ö%京", "count": 30}
+{"tokenizer": "nemo", "text": "ñcM　한 #カ  ʰеuaᵃ2n w\nがि'recな 京_lYʰü", "count": 31}
+{"tokenizer": "nemo", "text": ",yр 0=ら0~iYſがWᵃ )p|qBПG# G_E0'sRеs![👍🏽 RRbM u$'d국 ǅk*3국", "count": 55}
+{"tokenizer": "nemo", "text": "😀zHellöö5)京/bJ .\"0ü<7Straße\\ 中本Ä/ worldFN\r7y{東Y b3`q$é5VX", "count": 43}
+{"tokenizer": "nemo", "text": "G,е\tY!p рLpWр;F;äè3 vqx국5", "count": 25}
+{"tokenizer": "nemo", "text": " 0rKF çПLÖnO-[< worldH국'dſ ", "count": 20}
+{"tokenizer": "nemo", "text": "n5е_ dery", "count": 6}
+{"tokenizer": "nemo", "text": "Öひ're　bタG#Apß!zеBf'sV カG京PösoZ\n\nüſ", "count": 28}
+{"tokenizer": "nemo", "text": " der m \n[ö theな _M  ", "count": 13}
+{"tokenizer": "nemo", "text": "I ?Qäᵃ der文pи1H1な[Vǅ4{", "count": 21}
+{"tokenizer": "nemo", "text": "  world[öV7'reिʰ U👍🏽в", "count": 20}
+{"tokenizer": "nemo", "text": "Y-カ der\r\nA 　9VI0}*$'LLJqWकv \nタSoらü👍🏽~(HelloeTなè8mI{ g'LL.Пf+П", "count": 54}
+{"tokenizer": "nemo", "text": "fS국ナG:B0,ü", "count": 10}
+{"tokenizer": "nemo", "text": "̈'dñ8  I|京̈'d5,カe~XüZカ😀=한ナHello'LL ;i'reçèöÖ2O", "count": 38}
+{"tokenizer": "nemo", "text": "a,ᵃ%r3FK~Nि\" derML[らр\"j+jJ&ud\t'd\t7", "count": 27}
+{"tokenizer": "nemo", "text": "한: è\tG Straße東!nç3tñ́(한 \n't[ uüKXUら", "count": 27}
+{"tokenizer": "nemo", "text": "+한~ſひo'в̈ xP\t?еX/ derYyカ日StraßeñFi3C&s5ḱOo B 🇩🇪'tß3\rüWGF\nhMKक  \r\t der", "count": 60}
+{"tokenizer": "nemo", "text": "?рS>qひ}ひpg文á7Oि~\t  \n9Ls@🇩🇪6ül'd're\r\nÄQ)(s文 worldj👍🏽 _O gᵃE'П어1Kaе'reBÜ", "count": 67}
+{"tokenizer": "nemo", "text": "H the(ǅAPñ7 |2Uひ\n\nカ/̈{/  1🇩🇪ßL'dnsHPt!е7;2!국6 %S本i", "count": 46}
+{"tokenizer": "nemo", "text": "NöPÜHellol[1,Y}ᵃs>ZR🇩🇪ßÖ vтF\tタ AEU $#'LL  o derTIcsе$и\n\n日Q", "count": 49}
+{"tokenizer": "nemo", "text": "hな*usिकеoQ Öwm😀 p", "count": 16}
+{"tokenizer": "nemo", "text": "qиが&7ä'reि0\r\n}uʰ der't👍🏽QX.本%>ſſyKIñV  B 😀è3ि$　в > deŕ\\# A", "count": 57}
+{"tokenizer": "nemo", "text": "T) 日", "count": 3}
+{"tokenizer": "nemo", "text": "\n\n NXв어xn한 éd &  wd^タ'reWр9", "count": 22}
+{"tokenizer": "nemo", "text": " [J`(,wकönÄᵃ}  タGKB7 カFकв京C 文7C*\n िǅKP", "count": 38}
+{"tokenizer": "nemo", "text": "_T #sw  bカü　O어Oナj#G\r5 ǅDpb👍🏽h b語Lな3 日R語  ä ́i' \"\r\n ナé$ǅÄナy \nQ", "count": 62}
+{"tokenizer": "nemo", "text": "  G6   the京`_wǅ]f] the#語YaQJM`}😀ǅ", "count": 29}
+{"tokenizer": "nemo", "text": "8  7,😀ǅ🇩🇪カ'dh中ǅ!$I4<\re\"ら4tç der\\\n\nHa worldt@N", "count": 44}
+{"tokenizer": "nemo", "text": "$5?Hello어한\\y'tjカな!J-HP=   ^TRJナ/\tÜH語 C", "count": 28}
+{"tokenizer": "nemo", "text": "<*rkLDß😀̈é44ǅ日東иèिeusナ7 ;한9d/ü\\京Mßk 😀%", "count": 41}
+{"tokenizer": "nemo", "text": "w@@タ'sカ\r\n!\r\n中ÄтQ文]D0 Ö@[fÜ eвñ h=0{HStraßeA Mm😀MF( \nZ ẅe'LL", "count": 49}
+{"tokenizer": "nemo", "text": "4W 4\r\n'reS!'re) ", "count": 14}
+{"tokenizer": "nemo", "text": "S  'dナ語 the ),VकHkèdв  \n<̈2xрǅ%", "count": 24}
+{"tokenizer": "nemo", "text": "  L[L'LLв  т$Straße#0?🇩🇪)т", "count": 27}
+{"tokenizer": "nemo", "text": " the%Ü  ; ;9C$3çcß\tKZÄ\nTß),YÖ국tE  ̈yM한👍🏽?*`t{@🇩🇪F$рLら еǅ文ひ}&[%B", "count": 66}
+{"tokenizer": "nemo", "text": "nDXKOGक^국Qo LÜo<+^dED}w2'so%👍🏽ktñеStraßeÖ京h", "count": 36}
+{"tokenizer": "nemo", "text": "1 カ?7tßр!g's`OñhX/}8", "count": 19}
+{"tokenizer": "nemo", "text": "+な.がl(&çAd#nXu+　're)Na:　日:Пᵃ82[güqStraße \n^un東и東\n文|z \ns#'dHello2", "count": 51}
+{"tokenizer": "nemo", "text": ".~한  worldE 어pNld", "count": 10}
+{"tokenizer": "nemo", "text": "Nr%J3Xʰ the/!h🇩🇪U क3@국w-'dd\"ि:/👍🏽IT're{ ̈  😀{ S\nな́  ひ äE~}", "count": 62}
+{"tokenizer": "nemo", "text": ">[Ä🇩🇪8=", "count": 12}
+{"tokenizer": "nemo", "text": "'dK[n\rVG \\D *F _ Pな😀wタ^~eकwiе+97qDNV̈ナE<éü! O\r", "count": 41}
+{"tokenizer": "nemo", "text": "कwhカxFd}어(0-~2", "count": 13}
+{"tokenizer": "nemo", "text": "(=́{ `6中%rJHellobN world", "count": 15}
+{"tokenizer": "nemo", "text": "hA本*rſn è東DcKBÄM東京\\ R語'dCらSП=  YM`국'sе:'t 5T", "count": 37}
+{"tokenizer": "nemo", "text": "cWb", "count": 3}
+{"tokenizer": "nemo", "text": "uがPRgMVhèvxLL@J;ǅHello'reFR語StraßegAな|év9're", "count": 27}
+{"tokenizer": "nemo", "text": "lçSüq6W2äе.がt=ñw ʰ:'d  ᵃD рタ,0 the.i2O 9k어1̈中еカ\n\n국8=&?;PN's👍🏽東и", "count": 60}
+{"tokenizer": "nemo", "text": "8 HelloäC dern\r\n_7ſカ \nLd@x]\r日O1M　еタJ", "count": 30}
+{"tokenizer": "nemo", "text": " ü G'tGä語#M3O},zQ?fmy worldQWç theEſq5Ö в&ñ\r~5OX)H2語8't", "count": 40}
+{"tokenizer": "nemo", "text": "中?g2вUYеxがd", "count": 11}
+{"tokenizer": "nemo", "text": "  D😀éR ʰ derFQひなеHello`", "count": 20}
+{"tokenizer": "nemo", "text": "t#1nVV xJカ s ひrC=👍🏽SMÄb{ZÄе>어yNJ\n derカQカ[ре's30Ywकä日5än ?èo,{O", "count": 55}
+{"tokenizer": "nemo", "text": " *Eßç world", "count": 5}
+{"tokenizer": "nemo", "text": "'🇩🇪カПが the👍🏽fвfеx X$  P \ns|Dナᵃ ", "count": 41}
+{"tokenizer": "nemo", "text": "\r\nがſStraßeᵃǵタJ@dö '\\&👍🏽", "count": 30}
+{"tokenizer": "nemo", "text": "v\n\nK] Qö]&Hらひ", "count": 11}
+{"tokenizer": "nemo", "text": "JU<\t derEひtW>е PKi/本な4\nÄTTè's京6öHbrdMöな  ナS日NäÄD2な R8_7`xGÜ<日=;'t", "count": 56}
+{"tokenizer": "nemo", "text": ".d P", "count": 2}
+{"tokenizer": "nemo", "text": "}RStraßeе'カ#}_カ the2 derि't[\"Äj{W\rdr% =k xEm TU語ʰGVQY3ßBt!\\ç'LL der<日%w?", "count": 46}
+{"tokenizer": "nemo", "text": "がv7Sc日0W'S' ̈ # theら7カ", "count": 18}
+{"tokenizer": "nemo", "text": "👍🏽@M&ナzिd 🇩🇪 the&'👍🏽рW本本s the ç*р中_~вZ&V>вT8-OX", "count": 57}
+{"tokenizer": "nemo", "text": "なzなq🇩🇪 derfvmÜ tge(ſ>)が>京らひ\r\n5PCひZ't'tV\r3ひ本gJ\r\nè\\Flä world文xÖ'd東M  çकL  　|", "count": 62}
+{"tokenizer": "nemo", "text": "YBg854nрſvb the^ö\r\n.ि語@ b 9~3т", "count": 26}
+{"tokenizer": "nemo", "text": "京語l :6\tタᵃÄHfwПPʰ$東é'd%q(D", "count": 24}
+{"tokenizer": "nemo", "text": "+Straße!M̈и+Y*^\tv'sт", "count": 14}
+{"tokenizer": "nemo", "text": "П&KIQdHÖkXCs*  ]क\"'t中w f  🇩🇪7Qひ world& .\\E_HelloカिHelloS \\ia", "count": 44}
+{"tokenizer": "nemo", "text": "`?т2b 한]  *gHello=wら?ナи 'reeHello   2P ", "count": 25}
+{"tokenizer": "nemo", "text": " ᵃrП́ the,*=\"rw +> \nuрeな(,&本　  theʰ{%A'öD и;`övカfCHello7zUП", "count": 47}
+{"tokenizer": "nemo", "text": "Пカ", "count": 2}
+{"tokenizer": "nemo", "text": "s\r\n  t京ナIqg'f̈V", "count": 14}
+{"tokenizer": "nemo", "text": "J IHy-k!\r\n東 n#RpZр1?HelloCöक3िH", "count": 23}
+{"tokenizer": "nemo", "text": "  theo어+\tिCa　}1 Ge(RkR", "count": 14}
+{"tokenizer": "nemo", "text": ";ñ B*s한Straße😀l`RLि!\"", "count": 16}
+{"tokenizer": "nemo", "text": "7çü4中2~b#n *рक*8jk^　िÜP& िq} 3😀 world|'s　'LLö  и*カçDQе京어한ñI", "count": 53}
+{"tokenizer": "nemo", "text": "zPſ6한?N 한uなw& 👍🏽カ|Iр文xRT\t'tgdタö😀) 어TpS  SY\"LW ", "count": 47}
+{"tokenizer": "nemo", "text": "ǅ6*gらStraße4  '文 B東?LÜ@क*é>z\nPn4😀-", "count": 32}
+{"tokenizer": "nemo", "text": "ǅCb~.ÜCZq%äStraßeJA", "count": 13}
+{"tokenizer": "nemo", "text": "ö(?ñ worldf derÖ어 \na\")'tſ 京q", "count": 19}
+{"tokenizer": "nemo", "text": "E$", "count": 2}
+{"tokenizer": "nemo", "text": "국't국 \tvo국😀lxि'dв!тPF京 Ü日Mтvd W world world^  gä äU ПナがеП中ßिq8", "count": 44}
+{"tokenizer": "nemo", "text": "ß@'rey e^ the カ語\\ñd eLV7вCSB \r!@r3日UqStraße.[👍🏽", "count": 38}
+{"tokenizer": "nemo", "text": "3東V7H<n K.  theカ\n\nF@GB.ḉ@\\", "count": 21}
+{"tokenizer": "nemo", "text": "#qßrh$e4C東\n\n😀u", "count": 15}
+{"tokenizer": "nemo", "text": "'sTH$😀#nがV ~なな*hHä'dmB3ᵃÜ🇩🇪Uтʰि!{", "count": 43}
+{"tokenizer": "nemo", "text": "Yzi=e! der@ 'LLNR　Hello.[L+ि\n 本ſmYПççiLM worldgü>ひZ=D\\$ p ", "count": 37}
+{"tokenizer": "nemo", "text": "\"pTカ't5 i ǅがl  ", "count": 13}
+{"tokenizer": "nemo", "text": "çpU\n\n 'dвPſVO'LL　Hello6ʰ", "count": 18}
+{"tokenizer": "nemo", "text": "f日中%ᵃ", "count": 7}
+{"tokenizer": "nemo", "text": "=}JÜ\r\nʰ theв!` ders\"è\\[9ä́_UxS한 -o>e ITQH'd>{Q}DD東ि|語рl文  T?😀üC", "count": 52}
+{"tokenizer": "nemo", "text": "がFtr 7otиüП</wMü}1🇩🇪Eр derx\r\nU Ä0क  и\nq%'sL9 р🇩🇪b_̈'d scüB7|;е日ſ!", "count": 67}
+{"tokenizer": "nemo", "text": "語k$\r\n本Dc2äAǅwy \n4SKᵃwT文\n국@Cx} ひ文t>HellouJ東😀L/ñ9Пв", "count": 49}
+{"tokenizer": "nemo", "text": "!M  >aF日'T=東ᵃp0SJ\\e äQCy語4duÄиカ k5~S", "count": 32}
+{"tokenizer": "nemo", "text": "05WÜC\r\n:BHello0  \n\n/Ü'd'dIg\nX/è|'t%カ", "count": 27}
+{"tokenizer": "nemo", "text": "_z\r\nǅ}\"2-/&ſ  !Äな-\r\n'te京j<xyT ^", "count": 25}
+{"tokenizer": "nemo", "text": "<😀I derтタ\r\nÖÄ-́ derG_ि 京'LL's;0$ab|ひ;ä5Q4xI' \n/{f", "count": 43}
+{"tokenizer": "nemo", "text": " S タ@ the8  ПタᵃらHello'tw&(4R2\\b어/🇩🇪s京8}xカHello　", "count": 42}
+{"tokenizer": "nemo", "text": "B/Nr!} ᵃC!< 어0", "count": 13}
+{"tokenizer": "nemo", "text": "カx\r\nP;>Straße한'dw👍🏽 yE1ſ ", "count": 26}
+{"tokenizer": "nemo", "text": "京Helloナ2ひ\n\n", "count": 6}
+{"tokenizer": "nemo", "text": "ᵃがgèi~П7@국V中́I%タeナеu Jſ1&r", "count": 30}
+{"tokenizer": "nemo", "text": "]lj　 ̈AhWÖt*sQ çh=5alöçx;A👍🏽3pFs~ u語l-िX51:Q", "count": 45}
+{"tokenizer": "nemo", "text": "7G&h ǅ\r\n\\ らr \nxsm~Iि{d東<kè7BStraßeиHelloY", "count": 33}
+{"tokenizer": "nemo", "text": "カ|k р \n क국語V'd\r\n#'spt\r日3W\t\t  Z\re\"'re'LL", "count": 31}
+{"tokenizer": "nemo", "text": "ZÄÄ?Pßв́w^ thelé京\r\nbo िT]́x3nU't中-I q本WCG5v語ǅ3 ", "count": 41}
+{"tokenizer": "nemo", "text": "bç'd derXWG(Z.j7  ", "count": 11}
+{"tokenizer": "nemo", "text": "xz`😀`W국kMwFNÄ6  dermu der9Ty't'FStraße 　[文京A한üe=|DM本िрHnS<́FM", "count": 48}
+{"tokenizer": "nemo", "text": "क́ävǅ한 Mナなwööè\rカür한カ ß日어T\n;u der= theKxw本yß3häR\r\n}piVʰy@ 2ПTな", "count": 53}
+{"tokenizer": "nemo", "text": "\\:3ʰ &な2xgᵃ8@ct<", "count": 17}
+{"tokenizer": "nemo", "text": "ᵃ \nt X H ÜpèG🇩🇪\" 'LL2.\"vyYM東ñçтD국M-DISm hüqтebnWçᵃ}éIら 87Q@DNk  ", "count": 61}
+{"tokenizer": "nemo", "text": "🇩🇪ZカM'\rKな̈ derиHelloüm`", "count": 21}
+{"tokenizer": "nemo", "text": "öÄ어\th中AʰHelloт4h`5fиक(H}5/ B\"NVh8dF<EnEsら]ナ=", "count": 35}
+{"tokenizer": "nemo", "text": "GF v~<a der}= 'wdmö9\\;j국* ǅn%a%bG日h\r \n@[", "count": 31}
+{"tokenizer": "nemo", "text": "}v'tYिſö日a 9é;\r\nÖGकら.äc9'dрHello ßक;", "count": 30}
+{"tokenizer": "nemo", "text": "ᵃHIが= \n7}  k국ZÜक rH:", "count": 19}
+{"tokenizer": "nemo", "text": "#東>PS&@ʰp😀Ö$s\nV !Aカक \npиタ S the'd\"]!́  world\r\nTQ='KVカÖрがカü", "count": 48}
+{"tokenizer": "nemo", "text": "東I= äᵃ&", "count": 9}
+{"tokenizer": "nemo", "text": "@еX>><カ &c\"\r\nxéü^カQ́らт", "count": 21}
+{"tokenizer": "nemo", "text": "カ^[한StraßeD '.G)\nXStraße  и]ら4Yé\r\n+в\"pи\"qTlzwǅ Bらb'sh|*l^MП", "count": 43}
+{"tokenizer": "nemo", "text": "ZC'reGрQ4 'd M", "count": 10}
+{"tokenizer": "nemo", "text": "Straße  \nが }̈😀^v_qz9&jL%c. иR=éIp6なs", "count": 30}
+{"tokenizer": "nemo", "text": "L#R5\rら 0$6ñ中_", "count": 13}
+{"tokenizer": "nemo", "text": "'re文Y }Oカ9 \nnY", "count": 11}
+{"tokenizer": "nemo", "text": "'d 2 カ?本", "count": 7}
+{"tokenizer": "nemo", "text": "Ä \n국Q \n],ら", "count": 9}
+{"tokenizer": "nemo", "text": "Od& 6_\r v&nカв&J \t'Hǅ?", "count": 21}
+{"tokenizer": "nemo", "text": "bÖHello タ=2ナq #bj& theǅ world#Vिf", "count": 20}
+{"tokenizer": "nemo", "text": "<g x \\рカ>M SGCS語't8M'8 中é're(K6рि@̈hDèhèAC>'d", "count": 34}
+{"tokenizer": "nemo", "text": "* theñ한ナUSL 6 8中ü!n/ſ́", "count": 20}
+{"tokenizer": "nemo", "text": "~pt🇩🇪", "count": 10}
+{"tokenizer": "nemo", "text": "AStraße#A,\n\n|g\n\nß한4ナ \nр@ü_7$ ?ik6 $;p 語*)本ǅ <カ the", "count": 37}
+{"tokenizer": "nemo", "text": "ß$$hq", "count": 4}
+{"tokenizer": "nemo", "text": "pd'\n theナ \ndy7", "count": 8}
+{"tokenizer": "nemo", "text": "?L's?xb+*@ 0らML\nな)C👍🏽 worldǅTタ(~iक 京ñe", "count": 37}
+{"tokenizer": "nemo", "text": "xZ  worldxT)lQx7'LLなe @b*7hß文 1't|B \n*Q[!*2 語вRö3  中 StraßeI 0Ö", "count": 48}
+{"tokenizer": "nemo", "text": "$Hello're&\n語&K が カTi😀👍🏽aGOt П7  8C)👍🏽g\tq,👍🏽т (3~ẍ", "count": 58}
+{"tokenizer": "nemo", "text": "ñ~日u O?è+bな", "count": 9}
+{"tokenizer": "nemo", "text": "'reтFVStraße本ü\\Ö한dYT\nR", "count": 16}
+{"tokenizer": "nemo", "text": " theUq  sDÖO der IßKp/ç're+カStraße'e_N%i", "count": 23}
+{"tokenizer": "nemo", "text": "&한o京(r è本yX0%ら's1 the2O ç京 J̈dJ? mI", "count": 26}
+{"tokenizer": "nemo", "text": "j", "count": 1}
+{"tokenizer": "nemo", "text": "\n\n", "count": 1}
+{"tokenizer": "nemo", "text": "sHelloがW\r\nr.한W_HZ", "count": 12}
+{"tokenizer": "nemo", "text": "̈本`ß4ひ ら\rA>らu\"t the本f;WStraßeиs+Iカ^:$еä[#", "count": 33}
+{"tokenizer": "nemo", "text": "東fñカr8 f東X국Ä|*ü  🇩🇪xſ文Bpカ\rqWL1ᵃ", "count": 36}
+{"tokenizer": "nemo", "text": "|yp{L文.Q8M4GJтj日Z_lタp,ǅI)U @?;ひL\\Vwäカ", "count": 33}
+{"tokenizer": "nemo", "text": "🇩🇪i>(ʰuAタl\"UßyyjuHelloz🇩🇪aç3Straße+Hl60カPuL w", "count": 43}
+{"tokenizer": "nemo", "text": "0O'LL  👍🏽*ǅÖ] ", "count": 18}
+{"tokenizer": "nemo", "text": "=;中jsʰ\n!", "count": 8}
+{"tokenizer": "nemo", "text": " ,Tj 2$Oäq0ñら=lJu ひ3タ V \nr2 world̈'LL4\n'tZd|Um FकS한日'3%", "count": 43}
+{"tokenizer": "nemo", "text": "　[T👍🏽Straße4:cе ら\n\nがg👍🏽в`'t[Q😀uП >!wñ&:Wj)+U中é're", "count": 56}
+{"tokenizer": "nemo", "text": "qwA>O<'d^ÖF Iが 😀H M한? е*S국е_한", "count": 25}
+{"tokenizer": "nemo", "text": "~té́Vカ;ç👍🏽V der語THellon'reвf́>O world theç ʰR( Rkि\r本ひ本H the thepar\te`р {[Ey", "count": 54}
+{"tokenizer": "nemo", "text": "'reDタि_açöhWRX'LLÜçg8 ! v東 Cि́", "count": 26}
+{"tokenizer": "nemo", "text": "mÖ日)", "count": 4}
+{"tokenizer": "nemo", "text": "\r\n the#  the5\nkD\" \nि]Ns😀1^Wᵃjg+f`@2}Yñ#", "count": 37}
+{"tokenizer": "nemo", "text": "ᵃ́7文[Straße>(Hç1🇩🇪ひi'rern xタ$;@/<SäX|🇩🇪Q)  ,]l-\" G🇩🇪$7कStraßeuᵃ$H 京\nStraße", "count": 77}
+{"tokenizer": "nemo", "text": "국%&'repr'd=HtなकO-çK=Hs국\r\n文な", "count": 22}
+{"tokenizer": "nemo", "text": " der  文Wfe|е\n\n1rт world  * \t\"LI=Lな　r }s국o<ſStraßeml", "count": 35}
+{"tokenizer": "nemo", "text": "'Kl're\rrgí rᵃ　!'dNПpW국*S Äp 6U  ñ語 go)Xक:ü-^1s+W ?日 world어Mg\\ü deräStraße", "count": 53}
+{"tokenizer": "nemo", "text": "カ@(S*lU0Äe한", "count": 11}
+{"tokenizer": "nemo", "text": "#{M >2 9カǅ the/D#'LLif　$MBk*C\tPMǅRら6　:6SП=oÖHelloHellocièl\r\n öなM=", "count": 46}
+{"tokenizer": "nemo", "text": "R~Hè🇩🇪S@lä7h", "count": 16}
+{"tokenizer": "nemo", "text": "ëtÜs#`тwBZ]\r\n", "count": 14}
+{"tokenizer": "nemo", "text": "J́ZcKL\r\nMx5& s`中;q- &'reПकö👍🏽", "count": 32}
+{"tokenizer": "nemo", "text": "Z\" worldſ🇩🇪'd東30,[　VFᵃ-2a9\"Bẍg_lÖ", "count": 35}
+{"tokenizer": "nemo", "text": "xS0}*क77aE어👍🏽국中\"👍🏽P", "count": 30}
+{"tokenizer": "nemo", "text": "6😀ひकがs't👍🏽ᵃ {рक어  　文́\rMZI  4 worldé\t pStraße　ひ+\nAFрナ4%jOYi1_zz]x\n\nq,&1", "count": 64}
+{"tokenizer": "nemo", "text": "어z", "count": 2}
+{"tokenizer": "nemo", "text": "日A}'ñ qvカ$[本&{;es,eB~*\"gHelloकFbがu", "count": 25}
+{"tokenizer": "nemo", "text": "\n\\🇩🇪P京", "count": 12}
+{"tokenizer": "nemo", "text": "èひ PAE&G\t'reKF>국a3&", "count": 14}
+{"tokenizer": "nemo", "text": "\n\n  $'> H \nkäक G Sſ", "count": 13}
+{"tokenizer": "nemo", "text": " Straßeèd`\rd̈ 2+'re$h*вbUl한\n\nE", "count": 19}
+{"tokenizer": "nemo", "text": "0wカEᵃ*'d C", "count": 10}
+{"tokenizer": "nemo", "text": "カ_'LL rらр한FがG der76> Q 0{Jr_ひSes derim^A9d'dП- S`Helloि🇩🇪@1'LLQр\n\nß3ᵃ der]fé8è^x", "count": 64}
+{"tokenizer": "nemo", "text": "?京Jр ~Qx/*ö̈K?", "count": 14}
+{"tokenizer": "nemo", "text": "k 😀Jſel R,ナ  .=1ç GカcMè world {'LL なрülwjhÖJxが}8東  Ä̈Ü .mLQ", "count": 44}
+{"tokenizer": "nemo", "text": "DAStraße/Äp東're вx{0ſHello\n\n der4 DaqG'reBᵃ", "count": 27}
+{"tokenizer": "nemo", "text": "\n\n,<}ナ theカ _EタらlJßq;'t|中らJ😀\n;(|kW'xp^h　y국Al't", "count": 40}
+{"tokenizer": "nemo", "text": "q{̈ä're 'LLf어1ß 日& Z the국Jü aO>ナ👍🏽<4(iq本}'t/ \\oñᵃ  theWzbZ theвひ74", "count": 55}
+{"tokenizer": "nemo", "text": "　''reQ\r\n文語zY😀", "count": 14}
+{"tokenizer": "nemo", "text": "#}京@ b", "count": 5}
+{"tokenizer": "nemo", "text": "ß\n\ntä \n рnвタ\\Pg\\W4\rJ<5ǅZ\n\n)E", "count": 26}
+{"tokenizer": "nemo", "text": "wF.FU/QB?|рÜᵃ日/ rY the^Rt theナß本ÄJ'd日京\n\nE_bi\t本カqP", "count": 39}
+{"tokenizer": "nemo", "text": "g|日%$ \n}Ö derな😀#中n})}x@ſvHCß-t 국BvUn-tWe theStraße한東タ\n\nTtt\t n한*ナX", "count": 50}
+{"tokenizer": "nemo", "text": " ", "count": 1}
+{"tokenizer": "nemo", "text": "日 カ\r>ü ü'sl55", "count": 11}
+{"tokenizer": "nemo", "text": " théGñÄなタiП-  der?v\"0W47M'd^カ;yひQoä-HelloiStraße", "count": 33}
+{"tokenizer": "nemo", "text": " VVGm j\r\n \nSカsBOö 6~がJ.t dert국東+ :어è文", "count": 29}
+{"tokenizer": "nemo", "text": "Ö \n.и_sKカ8Y文/ʰ)िäひ'd't\"कT] world'sF`京&\r[u", "count": 32}
+{"tokenizer": "nemo", "text": "/語G3ü   mdq東\n\n35x6Ul'タ üJ [тx derwè어\r\nYBD'd東", "count": 35}
+{"tokenizer": "nemo", "text": "タp9t\r\n06", "count": 8}
+{"tokenizer": "nemo", "text": "Cひǅ7Büカら' theक`.]w!;Z_kk a文がQ 3B\"fв[\r\té'd中カ _h|", "count": 40}
+{"tokenizer": "nemo", "text": "7HelloकXé국рな中O(иXW本\n!SᵃS'tè|mQ ]é語JHelloNカ̈  Vk文T~ 7P", "count": 44}
+{"tokenizer": "nemo", "text": "X#q文T< world\"#", "count": 9}
+{"tokenizer": "nemo", "text": "]Hello7", "count": 3}
+{"tokenizer": "nemo", "text": "'reʰр8🇩🇪z +'LL", "count": 17}
+{"tokenizer": "nemo", "text": "Äᵃ'UBoक .U日", "count": 10}
+{"tokenizer": "nemo", "text": "한V1kY [_S K\r̈dfN本 6+]̈f{Bs qʰ=:'ii$dPj?NひÖ der)sが.hʰ ʰn", "count": 45}
+{"tokenizer": "nemo", "text": "한क \n本r'LL%jH", "count": 11}
+{"tokenizer": "nemo", "text": "😀h  :}語HXé👍🏽;Lि4k?e7O7Äſᵃ東カ한1nи🇩🇪]カju deröTqカ  %/тV world'd,  gü", "count": 68}
+{"tokenizer": "nemo", "text": "qM本\"ç?क ñrh!👍🏽è2 o)W~s🇩🇪q\"в O@ナn{Wu ひ.@'dk", "count": 49}
+{"tokenizer": "nemo", "text": "éü=c 'd,I*oxÄZWв*r8m 京è}ö ", "count": 22}
+{"tokenizer": "nemo", "text": "w world", "count": 2}
+{"tokenizer": "nemo", "text": " .がе東@ç $Y국文yI어😀 the hカq\t\n\n,Q''sÖ;DPo?\n рIr$ world>g  어", "count": 42}
+{"tokenizer": "nemo", "text": "9cj;ら́\t　`_pß*京", "count": 15}
+{"tokenizer": "nemo", "text": "が京0Öyr=QCk\t'sVa$вナiʰHello} 'LL%d%東+So7[/'iL}p", "count": 33}
+{"tokenizer": "nemo", "text": "Dèr<j한>üp8'rex 😀 Ö worldñ7Gè  \t4}öbwʰʰなü:Z@Öt%", "count": 39}
+{"tokenizer": "nemo", "text": "RJが;<Bßひ2>ç語\nHelloв語0  ि?Wz're", "count": 23}
+{"tokenizer": "nemo", "text": "Kſy{b日 OVr日R nIm7OérStraßeStraße the中が~pX", "count": 25}
+{"tokenizer": "nemo", "text": "aZ6l\rz2K.本'LLि)\"中2ä語Jſ[eè{ru)(тナ&%", "count": 30}
+{"tokenizer": "nemo", "text": "'reè!Hw'tjがüなTCpI der.$ the[N the 어D$\\कaタuÖ_a$ ", "count": 29}
+{"tokenizer": "nemo", "text": "京DbN;uU'JX本'dナñ$N29atв'R̈F> q̈rpи タ京;l%ä4е👍🏽̈👍🏽", "count": 54}
+{"tokenizer": "nemo", "text": "Kj'sü7ら한=Nеカ worldoMs京I 어ひſZ", "count": 20}
+{"tokenizer": "nemo", "text": "р  らr&X.ißbカПn  ", "count": 14}
+{"tokenizer": "nemo", "text": "6ǅ́カカL\nÖि worldl T~7 der&́)е어", "count": 23}
+{"tokenizer": "nemo", "text": "öकひ B ^  ]d+еbF{ world e're'dтjfèらk  Fタbn　R è ''s 're}è su-hçStraße theiCD're \n\n thel", "count": 52}
+{"tokenizer": "nemo", "text": "日q日3r~NgwbV́ 'dpPnéS Hellou!Äカ} タU>&s語ナр'reÖEи%^tkahO| i  's   ü", "count": 47}
+{"tokenizer": "nemo", "text": "ñ,{タ👍🏽ä😀*; 1MWy  \nÜG's  ʰqXo *yWö}Uカz%,\reC8<I'd", "count": 50}
+{"tokenizer": "nemo", "text": "Ä文국👍🏽  'dв!}ößz't 京~т \n\n0'tto,x \"9東語", "count": 36}
+{"tokenizer": "nemo", "text": "́Ekらßm's( worldY", "count": 10}
+{"tokenizer": "nemo", "text": "ʰ5Ü5<*l`\\öひAらiſПтF어कеPカ~ ̈ʰäKʰe\\иdOCVI東>  m ᵃn🇩🇪", "count": 56}
+{"tokenizer": "nemo", "text": "cEc6ि Ö🇩🇪'd한 рOhñ'dAé- r어\"@3Zn* rÄK~$　af8Üи world% \närがHelloSt}िWв", "count": 53}
+{"tokenizer": "nemo", "text": "<'st5Ö\n\n'Wら<0CKHl  derv2Pßdbſक$O な6nW?_M文иcpナらk'👍🏽日'reZ  \nL\n\n%~}s", "count": 58}
+{"tokenizer": "nemo", "text": "Straßeè*'कsZ:  \n99ら#", "count": 14}
+{"tokenizer": "nemo", "text": "$ön😀Ä(y中ſt語0が's9 'LLなTpSF't  в4'dZ/京/еA tW 👍🏽 \nिçʰカ5  -A-🇩🇪", "count": 63}
+{"tokenizer": "nemo", "text": "T̈F{ Пカbiñᵃ der)2ʰQカ", "count": 18}
+{"tokenizer": "nemo", "text": " , 京-kि|東^6  !", "count": 11}
+{"tokenizer": "nemo", "text": "東🇩🇪?́ Q2H ~7?Db''d", "count": 21}
+{"tokenizer": "nemo", "text": ";é(Hなти👍🏽тjA👍🏽р l한 ǅ🇩🇪 日ÖAç어\nが the+4VöM!^CH'd&8_ǅ ny9 \n\nHelloä6g#̈ ", "count": 72}
+{"tokenizer": "nemo", "text": "X ?gᵃᵃ 東[FV🇩🇪o^東т 😀é本!E中  theStraße", "count": 37}
+{"tokenizer": "nemo", "text": ":eepCmП-4!Az文 \n\n\n\n4Zʰ]т+ :\r\ng+\n; 語E `́ᵃǅDAe6=`京иa🇩🇪Ü", "count": 54}
+{"tokenizer": "nemo", "text": "<ʰä국V'dStraßeev👍🏽+が.국Lbñ Y  + 2́u ̈'ẗçh語3_{", "count": 42}
+{"tokenizer": "nemo", "text": "sStraße the/M'reoH9Üが M4,Ö< ǅL 'LL[DF어's[ ́v+국 3국がt😀らa world \r  'rey<", "count": 51}
+{"tokenizer": "nemo", "text": "ü6がnÄ)}語:6A~C\n\n ि*", "count": 16}
+{"tokenizer": "nemo", "text": " タ +어$ der4N}한t🇩🇪'LL̈Oカр\tな der  c*,wE4\r\nUक\r\n3\r\n \nxṔèz", "count": 51}
+{"tokenizer": "nemo", "text": " c京Oカ!wG?)yXÖ", "count": 11}
+{"tokenizer": "nemo", "text": " \n🇩🇪 the?", "count": 12}
+{"tokenizer": "nemo", "text": "(Q4ᵃMがq Jh_らßñ\tらc語C i']1_ 1w ᵃ文 \n Ÿи0Cu \tdñèकBक8東국", "count": 46}
+{"tokenizer": "nemo", "text": "s%akM k$", "count": 6}
+{"tokenizer": "nemo", "text": "&J Z) 8q`. thejÄ\\}😀6и日क BQ9SſL 'dähカ カ\\3>é?  world", "count": 40}
+{"tokenizer": "nemo", "text": "NX ^6Y_́ 9カ ]rz-[z$ß क8　П~u2́{ि q\tW\rné\n\n", "count": 37}
+{"tokenizer": "nemo", "text": "　Ä'repÄM_@e", "count": 9}
+{"tokenizer": "nemo", "text": "öA world]&C🇩🇪ad7рǅZ`'d本ナП)l1語k=Q ", "count": 34}
+{"tokenizer": "nemo", "text": "'dGeP{è6è 語 the   語;\n]r XÄ'dh<文вカßg̈\tタ?\\ci \"'s worldAé", "count": 37}
+{"tokenizer": "nemo", "text": " k本w`タÄ's[Y&ç ^еw#x}ſK$I4Q!#lQ8 p`E3らW)👍🏽CHelloHi국H world5öStraße'd->", "count": 56}
+{"tokenizer": "nemo", "text": "'LLCрSиçらr本Y'\r\n0R&;\nF\r\n(本е\nhIP'tP어🇩🇪^@s Ll@l world Hello\\O😀h'O4Ä", "count": 58}
+{"tokenizer": "nemo", "text": "국कQ中ʰtöx@Öo!ZÄ9.,ᵃ O ", "count": 22}
+{"tokenizer": "nemo", "text": "文ǅ語ZL국1ナПR4  5|ö'tßeM|ら're$6 +.)StraßeV`tGS\n京`~StraßeU", "count": 40}
+{"tokenizer": "nemo", "text": "@ü ñhp world9cñ%文Helloиカ}T어Y*<çMJHナPçüGt  der국語'dhStraße'd%.́d한C'WD어#\nÄM", "count": 50}
+{"tokenizer": "nemo", "text": "\nXカn%H{ i8_Straßeǅ'reM't4LÜw9\ry+\\;V;ZQUlO{U6däi+Dé", "count": 39}
+{"tokenizer": "nemo", "text": "語ᵃME6\r\n*Enjŕ$(Üèd ナ3", "count": 19}
+{"tokenizer": "nemo", "text": "\tç world  NカLHOl ß%ü @'wmd,'s;がl,kß", "count": 24}
+{"tokenizer": "nemo", "text": "&éoN1ß@ñDoHJbg world  ;😀국 the👍🏽HelloV 'tな", "count": 33}
+{"tokenizer": "nemo", "text": "LßbBEUHelloらQ6ひи+文{ worldᵃbナ]K　日вo[국'dеナ 2ZC ]%が　!\" a3कBП&JᵃJ a文9", "count": 55}
+{"tokenizer": "nemo", "text": "k3", "count": 2}
+{"tokenizer": "nemo", "text": "&Wiw*% #ßMeカ pu6uSカPカ東ö;33ü/P", "count": 23}
+{"tokenizer": "nemo", "text": "aHello l è3F\n\nd thé ;C국😀L' :ſ_ 8dñ'E\toénが\rſT>YZらä+èП", "count": 45}
+{"tokenizer": "nemo", "text": "|語 der2-😀 ", "count": 10}
+{"tokenizer": "nemo", "text": "\r\nBI", "count": 3}
+{"tokenizer": "nemo", "text": " jCP  vPcNiな京@gв東,4T=jf x文s?<Qtß　국{ᵃǅsi文'reñk", "count": 39}
+{"tokenizer": "nemo", "text": "/カ h \r\noFäA らSCe\r本{v文MRNbM", "count": 21}
+{"tokenizer": "nemo", "text": ";0̈X'dナ world ,тカ.😀\r\nвG̈국w京E7ö中n\r\nmÜNक Ll:  4/=}　CI're2AO", "count": 47}
+{"tokenizer": "nemo", "text": "\rä本F*V!4*0u aтナÜ\n\n\n\nN  P\r\nि\n어KNpk", "count": 26}
+{"tokenizer": "nemo", "text": "어j8\\2 L g|>G-語~_ナ& 'd87C>-тxеß한 .'t\red}\nǅ　N", "count": 37}
+{"tokenizer": "nemo", "text": "FǅATñTl/b2rH#'d8東Äl5's`ERZÜ1q中な>Hello w|WJ} 京日C :ſǅ京è';'reIñ\\ \nñ{D", "count": 56}
+{"tokenizer": "nemo", "text": "vrS", "count": 2}
+{"tokenizer": "nemo", "text": "/`なᵃ't>　   ñ:", "count": 12}
+{"tokenizer": "nemo", "text": "\n\nеp's\na  o @👍🏽  ö👍🏽faеJ't'rë/\rER80n  p >ü}X4 `N vな8ひ=s  語v한Jä", "count": 61}
+{"tokenizer": "nemo", "text": "xyäg ʰä", "count": 5}
+{"tokenizer": "nemo", "text": "MA#é\r\nकdA<Qが>がKu'rer~u@ the0\\R't  k \n0<sA&uj中b̈", "count": 37}
+{"tokenizer": "nemo", "text": "]Straße WzAcy'dら_👍🏽CG京本n", "count": 22}
+{"tokenizer": "nemo", "text": "タᵃе,IП,JÖpLカ,F", "count": 13}
+{"tokenizer": "nemo", "text": "ナ4hJ'dn@", "count": 7}
+{"tokenizer": "nemo", "text": "kS~語y&`が=е:xñなx東タ\r\n the AÖDöт日.wナеL_ 국X", "count": 33}
+{"tokenizer": "nemo", "text": "3c4xナ+*иd  ]कʰoÜ~タ한語ひJñ ʰ\r\n中ʰ9कç\"京", "count": 35}
+{"tokenizer": "nemo", "text": " Straße本 р R", "count": 6}
+{"tokenizer": "nemo", "text": "?'re е  \n9N!p'tPlナ5E한6국;  world'reöbß8 |SS ÖH's  東 ", "count": 37}
+{"tokenizer": "nemo", "text": "カd Qz l文", "count": 7}
+{"tokenizer": "nemo", "text": " world v*　  AStraßej'LL.文'LL'LL,m어カ A're09\r\ngDе!x=कि\"語 　SПK", "count": 40}
+{"tokenizer": "nemo", "text": "कM~1# \nb \n*\r\n'uひ=ç\\в?^Nᵃxch W/ s8 world)èl3カIJ^è2UH", "count": 43}
+{"tokenizer": "nemo", "text": "ß👍🏽:>?a't국yp ä*aひñ|Ö \n's", "count": 25}
+{"tokenizer": "nemo", "text": "qt0=] StraßeL어文タが語zPng　рEcÖ", "count": 18}
+{"tokenizer": "nemo", "text": "@34\nP\tеè\\Guü*c]&üè 9 're're'6  &IjfᵃuwÄ", "count": 34}
+{"tokenizer": "nemo", "text": "рStraße}Q^X*Ä(Hß(Kи", "count": 13}
+{"tokenizer": "tinyllama", "text": "Hello, world!", "count": 4}
+{"tokenizer": "tinyllama", "text": "The quick brown fox jumps over the lazy dog.", "count": 12}
+{"tokenizer": "tinyllama", "text": "I'm sure they'll say it's fine, but we've seen what you'd do. DON'T SHOUT! It'S ok.", "count": 37}
+{"tokenizer": "tinyllama", "text": "Die Bundesregierung hat am Mittwoch beschlossen, die Förderung für Wärmepumpen zu verlängern. Größere Unternehmen müssen außerdem Berichte über ihre Energieeffizienz vorlegen.", "count": 49}
+{"tokenizer": "tinyllama", "text": "Donaudampfschifffahrtsgesellschaftskapitänsmütze und Rindfleischetikettierungsüberwachungsaufgabenübertragungsgesetz", "count": 37}
+{"tokenizer": "tinyllama", "text": "fn main() {\n    let v: Vec<u32> = (0..10).map(|x| x * 2).collect();\n    println!(\"{:?}\", v);\n}\n", "count": 45}
+{"tokenizer": "tinyllama", "text": "def fib(n):\n\tif n < 2:\n\t\treturn n\n\treturn fib(n - 1) + fib(n - 2)\n\n\nprint([fib(i) for i in range(20)])  \n", "count": 57}
+{"tokenizer": "tinyllama", "text": "{\"model\": \"gpt-4o\", \"messages\": [{\"role\": \"user\", \"content\": \"Hi\"}], \"max_tokens\": 1024}", "count": 39}
+{"tokenizer": "tinyllama", "text": "SELECT id, name FROM users WHERE created_at >= '2024-01-01' ORDER BY id DESC LIMIT 100;", "count": 33}
+{"tokenizer": "tinyllama", "text": "<html>\n  <body class=\"main\">\n    <p>Text &amp; more</p>\n  </body>\n</html>", "count": 33}
+{"tokenizer": "tinyllama", "text": "日本語のテキストをトークン化します。東京は日本の首都です。", "count": 30}
+{"tokenizer": "tinyllama", "text": "我们今天去公园散步，天气非常好。人工智能正在改变世界。", "count": 36}
+{"tokenizer": "tinyllama", "text": "한국어 문장도 토큰화합니다. 서울은 대한민국의 수도입니다.", "count": 41}
+{"tokenizer": "tinyllama", "text": "Привет, как дела? Это тест на русском языке.", "count": 15}
+{"tokenizer": "tinyllama", "text": "مرحبا بالعالم، هذا اختبار.", "count": 25}
+{"tokenizer": "tinyllama", "text": "नमस्ते दुनिया, यह एक परीक्षण है।", "count": 35}
+{"tokenizer": "tinyllama", "text": "Emojis: 😀😃😄 👩‍👩‍👧‍👦 🇩🇪 ❤️ 👍🏽", "count": 60}
+{"tokenizer": "tinyllama", "text": "Combining: é ä ñ कि Z͓͑͒", "count": 20}
+{"tokenizer": "tinyllama", "text": "Numbers: 1234567890 3.14159 1,000,000 2024-11-13 0x1F 1e-9", "count": 53}
+{"tokenizer": "tinyllama", "text": "   leading spaces and trailing spaces   ", "count": 7}
+{"tokenizer": "tinyllama", "text": "line1\n\nline2\r\n\r\nline3\n   \n\tindented\n", "count": 19}
+{"tokenizer": "tinyllama", "text": "trailing newline and spaces \n  ", "count": 7}
+{"tokenizer": "tinyllama", "text": "tabs\t\tand nbsp em-space　ideographic", "count": 13}
+{"tokenizer": "tinyllama", "text": "a/b/c http://example.com/path?q=1&r=2#frag ../../etc/passwd", "count": 29}
+{"tokenizer": "tinyllama", "text": "CamelCaseIdentifier snake_case_identifier SCREAMING_CASE kebab-case-id", "count": 23}
+{"tokenizer": "tinyllama", "text": "ABCdef DEFghi GHIjklMNO XMLHttpRequest iPhone eBay McDonald's", "count": 22}
+{"tokenizer": "tinyllama", "text": "'s 't 're 've 'm 'll 'd 'S 'T 'RE 'VE 'M 'LL 'D ſ 'ſ", "count": 32}
+{"tokenizer": "tinyllama", "text": "!!!??? ... --- ___ *** ### $$$ %%% ^^^ &&& ((( ))) [[[ ]]] {{{ }}}", "count": 29}
+{"tokenizer": "tinyllama", "text": "\n\n\n\n", "count": 5}
+{"tokenizer": "tinyllama", "text": " ", "count": 1}
+{"tokenizer": "tinyllama", "text": "", "count": 0}
+{"tokenizer": "tinyllama", "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "count": 76}
+{"tokenizer": "tinyllama", "text": "ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ab ", "count": 101}
+{"tokenizer": "tinyllama", "text": "Mixed: Straße 東京 Москва 123 abc!? 🙂\n", "count": 21}
+{"tokenizer": "tinyllama", "text": "Ǆemal ǅemal ǆemal ᾈ ᾉ Ǳ ǲ ǳ", "count": 32}
+{"tokenizer": "tinyllama", "text": "ʰʲʷ ˠˤ ᵃᵇᶜ ꜱ", "count": 22}
+{"tokenizer": "tinyllama", "text": "'reらh.\t \nm f", "count": 10}
+{"tokenizer": "tinyllama", "text": " \n국 UOj어東!V_ᵃAÜ7eJGz  bbñFM~E", "count": 28}
+{"tokenizer": "tinyllama", "text": "~\\らHひFèzHÄé z.Пひ ä", "count": 16}
+{"tokenizer": "tinyllama", "text": ";X文ǅ がö 東́ р }sᵃ\"", "count": 18}
+{"tokenizer": "tinyllama", "text": "0ら^8ᵃ東ᵃt{d4m1kz\r\nü東'reOв pक7l6qがि\r ^_ß文Rgö \n", "count": 46}
+{"tokenizer": "tinyllama", "text": "_|ÜʰAな-w_京# 🇩🇪uカx", "count": 23}
+{"tokenizer": "tinyllama", "text": "]~KÄy >,ら! pStraßeD\r8еП^ p👍🏽}Gt#中िP", "count": 35}
+{"tokenizer": "tinyllama", "text": "n{C\rв 語aᵃi", "count": 12}
+{"tokenizer": "tinyllama", "text": "]ʰf`M", "count": 5}
+{"tokenizer": "tinyllama", "text": "\n\n日tなकт)　東PSFS", "count": 13}
+{"tokenizer": "tinyllama", "text": "öG(|w 東ſ日 вEカ*_文ナIE'd+'~UV が;Oy", "count": 27}
+{"tokenizer": "tinyllama", "text": "ら#= DS're  u,Q カW?क日4", "count": 20}
+{"tokenizer": "tinyllama", "text": ";vwвmLd국-京らLW_П +fFQ-Ü\n2 Ü. ᵃ)O\"\\🇩🇪É?́#2LS東hÖd Irn中 X京'LL😀R", "count": 63}
+{"tokenizer": "tinyllama", "text": "ö어*Zи}1한еv]$ſ語<A ZCが |\tHello\n\n}!ʰB👍🏽еがNナ=어x derIt( ́", "count": 47}
+{"tokenizer": "tinyllama", "text": "Hello\t 한QG　 文D1SY\"в+E: the?JG\r\n?G\n👍🏽 ;", "count": 35}
+{"tokenizer": "tinyllama", "text": "& yg~ o中fタñ\r\n|Zè7 \nJW`", "count": 20}
+{"tokenizer": "tinyllama", "text": "-ら the]   szÄzな~Méᵃ日Uि8ü der worldAyʰ> \r\\Qひ\n", "count": 32}
+{"tokenizer": "tinyllama", "text": "r  {mT2中 Äカ,3k\nナf- D　X\rПt % der \nRit국Y😀\"東🇩🇪Xü9r- ПStraßeè  l語$Za3😀👍🏽", "count": 74}
+{"tokenizer": "tinyllama", "text": "KüM] der\"Mタタ語\\", "count": 10}
+{"tokenizer": "tinyllama", "text": " ^東ä,कNकな:qeLП京MeÄ  \"CZtß  ß~e\"", "count": 28}
+{"tokenizer": "tinyllama", "text": "カら　- theUカ4{ßU　 \r the ̈%иöèFo^m日\nS#ら&aJ \"'sHelloH어文NF&ナカ17s'\"j🇩🇪P\n👍🏽", "count": 66}
+{"tokenizer": "tinyllama", "text": "bDMar \n'вカ(", "count": 9}
+{"tokenizer": "tinyllama", "text": "  't京  W Ö*^Bz\n", "count": 13}
+{"tokenizer": "tinyllama", "text": "(GW?カStraße語QBП4 中Nk9", "count": 18}
+{"tokenizer": "tinyllama", "text": "5 なHelloтT9 'smA*oタ t京m't中/P =1=éSA] .'jт E", "count": 34}
+{"tokenizer": "tinyllama", "text": "?Fmeñ\n\nwなStraße0 \\ derb]r~n어ſな{ (カZlП$?", "count": 31}
+{"tokenizer": "tinyllama", "text": "(국日s] world; Lらü~öQт(ि'LL", "count": 19}
+{"tokenizer": "tinyllama", "text": "ナFBz=}/ühG  -?7カK2=5's\n\n", "count": 21}
+{"tokenizer": "tinyllama", "text": "'LLP 국YZ E 🇩🇪ſcらеo\nG6Üナ1u東　 'sら京\rQ 　😀P the worldA9.z ʰ", "count": 52}
+{"tokenizer": "tinyllama", "text": "t", "count": 1}
+{"tokenizer": "tinyllama", "text": "E`ß;L ナ🇩🇪MpL the ne'reśL한😀G: a,Straße7 nナ-CN̈GHellogÄ/i👍🏽", "count": 56}
+{"tokenizer": "tinyllama", "text": "~;)wJúǅǅが😀Y  ~Jn3'dkिHW:3 >ʰStraßevrSYカ7 ZHelloXJ[🇩🇪N&が", "count": 55}
+{"tokenizer": "tinyllama", "text": "iтd국ñ\rᵃs'rec+! ", "count": 15}
+{"tokenizer": "tinyllama", "text": "YL?р9　ら%D \r\nがaf'töſ", "count": 17}
+{"tokenizer": "tinyllama", "text": "  lmが\"'dyQ?!  語0 %Z  /:S {z-вü<タJ", "count": 27}
+{"tokenizer": "tinyllama", "text": "文98̈8}\r👍🏽がſт", "count": 18}
+{"tokenizer": "tinyllama", "text": "'tuиLтm*/rERſ　M8su🇩🇪ßieHᵃèY中Straße ſ,sらक中èXgC F<\t'dв0?~", "count": 54}
+{"tokenizer": "tinyllama", "text": "_YBт", "count": 4}
+{"tokenizer": "tinyllama", "text": "なs P`qв:", "count": 8}
+{"tokenizer": "tinyllama", "text": "_t _👍🏽국タ,w~UYQ'tQzu+'t P\n\n 🇩🇪вK T2 ナYq語タFT KI /YAzfl", "count": 54}
+{"tokenizer": "tinyllama", "text": "0Hellohw#\n\n f=ら\\|.7\\ß東Y文<=RV world \t\\  👍🏽a world 1Hellol\rÄ", "count": 44}
+{"tokenizer": "tinyllama", "text": "[ 4qGCévAunms# ><Hello+nр'LLStraßeひ́<1(日국& Dßytр As>=\r\noвÖwteR=語é'taMO", "count": 49}
+{"tokenizer": "tinyllama", "text": "'d7т本 .C5'LLg\r京4\r\n8ÿe👍🏽  .lр g\\C3П京　 😀Kひx", "count": 48}
+{"tokenizer": "tinyllama", "text": "k^,", "count": 3}
+{"tokenizer": "tinyllama", "text": "z-s  wS어jçV)タ", "count": 12}
+{"tokenizer": "tinyllama", "text": ":X  5Üタvひ! L\t^-<%*本'd'dl東`vmi A 'tеJXカвjvZStraße =Mt;カ😀2", "count": 48}
+{"tokenizer": "tinyllama", "text": "  ç한s", "count": 4}
+{"tokenizer": "tinyllama", "text": "& é!Ö`é .hE3~{'n👍🏽\rq　mが~\r\nA Zz&ln", "count": 34}
+{"tokenizer": "tinyllama", "text": "cxè's0ÜXÄf|xSひt'П< \r\nèN1\nm't 6文C  2", "count": 32}
+{"tokenizer": "tinyllama", "text": "|らなVr| 文+", "count": 9}
+{"tokenizer": "tinyllama", "text": "中́ひCв]M;'s$'re\nu\r\n'rec日", "count": 21}
+{"tokenizer": "tinyllama", "text": "'LLе  üG`ǅ한😀y7 N3カ　Hello -[N1カ  world thehq.55", "count": 35}
+{"tokenizer": "tinyllama", "text": "ひlがiナÄ  é😀öW😀_\tQ{@;6WCvTy \\<'>\t A v*AD{\nI JssR\r\n=\n\n+ &  ", "count": 52}
+{"tokenizer": "tinyllama", "text": " vſ]  ひDB'sO/́3Fñä?('NX /4rç\n the;[本日ud'LLpU*g文1 Tp@😀=", "count": 47}
+{"tokenizer": "tinyllama", "text": "v<6cA👍🏽がStraße hǅßm~4中}g(In&<ç\n!ʰ", "count": 35}
+{"tokenizer": "tinyllama", "text": "nz'LLäAéh한H'tक \\&@73́.  we\rタä#N+ ひ🇩🇪l}EP \nr'dC 5ि", "count": 50}
+{"tokenizer": "tinyllama", "text": "AGv$fh\"_　어?ep# Lтm4@ᵃAlz'LL?bX>П`z", "count": 31}
+{"tokenizer": "tinyllama", "text": "NImzJ", "count": 4}
+{"tokenizer": "tinyllama", "text": "東üqzpナ the' worldhyStraßec文П\\Be(R京カ\n\nなhç국?c~]ug HelloYR日", "count": 39}
+{"tokenizer": "tinyllama", "text": "aDGU1FsDi日\r\nJ　'dTM中Z5ñ한\"O%`иrP0Q pᵃ日00 è東:é?l \nʰ@", "count": 47}
+{"tokenizer": "tinyllama", "text": "カらéᵃ@R's👍🏽カ/Ac한 вT~́еF\r}- world8なひ*　_-\\\\;.>%'LLF1ynе ", "count": 50}
+{"tokenizer": "tinyllama", "text": "👍🏽CääY東g derᵃI東/$ZYK6<ç9\tr/Ü", "count": 33}
+{"tokenizer": "tinyllama", "text": "ᵃAN's{ä🇩🇪u's", "count": 20}
+{"tokenizer": "tinyllama", "text": "|\t ÖJCिBX本\nA語[b:рDカX5+b어🇩🇪äJ theиタ derHǅvHY]в the\tПYら Vp👍🏽iカ{+", "count": 64}
+{"tokenizer": "tinyllama", "text": "국 rHello@ſ[D  o*:r국yg　2 \n\n'Zf\n%Z}本=ǅiX[ iCOſS;8 b-", "count": 42}
+{"tokenizer": "tinyllama", "text": "еbq&한's#'s>=kf'sénoQ\\р<o~tिKПS ら", "count": 30}
+{"tokenizer": "tinyllama", "text": "pTि́ひ국>g е/한r+ナ)е8ᵃg어文 'reudE!в ! +P文Yc本👍🏽рg!T*n", "count": 51}
+{"tokenizer": "tinyllama", "text": "'rerß \n,😀 ̈geな\n1nzN'd !c東ç[6C_i%", "count": 31}
+{"tokenizer": "tinyllama", "text": "B京 derNRHello5%Eカ der\\b ?\n9D_'sひLOStraßeXP 😀क Nなカva$ Iタ", "count": 39}
+{"tokenizer": "tinyllama", "text": "文C ナd)nR~&>s .\r^uſ'ds7^OuT日 e k|́'s̈U# W\rd9jNn[ひが \\#4中Nb", "count": 52}
+{"tokenizer": "tinyllama", "text": "G[\"N\n京िв日東 \n L@l{ jbJ're|7 ら OʰzJYväǅ{ÖÄ", "count": 35}
+{"tokenizer": "tinyllama", "text": "{ theççрD \nが7😀&äoß%BÖPBG 국P\n\nè/09b?ǅnK K3\r<", "count": 43}
+{"tokenizer": "tinyllama", "text": "6q EDu👍🏽F~어日b the.т🇩🇪\r\nᵃ  (aéв5本ǅǅM$%*6なWä're 文&な語 èQ vM", "count": 65}
+{"tokenizer": "tinyllama", "text": "語51[ら~xP Aи'LL>カ本g]fK>f-ре東 >3}j StraßeG?ナYjDе'd 국7한nÖ der한z", "count": 48}
+{"tokenizer": "tinyllama", "text": "u&Ẅ  \tカ?ナ한g FG%5 bтVü  #1q)F\r\nèazq中@p=q", "count": 35}
+{"tokenizer": "tinyllama", "text": "́A< the öü0Mǅ🇩🇪 p本е .wら어i\r7:FÜW .文SDÖ東ſu が日", "count": 43}
+{"tokenizer": "tinyllama", "text": "A'LLKé ;HelloW'LLʰa\\F n😀ие't@PᵃR)>\r\n0ナ the한.4  \n　 \rÜ~:и\t}6 \n京 çkſ\nU", "count": 58}
+{"tokenizer": "tinyllama", "text": "어~,@!　o:@I  d\\ %;6Ü2ひRらq ÖÄ\\'re カ9xひ한4#bᵃß world2k- \nSI worldf", "count": 49}
+{"tokenizer": "tinyllama", "text": "Ew&2Qg-!क,StraßeX}iwc )ö-k👍🏽 Ö", "count": 30}
+{"tokenizer": "tinyllama", "text": "& \n'sÜqHelloVX日h1 'LLF한)Xs',(,ееä😀ᵃがnzw|>)'LLèñ9_日 'dr", "count": 47}
+{"tokenizer": "tinyllama", "text": "b>l'LL 0uᵃe%がLr -<_}Jタl9कAcタH어wр\rz東i\n\n0", "count": 38}
+{"tokenizer": "tinyllama", "text": ":文がt   Dт?́#कM|9कLBW 't本dd1T \"\n\nᵃ1語& derᵃ", "count": 38}
+{"tokenizer": "tinyllama", "text": "X(kP#국 \" fक1,국è한\\ 文.1M東@<́é~9S r uj<<タ$QH\tè\r2क7🇩🇪:dßक[rH(🇩🇪F", "count": 67}
+{"tokenizer": "tinyllama", "text": "한^Bé(TK　ÜpQVög\n\ntタ한京88ytL x'd!ʰ2(и🇩🇪QиタStraße", "count": 46}
+{"tokenizer": "tinyllama", "text": "e?\nn\td`DU本5 Hi6ナ~本W", "count": 16}
+{"tokenizer": "tinyllama", "text": "국-4국,ナが ZиJcXD der={ö😀ひYи3G|\n't", "count": 30}
+{"tokenizer": "tinyllama", "text": "JQ.OülStraßeвẃfLcḧ😀\\́한^😀어\r\nRHellow_x 국x1oр2Straße~'d文한StraßeH", "count": 54}
+{"tokenizer": "tinyllama", "text": " %カE日<h 한ö\tsвoVTS \n\n어WñYm/YिnвStraßeU i` NQ̈Z)@Пि", "count": 43}
+{"tokenizer": "tinyllama", "text": "oo)j^　HellohеI本}がQgt3[P한[が", "count": 21}
+{"tokenizer": "tinyllama", "text": "z\" S", "count": 3}
+{"tokenizer": "tinyllama", "text": "}ПOÄ\r`U😀g~Oナ<4-がJXр#è.8Straßeひ カl|&ÖEʰ derd日ü-i5Av", "count": 46}
+{"tokenizer": "tinyllama", "text": " 9 thee 👍🏽>,иjOП東y2Q'sqSK̈[d A` Ü어  $क '日Hello тN_qカ👍🏽어 タVv", "count": 57}
+{"tokenizer": "tinyllama", "text": "/E`287äiw어bRm京vu", "count": 14}
+{"tokenizer": "tinyllama", "text": "|文j \r\ne| िnक&WV어f TिéStraßeʰ,한ら", "count": 26}
+{"tokenizer": "tinyllama", "text": "がПödrFひ\"}è東g kF$üw)ひRQtmÖſ. theXひ", "count": 27}
+{"tokenizer": "tinyllama", "text": ";👍🏽\t 語,bk 국+1xm!,タ", "count": 23}
+{"tokenizer": "tinyllama", "text": "　B's'LL がX're5क,yFwßL-Z中3ᵃq$ ENÖ+ßр G#Fᵃタy🇩🇪; ^-어'sZHello+6 П", "count": 61}
+{"tokenizer": "tinyllama", "text": "р!　語A\"*$어Qv한d  '+ {'s\"<~Hr 😀　タñrUtfK文N な4 H8?zHello%|f ", "count": 48}
+{"tokenizer": "tinyllama", "text": "URz@ 5ᵃo!\\中ñG `日т\r\nL>ÄV't'LLßт\rvg worldStraßeA", "count": 37}
+{"tokenizer": "tinyllama", "text": "PS7ʰ京\t ひ derj%v?ä<),тF~р5*l국h X中, >ひ(V\t🇩🇪nſHelloo|語s京ʰ", "count": 50}
+{"tokenizer": "tinyllama", "text": "x)'tU g: theöᵃß*  р иit語~~tj🇩🇪ß　タStraßejè", "count": 37}
+{"tokenizer": "tinyllama", "text": "6ввタStraße\r1中👍🏽|S ПO1京Straßeü$g👍🏽-ら+ が'LL어nt　]bʰ{|िum\"DäカfQ$", "count": 62}
+{"tokenizer": "tinyllama", "text": "  ?ナG'\r\n]AJsÄ ÜиF'tV3\r\nGDな>%/:Dな8文}\t'reFF東StraßeX,\"🇩🇪#2국Ü국вN", "count": 57}
+{"tokenizer": "tinyllama", "text": "^LʰOHFカm日̈한 der5e5", "count": 14}
+{"tokenizer": "tinyllama", "text": "9Hello\"éU京\r\n[ derеYH", "count": 15}
+{"tokenizer": "tinyllama", "text": " P{0G  本и!국%k(ñRʰ́ Ä6東Twpt}'NQ&'t@ 한MgSタñ  KQ _'文>Yy&", "count": 46}
+{"tokenizer": "tinyllama", "text": "^тcf7=Aि'tiQA0tS=_-|が 'sè /ि日1d &'t=ᵃa? derナfq/ Kカ", "count": 43}
+{"tokenizer": "tinyllama", "text": "&K|'sG_вN\n\n-u=ſSQ рc語", "count": 20}
+{"tokenizer": "tinyllama", "text": "9=語 h cらиStraße=中<SéRUö { ö 京's8dт어%\tkhE/u Qdकक\r\\ç", "count": 41}
+{"tokenizer": "tinyllama", "text": "東らStraßerhB[OſoS;] \n한", "count": 18}
+{"tokenizer": "tinyllama", "text": "'tEjÄV's'sä{b4{文́カY", "count": 19}
+{"tokenizer": "tinyllama", "text": "scO`SxJz9chW9Straße\n.j京V~JaTüqL\tなj　京}c's+ǅ\njʰ ^ひ👍🏽京*h u(/ǅ I0\rS>f", "count": 64}
+{"tokenizer": "tinyllama", "text": " the어3tиカöèjw5S der|Ö9äF  東bがZ 👍🏽&>̈pB Lि中́n!wc9K/京が worldÖ6B deriaQカM derǅ", "count": 64}
+{"tokenizer": "tinyllama", "text": "\"qがeéひqなL96F $2DDk2\n derеB`", "count": 22}
+{"tokenizer": "tinyllama", "text": "<  \n\n ᵃ65%タ derk'tʰ\r\n京京`\"/국StraßeIf/W world Ö%京", "count": 34}
+{"tokenizer": "tinyllama", "text": "ñcM　한 #カ  ʰеuaᵃ2n w\nがि'recな 京_lYʰü", "count": 31}
+{"tokenizer": "tinyllama", "text": ",yр 0=ら0~iYſがWᵃ )p|qBПG# G_E0'sRеs![👍🏽 RRbM u$'d국 ǅk*3국", "count": 60}
+{"tokenizer": "tinyllama", "text": "😀zHellöö5)京/bJ .\"0ü<7Straße\\ 中本Ä/ worldFN\r7y{東Y b3`q$é5VX", "count": 48}
+{"tokenizer": "tinyllama", "text": "G,е\tY!p рLpWр;F;äè3 vqx국5", "count": 24}
+{"tokenizer": "tinyllama", "text": " 0rKF çПLÖnO-[< worldH국'dſ ", "count": 22}
+{"tokenizer": "tinyllama", "text": "n5е_ dery", "count": 6}
+{"tokenizer": "tinyllama", "text": "Öひ're　bタG#Apß!zеBf'sV カG京PösoZ\n\nüſ", "count": 31}
+{"tokenizer": "tinyllama", "text": " der m \n[ö theな _M  ", "count": 13}
+{"tokenizer": "tinyllama", "text": "I ?Qäᵃ der文pи1H1な[Vǅ4{", "count": 21}
+{"tokenizer": "tinyllama", "text": "  world[öV7'reिʰ U👍🏽в", "count": 20}
+{"tokenizer": "tinyllama", "text": "Y-カ der\r\nA 　9VI0}*$'LLJqWकv \nタSoらü👍🏽~(HelloeTなè8mI{ g'LL.Пf+П", "count": 54}
+{"tokenizer": "tinyllama", "text": "fS국ナG:B0,ü", "count": 10}
+{"tokenizer": "tinyllama", "text": "̈'dñ8  I|京̈'d5,カe~XüZカ😀=한ナHello'LL ;i'reçèöÖ2O", "count": 42}
+{"tokenizer": "tinyllama", "text": "a,ᵃ%r3FK~Nि\" derML[らр\"j+jJ&ud\t'd\t7", "count": 31}
+{"tokenizer": "tinyllama", "text": "한: è\tG Straße東!nç3tñ́(한 \n't[ uüKXUら", "count": 28}
+{"tokenizer": "tinyllama", "text": "+한~ſひo'в̈ xP\t?еX/ derYyカ日StraßeñFi3C&s5ḱOo B 🇩🇪'tß3\rüWGF\nhMKक  \r\t der", "count": 63}
+{"tokenizer": "tinyllama", "text": "?рS>qひ}ひpg文á7Oि~\t  \n9Ls@🇩🇪6ül'd're\r\nÄQ)(s文 worldj👍🏽 _O gᵃE'П어1Kaе'reBÜ", "count": 73}
+{"tokenizer": "tinyllama", "text": "H the(ǅAPñ7 |2Uひ\n\nカ/̈{/  1🇩🇪ßL'dnsHPt!е7;2!국6 %S本i", "count": 48}
+{"tokenizer": "tinyllama", "text": "NöPÜHellol[1,Y}ᵃs>ZR🇩🇪ßÖ vтF\tタ AEU $#'LL  o derTIcsе$и\n\n日Q", "count": 53}
+{"tokenizer": "tinyllama", "text": "hな*usिकеoQ Öwm😀 p", "count": 18}
+{"tokenizer": "tinyllama", "text": "qиが&7ä'reि0\r\n}uʰ der't👍🏽QX.本%>ſſyKIñV  B 😀è3ि$　в > deŕ\\# A", "count": 58}
+{"tokenizer": "tinyllama", "text": "T) 日", "count": 4}
+{"tokenizer": "tinyllama", "text": "\n\n NXв어xn한 éd &  wd^タ'reWр9", "count": 23}
+{"tokenizer": "tinyllama", "text": " [J`(,wकönÄᵃ}  タGKB7 カFकв京C 文7C*\n िǅKP", "count": 38}
+{"tokenizer": "tinyllama", "text": "_T #sw  bカü　O어Oナj#G\r5 ǅDpb👍🏽h b語Lな3 日R語  ä ́i' \"\r\n ナé$ǅÄナy \nQ", "count": 62}
+{"tokenizer": "tinyllama", "text": "  G6   the京`_wǅ]f] the#語YaQJM`}😀ǅ", "count": 29}
+{"tokenizer": "tinyllama", "text": "8  7,😀ǅ🇩🇪カ'dh中ǅ!$I4<\re\"ら4tç der\\\n\nHa worldt@N", "count": 46}
+{"tokenizer": "tinyllama", "text": "$5?Hello어한\\y'tjカな!J-HP=   ^TRJナ/\tÜH語 C", "count": 29}
+{"tokenizer": "tinyllama", "text": "<*rkLDß😀̈é44ǅ日東иèिeusナ7 ;한9d/ü\\京Mßk 😀%", "count": 41}
+{"tokenizer": "tinyllama", "text": "w@@タ'sカ\r\n!\r\n中ÄтQ文]D0 Ö@[fÜ eвñ h=0{HStraßeA Mm😀MF( \nZ ẅe'LL", "count": 53}
+{"tokenizer": "tinyllama", "text": "4W 4\r\n'reS!'re) ", "count": 14}
+{"tokenizer": "tinyllama", "text": "S  'dナ語 the ),VकHkèdв  \n<̈2xрǅ%", "count": 25}
+{"tokenizer": "tinyllama", "text": "  L[L'LLв  т$Straße#0?🇩🇪)т", "count": 27}
+{"tokenizer": "tinyllama", "text": " the%Ü  ; ;9C$3çcß\tKZÄ\nTß),YÖ국tE  ̈yM한👍🏽?*`t{@🇩🇪F$рLら еǅ文ひ}&[%B", "count": 67}
+{"tokenizer": "tinyllama", "text": "nDXKOGक^국Qo LÜo<+^dED}w2'so%👍🏽ktñеStraßeÖ京h", "count": 42}
+{"tokenizer": "tinyllama", "text": "1 カ?7tßр!g's`OñhX/}8", "count": 21}
+{"tokenizer": "tinyllama", "text": "+な.がl(&çAd#nXu+　're)Na:　日:Пᵃ82[güqStraße \n^un東и東\n文|z \ns#'dHello2", "count": 54}
+{"tokenizer": "tinyllama", "text": ".~한  worldE 어pNld", "count": 11}
+{"tokenizer": "tinyllama", "text": "Nr%J3Xʰ the/!h🇩🇪U क3@국w-'dd\"ि:/👍🏽IT're{ ̈  😀{ S\nな́  ひ äE~}", "count": 62}
+{"tokenizer": "tinyllama", "text": ">[Ä🇩🇪8=", "count": 13}
+{"tokenizer": "tinyllama", "text": "'dK[n\rVG \\D *F _ Pな😀wタ^~eकwiе+97qDNV̈ナE<éü! O\r", "count": 43}
+{"tokenizer": "tinyllama", "text": "कwhカxFd}어(0-~2", "count": 14}
+{"tokenizer": "tinyllama", "text": "(=́{ `6中%rJHellobN world", "count": 13}
+{"tokenizer": "tinyllama", "text": "hA本*rſn è東DcKBÄM東京\\ R語'dCらSП=  YM`국'sе:'t 5T", "count": 39}
+{"tokenizer": "tinyllama", "text": "cWb", "count": 3}
+{"tokenizer": "tinyllama", "text": "uがPRgMVhèvxLL@J;ǅHello'reFR語StraßegAな|év9're", "count": 32}
+{"tokenizer": "tinyllama", "text": "lçSüq6W2äе.がt=ñw ʰ:'d  ᵃD рタ,0 the.i2O 9k어1̈中еカ\n\n국8=&?;PN's👍🏽東и", "count": 63}
+{"tokenizer": "tinyllama", "text": "8 HelloäC dern\r\n_7ſカ \nLd@x]\r日O1M　еタJ", "count": 30}
+{"tokenizer": "tinyllama", "text": " ü G'tGä語#M3O},zQ?fmy worldQWç theEſq5Ö в&ñ\r~5OX)H2語8't", "count": 43}
+{"tokenizer": "tinyllama", "text": "中?g2вUYеxがd", "count": 12}
+{"tokenizer": "tinyllama", "text": "  D😀éR ʰ derFQひなеHello`", "count": 18}
+{"tokenizer": "tinyllama", "text": "t#1nVV xJカ s ひrC=👍🏽SMÄb{ZÄе>어yNJ\n derカQカ[ре's30Ywकä日5än ?èo,{O", "count": 59}
+{"tokenizer": "tinyllama", "text": " *Eßç world", "count": 6}
+{"tokenizer": "tinyllama", "text": "'🇩🇪カПが the👍🏽fвfеx X$  P \ns|Dナᵃ ", "count": 40}
+{"tokenizer": "tinyllama", "text": "\r\nがſStraßeᵃǵタJ@dö '\\&👍🏽", "count": 28}
+{"tokenizer": "tinyllama", "text": "v\n\nK] Qö]&Hらひ", "count": 12}
+{"tokenizer": "tinyllama", "text": "JU<\t derEひtW>е PKi/本な4\nÄTTè's京6öHbrdMöな  ナS日NäÄD2な R8_7`xGÜ<日=;'t", "count": 57}
+{"tokenizer": "tinyllama", "text": ".d P", "count": 3}
+{"tokenizer": "tinyllama", "text": "}RStraßeе'カ#}_カ the2 derि't[\"Äj{W\rdr% =k xEm TU語ʰGVQY3ßBt!\\ç'LL der<日%w?", "count": 50}
+{"tokenizer": "tinyllama", "text": "がv7Sc日0W'S' ̈ # theら7カ", "count": 19}
+{"tokenizer": "tinyllama", "text": "👍🏽@M&ナzिd 🇩🇪 the&'👍🏽рW本本s the ç*р中_~вZ&V>вT8-OX", "count": 60}
+{"tokenizer": "tinyllama", "text": "なzなq🇩🇪 derfvmÜ tge(ſ>)が>京らひ\r\n5PCひZ't'tV\r3ひ本gJ\r\nè\\Flä world文xÖ'd東M  çकL  　|", "count": 65}
+{"tokenizer": "tinyllama", "text": "YBg854nрſvb the^ö\r\n.ि語@ b 9~3т", "count": 25}
+{"tokenizer": "tinyllama", "text": "京語l :6\tタᵃÄHfwПPʰ$東é'd%q(D", "count": 26}
+{"tokenizer": "tinyllama", "text": "+Straße!M̈и+Y*^\tv'sт", "count": 17}
+{"tokenizer": "tinyllama", "text": "П&KIQdHÖkXCs*  ]क\"'t中w f  🇩🇪7Qひ world& .\\E_HelloカिHelloS \\ia", "count": 47}
+{"tokenizer": "tinyllama", "text": "`?т2b 한]  *gHello=wら?ナи 'reeHello   2P ", "count": 26}
+{"tokenizer": "tinyllama", "text": " ᵃrП́ the,*=\"rw +> \nuрeな(,&本　  theʰ{%A'öD и;`övカfCHello7zUП", "count": 46}
+{"tokenizer": "tinyllama", "text": "Пカ", "count": 2}
+{"tokenizer": "tinyllama", "text": "s\r\n  t京ナIqg'f̈V", "count": 14}
+{"tokenizer": "tinyllama", "text": "J IHy-k!\r\n東 n#RpZр1?HelloCöक3िH", "count": 24}
+{"tokenizer": "tinyllama", "text": "  theo어+\tिCa　}1 Ge(RkR", "count": 16}
+{"tokenizer": "tinyllama", "text": ";ñ B*s한Straße😀l`RLि!\"", "count": 18}
+{"tokenizer": "tinyllama", "text": "7çü4中2~b#n *рक*8jk^　िÜP& िq} 3😀 world|'s　'LLö  и*カçDQе京어한ñI", "count": 54}
+{"tokenizer": "tinyllama", "text": "zPſ6한?N 한uなw& 👍🏽カ|Iр文xRT\t'tgdタö😀) 어TpS  SY\"LW ", "count": 52}
+{"tokenizer": "tinyllama", "text": "ǅ6*gらStraße4  '文 B東?LÜ@क*é>z\nPn4😀-", "count": 34}
+{"tokenizer": "tinyllama", "text": "ǅCb~.ÜCZq%äStraßeJA", "count": 18}
+{"tokenizer": "tinyllama", "text": "ö(?ñ worldf derÖ어 \na\")'tſ 京q", "count": 18}
+{"tokenizer": "tinyllama", "text": "E$", "count": 2}
+{"tokenizer": "tinyllama", "text": "국't국 \tvo국😀lxि'dв!тPF京 Ü日Mтvd W world world^  gä äU ПナがеП中ßिq8", "count": 48}
+{"tokenizer": "tinyllama", "text": "ß@'rey e^ the カ語\\ñd eLV7вCSB \r!@r3日UqStraße.[👍🏽", "count": 41}
+{"tokenizer": "tinyllama", "text": "3東V7H<n K.  theカ\n\nF@GB.ḉ@\\", "count": 23}
+{"tokenizer": "tinyllama", "text": "#qßrh$e4C東\n\n😀u", "count": 16}
+{"tokenizer": "tinyllama", "text": "'sTH$😀#nがV ~なな*hHä'dmB3ᵃÜ🇩🇪Uтʰि!{", "count": 42}
+{"tokenizer": "tinyllama", "text": "Yzi=e! der@ 'LLNR　Hello.[L+ि\n 本ſmYПççiLM worldgü>ひZ=D\\$ p ", "count": 39}
+{"tokenizer": "tinyllama", "text": "\"pTカ't5 i ǅがl  ", "count": 14}
+{"tokenizer": "tinyllama", "text": "çpU\n\n 'dвPſVO'LL　Hello6ʰ", "count": 18}
+{"tokenizer": "tinyllama", "text": "f日中%ᵃ", "count": 7}
+{"tokenizer": "tinyllama", "text": "=}JÜ\r\nʰ theв!` ders\"è\\[9ä́_UxS한 -o>e ITQH'd>{Q}DD東ि|語рl文  T?😀üC", "count": 55}
+{"tokenizer": "tinyllama", "text": "がFtr 7otиüП</wMü}1🇩🇪Eр derx\r\nU Ä0क  и\nq%'sL9 р🇩🇪b_̈'d scüB7|;е日ſ!", "count": 67}
+{"tokenizer": "tinyllama", "text": "語k$\r\n本Dc2äAǅwy \n4SKᵃwT文\n국@Cx} ひ文t>HellouJ東😀L/ñ9Пв", "count": 51}
+{"tokenizer": "tinyllama", "text": "!M  >aF日'T=東ᵃp0SJ\\e äQCy語4duÄиカ k5~S", "count": 33}
+{"tokenizer": "tinyllama", "text": "05WÜC\r\n:BHello0  \n\n/Ü'd'dIg\nX/è|'t%カ", "count": 31}
+{"tokenizer": "tinyllama", "text": "_z\r\nǅ}\"2-/&ſ  !Äな-\r\n'te京j<xyT ^", "count": 27}
+{"tokenizer": "tinyllama", "text": "<😀I derтタ\r\nÖÄ-́ derG_ि 京'LL's;0$ab|ひ;ä5Q4xI' \n/{f", "count": 43}
+{"tokenizer": "tinyllama", "text": " S タ@ the8  ПタᵃらHello'tw&(4R2\\b어/🇩🇪s京8}xカHello　", "count": 43}
+{"tokenizer": "tinyllama", "text": "B/Nr!} ᵃC!< 어0", "count": 15}
+{"tokenizer": "tinyllama", "text": "カx\r\nP;>Straße한'dw👍🏽 yE1ſ ", "count": 27}
+{"tokenizer": "tinyllama", "text": "京Helloナ2ひ\n\n", "count": 8}
+{"tokenizer": "tinyllama", "text": "ᵃがgèi~П7@국V中́I%タeナеu Jſ1&r", "count": 29}
+{"tokenizer": "tinyllama", "text": "]lj　 ̈AhWÖt*sQ çh=5alöçx;A👍🏽3pFs~ u語l-िX51:Q", "count": 46}
+{"tokenizer": "tinyllama", "text": "7G&h ǅ\r\n\\ らr \nxsm~Iि{d東<kè7BStraßeиHelloY", "count": 35}
+{"tokenizer": "tinyllama", "text": "カ|k р \n क국語V'd\r\n#'spt\r日3W\t\t  Z\re\"'re'LL", "count": 35}
+{"tokenizer": "tinyllama", "text": "ZÄÄ?Pßв́w^ thelé京\r\nbo िT]́x3nU't中-I q本WCG5v語ǅ3 ", "count": 41}
+{"tokenizer": "tinyllama", "text": "bç'd derXWG(Z.j7  ", "count": 14}
+{"tokenizer": "tinyllama", "text": "xz`😀`W국kMwFNÄ6  dermu der9Ty't'FStraße 　[文京A한üe=|DM本िрHnS<́FM", "count": 51}
+{"tokenizer": "tinyllama", "text": "क́ävǅ한 Mナなwööè\rカür한カ ß日어T\n;u der= theKxw本yß3häR\r\n}piVʰy@ 2ПTな", "count": 54}
+{"tokenizer": "tinyllama", "text": "\\:3ʰ &な2xgᵃ8@ct<", "count": 16}
+{"tokenizer": "tinyllama", "text": "ᵃ \nt X H ÜpèG🇩🇪\" 'LL2.\"vyYM東ñçтD국M-DISm hüqтebnWçᵃ}éIら 87Q@DNk  ", "count": 63}
+{"tokenizer": "tinyllama", "text": "🇩🇪ZカM'\rKな̈ derиHelloüm`", "count": 23}
+{"tokenizer": "tinyllama", "text": "öÄ어\th中AʰHelloт4h`5fиक(H}5/ B\"NVh8dF<EnEsら]ナ=", "count": 37}
+{"tokenizer": "tinyllama", "text": "GF v~<a der}= 'wdmö9\\;j국* ǅn%a%bG日h\r \n@[", "count": 33}
+{"tokenizer": "tinyllama", "text": "}v'tYिſö日a 9é;\r\nÖGकら.äc9'dрHello ßक;", "count": 31}
+{"tokenizer": "tinyllama", "text": "ᵃHIが= \n7}  k국ZÜक rH:", "count": 20}
+{"tokenizer": "tinyllama", "text": "#東>PS&@ʰp😀Ö$s\nV !Aカक \npиタ S the'd\"]!́  world\r\nTQ='KVカÖрがカü", "count": 48}
+{"tokenizer": "tinyllama", "text": "東I= äᵃ&", "count": 10}
+{"tokenizer": "tinyllama", "text": "@еX>><カ &c\"\r\nxéü^カQ́らт", "count": 19}
+{"tokenizer": "tinyllama", "text": "カ^[한StraßeD '.G)\nXStraße  и]ら4Yé\r\n+в\"pи\"qTlzwǅ Bらb'sh|*l^MП", "count": 49}
+{"tokenizer": "tinyllama", "text": "ZC'reGрQ4 'd M", "count": 11}
+{"tokenizer": "tinyllama", "text": "Straße  \nが }̈😀^v_qz9&jL%c. иR=éIp6なs", "count": 31}
+{"tokenizer": "tinyllama", "text": "L#R5\rら 0$6ñ中_", "count": 13}
+{"tokenizer": "tinyllama", "text": "'re文Y }Oカ9 \nnY", "count": 12}
+{"tokenizer": "tinyllama", "text": "'d 2 カ?本", "count": 8}
+{"tokenizer": "tinyllama", "text": "Ä \n국Q \n],ら", "count": 9}
+{"tokenizer": "tinyllama", "text": "Od& 6_\r v&nカв&J \t'Hǅ?", "count": 21}
+{"tokenizer": "tinyllama", "text": "bÖHello タ=2ナq #bj& theǅ world#Vिf", "count": 21}
+{"tokenizer": "tinyllama", "text": "<g x \\рカ>M SGCS語't8M'8 中é're(K6рि@̈hDèhèAC>'d", "count": 38}
+{"tokenizer": "tinyllama", "text": "* theñ한ナUSL 6 8中ü!n/ſ́", "count": 18}
+{"tokenizer": "tinyllama", "text": "~pt🇩🇪", "count": 10}
+{"tokenizer": "tinyllama", "text": "AStraße#A,\n\n|g\n\nß한4ナ \nр@ü_7$ ?ik6 $;p 語*)本ǅ <カ the", "count": 40}
+{"tokenizer": "tinyllama", "text": "ß$$hq", "count": 5}
+{"tokenizer": "tinyllama", "text": "pd'\n theナ \ndy7", "count": 9}
+{"tokenizer": "tinyllama", "text": "?L's?xb+*@ 0らML\nな)C👍🏽 worldǅTタ(~iक 京ñe", "count": 39}
+{"tokenizer": "tinyllama", "text": "xZ  worldxT)lQx7'LLなe @b*7hß文 1't|B \n*Q[!*2 語вRö3  中 StraßeI 0Ö", "count": 49}
+{"tokenizer": "tinyllama", "text": "$Hello're&\n語&K が カTi😀👍🏽aGOt П7  8C)👍🏽g\tq,👍🏽т (3~ẍ", "count": 62}
+{"tokenizer": "tinyllama", "text": "ñ~日u O?è+bな", "count": 11}
+{"tokenizer": "tinyllama", "text": "'reтFVStraße本ü\\Ö한dYT\nR", "count": 18}
+{"tokenizer": "tinyllama", "text": " theUq  sDÖO der IßKp/ç're+カStraße'e_N%i", "count": 29}
+{"tokenizer": "tinyllama", "text": "&한o京(r è本yX0%ら's1 the2O ç京 J̈dJ? mI", "count": 29}
+{"tokenizer": "tinyllama", "text": "j", "count": 1}
+{"tokenizer": "tinyllama", "text": "\n\n", "count": 3}
+{"tokenizer": "tinyllama", "text": "sHelloがW\r\nr.한W_HZ", "count": 13}
+{"tokenizer": "tinyllama", "text": "̈本`ß4ひ ら\rA>らu\"t the本f;WStraßeиs+Iカ^:$еä[#", "count": 35}
+{"tokenizer": "tinyllama", "text": "東fñカr8 f東X국Ä|*ü  🇩🇪xſ文Bpカ\rqWL1ᵃ", "count": 38}
+{"tokenizer": "tinyllama", "text": "|yp{L文.Q8M4GJтj日Z_lタp,ǅI)U @?;ひL\\Vwäカ", "count": 36}
+{"tokenizer": "tinyllama", "text": "🇩🇪i>(ʰuAタl\"UßyyjuHelloz🇩🇪aç3Straße+Hl60カPuL w", "count": 47}
+{"tokenizer": "tinyllama", "text": "0O'LL  👍🏽*ǅÖ] ", "count": 20}
+{"tokenizer": "tinyllama", "text": "=;中jsʰ\n!", "count": 7}
+{"tokenizer": "tinyllama", "text": " ,Tj 2$Oäq0ñら=lJu ひ3タ V \nr2 world̈'LL4\n'tZd|Um FकS한日'3%", "count": 47}
+{"tokenizer": "tinyllama", "text": "　[T👍🏽Straße4:cе ら\n\nがg👍🏽в`'t[Q😀uП >!wñ&:Wj)+U中é're", "count": 59}
+{"tokenizer": "tinyllama", "text": "qwA>O<'d^ÖF Iが 😀H M한? е*S국е_한", "count": 28}
+{"tokenizer": "tinyllama", "text": "~té́Vカ;ç👍🏽V der語THellon'reвf́>O world theç ʰR( Rkि\r本ひ本H the thepar\te`р {[Ey", "count": 55}
+{"tokenizer": "tinyllama", "text": "'reDタि_açöhWRX'LLÜçg8 ! v東 Cि́", "count": 25}
+{"tokenizer": "tinyllama", "text": "mÖ日)", "count": 4}
+{"tokenizer": "tinyllama", "text": "\r\n the#  the5\nkD\" \nि]Ns😀1^Wᵃjg+f`@2}Yñ#", "count": 38}
+{"tokenizer": "tinyllama", "text": "ᵃ́7文[Straße>(Hç1🇩🇪ひi'rern xタ$;@/<SäX|🇩🇪Q)  ,]l-\" G🇩🇪$7कStraßeuᵃ$H 京\nStraße", "count": 82}
+{"tokenizer": "tinyllama", "text": "국%&'repr'd=HtなकO-çK=Hs국\r\n文な", "count": 26}
+{"tokenizer": "tinyllama", "text": " der  文Wfe|е\n\n1rт world  * \t\"LI=Lな　r }s국o<ſStraßeml", "count": 36}
+{"tokenizer": "tinyllama", "text": "'Kl're\rrgí rᵃ　!'dNПpW국*S Äp 6U  ñ語 go)Xक:ü-^1s+W ?日 world어Mg\\ü deräStraße", "count": 56}
+{"tokenizer": "tinyllama", "text": "カ@(S*lU0Äe한", "count": 12}
+{"tokenizer": "tinyllama", "text": "#{M >2 9カǅ the/D#'LLif　$MBk*C\tPMǅRら6　:6SП=oÖHelloHellocièl\r\n öなM=", "count": 48}
+{"tokenizer": "tinyllama", "text": "R~Hè🇩🇪S@lä7h", "count": 17}
+{"tokenizer": "tinyllama", "text": "ëtÜs#`тwBZ]\r\n", "count": 14}
+{"tokenizer": "tinyllama", "text": "J́ZcKL\r\nMx5& s`中;q- &'reПकö👍🏽", "count": 32}
+{"tokenizer": "tinyllama", "text": "Z\" worldſ🇩🇪'd東30,[　VFᵃ-2a9\"Bẍg_lÖ", "count": 35}
+{"tokenizer": "tinyllama", "text": "xS0}*क77aE어👍🏽국中\"👍🏽P", "count": 31}
+{"tokenizer": "tinyllama", "text": "6😀ひकがs't👍🏽ᵃ {рक어  　文́\rMZI  4 worldé\t pStraße　ひ+\nAFрナ4%jOYi1_zz]x\n\nq,&1", "count": 68}
+{"tokenizer": "tinyllama", "text": "어z", "count": 3}
+{"tokenizer": "tinyllama", "text": "日A}'ñ qvカ$[本&{;es,eB~*\"gHelloकFbがu", "count": 27}
+{"tokenizer": "tinyllama", "text": "\n\\🇩🇪P京", "count": 13}
+{"tokenizer": "tinyllama", "text": "èひ PAE&G\t'reKF>국a3&", "count": 16}
+{"tokenizer": "tinyllama", "text": "\n\n  $'> H \nkäक G Sſ", "count": 15}
+{"tokenizer": "tinyllama", "text": " Straßeèd`\rd̈ 2+'re$h*вbUl한\n\nE", "count": 23}
+{"tokenizer": "tinyllama", "text": "0wカEᵃ*'d C", "count": 12}
+{"tokenizer": "tinyllama", "text": "カ_'LL rらр한FがG der76> Q 0{Jr_ひSes derim^A9d'dП- S`Helloि🇩🇪@1'LLQр\n\nß3ᵃ der]fé8è^x", "count": 70}
+{"tokenizer": "tinyllama", "text": "?京Jр ~Qx/*ö̈K?", "count": 13}
+{"tokenizer": "tinyllama", "text": "k 😀Jſel R,ナ  .=1ç GカcMè world {'LL なрülwjhÖJxが}8東  Ä̈Ü .mLQ", "count": 46}
+{"tokenizer": "tinyllama", "text": "DAStraße/Äp東're вx{0ſHello\n\n der4 DaqG'reBᵃ", "count": 30}
+{"tokenizer": "tinyllama", "text": "\n\n,<}ナ theカ _EタらlJßq;'t|中らJ😀\n;(|kW'xp^h　y국Al't", "count": 43}
+{"tokenizer": "tinyllama", "text": "q{̈ä're 'LLf어1ß 日& Z the국Jü aO>ナ👍🏽<4(iq本}'t/ \\oñᵃ  theWzbZ theвひ74", "count": 59}
+{"tokenizer": "tinyllama", "text": "　''reQ\r\n文語zY😀", "count": 15}
+{"tokenizer": "tinyllama", "text": "#}京@ b", "count": 5}
+{"tokenizer": "tinyllama", "text": "ß\n\ntä \n рnвタ\\Pg\\W4\rJ<5ǅZ\n\n)E", "count": 29}
+{"tokenizer": "tinyllama", "text": "wF.FU/QB?|рÜᵃ日/ rY the^Rt theナß本ÄJ'd日京\n\nE_bi\t本カqP", "count": 43}
+{"tokenizer": "tinyllama", "text": "g|日%$ \n}Ö derな😀#中n})}x@ſvHCß-t 국BvUn-tWe theStraße한東タ\n\nTtt\t n한*ナX", "count": 54}
+{"tokenizer": "tinyllama", "text": " ", "count": 1}
+{"tokenizer": "tinyllama", "text": "日 カ\r>ü ü'sl55", "count": 12}
+{"tokenizer": "tinyllama", "text": " théGñÄなタiП-  der?v\"0W47M'd^カ;yひQoä-HelloiStraße", "count": 37}
+{"tokenizer": "tinyllama", "text": " VVGm j\r\n \nSカsBOö 6~がJ.t dert국東+ :어è文", "count": 32}
+{"tokenizer": "tinyllama", "text": "Ö \n.и_sKカ8Y文/ʰ)िäひ'd't\"कT] world'sF`京&\r[u", "count": 36}
+{"tokenizer": "tinyllama", "text": "/語G3ü   mdq東\n\n35x6Ul'タ üJ [тx derwè어\r\nYBD'd東", "count": 37}
+{"tokenizer": "tinyllama", "text": "タp9t\r\n06", "count": 9}
+{"tokenizer": "tinyllama", "text": "Cひǅ7Büカら' theक`.]w!;Z_kk a文がQ 3B\"fв[\r\té'd中カ _h|", "count": 41}
+{"tokenizer": "tinyllama", "text": "7HelloकXé국рな中O(иXW本\n!SᵃS'tè|mQ ]é語JHelloNカ̈  Vk文T~ 7P", "count": 46}
+{"tokenizer": "tinyllama", "text": "X#q文T< world\"#", "count": 9}
+{"tokenizer": "tinyllama", "text": "]Hello7", "count": 3}
+{"tokenizer": "tinyllama", "text": "'reʰр8🇩🇪z +'LL", "count": 17}
+{"tokenizer": "tinyllama", "text": "Äᵃ'UBoक .U日", "count": 11}
+{"tokenizer": "tinyllama", "text": "한V1kY [_S K\r̈dfN本 6+]̈f{Bs qʰ=:'ii$dPj?NひÖ der)sが.hʰ ʰn", "count": 47}
+{"tokenizer": "tinyllama", "text": "한क \n本r'LL%jH", "count": 12}
+{"tokenizer": "tinyllama", "text": "😀h  :}語HXé👍🏽;Lि4k?e7O7Äſᵃ東カ한1nи🇩🇪]カju deröTqカ  %/тV world'd,  gü", "count": 70}
+{"tokenizer": "tinyllama", "text": "qM本\"ç?क ñrh!👍🏽è2 o)W~s🇩🇪q\"в O@ナn{Wu ひ.@'dk", "count": 49}
+{"tokenizer": "tinyllama", "text": "éü=c 'd,I*oxÄZWв*r8m 京è}ö ", "count": 24}
+{"tokenizer": "tinyllama", "text": "w world", "count": 2}
+{"tokenizer": "tinyllama", "text": " .がе東@ç $Y국文yI어😀 the hカq\t\n\n,Q''sÖ;DPo?\n рIr$ world>g  어", "count": 45}
+{"tokenizer": "tinyllama", "text": "9cj;ら́\t　`_pß*京", "count": 15}
+{"tokenizer": "tinyllama", "text": "が京0Öyr=QCk\t'sVa$вナiʰHello} 'LL%d%東+So7[/'iL}p", "count": 37}
+{"tokenizer": "tinyllama", "text": "Dèr<j한>üp8'rex 😀 Ö worldñ7Gè  \t4}öbwʰʰなü:Z@Öt%", "count": 41}
+{"tokenizer": "tinyllama", "text": "RJが;<Bßひ2>ç語\nHelloв語0  ि?Wz're", "count": 24}
+{"tokenizer": "tinyllama", "text": "Kſy{b日 OVr日R nIm7OérStraßeStraße the中が~pX", "count": 28}
+{"tokenizer": "tinyllama", "text": "aZ6l\rz2K.本'LLि)\"中2ä語Jſ[eè{ru)(тナ&%", "count": 30}
+{"tokenizer": "tinyllama", "text": "'reè!Hw'tjがüなTCpI der.$ the[N the 어D$\\कaタuÖ_a$ ", "count": 34}
+{"tokenizer": "tinyllama", "text": "京DbN;uU'JX本'dナñ$N29atв'R̈F> q̈rpи タ京;l%ä4е👍🏽̈👍🏽", "count": 56}
+{"tokenizer": "tinyllama", "text": "Kj'sü7ら한=Nеカ worldoMs京I 어ひſZ", "count": 23}
+{"tokenizer": "tinyllama", "text": "р  らr&X.ißbカПn  ", "count": 13}
+{"tokenizer": "tinyllama", "text": "6ǅ́カカL\nÖि worldl T~7 der&́)е어", "count": 22}
+{"tokenizer": "tinyllama", "text": "öकひ B ^  ]d+еbF{ world e're'dтjfèらk  Fタbn　R è ''s 're}è su-hçStraße theiCD're \n\n thel", "count": 56}
+{"tokenizer": "tinyllama", "text": "日q日3r~NgwbV́ 'dpPnéS Hellou!Äカ} タU>&s語ナр'reÖEи%^tkahO| i  's   ü", "count": 51}
+{"tokenizer": "tinyllama", "text": "ñ,{タ👍🏽ä😀*; 1MWy  \nÜG's  ʰqXo *yWö}Uカz%,\reC8<I'd", "count": 53}
+{"tokenizer": "tinyllama", "text": "Ä文국👍🏽  'dв!}ößz't 京~т \n\n0'tto,x \"9東語", "count": 37}
+{"tokenizer": "tinyllama", "text": "́Ekらßm's( worldY", "count": 12}
+{"tokenizer": "tinyllama", "text": "ʰ5Ü5<*l`\\öひAらiſПтF어कеPカ~ ̈ʰäKʰe\\иdOCVI東>  m ᵃn🇩🇪", "count": 55}
+{"tokenizer": "tinyllama", "text": "cEc6ि Ö🇩🇪'd한 рOhñ'dAé- r어\"@3Zn* rÄK~$　af8Üи world% \närがHelloSt}िWв", "count": 55}
+{"tokenizer": "tinyllama", "text": "<'st5Ö\n\n'Wら<0CKHl  derv2Pßdbſक$O な6nW?_M文иcpナらk'👍🏽日'reZ  \nL\n\n%~}s", "count": 62}
+{"tokenizer": "tinyllama", "text": "Straßeè*'कsZ:  \n99ら#", "count": 14}
+{"tokenizer": "tinyllama", "text": "$ön😀Ä(y中ſt語0が's9 'LLなTpSF't  в4'dZ/京/еA tW 👍🏽 \nिçʰカ5  -A-🇩🇪", "count": 67}
+{"tokenizer": "tinyllama", "text": "T̈F{ Пカbiñᵃ der)2ʰQカ", "count": 17}
+{"tokenizer": "tinyllama", "text": " , 京-kि|東^6  !", "count": 13}
+{"tokenizer": "tinyllama", "text": "東🇩🇪?́ Q2H ~7?Db''d", "count": 21}
+{"tokenizer": "tinyllama", "text": ";é(Hなти👍🏽тjA👍🏽р l한 ǅ🇩🇪 日ÖAç어\nが the+4VöM!^CH'd&8_ǅ ny9 \n\nHelloä6g#̈ ", "count": 75}
+{"tokenizer": "tinyllama", "text": "X ?gᵃᵃ 東[FV🇩🇪o^東т 😀é本!E中  theStraße", "count": 41}
+{"tokenizer": "tinyllama", "text": ":eepCmП-4!Az文 \n\n\n\n4Zʰ]т+ :\r\ng+\n; 語E `́ᵃǅDAe6=`京иa🇩🇪Ü", "count": 56}
+{"tokenizer": "tinyllama", "text": "<ʰä국V'dStraßeev👍🏽+が.국Lbñ Y  + 2́u ̈'ẗçh語3_{", "count": 44}
+{"tokenizer": "tinyllama", "text": "sStraße the/M'reoH9Üが M4,Ö< ǅL 'LL[DF어's[ ́v+국 3국がt😀らa world \r  'rey<", "count": 53}
+{"tokenizer": "tinyllama", "text": "ü6がnÄ)}語:6A~C\n\n ि*", "count": 17}
+{"tokenizer": "tinyllama", "text": " タ +어$ der4N}한t🇩🇪'LL̈Oカр\tな der  c*,wE4\r\nUक\r\n3\r\n \nxṔèz", "count": 50}
+{"tokenizer": "tinyllama", "text": " c京Oカ!wG?)yXÖ", "count": 12}
+{"tokenizer": "tinyllama", "text": " \n🇩🇪 the?", "count": 12}
+{"tokenizer": "tinyllama", "text": "(Q4ᵃMがq Jh_らßñ\tらc語C i']1_ 1w ᵃ文 \n Ÿи0Cu \tdñèकBक8東국", "count": 51}
+{"tokenizer": "tinyllama", "text": "s%akM k$", "count": 6}
+{"tokenizer": "tinyllama", "text": "&J Z) 8q`. thejÄ\\}😀6и日क BQ9SſL 'dähカ カ\\3>é?  world", "count": 39}
+{"tokenizer": "tinyllama", "text": "NX ^6Y_́ 9カ ]rz-[z$ß क8　П~u2́{ि q\tW\rné\n\n", "count": 36}
+{"tokenizer": "tinyllama", "text": "　Ä'repÄM_@e", "count": 10}
+{"tokenizer": "tinyllama", "text": "öA world]&C🇩🇪ad7рǅZ`'d本ナП)l1語k=Q ", "count": 33}
+{"tokenizer": "tinyllama", "text": "'dGeP{è6è 語 the   語;\n]r XÄ'dh<文вカßg̈\tタ?\\ci \"'s worldAé", "count": 38}
+{"tokenizer": "tinyllama", "text": " k本w`タÄ's[Y&ç ^еw#x}ſK$I4Q!#lQ8 p`E3らW)👍🏽CHelloHi국H world5öStraße'd->", "count": 59}
+{"tokenizer": "tinyllama", "text": "'LLCрSиçらr本Y'\r\n0R&;\nF\r\n(本е\nhIP'tP어🇩🇪^@s Ll@l world Hello\\O😀h'O4Ä", "count": 61}
+{"tokenizer": "tinyllama", "text": "국कQ中ʰtöx@Öo!ZÄ9.,ᵃ O ", "count": 22}
+{"tokenizer": "tinyllama", "text": "文ǅ語ZL국1ナПR4  5|ö'tßeM|ら're$6 +.)StraßeV`tGS\n京`~StraßeU", "count": 44}
+{"tokenizer": "tinyllama", "text": "@ü ñhp world9cñ%文Helloиカ}T어Y*<çMJHナPçüGt  der국語'dhStraße'd%.́d한C'WD어#\nÄM", "count": 53}
+{"tokenizer": "tinyllama", "text": "\nXカn%H{ i8_Straßeǅ'reM't4LÜw9\ry+\\;V;ZQUlO{U6däi+Dé", "count": 45}
+{"tokenizer": "tinyllama", "text": "語ᵃME6\r\n*Enjŕ$(Üèd ナ3", "count": 21}
+{"tokenizer": "tinyllama", "text": "\tç world  NカLHOl ß%ü @'wmd,'s;がl,kß", "count": 26}
+{"tokenizer": "tinyllama", "text": "&éoN1ß@ñDoHJbg world  ;😀국 the👍🏽HelloV 'tな", "count": 33}
+{"tokenizer": "tinyllama", "text": "LßbBEUHelloらQ6ひи+文{ worldᵃbナ]K　日вo[국'dеナ 2ZC ]%が　!\" a3कBП&JᵃJ a文9", "count": 56}
+{"tokenizer": "tinyllama", "text": "k3", "count": 2}
+{"tokenizer": "tinyllama", "text": "&Wiw*% #ßMeカ pu6uSカPカ東ö;33ü/P", "count": 24}
+{"tokenizer": "tinyllama", "text": "aHello l è3F\n\nd thé ;C국😀L' :ſ_ 8dñ'E\toénが\rſT>YZらä+èП", "count": 45}
+{"tokenizer": "tinyllama", "text": "|語 der2-😀 ", "count": 10}
+{"tokenizer": "tinyllama", "text": "\r\nBI", "count": 3}
+{"tokenizer": "tinyllama", "text": " jCP  vPcNiな京@gв東,4T=jf x文s?<Qtß　국{ᵃǅsi文'reñk", "count": 43}
+{"tokenizer": "tinyllama", "text": "/カ h \r\noFäA らSCe\r本{v文MRNbM", "count": 23}
+{"tokenizer": "tinyllama", "text": ";0̈X'dナ world ,тカ.😀\r\nвG̈국w京E7ö中n\r\nmÜNक Ll:  4/=}　CI're2AO", "count": 50}
+{"tokenizer": "tinyllama", "text": "\rä本F*V!4*0u aтナÜ\n\n\n\nN  P\r\nि\n어KNpk", "count": 30}
+{"tokenizer": "tinyllama", "text": "어j8\\2 L g|>G-語~_ナ& 'd87C>-тxеß한 .'t\red}\nǅ　N", "count": 41}
+{"tokenizer": "tinyllama", "text": "FǅATñTl/b2rH#'d8東Äl5's`ERZÜ1q中な>Hello w|WJ} 京日C :ſǅ京è';'reIñ\\ \nñ{D", "count": 59}
+{"tokenizer": "tinyllama", "text": "vrS", "count": 2}
+{"tokenizer": "tinyllama", "text": "/`なᵃ't>　   ñ:", "count": 13}
+{"tokenizer": "tinyllama", "text": "\n\nеp's\na  o @👍🏽  ö👍🏽faеJ't'rë/\rER80n  p >ü}X4 `N vな8ひ=s  語v한Jä", "count": 66}
+{"tokenizer": "tinyllama", "text": "xyäg ʰä", "count": 6}
+{"tokenizer": "tinyllama", "text": "MA#é\r\nकdA<Qが>がKu'rer~u@ the0\\R't  k \n0<sA&uj中b̈", "count": 39}
+{"tokenizer": "tinyllama", "text": "]Straße WzAcy'dら_👍🏽CG京本n", "count": 23}
+{"tokenizer": "tinyllama", "text": "タᵃе,IП,JÖpLカ,F", "count": 17}
+{"tokenizer": "tinyllama", "text": "ナ4hJ'dn@", "count": 8}
+{"tokenizer": "tinyllama", "text": "kS~語y&`が=е:xñなx東タ\r\n the AÖDöт日.wナеL_ 국X", "count": 36}
+{"tokenizer": "tinyllama", "text": "3c4xナ+*иd  ]कʰoÜ~タ한語ひJñ ʰ\r\n中ʰ9कç\"京", "count": 34}
+{"tokenizer": "tinyllama", "text": " Straße本 р R", "count": 7}
+{"tokenizer": "tinyllama", "text": "?'re е  \n9N!p'tPlナ5E한6국;  world'reöbß8 |SS ÖH's  東 ", "count": 40}
+{"tokenizer": "tinyllama", "text": "カd Qz l文", "count": 8}
+{"tokenizer": "tinyllama", "text": " world v*　  AStraßej'LL.文'LL'LL,m어カ A're09\r\ngDе!x=कि\"語 　SПK", "count": 45}
+{"tokenizer": "tinyllama", "text": "कM~1# \nb \n*\r\n'uひ=ç\\в?^Nᵃxch W/ s8 world)èl3カIJ^è2UH", "count": 46}
+{"tokenizer": "tinyllama", "text": "ß👍🏽:>?a't국yp ä*aひñ|Ö \n's", "count": 29}
+{"tokenizer": "tinyllama", "text": "qt0=] StraßeL어文タが語zPng　рEcÖ", "count": 20}
+{"tokenizer": "tinyllama", "text": "@34\nP\tеè\\Guü*c]&üè 9 're're'6  &IjfᵃuwÄ", "count": 35}
+{"tokenizer": "tinyllama", "text": "рStraße}Q^X*Ä(Hß(Kи", "count": 17}

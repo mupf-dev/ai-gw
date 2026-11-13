@@ -96,6 +96,15 @@ impl Runtime {
                 (*calendar).clone(),
             )));
         }
+        // Strikte Budgets im Cluster exakt über Redis (F106), sonst im Abgleich-Takt.
+        if config.counters.backend == aigw_core::config::CounterBackendKind::Redis
+            && let Some(url) = config.counters.redis_url.as_deref()
+        {
+            budgets = budgets.with_shared(Arc::new(
+                aigw_proxy::RedisBudgets::new(url, "aigw:b:")
+                    .map_err(|e| format!("Budgets (Redis): {e}"))?,
+            ));
+        }
         let budgets = Arc::new(budgets);
         let budget_sync = budgets.spawn_sync(Duration::from_millis(config.billing.budget_sync_ms));
         tracing::info!(

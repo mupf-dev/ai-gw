@@ -82,6 +82,7 @@ async fn run(store: Store) {
             period: BudgetPeriod::Month,
             warn_at_percent: vec![80],
             hard_limit: true,
+            enforcement: Default::default(),
         }),
         ..Default::default()
     };

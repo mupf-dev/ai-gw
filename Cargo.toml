@@ -21,6 +21,7 @@ members = [
     "crates/aigw-providers",
     "crates/aigw-proxy",
     "crates/aigw-store",
+    "crates/aigw-tokenizer",
     "crates/aigw-webhook",
 ]
 
@@ -47,6 +48,7 @@ aigw-plugins = { path = "crates/aigw-plugins" }
 aigw-providers = { path = "crates/aigw-providers" }
 aigw-proxy = { path = "crates/aigw-proxy" }
 aigw-store = { path = "crates/aigw-store" }
+aigw-tokenizer = { path = "crates/aigw-tokenizer" }
 aigw-webhook = { path = "crates/aigw-webhook" }
 
 # HTTP-Stack (E2): axum 0.8 auf hyper 1, tower, tokio.
@@ -102,6 +104,8 @@ redis = { version = "1.8.1", default-features = false, features = ["tokio-comp",
 clap = { version = "4.6", default-features = false, features = ["std", "derive", "env", "help", "usage", "error-context"] }
 # Payload-Maskierung (AIGW-43): ohne Unicode-Tabellen außer \b/\w (unicode-perl).
 regex = { version = "1.12", default-features = false, features = ["std", "perf", "unicode-perl", "unicode-case"] }
+# Unicode-Kategorietabellen für die Pre-Tokenizer von aigw-tokenizer (AIGW-71; ohnehin über regex im Baum).
+regex-syntax = { version = "0.8.11", default-features = false, features = ["std", "unicode-gencat", "unicode-perl"] }
 # Guardrails (AIGW-37): Wort-/Phrasenlisten des Prompt-Filters (ohnehin Abhängigkeit von regex).
 aho-corasick = { version = "1.1", default-features = false, features = ["std", "perf-literal"] }
 serde = { version = "1.0.220", features = ["derive"] }

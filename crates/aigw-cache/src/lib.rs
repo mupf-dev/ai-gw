@@ -45,12 +45,44 @@ use crate::redis_conn::RedisConn;
 use crate::vector::memory::{MemoryIndex, MemoryOptions};
 use crate::vector::{VectorEntry, VectorIndex, VectorQuery, now_ms};
 
+/// Auslöser eines Embedding-Aufrufs (F169): Der Proxy legt hier seinen Anfragekontext ab,
+/// damit der Embedder die Kosten dem anfragenden Key berechnen kann. Für den Cache
+/// undurchsichtig.
+#[derive(Clone, Default)]
+pub struct EmbedContext {
+    /// Request-ID der auslösenden Anfrage.
+    pub request_id: String,
+    /// Anfragekontext des Aufrufers (z. B. Key), nur vom Embedder ausgewertet.
+    pub caller: Option<Arc<dyn std::any::Any + Send + Sync>>,
+}
+
+impl std::fmt::Debug for EmbedContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EmbedContext")
+            .field("request_id", &self.request_id)
+            .field("caller", &self.caller.is_some())
+            .finish()
+    }
+}
+
 /// Erzeugt Embeddings über eine Modellgruppe des Gateways (internes Routing, keine externen
 /// Direktaufrufe). Der Proxy stellt die Implementierung bereit.
 #[async_trait]
 pub trait Embedder: Send + Sync + std::fmt::Debug + 'static {
     /// Embedding von `text` mit der Modellgruppe `model`.
     async fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String>;
+
+    /// Wie [`Embedder::embed`], mit dem Auslöser (Abrechnung auf den anfragenden Key, F169).
+    /// Standard: ohne Abrechnung.
+    async fn embed_for(
+        &self,
+        model: &str,
+        text: &str,
+        ctx: &EmbedContext,
+    ) -> Result<Vec<f32>, String> {
+        let _ = ctx;
+        self.embed(model, text).await
+    }
 }
 
 /// Art eines Treffers.
@@ -96,6 +128,8 @@ pub struct LookupRequest<'a> {
     pub semantic: Option<SemanticLookup<'a>>,
     /// Nachschlagen überspringen (Client `no-cache`), nur Ticket zum Speichern bilden.
     pub skip_lookup: bool,
+    /// Auslöser für den Embedding-Aufruf des semantischen Caches (Abrechnung, F169).
+    pub embed_ctx: Option<&'a EmbedContext>,
 }
 
 /// Was zum Speichern nach einem Miss nötig ist.
@@ -296,8 +330,13 @@ impl ResponseCache {
         }
         let started = Instant::now();
         let timeout = Duration::from_millis(self.cfg.semantic.embed_timeout_ms.max(1));
-        let vector = match tokio::time::timeout(timeout, embedder.embed(s.embedding_model, &text))
-            .await
+        let no_ctx = EmbedContext::default();
+        let ctx = q.embed_ctx.unwrap_or(&no_ctx);
+        let vector = match tokio::time::timeout(
+            timeout,
+            embedder.embed_for(s.embedding_model, &text, ctx),
+        )
+        .await
         {
             Ok(Ok(v)) if !v.is_empty() => {
                 self.metrics.embedded(true, started.elapsed());

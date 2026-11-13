@@ -79,6 +79,7 @@ async fn run(store: Store) {
         period: BudgetPeriod::Total,
         warn_at_percent: vec![],
         hard_limit: true,
+        enforcement: Default::default(),
     };
     let t = [BudgetTarget {
         level: BudgetLevel::Organization,

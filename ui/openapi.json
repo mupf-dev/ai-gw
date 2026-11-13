@@ -8816,6 +8816,10 @@
             "$ref": "#/components/schemas/Amount",
             "description": "Betrag je Zeitraum in der Abrechnungswährung."
           },
+          "enforcement": {
+            "$ref": "#/components/schemas/BudgetEnforcement",
+            "description": "Durchsetzung der harten Grenze (F106): `strict` (Standard) reserviert die geschätzten\nKosten vor dem Upstream-Aufruf, `soft` lehnt erst ab, wenn der Verbrauch den Betrag\nerreicht hat."
+          },
           "hardLimit": {
             "type": "boolean",
             "description": "Bei Erreichen ablehnen (`budget_exceeded`); `false` = nur warnen."
@@ -8835,6 +8839,14 @@
           }
         },
         "additionalProperties": false
+      },
+      "BudgetEnforcement": {
+        "type": "string",
+        "description": "Durchsetzung der harten Grenze eines Budgets (F106, AIGW-71).",
+        "enum": [
+          "strict",
+          "soft"
+        ]
       },
       "BudgetLevelName": {
         "type": "string",

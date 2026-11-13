@@ -11,9 +11,11 @@
 //! Payload-Mitschnitt nur, wenn [`RequestObserver::payload_mode`] es verlangt: Request-Header
 //! und -Body (ohne Kopie), JSON-Antwort bzw. bei Streams der zusammengesetzte Antworttext.
 //!
-//! Usage-Schätzung (fehlende oder unvollständige Usage, z. B. bei Abbruch): ≈ 1 Token je 4
-//! Bytes Text (Eingabe: Nachrichtentexte, Tool-Aufrufe/-Ergebnisse, Reasoning; Ausgabe:
-//! gestreamte Text-/Reasoning-/Tool-Fragmente). Bekannte Werte des Anbieters haben Vorrang.
+//! Usage-Schätzung (fehlende oder unvollständige Usage, z. B. bei Abbruch): mit dem Tokenizer
+//! der Modellgruppe (F46, aus der Zulassung der Limits): Eingabe = Prompt-Schätzung der
+//! Reservierung, Ausgabe = Zählung der gestreamten Text-/Reasoning-/Tool-Fragmente (bis 64 KiB
+//! gepuffert, darüber hochgerechnet). Ohne Zulassung ≈ 1 Token je 4 Bytes. Bekannte Werte des
+//! Anbieters haben Vorrang.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -35,6 +37,9 @@ use tracing::Span;
 use crate::auth::AuthContext;
 use crate::provider::{ByteStream, Describe, EventStream};
 use crate::request_id::RequestStart;
+
+/// Höchstens so viel Ausgabetext wird für die Usage-Schätzung gepuffert.
+const OUTPUT_TEXT_MAX: usize = 64 * 1024;
 
 /// Geschätzte Tokens zu einer Textlänge in Bytes.
 pub(crate) fn estimate_tokens(bytes: usize) -> u64 {
@@ -60,6 +65,48 @@ fn content_bytes(c: &Content) -> usize {
     }
 }
 
+/// Hängt `text` an, solange der Puffer [`OUTPUT_TEXT_MAX`] nicht überschreitet (an einer
+/// Zeichengrenze abgeschnitten).
+fn push_capped(buf: &mut String, text: &str) {
+    let room = OUTPUT_TEXT_MAX.saturating_sub(buf.len());
+    if room == 0 {
+        return;
+    }
+    if text.len() <= room {
+        buf.push_str(text);
+    } else {
+        let mut end = room;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        buf.push_str(text.get(..end).unwrap_or_default());
+    }
+}
+
+/// Text eines Inhalts (für die Ausgabe-Schätzung).
+fn push_content(buf: &mut String, c: &Content) {
+    match c {
+        Content::Text(t) => push_capped(buf, t),
+        Content::Parts(parts) => {
+            for p in parts {
+                match &p.kind {
+                    PartKind::Text { text }
+                    | PartKind::Reasoning { text, .. }
+                    | PartKind::Refusal { text } => push_capped(buf, text),
+                    PartKind::ToolCall {
+                        name, arguments, ..
+                    } => {
+                        push_capped(buf, name);
+                        push_capped(buf, arguments);
+                    }
+                    PartKind::ToolResult { content, .. } => push_content(buf, content),
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
 /// Textumfang einer Anfrage in Bytes (Grundlage der Eingabe-Schätzung).
 pub(crate) fn request_bytes(req: &ChatRequest) -> usize {
     req.messages.iter().map(|m| content_bytes(&m.content)).sum()
@@ -80,6 +127,8 @@ pub(crate) struct Recorder {
     start: Instant,
     input_bytes: usize,
     output_bytes: usize,
+    /// Ausgabetext für die Usage-Schätzung mit dem Tokenizer (bis [`OUTPUT_TEXT_MAX`]).
+    output_text: String,
     usage: Option<Usage>,
     /// Usage gilt als vollständig (nach dem Endgrund bzw. aus einer vollständigen Antwort).
     usage_final: bool,
@@ -115,6 +164,7 @@ impl Recorder {
             start: start.instant,
             input_bytes: 0,
             output_bytes: 0,
+            output_text: String::new(),
             usage: None,
             usage_final: false,
             stopped: false,
@@ -292,7 +342,12 @@ impl Recorder {
                 self.usage = Some(u.clone());
                 self.usage_final = true;
             }
-            None => self.output_bytes = response_bytes(resp),
+            None => {
+                self.output_bytes = response_bytes(resp);
+                for c in &resp.choices {
+                    push_content(&mut self.output_text, &c.message.content);
+                }
+            }
         }
     }
 
@@ -387,6 +442,7 @@ impl Recorder {
             StreamEvent::TextDelta { text, .. } => {
                 self.first_token();
                 self.output_bytes += text.len();
+                push_capped(&mut self.output_text, text);
                 if let Some(t) = self.streamed_text.as_mut() {
                     t.push_str(text);
                 }
@@ -394,14 +450,17 @@ impl Recorder {
             StreamEvent::ReasoningDelta { text, .. } => {
                 self.first_token();
                 self.output_bytes += text.len();
+                push_capped(&mut self.output_text, text);
             }
             StreamEvent::ToolCallStart(t) => {
                 self.first_token();
                 self.output_bytes += t.name.len();
+                push_capped(&mut self.output_text, &t.name);
             }
             StreamEvent::ToolCallDelta { arguments, .. } => {
                 self.first_token();
                 self.output_bytes += arguments.len();
+                push_capped(&mut self.output_text, arguments);
             }
             StreamEvent::RedactedReasoning { .. } | StreamEvent::ReasoningSignature { .. } => {
                 self.first_token();
@@ -456,10 +515,23 @@ impl Recorder {
             }
             (u, _) => {
                 let mut u = u.unwrap_or_default();
-                if u.input_tokens == 0 {
-                    u.input_tokens = estimate_tokens(self.input_bytes);
+                // Tokenizer der Modellgruppe aus der Zulassung (F46), sonst ≈ Bytes/4.
+                let adm = self.admission.as_ref();
+                if u.input_tokens == 0 && self.input_bytes > 0 {
+                    u.input_tokens = adm.map_or_else(
+                        || estimate_tokens(self.input_bytes),
+                        crate::limits::Admission::input_estimate,
+                    );
                 }
-                u.output_tokens = u.output_tokens.max(estimate_tokens(self.output_bytes));
+                let out = match adm {
+                    Some(a) if self.output_bytes > 0 => crate::limits::output_tokens(
+                        a.tokenizer(),
+                        &self.output_text,
+                        self.output_bytes,
+                    ),
+                    _ => estimate_tokens(self.output_bytes),
+                };
+                u.output_tokens = u.output_tokens.max(out);
                 (u, true)
             }
         };

@@ -1021,6 +1021,12 @@ export interface components {
         Budget: {
             /** @description Betrag je Zeitraum in der Abrechnungswährung. */
             amount: components["schemas"]["Amount"];
+            /**
+             * @description Durchsetzung der harten Grenze (F106): `strict` (Standard) reserviert die geschätzten
+             *     Kosten vor dem Upstream-Aufruf, `soft` lehnt erst ab, wenn der Verbrauch den Betrag
+             *     erreicht hat.
+             */
+            enforcement?: components["schemas"]["BudgetEnforcement"];
             /** @description Bei Erreichen ablehnen (`budget_exceeded`); `false` = nur warnen. */
             hardLimit?: boolean;
             /** @description Zeitraum. */
@@ -1028,6 +1034,11 @@ export interface components {
             /** @description Warnschwellen in Prozent (Ereignis/Webhook), z. B. `[50, 80, 100]`. */
             warnAtPercent?: number[];
         };
+        /**
+         * @description Durchsetzung der harten Grenze eines Budgets (F106, AIGW-71).
+         * @enum {string}
+         */
+        BudgetEnforcement: "strict" | "soft";
         /**
          * @description Ebene eines Budgets.
          * @enum {string}

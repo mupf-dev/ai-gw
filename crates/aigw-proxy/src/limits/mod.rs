@@ -16,9 +16,15 @@
 //!   **Modellgruppe global**, Metriken `requests`, `tokens`, `input-tokens`, `output-tokens`,
 //!   Fenster Sekunde/Minute/Stunde/Tag (RPM/RPD, TPM/TPD). Alle Ebenen werden mit **einem**
 //!   [`CounterBackend::reserve`] atomar geprüft und gebucht.
-//! - Token-Reservierung = geschätzte Prompt-Tokens (≈ Bytes/4) + `max_tokens` (ohne Angabe:
+//! - Token-Reservierung = geschätzte Prompt-Tokens + `max_tokens` (ohne Angabe:
 //!   `limits.default_max_tokens`); abgeglichen wird mit der gemeldeten (bzw. bei Abbruch
-//!   geschätzten) Usage.
+//!   geschätzten) Usage. Die Prompt-Tokens zählt der Tokenizer der Modellgruppe
+//!   ([`aigw_tokenizer`], F46: o200k/cl100k exakt, `tokenizer.json`, Heuristik für
+//!   Claude/Gemini), siehe [`Limiter::estimate`].
+//! - Budgets mit `enforcement: strict` (Standard) reservieren die geschätzten Kosten (Schätzung
+//!   × Preis des teuersten Deployments der Gruppe) vor dem Upstream-Aufruf und gleichen sie
+//!   nach der Usage ab (F106); mit `counters.backend: redis` exakt im Cluster
+//!   ([`RedisBudgets`]), sonst im Abgleich-Takt des Budget-Ledgers.
 //! - Die Deployment-Kapazität (Routing) nutzt dieselben Zähler-Backends, siehe
 //!   [`crate::routing`].
 //!
@@ -26,17 +32,21 @@
 
 mod headers;
 mod plan;
+mod redis_budget;
+mod tokens;
 
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use aigw_billing::{BudgetExceeded, BudgetLevel, BudgetTarget, Budgets};
+use aigw_billing::{BudgetExceeded, BudgetHold, BudgetLevel, BudgetTarget, Budgets, ExceededKind};
 use aigw_core::config::LimitsConfig;
 use aigw_core::ir::{ApiError, ChatRequest, ErrorClass, ErrorKind, UpstreamError, Usage};
 use aigw_core::observe::RequestRecord;
+use aigw_core::resource::Amount;
 use aigw_core::snapshot::{KeyCtx, ModelGroupCtx, Snapshot};
 use aigw_counters::{CounterBackend, LimitCheck, LocalCounters, Rejection, Reservation};
+use aigw_tokenizer::Tokenizer;
 use time::OffsetDateTime;
 
 use crate::auth::AuthContext;
@@ -45,6 +55,9 @@ use crate::observe::{estimate_tokens, request_bytes};
 pub(crate) use headers::RateHeaders;
 pub use plan::Metric;
 use plan::{Planned, plan};
+pub use redis_budget::RedisBudgets;
+use tokens::Tokenizers;
+pub(crate) use tokens::{output_tokens, request_tokens};
 
 /// Geschätzter Token-Bedarf einer Anfrage (Grundlage der Reservierungen).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -56,9 +69,9 @@ pub struct TokenEstimate {
 }
 
 impl TokenEstimate {
-    /// Schätzung für `req`; ohne `max_tokens` gilt `default_max_tokens`. Bei `n > 1` (F12)
-    /// zählt die Ausgabe je Variante (Anbieter ohne `n` bekommen zudem die Eingabe je
-    /// Variante; abgerechnet wird ohnehin die gemeldete Usage).
+    /// Grobe Schätzung für `req` (≈ 4 Bytes je Token, ohne Tokenizer); ohne `max_tokens` gilt
+    /// `default_max_tokens`. Bei `n > 1` (F12) zählt die Ausgabe je Variante. Im Request-Pfad
+    /// gilt [`Limiter::estimate`].
     pub fn of(req: &ChatRequest, default_max_tokens: u64) -> Self {
         let n = u64::from(req.choices());
         Self {
@@ -91,6 +104,7 @@ pub struct Limiter {
     budgets: Option<Arc<Budgets>>,
     default_max_tokens: u64,
     response_headers: bool,
+    tokenizers: Tokenizers,
 }
 
 impl fmt::Debug for Limiter {
@@ -117,11 +131,13 @@ impl Limiter {
         budgets: Option<Arc<Budgets>>,
         cfg: &LimitsConfig,
     ) -> Self {
+        Tokenizers::warm_up();
         Self {
             counters,
             budgets,
             default_max_tokens: cfg.default_max_tokens,
             response_headers: cfg.response_headers,
+            tokenizers: Tokenizers::new(cfg.tokenizer_dir.as_ref().map(std::path::PathBuf::from)),
         }
     }
 
@@ -155,6 +171,26 @@ impl Limiter {
         self.response_headers
     }
 
+    /// Tokenizer einer Modellgruppe (`settings.tokenizer`, sonst automatisch; ohne Gruppe:
+    /// Heuristik).
+    pub fn tokenizer(&self, group: Option<&ModelGroupCtx>) -> Tokenizer {
+        self.tokenizers.for_group(group)
+    }
+
+    /// Geschätzter Token-Bedarf einer Chat-Anfrage mit dem Tokenizer der Modellgruppe
+    /// (Eingabe) und `max_tokens` bzw. `limits.default_max_tokens` (Ausgabe).
+    pub fn estimate(&self, req: &ChatRequest, group: Option<&Arc<ModelGroupCtx>>) -> TokenEstimate {
+        let tok = self.tokenizer(group.map(Arc::as_ref));
+        // Bei `n > 1` (F12) zählt die Ausgabe je Variante.
+        TokenEstimate {
+            input: request_tokens(&tok, req),
+            output: req
+                .max_tokens
+                .unwrap_or(self.default_max_tokens)
+                .saturating_mul(u64::from(req.choices())),
+        }
+    }
+
     /// Prüft Budgets und reserviert alle Limits einer Anfrage (einmal je Client-Anfrage).
     ///
     /// `group` ist die freigegebene Modellgruppe (ohne Snapshot `None`: dann gelten nur
@@ -170,13 +206,18 @@ impl Limiter {
         let now_ms = unix_ms(now);
         let key = auth.key.as_ref();
 
-        // Budgets: harte Grenze vor dem Upstream-Aufruf (Stand: lokal + letzter Abgleich).
+        // Budgets: harte Grenze vor dem Upstream-Aufruf; `strict` reserviert die geschätzten
+        // Kosten (F106). Lehnt danach ein Limit ab, gibt das Verwerfen des Holds sie frei.
+        let mut budget_hold = None;
         if let (Some(budgets), Some(k)) = (&self.budgets, key) {
             let targets = budget_targets(k);
-            if targets.iter().any(|t| t.budget.hard_limit)
-                && let Err(e) = budgets.check(&targets, now_ms).await
-            {
-                return Err(Box::new(Denied::budget(&e, now_ms)));
+            if targets.iter().any(|t| t.budget.hard_limit) {
+                let cost =
+                    estimate_cost(auth.snapshot.as_deref(), group.map(Arc::as_ref), est, now);
+                match budgets.reserve(&targets, cost, now_ms).await {
+                    Ok(h) => budget_hold = (!h.is_empty()).then_some(h),
+                    Err(e) => return Err(Box::new(Denied::budget(&e, now_ms))),
+                }
             }
         }
 
@@ -212,17 +253,49 @@ impl Limiter {
             snapshot: auth.snapshot.clone(),
             parts,
             headers: quotas,
+            budget_hold,
+            estimate: est,
+            tokenizer: self.tokenizer(group.map(Arc::as_ref)),
         })
     }
 }
 
-fn unix_ms(t: SystemTime) -> i64 {
+/// Geschätzte Kosten einer Anfrage für die Budget-Reservierung: Schätzung × Preis, beim
+/// teuersten aktiven Deployment der Gruppe (Routing/Fallbacks innerhalb der Gruppe sind damit
+/// abgedeckt). Ohne Gruppe, Snapshot oder Preis: 0 (keine Reservierung, nur Prüfung).
+fn estimate_cost(
+    snap: Option<&Snapshot>,
+    group: Option<&ModelGroupCtx>,
+    est: TokenEstimate,
+    now: SystemTime,
+) -> Amount {
+    let (Some(snap), Some(group)) = (snap, group) else {
+        return Amount::ZERO;
+    };
+    let usage = Usage {
+        input_tokens: est.input,
+        output_tokens: est.output,
+        ..Usage::default()
+    };
+    let at = OffsetDateTime::from(now);
+    group
+        .deployments
+        .iter()
+        .filter_map(|d| {
+            let s = &d.deployment.spec;
+            aigw_billing::cost_at(snap, s.provider, &s.provider_model, at, &usage)
+        })
+        .max()
+        .unwrap_or(Amount::ZERO)
+}
+
+pub(crate) fn unix_ms(t: SystemTime) -> i64 {
     t.duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
 /// Budgets eines Keys: Key, Team, Organisation (in dieser Reihenfolge).
-fn budget_targets(k: &KeyCtx) -> Vec<BudgetTarget<'_>> {
+pub(crate) fn budget_targets(k: &KeyCtx) -> Vec<BudgetTarget<'_>> {
     let mut out = Vec::with_capacity(3);
     if let Some(b) = &k.key.spec.budget {
         out.push(BudgetTarget {
@@ -296,6 +369,12 @@ pub struct Admission {
     snapshot: Option<Arc<Snapshot>>,
     parts: Parts,
     headers: RateHeaders,
+    /// Reservierte geschätzte Kosten (strikte Budgets, F106).
+    budget_hold: Option<BudgetHold>,
+    /// Schätzung, mit der reserviert wurde.
+    estimate: TokenEstimate,
+    /// Tokenizer der Modellgruppe (Usage-Schätzung bei Abbruch/fehlender Usage).
+    tokenizer: Tokenizer,
 }
 
 impl fmt::Debug for Admission {
@@ -313,21 +392,38 @@ impl Admission {
         &self.headers
     }
 
+    /// Geschätzte Eingabe-Tokens (Grundlage der Reservierung).
+    pub(crate) fn input_estimate(&self) -> u64 {
+        self.estimate.input
+    }
+
+    /// Tokenizer der Modellgruppe.
+    pub(crate) fn tokenizer(&self) -> &Tokenizer {
+        &self.tokenizer
+    }
+
     /// Schließt die Anfrage ab (synchron, ohne I/O im Aufrufer): Kosten aus der Preistabelle
     /// zum Anfragezeitpunkt in `record.cost`, Kosten auf die Budgets buchen, Reservierungen
     /// mit der tatsächlichen Usage abgleichen (bei entfernten Backends im Hintergrund).
-    pub(crate) fn complete(self, record: &mut RequestRecord) {
+    pub(crate) fn complete(mut self, record: &mut RequestRecord) {
         let cost = self.price(record);
         if let Some(c) = cost {
             record.cost = Some(c);
-            if let (Some(budgets), Some(k)) = (&self.budgets, &self.key) {
-                budgets.charge(&budget_targets(k), c, unix_ms(record.started_at));
+        }
+        if let (Some(budgets), Some(k)) = (&self.budgets, &self.key) {
+            let targets = budget_targets(k);
+            let at = unix_ms(record.started_at);
+            let c = cost.unwrap_or(Amount::ZERO);
+            match self.budget_hold.take() {
+                // Reservierung gegen die tatsächlichen Kosten tauschen (auch 0 = Freigabe).
+                Some(hold) => budgets.settle(hold, &targets, c, at),
+                None => budgets.charge(&targets, c, at),
             }
         }
         settle(self.counters, self.parts, &record.usage);
     }
 
-    fn price(&self, r: &RequestRecord) -> Option<aigw_core::resource::Amount> {
+    fn price(&self, r: &RequestRecord) -> Option<Amount> {
         let snap = self.snapshot.as_ref()?;
         let (provider, model) = (r.provider?, r.provider_model.as_deref()?);
         // Fehlgeschlagene Anfragen ohne Verbrauch kosten nichts (auch kein Preis je Anfrage).
@@ -418,12 +514,27 @@ impl Denied {
             BudgetLevel::Team => "Team",
             BudgetLevel::Organization => "Organisation",
         };
-        let msg = format!(
-            "Budget erschöpft ({level}, {}): {} von {} verbraucht",
-            aigw_billing::period_code(e.period),
-            e.used,
-            e.amount
-        );
+        let period = aigw_billing::period_code(e.period);
+        let msg = match e.kind {
+            ExceededKind::Exhausted => format!(
+                "Budget erschöpft ({level}, {period}): {} von {} verbraucht",
+                e.used, e.amount
+            ),
+            ExceededKind::Reserved => format!(
+                "Budget ausgelastet ({level}, {period}): {} verbraucht und {} für laufende \
+                 Anfragen reserviert, diese Anfrage braucht geschätzt {} (Betrag {}); später \
+                 erneut versuchen",
+                e.used, e.reserved, e.requested, e.amount
+            ),
+            ExceededKind::Estimate => format!(
+                "Budget reicht nicht ({level}, {period}): geschätzte Kosten {} übersteigen den \
+                 Rest von {} ({} von {} verbraucht); max_tokens verringern",
+                e.requested,
+                Amount::from_nanos(e.amount.nanos().saturating_sub(e.used.nanos()).max(0)),
+                e.used,
+                e.amount
+            ),
+        };
         let mut err = UpstreamError::new(
             ErrorClass::Quota,
             ApiError::new(ErrorKind::RateLimit, msg).with_code("budget_exceeded"),

@@ -24,8 +24,9 @@ pub mod cost;
 pub mod webhook;
 
 pub use budget::{
-    BudgetEvent, BudgetEventKind, BudgetEventSink, BudgetExceeded, BudgetKey, BudgetLedger,
-    BudgetLevel, BudgetSyncTask, BudgetTarget, Budgets, LedgerError, LogEvents, MemoryLedger,
+    BudgetEvent, BudgetEventKind, BudgetEventSink, BudgetExceeded, BudgetHold, BudgetKey,
+    BudgetLedger, BudgetLevel, BudgetSyncTask, BudgetTarget, Budgets, ExceededKind, LedgerError,
+    LogEvents, MemoryLedger, MemoryShared, SharedBudgets, SharedItem, SharedReserve,
 };
 pub use calendar::{Calendar, CalendarError, PeriodRange, period_code, period_from_code};
 pub use cost::{cost, cost_at};

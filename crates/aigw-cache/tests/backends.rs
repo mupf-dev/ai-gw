@@ -123,6 +123,7 @@ async fn lookup(c: &ResponseCache, scope: Scope, r: &ChatRequest, semantic: bool
             max_chars: 8000,
         }),
         skip_lookup: false,
+        embed_ctx: None,
     })
     .await
 }
