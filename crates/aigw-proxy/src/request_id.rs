@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 ai-gw contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Request-ID (UUIDv7) für jede Anfrage der Datenebene.
+//! Request-ID (UUIDv7) und Annahmezeitpunkt für jede Anfrage der Datenebene.
 
 use axum::extract::Request;
 use axum::http::HeaderValue;
@@ -28,10 +28,31 @@ impl Default for RequestId {
     }
 }
 
-/// Middleware: erzeugt die ID, legt sie als Extension ab und setzt den Antwort-Header.
+/// Annahmezeitpunkt einer Anfrage (vor dem Lesen des Bodys) als Request-Extension.
+#[derive(Debug, Clone, Copy)]
+pub struct RequestStart {
+    /// Monotone Uhr (für Dauer und TTFT).
+    pub instant: std::time::Instant,
+    /// Wanduhr (für das Request-Log).
+    pub at: std::time::SystemTime,
+}
+
+impl RequestStart {
+    /// Jetzt.
+    pub fn now() -> Self {
+        Self {
+            instant: std::time::Instant::now(),
+            at: std::time::SystemTime::now(),
+        }
+    }
+}
+
+/// Middleware: erzeugt die ID und den Annahmezeitpunkt, legt beide als Extension ab und setzt
+/// den Antwort-Header.
 ///
 /// Eine vom Client mitgeschickte ID wird bewusst nicht übernommen (nicht vertrauenswürdig).
 pub(crate) async fn middleware(mut req: Request, next: Next) -> Response {
+    req.extensions_mut().insert(RequestStart::now());
     let id = RequestId::new();
     let header = HeaderValue::from_str(&id.0).ok();
     req.extensions_mut().insert(id);

@@ -15,6 +15,7 @@ use aigw_core::config::ServerConfig;
 use aigw_proxy::ProxyState;
 use axum::Router;
 use axum::routing::get;
+use axum::serve::ListenerExt as _;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
@@ -71,11 +72,15 @@ pub(crate) async fn run(
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
     let data_router = aigw_proxy::router(state);
+    // TCP_NODELAY: SSE-Chunks sofort senden statt auf ACKs zu warten (Nagle, Q4).
+    let data_listener = listeners.data.tap_io(|tcp| {
+        let _ = tcp.set_nodelay(true);
+    });
     match listeners.control {
         None => {
             // `/healthz` liefert bereits der Daten-Router.
             let app = data_router.merge(control_router(control_plane, false));
-            axum::serve(listeners.data, app)
+            axum::serve(data_listener, app)
                 .with_graceful_shutdown(shutdown)
                 .await
         }
@@ -88,7 +93,7 @@ pub(crate) async fn run(
             let wait = |mut rx: watch::Receiver<bool>| async move {
                 let _ = rx.wait_for(|stop| *stop).await;
             };
-            let data = axum::serve(listeners.data, data_router)
+            let data = axum::serve(data_listener, data_router)
                 .with_graceful_shutdown(wait(rx.clone()))
                 .into_future();
             let ctrl = axum::serve(control, control_router(control_plane, true))

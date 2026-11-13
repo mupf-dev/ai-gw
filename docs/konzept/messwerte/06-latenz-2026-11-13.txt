@@ -1,0 +1,66 @@
+# 2026-11-13T07:40:05Z 8 vCPU,  AMD EPYC-Genoa Processor
+# Upstream: Kerne 0-1, Gateway: Kerne 2-3, Last: Kerne 4-7, RT=1, Last vorher: 4.64 4.83 5.10
+== direkt (json, 200 Verbindungen, Sättigung)
+40000 Anfragen, 200 Verbindungen, 156977 req/s (Ziel None), stream=false
+ttfb     p50=  1251µs p90=  1387µs p99=  1820µs max=   2274µs
+gesamt   p50=  1251µs p90=  1387µs p99=  1821µs max=   2275µs
+== Gateway (json, 200 Verbindungen, Sättigung)
+40000 Anfragen, 200 Verbindungen, 33016 req/s (Ziel None), stream=false
+ttfb     p50=  5589µs p90=  8547µs p99= 11334µs max=  60067µs
+gesamt   p50=  5589µs p90=  8548µs p99= 11334µs max=  60068µs
+== direkt (stream, 200 Verbindungen, Sättigung)
+40000 Anfragen, 200 Verbindungen, 157516 req/s (Ziel None), stream=true
+ttfb     p50=  1250µs p90=  1394µs p99=  1601µs max=   2671µs
+gesamt   p50=  1250µs p90=  1395µs p99=  1601µs max=   2671µs
+== Gateway (stream, 200 Verbindungen, Sättigung)
+40000 Anfragen, 200 Verbindungen, 25189 req/s (Ziel None), stream=true
+ttfb     p50=  7429µs p90= 11487µs p99= 14780µs max=  62080µs
+gesamt   p50=  7430µs p90= 11488µs p99= 14781µs max=  62081µs
+== direkt (json, 200 Verbindungen, 2000 req/s)
+20000 Anfragen, 200 Verbindungen, 2000 req/s (Ziel Some(2000.0)), stream=false
+ttfb     p50=   106µs p90=   151µs p99=   220µs max=    418µs
+gesamt   p50=   106µs p90=   151µs p99=   221µs max=    418µs
+== Gateway (json, 200 Verbindungen, 2000 req/s)
+20000 Anfragen, 200 Verbindungen, 2000 req/s (Ziel Some(2000.0)), stream=false
+ttfb     p50=   248µs p90=   431µs p99=   584µs max=   1520µs
+gesamt   p50=   248µs p90=   431µs p99=   585µs max=   1520µs
+== direkt (stream, 200 Verbindungen, 2000 req/s)
+20000 Anfragen, 200 Verbindungen, 2000 req/s (Ziel Some(2000.0)), stream=true
+ttfb     p50=   107µs p90=   134µs p99=   164µs max=    796µs
+gesamt   p50=   107µs p90=   135µs p99=   165µs max=    796µs
+== Gateway (stream, 200 Verbindungen, 2000 req/s)
+20000 Anfragen, 200 Verbindungen, 2000 req/s (Ziel Some(2000.0)), stream=true
+ttfb     p50=   260µs p90=   376µs p99=   564µs max=   1525µs
+gesamt   p50=   261µs p90=   377µs p99=   567µs max=   1525µs
+== direkt (json, 200 Verbindungen, 10000 req/s)
+20000 Anfragen, 200 Verbindungen, 9995 req/s (Ziel Some(10000.0)), stream=false
+ttfb     p50=   182µs p90=   291µs p99=   392µs max=    593µs
+gesamt   p50=   183µs p90=   291µs p99=   392µs max=    593µs
+== Gateway (json, 200 Verbindungen, 10000 req/s)
+20000 Anfragen, 200 Verbindungen, 9992 req/s (Ziel Some(10000.0)), stream=false
+ttfb     p50=   504µs p90=   807µs p99=  1115µs max=   1703µs
+gesamt   p50=   504µs p90=   808µs p99=  1115µs max=   1703µs
+== direkt (stream, 200 Verbindungen, 10000 req/s)
+20000 Anfragen, 200 Verbindungen, 9991 req/s (Ziel Some(10000.0)), stream=true
+ttfb     p50=   173µs p90=   281µs p99=   380µs max=    797µs
+gesamt   p50=   174µs p90=   282µs p99=   381µs max=    797µs
+== Gateway (stream, 200 Verbindungen, 10000 req/s)
+20000 Anfragen, 200 Verbindungen, 9993 req/s (Ziel Some(10000.0)), stream=true
+ttfb     p50=   505µs p90=   812µs p99=  1105µs max=   1797µs
+gesamt   p50=   506µs p90=   813µs p99=  1106µs max=   1798µs
+== direkt (json, 1 Verbindung)
+5000 Anfragen, 1 Verbindungen, 24744 req/s (Ziel None), stream=false
+ttfb     p50=    36µs p90=    48µs p99=    64µs max=    143µs
+gesamt   p50=    36µs p90=    49µs p99=    64µs max=    143µs
+== Gateway (json, 1 Verbindung)
+5000 Anfragen, 1 Verbindungen, 5076 req/s (Ziel None), stream=false
+ttfb     p50=   166µs p90=   306µs p99=   405µs max=   6727µs
+gesamt   p50=   166µs p90=   306µs p99=   405µs max=   6727µs
+== direkt (stream, 1 Verbindung)
+5000 Anfragen, 1 Verbindungen, 25471 req/s (Ziel None), stream=true
+ttfb     p50=    36µs p90=    45µs p99=    61µs max=   1301µs
+gesamt   p50=    36µs p90=    45µs p99=    61µs max=   1301µs
+== Gateway (stream, 1 Verbindung)
+5000 Anfragen, 1 Verbindungen, 5544 req/s (Ziel None), stream=true
+ttfb     p50=   165µs p90=   248µs p99=   340µs max=   1387µs
+gesamt   p50=   166µs p90=   249µs p99=   341µs max=   1388µs

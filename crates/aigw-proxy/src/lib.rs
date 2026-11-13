@@ -9,19 +9,26 @@
 //! - `GET /v1/models` – Modellliste (Anthropic-Format, wenn `anthropic-version` gesetzt ist)
 //! - `GET /healthz` – Liveness
 //!
-//! Jede Anfrage wird in die IR übersetzt ([`aigw_core::ir`]), an einen [`ChatProvider`]
-//! übergeben und im Format des Eingangs beantwortet – auch Fehler. Jede Antwort trägt den
-//! Header `x-aigw-request-id` (UUIDv7). Bis die echten Anbieter-Adapter (AIGW-15) da sind,
-//! steht [`mock::MockProvider`] als Platzhalter bereit. Die Schlüsselprüfung übernimmt
-//! [`SnapshotAuthenticator`] (Keys, Ablauf, Modellfreigaben aus dem Snapshot);
-//! [`auth::AllowAll`] lässt alles zu (Tests, Entwicklung).
+//! Jede Anfrage wird in die IR übersetzt ([`aigw_core::ir`]), über [`ModelRoutes`] einem
+//! Deployment ([`ChatProvider`], in der Regel ein [`aigw_providers::Upstream`]) zugeordnet
+//! und im Format des Eingangs beantwortet – auch Fehler. Streams laufen Upstream-Bytes →
+//! Decoder → IR-Ereignisse → Encoder des Eingangsformats, ohne Puffern und mit Backpressure.
+//! Jede Antwort trägt den Header `x-aigw-request-id` (UUIDv7); am Ende jeder Anfrage geht ein
+//! [`RequestRecord`](aigw_core::observe::RequestRecord) an den
+//! [`RequestObserver`](aigw_core::observe::RequestObserver).
+//!
+//! Die Schlüsselprüfung übernimmt [`SnapshotAuthenticator`] (Keys, Ablauf, Modellfreigaben
+//! aus dem Snapshot); [`auth::AllowAll`] lässt alles zu (Tests, Entwicklung). Bis zum
+//! Snapshot-Routing (AIGW-24) stehen [`StaticRoutes`] und [`mock::MockProvider`] bereit.
 
 pub mod auth;
 mod error;
 mod handlers;
 pub mod mock;
+mod observe;
 pub mod provider;
 mod request_id;
+pub mod routes;
 mod stream;
 
 use std::fmt;
@@ -31,12 +38,14 @@ use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{any, get, post};
 
+pub use aigw_core::observe::{NoopObserver, PayloadMode, RequestObserver, RequestRecord};
 pub use auth::{
     AllowAll, ApiKey, AuthContext, Authenticator, KeySource, SnapshotAuthenticator, extract_api_key,
 };
 pub use error::ErrorFormat;
-pub use provider::{BoxFuture, ChatProvider, EventStream};
-pub use request_id::{REQUEST_ID_HEADER, RequestId};
+pub use provider::{BoxFuture, ChatProvider, Describe, EventStream};
+pub use request_id::{REQUEST_ID_HEADER, RequestId, RequestStart};
+pub use routes::{ModelRoutes, StaticRoutes};
 
 pub use aigw_core::config::DEFAULT_MAX_BODY_BYTES;
 
@@ -66,10 +75,12 @@ impl From<&aigw_core::config::DataListenerConfig> for ProxyConfig {
 /// Gemeinsamer Zustand der Datenebene.
 #[derive(Clone)]
 pub struct ProxyState {
-    /// Anbieter (vorerst einer; Routing folgt mit AIGW-15 ff.).
-    pub provider: Arc<dyn ChatProvider>,
+    /// Modellname → Deployment.
+    pub routes: Arc<dyn ModelRoutes>,
     /// Schlüsselprüfung.
     pub auth: Arc<dyn Authenticator>,
+    /// Empfänger der Kennzahlen je Anfrage (Request-Log, Abrechnung).
+    pub observer: Arc<dyn RequestObserver>,
     /// Einstellungen.
     pub config: ProxyConfig,
 }
@@ -78,6 +89,7 @@ impl fmt::Debug for ProxyState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ProxyState")
             .field("config", &self.config)
+            .field("observer", &self.observer)
             .finish_non_exhaustive()
     }
 }
@@ -85,9 +97,15 @@ impl fmt::Debug for ProxyState {
 impl ProxyState {
     /// Zustand mit eingebautem Mock-Anbieter und ohne Schlüsselprüfung ([`AllowAll`]).
     pub fn mock() -> Self {
+        Self::with_routes(Arc::new(mock::mock_routes()))
+    }
+
+    /// Zustand mit den angegebenen Routen, ohne Schlüsselprüfung, ohne Beobachter.
+    pub fn with_routes(routes: Arc<dyn ModelRoutes>) -> Self {
         Self {
-            provider: Arc::new(mock::MockProvider::new()),
+            routes,
             auth: Arc::new(AllowAll),
+            observer: Arc::new(NoopObserver),
             config: ProxyConfig::default(),
         }
     }

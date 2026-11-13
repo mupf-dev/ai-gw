@@ -234,6 +234,12 @@ impl StreamDecoder {
             return Ok(out);
         }
         let chunk: ChatCompletionChunk = serde_json::from_str(data)?;
+        // Azure OpenAI schickt vorab einen Chunk nur mit `prompt_filter_results` (leere ID,
+        // keine Varianten); er darf den Stream nicht mit leerer ID/Modell eröffnen.
+        if !self.started && chunk.id.is_empty() && chunk.choices.is_empty() && chunk.usage.is_none()
+        {
+            return Ok(out);
+        }
         if !self.started {
             self.started = true;
             out.push(StreamEvent::Start {

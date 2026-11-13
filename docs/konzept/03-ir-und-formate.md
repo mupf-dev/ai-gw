@@ -122,7 +122,7 @@ Kreuzkonvertierung (wird als `Losses` gemeldet):
   `Authenticator` übergeben (im Server `SnapshotAuthenticator`: Keys, Ablauf und
   Modellfreigaben aus dem Snapshot, siehe [08-admin-api.md](08-admin-api.md) §6; `AllowAll` nur
   für Tests).
-- Bis AIGW-15 beantwortet der Mock-Anbieter (`echo`) alle Anfragen, auch gestreamt.
+- Anbieter: siehe [06-streaming-und-anbieter.md](06-streaming-und-anbieter.md); ohne Konfiguration beantwortet der Mock-Anbieter (`echo`) die Modelle `mock*`, auch gestreamt.
 - Getrennte Listener: `server.data.listen` (Standard `127.0.0.1:4000`, `/v1/*` + `/healthz`) und
   `server.control.listen` (Standard `127.0.0.1:4001`, Admin-API/UI + `/healthz`); gleiche Adresse
   → ein Listener. Beide fahren bei SIGINT/SIGTERM gemeinsam geordnet herunter.

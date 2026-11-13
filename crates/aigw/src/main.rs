@@ -128,6 +128,7 @@ fn serve(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
             auth: std::sync::Arc::new(aigw_proxy::SnapshotAuthenticator::new(
                 runtime_state.snapshot.clone(),
             )),
+            observer: runtime_state.observer.clone(),
             ..aigw_proxy::ProxyState::mock()
         };
         // Steuerebene: Admin-API/-UI (mit Anmeldung, AIGW-28) und /metrics (AIGW-43).

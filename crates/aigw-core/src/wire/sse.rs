@@ -46,21 +46,48 @@ impl SseParser {
 
     /// Verarbeitet weitere Bytes.
     pub fn push(&mut self, chunk: &[u8]) -> Vec<SseEvent> {
-        self.buf.extend_from_slice(chunk);
         let mut events = Vec::new();
+        self.push_into(chunk, &mut events);
+        events
+    }
+
+    /// Wie [`SseParser::push`], hängt die Ereignisse aber an `events` an (ohne eigene
+    /// Allokation). Vollständige Zeilen werden direkt aus `chunk` gelesen; nur ein
+    /// unvollständiger Rest wird zwischengespeichert.
+    pub fn push_into(&mut self, chunk: &[u8], events: &mut Vec<SseEvent>) {
+        if self.buf.is_empty() {
+            let used = self.lines(chunk, events);
+            self.buf.extend_from_slice(&chunk[used..]);
+        } else {
+            let mut buf = std::mem::take(&mut self.buf);
+            buf.extend_from_slice(chunk);
+            let used = self.lines(&buf, events);
+            buf.drain(..used);
+            self.buf = buf;
+        }
+    }
+
+    /// Anzahl der zwischengespeicherten Bytes (unvollständige Zeile).
+    pub fn buffered(&self) -> usize {
+        self.buf.len()
+    }
+
+    /// Verarbeitet alle vollständigen Zeilen in `data`; liefert die Anzahl verbrauchter Bytes.
+    fn lines(&mut self, data: &[u8], events: &mut Vec<SseEvent>) -> usize {
         let mut start = 0;
-        while let Some(rel) = self.buf[start..].iter().position(|&b| b == b'\n') {
+        while let Some(rel) = data[start..].iter().position(|&b| b == b'\n') {
             let end = start + rel;
-            let mut line = &self.buf[start..end];
+            let mut line = &data[start..end];
             if line.last() == Some(&b'\r') {
                 line = &line[..line.len() - 1];
             }
-            let line = String::from_utf8_lossy(line).into_owned();
             start = end + 1;
-            self.line(&line, &mut events);
+            match std::str::from_utf8(line) {
+                Ok(s) => self.line(s, events),
+                Err(_) => self.line(&String::from_utf8_lossy(line), events),
+            }
         }
-        self.buf.drain(..start);
-        events
+        start
     }
 
     fn line(&mut self, line: &str, events: &mut Vec<SseEvent>) {

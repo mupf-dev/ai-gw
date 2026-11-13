@@ -13,13 +13,17 @@
 //!   Stream nach dem ersten Textstück mit Fehler ab.
 //! - Usage: Eingabe ≈ Zeichen / 4 aller Nachrichten, Ausgabe = Anzahl Wörter.
 
+use std::sync::Arc;
+
 use aigw_core::ir::{
     ApiError, ChatRequest, ChatResponse, Choice, Content, ErrorKind, Message, ModelInfo, Part,
-    PartKind, Role, StopReason, StreamEvent, ToolCallStart, ToolChoice, ToolKind, Usage,
+    PartKind, Role, StopReason, StreamEvent, ToolCallStart, ToolChoice, ToolKind, UpstreamError,
+    Usage,
 };
 use futures_util::stream;
 
-use crate::provider::{BoxFuture, ChatProvider, EventStream};
+use crate::provider::{BoxFuture, ChatProvider, Describe, EventStream};
+use crate::routes::StaticRoutes;
 
 /// Mock-Anbieter.
 #[derive(Debug, Clone, Default)]
@@ -82,20 +86,39 @@ fn plan(req: &ChatRequest) -> Result<Plan, ApiError> {
 const REASONING: &str = "Mock-Überlegung.";
 const SIGNATURE: &str = "mock-signature";
 
+/// Modellnamen des Mock-Anbieters.
+pub const MOCK_MODELS: [&str; 3] = ["mock", "mock-error", "mock-stream-error"];
+
+/// Routing-Tabelle, die [`MOCK_MODELS`] (für `GET /v1/models`) und jeden anderen
+/// Modellnamen auf den Mock-Anbieter abbildet.
+pub fn mock_routes() -> StaticRoutes {
+    let provider: Arc<dyn ChatProvider> = Arc::new(MockProvider::new());
+    let mut routes = StaticRoutes::new();
+    routes.set_fallback(provider.clone());
+    for id in MOCK_MODELS {
+        routes.insert(id, provider.clone());
+        routes.set_model_info(ModelInfo {
+            id: id.to_owned(),
+            display_name: Some(format!("Mock ({id})")),
+            created: 1_763_000_000,
+            owned_by: "ai-gw".to_owned(),
+        });
+    }
+    routes
+}
+
 impl ChatProvider for MockProvider {
-    fn models(&self) -> Vec<ModelInfo> {
-        ["mock", "mock-error", "mock-stream-error"]
-            .into_iter()
-            .map(|id| ModelInfo {
-                id: id.to_owned(),
-                display_name: Some(format!("Mock ({id})")),
-                created: 1_763_000_000,
-                owned_by: "ai-gw".to_owned(),
-            })
-            .collect()
+    fn describe(&self) -> Describe<'_> {
+        Describe {
+            deployment: "mock",
+            deployment_id: None,
+            model_group: None,
+            provider: None,
+            provider_model: "mock",
+        }
     }
 
-    fn chat(&self, req: ChatRequest) -> BoxFuture<Result<ChatResponse, ApiError>> {
+    fn chat(self: Arc<Self>, req: ChatRequest) -> BoxFuture<Result<ChatResponse, UpstreamError>> {
         let result = plan(&req).map(|p| {
             let mut parts = Vec::new();
             if p.reasoning {
@@ -136,10 +159,13 @@ impl ChatProvider for MockProvider {
                 source: None,
             }
         });
-        Box::pin(async move { result })
+        Box::pin(async move { result.map_err(UpstreamError::from) })
     }
 
-    fn chat_stream(&self, req: ChatRequest) -> BoxFuture<Result<EventStream, ApiError>> {
+    fn chat_stream(
+        self: Arc<Self>,
+        req: ChatRequest,
+    ) -> BoxFuture<Result<EventStream, UpstreamError>> {
         let fail_mid_stream = req.model == "mock-stream-error";
         let result = plan(&req).map(|p| {
             let mut events = vec![
@@ -211,6 +237,10 @@ impl ChatProvider for MockProvider {
             events.push(StreamEvent::Usage(p.usage));
             stream::iter(events)
         });
-        Box::pin(async move { result.map(|s| Box::pin(s) as EventStream) })
+        Box::pin(async move {
+            result
+                .map(|s| Box::pin(s) as EventStream)
+                .map_err(UpstreamError::from)
+        })
     }
 }

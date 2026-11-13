@@ -242,7 +242,8 @@ pub struct Usage {
 /// Stream-Chunk `chat.completion.chunk`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatCompletionChunk {
-    /// ID (in allen Chunks gleich).
+    /// ID (in allen Chunks gleich; manche kompatiblen Anbieter lassen sie weg).
+    #[serde(default)]
     pub id: String,
     /// `chat.completion.chunk`.
     #[serde(default = "object_chunk")]

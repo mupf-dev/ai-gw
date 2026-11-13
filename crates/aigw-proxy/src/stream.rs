@@ -3,8 +3,9 @@
 
 //! IR-Ereignisstrom → SSE-Antwort im Eingangsformat.
 //!
-//! Jedes Ereignis wird sofort kodiert und als eigener Body-Frame weitergereicht (kein Puffern,
-//! Q4); gelesen wird nur, wenn hyper den nächsten Frame anfordert (Backpressure).
+//! Jedes Ereignis wird sofort kodiert und weitergereicht (kein Puffern, Q4); gelesen wird nur,
+//! wenn hyper den nächsten Frame anfordert (Backpressure) – hyper fordert erst dann an, wenn
+//! der vorige Frame in den Socket geschrieben ist.
 
 use std::convert::Infallible;
 
@@ -14,7 +15,7 @@ use axum::body::Body;
 use axum::http::{HeaderValue, header};
 use axum::response::Response;
 use bytes::Bytes;
-use futures_util::StreamExt;
+use futures_util::{FutureExt as _, StreamExt as _};
 
 use crate::error::ErrorFormat;
 use crate::provider::EventStream;
@@ -40,7 +41,14 @@ impl Encoder {
     }
 }
 
+/// Höchstens so viele Bytes werden zu einem Body-Frame zusammengefasst.
+const MAX_FRAME: usize = 16 * 1024;
+
 /// Baut die SSE-Antwort. `include_usage` gilt nur für OpenAI (`stream_options`).
+///
+/// Jedes Ereignis wird sofort kodiert. Liegen bereits weitere Ereignisse bereit (z. B.
+/// mehrere aus einem Upstream-Frame), werden sie ohne Warten in denselben Frame gepackt
+/// (weniger Syscalls); es wird nie auf weitere Ereignisse gewartet.
 pub(crate) fn sse_response(
     format: ErrorFormat,
     events: EventStream,
@@ -56,17 +64,25 @@ pub(crate) fn sse_response(
             if done {
                 return None;
             }
-            let mut buf = Vec::with_capacity(256);
-            let done = match events.next().await {
-                Some(ev) => {
-                    enc.encode(ev, &mut buf);
-                    false
-                }
+            let mut buf = Vec::with_capacity(512);
+            let mut done = false;
+            match events.next().await {
+                Some(ev) => enc.encode(ev, &mut buf),
                 None => {
                     enc.finish(&mut buf);
-                    true
+                    done = true;
                 }
-            };
+            }
+            while !done && buf.len() < MAX_FRAME {
+                match events.next().now_or_never() {
+                    Some(Some(ev)) => enc.encode(ev, &mut buf),
+                    Some(None) => {
+                        enc.finish(&mut buf);
+                        done = true;
+                    }
+                    None => break,
+                }
+            }
             Some((Bytes::from(buf), (events, enc, done)))
         },
     )

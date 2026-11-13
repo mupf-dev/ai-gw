@@ -5,8 +5,8 @@
 
 use std::sync::Arc;
 
-use aigw_core::ir::{ApiError, ChatRequest, ErrorKind};
-use aigw_core::wire::{Losses, anthropic, openai};
+use aigw_core::ir::{ApiError, ChatRequest, ErrorKind, UpstreamError};
+use aigw_core::wire::{Losses, WireFormat, anthropic, openai};
 use axum::body::Body;
 use axum::extract::rejection::BytesRejection;
 use axum::extract::{Extension, State};
@@ -17,13 +17,15 @@ use bytes::Bytes;
 use crate::ProxyState;
 use crate::auth::extract_api_key;
 use crate::error::ErrorFormat;
-use crate::request_id::RequestId;
+use crate::observe::{ObservedStream, Recorder};
+use crate::provider::EventStream;
+use crate::request_id::{RequestId, RequestStart};
 use crate::stream::sse_response;
 
 type St = State<Arc<ProxyState>>;
 
-fn json_response(status: StatusCode, body: Vec<u8>) -> Response {
-    let mut res = Response::new(Body::from(body));
+fn json_response(status: StatusCode, body: impl Into<Body>) -> Response {
+    let mut res = Response::new(body.into());
     *res.status_mut() = status;
     res.headers_mut().insert(
         header::CONTENT_TYPE,
@@ -62,34 +64,73 @@ fn validate(req: &ChatRequest) -> Result<(), ApiError> {
 pub(crate) async fn chat_completions(
     State(st): St,
     Extension(rid): Extension<RequestId>,
+    Extension(started): Extension<RequestStart>,
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
-    chat(&st, &rid, &headers, body, ErrorFormat::OpenAi).await
+    chat(&st, &rid, started, &headers, body, ErrorFormat::OpenAi).await
 }
 
 /// `POST /v1/messages`.
 pub(crate) async fn messages(
     State(st): St,
     Extension(rid): Extension<RequestId>,
+    Extension(started): Extension<RequestStart>,
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
-    chat(&st, &rid, &headers, body, ErrorFormat::Anthropic).await
+    chat(&st, &rid, started, &headers, body, ErrorFormat::Anthropic).await
+}
+
+fn ingress(format: ErrorFormat) -> WireFormat {
+    match format {
+        ErrorFormat::OpenAi => WireFormat::OpenAiChat,
+        ErrorFormat::Anthropic => WireFormat::AnthropicMessages,
+    }
+}
+
+/// Ergebnis einer erfolgreichen Anfrage.
+enum Reply {
+    /// JSON-Body.
+    Json(Vec<u8>),
+    /// SSE-Strom (Ereignisse, Client wollte Usage im Stream).
+    Stream(EventStream, bool),
 }
 
 async fn chat(
     st: &ProxyState,
     rid: &RequestId,
+    started: RequestStart,
     headers: &HeaderMap,
     body: Result<Bytes, BytesRejection>,
     format: ErrorFormat,
 ) -> Response {
-    match chat_inner(st, headers, body, format).await {
-        Ok(res) => res,
+    let mut rec = Recorder::new(st.observer.clone(), rid.0.clone(), started, ingress(format));
+    match chat_inner(st, headers, body, format, &mut rec).await {
+        Ok(Reply::Json(out)) => {
+            let out = Bytes::from(out);
+            if rec.captures() {
+                rec.set_response_payload(out.clone());
+            }
+            rec.finish(false);
+            json_response(StatusCode::OK, out)
+        }
+        Ok(Reply::Stream(events, include_usage)) => {
+            let events: EventStream = Box::pin(ObservedStream::new(events, rec));
+            sse_response(format, events, include_usage)
+        }
         Err(e) => {
             tracing::debug!(request_id = %rid.0, error = %e, "Anfrage abgelehnt");
-            format.response(&e, Some(&rid.0))
+            let mut res = format.response(&e.error, Some(&rid.0));
+            if let Some(after) = e.retry_after {
+                let secs = after.as_secs() + u64::from(after.subsec_nanos() > 0);
+                if let Ok(v) = HeaderValue::from_str(&secs.to_string()) {
+                    res.headers_mut().insert(header::RETRY_AFTER, v);
+                }
+            }
+            rec.fail(res.status().as_u16(), &e);
+            rec.finish(false);
+            res
         }
     }
 }
@@ -99,9 +140,12 @@ async fn chat_inner(
     headers: &HeaderMap,
     body: Result<Bytes, BytesRejection>,
     format: ErrorFormat,
-) -> Result<Response, ApiError> {
+    rec: &mut Recorder,
+) -> Result<Reply, UpstreamError> {
     let auth = st.auth.authenticate(extract_api_key(headers).as_ref())?;
+    rec.set_key(&auth);
     let body = body.map_err(|r| body_error(&r, st.config.max_body_bytes))?;
+    rec.set_request_payload(headers, &body);
     let req = match format {
         ErrorFormat::OpenAi => openai::decode_request(&body)?,
         ErrorFormat::Anthropic => anthropic::decode_request(&body)?,
@@ -110,6 +154,17 @@ async fn chat_inner(
     validate(&req)?;
     // Modellfreigabe (Architektur §3, Schritt 3); die Gruppe nutzt später das Routing.
     let _group = auth.authorize_model(&req.model)?;
+    rec.set_request(&req);
+
+    let provider = st.routes.resolve(&req.model).ok_or_else(|| {
+        ApiError::new(
+            ErrorKind::NotFound,
+            format!("Modell {:?} ist nicht konfiguriert", req.model),
+        )
+        .with_param("model")
+        .with_code("model_not_found")
+    })?;
+    rec.set_deployment(provider.describe());
 
     if req.is_stream() {
         let include_usage = req
@@ -117,11 +172,12 @@ async fn chat_inner(
             .as_ref()
             .and_then(|o| o.include_usage)
             .unwrap_or(false);
-        let events = st.provider.chat_stream(req).await?;
-        return Ok(sse_response(format, events, include_usage));
+        let events = provider.chat_stream(req).await?;
+        return Ok(Reply::Stream(events, include_usage));
     }
 
-    let resp = st.provider.chat(req).await?;
+    let resp = provider.chat(req).await?;
+    rec.set_response(&resp);
     let mut losses = Losses::new();
     let out = match format {
         ErrorFormat::OpenAi => openai::encode_response(resp, &mut losses)?,
@@ -130,7 +186,7 @@ async fn chat_inner(
     if !losses.is_empty() {
         tracing::debug!(losses = ?losses.items(), "Antwort mit Übersetzungsverlusten");
     }
-    Ok(json_response(StatusCode::OK, out))
+    Ok(Reply::Json(out))
 }
 
 /// `GET /v1/models` (Anthropic-Format bei gesetztem `anthropic-version`).
@@ -145,9 +201,7 @@ pub(crate) async fn models(
         Err(e) => return format.response(&e, Some(&rid.0)),
     };
     // Mit Snapshot: nur die für den Key freigegebenen Modellgruppen.
-    let models = auth
-        .visible_models()
-        .unwrap_or_else(|| st.provider.models());
+    let models = auth.visible_models().unwrap_or_else(|| st.routes.models());
     let body = match format {
         ErrorFormat::OpenAi => serde_json::to_vec(&openai::encode_models(&models)),
         ErrorFormat::Anthropic => serde_json::to_vec(&anthropic::encode_models(&models)),

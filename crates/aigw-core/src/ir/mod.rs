@@ -23,7 +23,7 @@
 mod error;
 mod stream;
 
-pub use error::{ApiError, ErrorKind};
+pub use error::{ApiError, ErrorClass, ErrorKind, UpstreamError};
 pub use stream::{StreamEvent, ToolCallStart};
 
 use serde::{Deserialize, Serialize};

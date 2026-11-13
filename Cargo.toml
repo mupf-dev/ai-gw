@@ -59,7 +59,10 @@ rust-embed = { version = "8.14", default-features = false, features = ["debug-em
 
 bytes = "1.12"
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
-hyper-util = { version = "0.1.21", default-features = false, features = ["tokio", "client", "client-legacy", "http1"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["tokio", "client", "client-legacy", "http1", "http2"] }
+# Upstream-TLS (AIGW-14): rustls/aws-lc-rs, ALPN h2+http/1.1, Mozilla-Wurzelzertifikate
+# (webpki-roots, unabhängig vom Container-Image).
+hyper-rustls = { version = "0.27.10", default-features = false, features = ["aws-lc-rs", "http1", "http2", "tls12", "webpki-tokio"] }
 # Mikro-Benchmarks (nur dev).
 divan = "0.1.21"
 
