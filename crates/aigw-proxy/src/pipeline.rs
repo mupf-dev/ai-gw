@@ -9,12 +9,13 @@
 //!          ─► Antwort bzw. Fehler im Eingangsformat (+ Routing-Header, Request-Log)
 //! ```
 //!
-//! Limits/Budgets (AIGW-30/31) und die Plugin-Kette (AIGW-36) hängen sich vorerst nur in den
-//! Chat-Pfad (`handlers.rs`); die Stellen dafür sind hier [`Pipeline::authenticate`]
-//! (nach der Schlüsselprüfung) und [`Pipeline::route`] (vor dem Routing). Ziel ist, dass
-//! auch der Chat-Handler über diese Pipeline läuft.
+//! Limits und Budgets (AIGW-30/31) greifen wie im Chat-Pfad mit genau einer Reservierung je
+//! Client-Anfrage ([`Pipeline::route`]; Tokens geschätzt je Endpunkt, abgerechnet mit der
+//! tatsächlichen Usage). Die Plugin-Kette (AIGW-36) gehört an dieselbe Stelle (vor dem
+//! Routing). Ziel ist, dass auch der Chat-Handler über diese Pipeline läuft.
 
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use aigw_core::ir::{ApiError, ErrorKind, UpstreamError};
 use aigw_core::observe::error_type;
@@ -30,6 +31,7 @@ use crate::ProxyState;
 use crate::auth::{AuthContext, extract_api_key};
 use crate::error::ErrorFormat;
 use crate::handlers::{RouteInfo, body_error};
+use crate::limits::{TokenEstimate, retry_after_secs};
 use crate::observe::Recorder;
 use crate::provider::Capability;
 use crate::request_id::{RequestId, RequestStart};
@@ -44,6 +46,8 @@ pub(crate) struct Pipeline<'a> {
     info: RouteInfo,
     /// Wurzel-Span (OpenTelemetry, AIGW-45); der Handler führt die Anfrage darin aus.
     pub(crate) span: Span,
+    /// Geschätzter Token-Bedarf (Limits und Deployment-Kapazität).
+    est: TokenEstimate,
 }
 
 impl<'a> Pipeline<'a> {
@@ -65,6 +69,7 @@ impl<'a> Pipeline<'a> {
             rec,
             info: RouteInfo::default(),
             span,
+            est: TokenEstimate::default(),
         }
     }
 
@@ -108,21 +113,21 @@ impl<'a> Pipeline<'a> {
         Ok(body)
     }
 
-    /// Modellfreigabe des Keys, Route der Modellgruppe und deren Fähigkeit.
-    pub(crate) fn route(
+    /// Modellfreigabe des Keys, Route der Modellgruppe und deren Fähigkeit, danach Limits und
+    /// Budgets (eine Reservierung je Anfrage mit dem geschätzten Bedarf `est`).
+    pub(crate) async fn route(
         &mut self,
         auth: &AuthContext,
         model: &str,
         cap: Capability,
+        est: TokenEstimate,
     ) -> Result<Arc<GroupRoute>, UpstreamError> {
         if model.trim().is_empty() {
             return Err(UpstreamError::from(
                 ApiError::invalid_request("model darf nicht leer sein").with_param("model"),
             ));
         }
-        let _group = auth.authorize_model(model)?;
-        // Platzhalter-Span wie im Chat-Pfad, bis die Plugin-Kette eingehängt wird.
-        drop(crate::trace::plugins_span());
+        let group = auth.authorize_model(model)?;
         let route_span = crate::trace::route_span(model);
         let route = route_span
             .in_scope(|| self.st.routes.route(model))
@@ -140,6 +145,28 @@ impl<'a> Pipeline<'a> {
             crate::trace::fail(&route_span, "unsupported_capability");
             return Err(UpstreamError::from(route.unsupported_error(cap)));
         }
+        drop(route_span);
+        // Limits und Budgets (Architektur §3, Schritt 4; AIGW-30/31), abgeschlossen im
+        // Recorder (Kosten, Budget, Abgleich mit der Usage).
+        match self
+            .st
+            .limits
+            .admit(auth, group.as_ref(), est, SystemTime::now())
+            .await
+        {
+            Ok(admission) => {
+                if self.st.limits.response_headers() && !admission.headers().is_empty() {
+                    self.info.ratelimit = Some(admission.headers().clone());
+                }
+                self.rec.set_admission(admission);
+            }
+            Err(denied) => {
+                let denied = *denied;
+                self.info.ratelimit = (!denied.headers.is_empty()).then_some(denied.headers);
+                return Err(denied.error);
+            }
+        }
+        self.est = est;
         Ok(route)
     }
 
@@ -152,7 +179,7 @@ impl<'a> Pipeline<'a> {
     ) -> Result<Outcome<O::Out>, UpstreamError> {
         let cap = exec::CapacityCtx {
             counters: self.st.limits.counters(),
-            tokens: 0,
+            tokens: self.est.total(),
         };
         let routed = exec::execute_op(self.st.routes.as_ref(), route, op, req, cap).await;
         if let Some(m) = &routed.last {
@@ -170,9 +197,7 @@ impl<'a> Pipeline<'a> {
     }
 
     fn headers(&self, res: &mut Response) {
-        if self.st.config.routing_headers {
-            self.info.apply(res);
-        }
+        apply_headers(self.st, &self.info, res);
     }
 
     /// Erfolgreiche, vollständige Antwort.
@@ -194,9 +219,7 @@ impl<'a> Pipeline<'a> {
     pub(crate) fn stream(self, build: impl FnOnce(Recorder) -> Response) -> Response {
         let Self { st, info, rec, .. } = self;
         let mut res = build(rec);
-        if st.config.routing_headers {
-            info.apply(&mut res);
-        }
+        apply_headers(st, &info, &mut res);
         res
     }
 
@@ -205,7 +228,7 @@ impl<'a> Pipeline<'a> {
         tracing::debug!(request_id = %self.rid.0, error = %e, "Anfrage abgelehnt");
         let mut res = ErrorFormat::OpenAi.response(&e.error, Some(&self.rid.0));
         if let Some(after) = e.retry_after {
-            let secs = after.as_secs() + u64::from(after.subsec_nanos() > 0);
+            let secs = retry_after_secs(after);
             if let Ok(v) = HeaderValue::from_str(&secs.to_string()) {
                 res.headers_mut().insert(header::RETRY_AFTER, v);
             }
@@ -214,6 +237,16 @@ impl<'a> Pipeline<'a> {
         self.rec.finish(false);
         self.headers(&mut res);
         res
+    }
+}
+
+/// Routing-Header (falls eingeschaltet) und Rate-Limit-Header.
+fn apply_headers(st: &ProxyState, info: &RouteInfo, res: &mut Response) {
+    if st.config.routing_headers {
+        info.apply(res);
+    }
+    if let Some(h) = &info.ratelimit {
+        h.apply(ErrorFormat::OpenAi, res.headers_mut(), SystemTime::now());
     }
 }
 

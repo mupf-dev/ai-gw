@@ -97,7 +97,6 @@ impl Operation for ChatOp {
     }
 }
 
-
 /// Zähler für die Deployment-Kapazität (`capacity.rpm`/`tpm`).
 #[derive(Clone, Copy)]
 pub(crate) struct CapacityCtx<'a> {

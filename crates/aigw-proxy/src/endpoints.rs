@@ -27,7 +27,8 @@ use bytes::Bytes;
 use tracing::Instrument as _;
 
 use crate::ProxyState;
-use crate::observe::{ObservedBytes, ObservedStream};
+use crate::limits::TokenEstimate;
+use crate::observe::{ObservedBytes, ObservedStream, estimate_tokens};
 use crate::pipeline::{Pipeline, content_type, ok_with};
 use crate::provider::{BoxFuture, Capability, ChatProvider, EventStream, SpeechStream};
 use crate::request_id::{RequestId, RequestStart};
@@ -182,7 +183,13 @@ async fn embeddings_inner(
     drop(body);
     p.rec.set_target(&req.model, false, req.input.byte_len());
     let format = req.encoding_format.unwrap_or_default();
-    let route = p.route(&auth, &req.model, Capability::Embeddings)?;
+    let est = TokenEstimate {
+        input: estimate_tokens(req.input.byte_len()),
+        output: 0,
+    };
+    let route = p
+        .route(&auth, &req.model, Capability::Embeddings, est)
+        .await?;
     let Outcome::Json(resp) = p.execute(route, &EmbeddingsOp, req).await? else {
         return Err(unexpected_stream());
     };
@@ -244,7 +251,11 @@ async fn images_inner(
     }
     p.rec.set_target(&req.model, false, req.prompt.len());
     let requested = req.response_format;
-    let route = p.route(&auth, &req.model, Capability::Images)?;
+    let est = TokenEstimate {
+        input: estimate_tokens(req.prompt.len()),
+        output: 0,
+    };
+    let route = p.route(&auth, &req.model, Capability::Images, est).await?;
     let Outcome::Json(resp) = p.execute(route, &ImagesOp, req).await? else {
         return Err(unexpected_stream());
     };
@@ -318,7 +329,15 @@ async fn audio_text_inner(
     let body = p.body(headers, body, limit)?;
     let req = audio::decode_transcription_request(content_type(headers), &body, task)?;
     p.rec.set_target(&req.model, false, 0);
-    let route = p.route(&auth, &req.model, Capability::AudioTranscription)?;
+    // Audio hat keinen Token-Bedarf vor der Antwort; Anfrage-Limits greifen trotzdem.
+    let route = p
+        .route(
+            &auth,
+            &req.model,
+            Capability::AudioTranscription,
+            TokenEstimate::default(),
+        )
+        .await?;
     let Outcome::Json(resp) = p.execute(route, &TranscriptionOp, req).await? else {
         return Err(unexpected_stream());
     };
@@ -376,7 +395,13 @@ async fn speech_inner(
     }
     let characters = u64::try_from(req.input.chars().count()).unwrap_or(u64::MAX);
     p.rec.set_target(&req.model, true, 0);
-    let route = p.route(&auth, &req.model, Capability::AudioSpeech)?;
+    let est = TokenEstimate {
+        input: estimate_tokens(req.input.len()),
+        output: 0,
+    };
+    let route = p
+        .route(&auth, &req.model, Capability::AudioSpeech, est)
+        .await?;
     let Outcome::Json(speech) = p.execute(route, &SpeechOp, req).await? else {
         return Err(unexpected_stream());
     };
@@ -445,7 +470,8 @@ async fn responses_inner(
             .into());
     }
     p.rec.set_request(&req);
-    let route = p.route(&auth, &req.model, Capability::Chat)?;
+    let est = TokenEstimate::of(&req, p.state().limits.default_max_tokens());
+    let route = p.route(&auth, &req.model, Capability::Chat, est).await?;
     let op = ChatOp {
         stream: req.is_stream(),
     };

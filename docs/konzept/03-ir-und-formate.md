@@ -152,8 +152,13 @@ Deserializer ohne `flatten`, geliehene Strings) wird mit AIGW-57 gemessen.
 ## 6. Weitere Endpunkte (AIGW-21)
 
 Alle Endpunkte laufen durch dieselbe Pipeline (`aigw-proxy/src/pipeline.rs`: Auth → Body →
-Modellfreigabe → Route + Fähigkeit der Gruppe → Routing mit Retries/Fallbacks/Breaker →
-Antwort/Fehler im OpenAI-Format, Request-Log) und dasselbe Routing wie Chat. Die Modellgruppe
+Modellfreigabe → Route + Fähigkeit der Gruppe → Limits/Budgets (AIGW-30/31, eine Reservierung
+je Anfrage) → Routing mit Retries/Fallbacks/Breaker/Kapazität → Antwort/Fehler im
+OpenAI-Format inkl. Rate-Limit-Header, Request-Log, OpenTelemetry-Spans mit
+`gen_ai.operation.name` `embeddings`/`image_generation`/`audio_transcription`/`audio_speech`/
+`chat`) und dasselbe Routing wie Chat. Geschätzter Token-Bedarf für die Reservierung:
+Embeddings Eingabetext / 4, Bilder Prompt / 4, Sprachausgabe Text / 4, Transkription 0
+(Anfrage-Limits greifen), Responses wie Chat (Eingabe / 4 + `max_output_tokens`). Die Modellgruppe
 muss die Art der Anfrage in `settings.capabilities` freigeben (siehe
 [10-routing.md](10-routing.md) §2a), sonst `400 unsupported_capability`.
 
