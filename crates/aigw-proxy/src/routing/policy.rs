@@ -217,6 +217,20 @@ impl GroupPolicy {
         }
     }
 
+    /// Wie [`GroupPolicy::from_settings`], dazu die typisierten Fähigkeiten der Gruppe
+    /// (`spec.capabilities`, F123; gehen `settings.capabilities` vor).
+    pub fn from_spec(spec: &aigw_core::resource::ModelGroupSpec) -> Result<Self, String> {
+        let mut p = Self::from_settings(&spec.settings)?;
+        if !spec.capabilities.is_empty() {
+            p.capabilities = spec
+                .capabilities
+                .iter()
+                .filter_map(|c| Capability::parse(c.as_str()))
+                .collect();
+        }
+        Ok(p)
+    }
+
     /// Liest `retry`, `circuitBreaker`, `healthCheck` und `capabilities` aus den
     /// Einstellungen einer Modellgruppe. Andere Schlüssel werden ignoriert, unbekannte Felder
     /// in diesen Abschnitten sind Fehler (Tippfehler sollen auffallen). Auch für die Prüfung

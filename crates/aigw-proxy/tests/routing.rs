@@ -261,6 +261,7 @@ fn group(
             metadata: ObjectMeta::named(name),
             spec: ModelGroupSpec {
                 aliases: vec![format!("{name}-alias")],
+                capabilities: Vec::new(),
                 routing,
                 fallbacks,
                 limits: Vec::new(),

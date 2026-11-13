@@ -240,6 +240,7 @@ impl Resource for ModelGroupSpec {
     fn to_columns(&self) -> Result<Vec<(&'static str, Col)>, StoreError> {
         Ok(vec![
             ("aliases", Col::json(&self.aliases)?),
+            ("capabilities", Col::json(&self.capabilities)?),
             ("routing", Col::text(self.routing.as_str())),
             ("fallbacks", Col::json(&self.fallbacks)?),
             ("limits", Col::json(&self.limits)?),
@@ -248,13 +249,20 @@ impl Resource for ModelGroupSpec {
     }
 
     fn from_row(row: &Row<'_>) -> Result<Self, StoreError> {
-        Ok(Self {
+        let mut spec = Self {
             aliases: row.json("aliases")?,
+            capabilities: row.json("capabilities")?,
             routing: enum_text::<RoutingStrategy>(row, "routing")?,
             fallbacks: row.json("fallbacks")?,
             limits: row.json("limits")?,
             settings: row.json("settings")?,
-        })
+        };
+        // Vor F123 gespeicherte Gruppen (falls die Migration den Wert nicht übernehmen
+        // konnte): ungültige Werte bleiben in `settings` und werden vom Routing gemeldet.
+        if let Err(e) = spec.lift_legacy_capabilities() {
+            tracing::warn!(error = %e, "Modellgruppe: settings.capabilities nicht übernommen");
+        }
+        Ok(spec)
     }
 
     fn validate(&self) -> Result<(), StoreError> {

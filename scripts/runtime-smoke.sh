@@ -78,8 +78,7 @@ apiVersion: aigw/v1alpha1
 kind: ModelGroup
 metadata: {name: mock-media}
 spec:
-  settings:
-    capabilities: [embeddings, images, audio-transcription, audio-speech]
+  capabilities: [embeddings, images, audio-transcription, audio-speech]
 ---
 apiVersion: aigw/v1alpha1
 kind: Deployment

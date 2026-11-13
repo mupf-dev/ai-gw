@@ -69,3 +69,8 @@ ALTER TABLE mcp_server ADD COLUMN secret_id UUID REFERENCES secret (id);
 -- Nano-Einheiten wie per_request/per_image.
 ALTER TABLE price ADD COLUMN per_audio_minute BIGINT;
 ALTER TABLE price ADD COLUMN per_million_characters BIGINT;
+
+-- F123: Fähigkeiten der Modellgruppe als eigenes Feld. `settings.capabilities` älterer Gruppen
+-- wird beim Lesen übernommen (ungültige Werte bleiben in settings und meldet das Routing)
+-- und beim nächsten Schreiben umgeschrieben.
+ALTER TABLE model_group ADD COLUMN capabilities JSONB NOT NULL DEFAULT '[]';

@@ -183,7 +183,7 @@ impl SnapshotRoutes {
         groups.sort_by(|a, b| a.group.metadata.name.cmp(&b.group.metadata.name));
         for g in groups {
             let name = &g.group.metadata.name;
-            let policy = GroupPolicy::from_settings(&g.group.spec.settings).unwrap_or_else(|e| {
+            let policy = GroupPolicy::from_spec(&g.group.spec).unwrap_or_else(|e| {
                 tracing::error!(
                     model_group = %name,
                     error = %e,

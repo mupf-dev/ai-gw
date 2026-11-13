@@ -116,10 +116,11 @@ impl Runtime {
         let events = start_events(config, &webhooks, &store, &snapshot)?;
         let mut budgets = Budgets::new((*calendar).clone(), Some(ledger));
         if let Some((d, _)) = &events {
-            budgets = budgets.with_events(Arc::new(aigw_billing::WebhookEvents::new(
-                d.clone(),
-                (*calendar).clone(),
-            )));
+            // F154: Namen der Ziele aus dem Snapshot in den Ereignisdaten.
+            budgets = budgets.with_events(Arc::new(
+                aigw_billing::WebhookEvents::new(d.clone(), (*calendar).clone())
+                    .with_snapshot(snapshot.clone()),
+            ));
         }
         // Strikte Budgets im Cluster exakt über Redis (F106), sonst im Abgleich-Takt.
         if config.counters.backend == aigw_core::config::CounterBackendKind::Redis

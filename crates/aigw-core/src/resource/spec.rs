@@ -512,13 +512,54 @@ pub struct Fallback {
     pub on: Vec<FallbackTrigger>,
 }
 
+/// Art von Anfragen, die eine Modellgruppe annimmt (F123, AIGW-21).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum ModelCapability {
+    /// Chat Completions, Messages, Responses.
+    Chat,
+    /// Embeddings.
+    Embeddings,
+    /// Bilderzeugung.
+    Images,
+    /// Transkription und Übersetzung.
+    AudioTranscription,
+    /// Sprachausgabe.
+    AudioSpeech,
+}
+
+impl ModelCapability {
+    /// Bezeichner.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Embeddings => "embeddings",
+            Self::Images => "images",
+            Self::AudioTranscription => "audio-transcription",
+            Self::AudioSpeech => "audio-speech",
+        }
+    }
+}
+
 /// Modellgruppe: öffentlicher Modellname mit Deployments dahinter.
+///
+/// Abwärtskompatibilität (F123): `settings.capabilities` (Form vor dem typisierten Feld) wird
+/// beim Lesen in `capabilities` übernommen.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    rename_all = "camelCase",
+    deny_unknown_fields,
+    try_from = "RawModelGroupSpec"
+)]
 pub struct ModelGroupSpec {
     /// Weitere Namen, unter denen Clients die Gruppe ansprechen.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
+    /// Arten von Anfragen, die die Gruppe annimmt (F123); leer = nur `chat`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<ModelCapability>,
     /// Routing-Strategie.
     #[serde(default, skip_serializing_if = "is_default")]
     pub routing: RoutingStrategy,
@@ -532,6 +573,82 @@ pub struct ModelGroupSpec {
     #[serde(default, skip_serializing_if = "JsonObject::is_empty")]
     #[schema(value_type = Object)]
     pub settings: JsonObject,
+}
+
+/// Eingabeform von [`ModelGroupSpec`] (vor der Übernahme von `settings.capabilities`).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RawModelGroupSpec {
+    #[serde(default)]
+    aliases: Vec<String>,
+    #[serde(default)]
+    capabilities: Vec<ModelCapability>,
+    #[serde(default)]
+    routing: RoutingStrategy,
+    #[serde(default)]
+    fallbacks: Vec<Fallback>,
+    #[serde(default)]
+    limits: Vec<LimitSpec>,
+    #[serde(default)]
+    settings: JsonObject,
+}
+
+impl TryFrom<RawModelGroupSpec> for ModelGroupSpec {
+    type Error = String;
+
+    fn try_from(r: RawModelGroupSpec) -> Result<Self, String> {
+        let mut spec = Self {
+            aliases: r.aliases,
+            capabilities: r.capabilities,
+            routing: r.routing,
+            fallbacks: r.fallbacks,
+            limits: r.limits,
+            settings: r.settings,
+        };
+        spec.lift_legacy_capabilities()?;
+        Ok(spec)
+    }
+}
+
+impl ModelGroupSpec {
+    /// Übernimmt `settings.capabilities` (Form vor F123) in `capabilities` und entfernt den
+    /// Schlüssel. Fehler bei ungültigem Wert oder Widerspruch zum Feld; der Schlüssel bleibt
+    /// dann in `settings`.
+    pub fn lift_legacy_capabilities(&mut self) -> Result<(), String> {
+        let Some(v) = self.settings.get("capabilities") else {
+            return Ok(());
+        };
+        let mut list: Vec<ModelCapability> = serde_json::from_value(v.clone()).map_err(|e| {
+            format!("settings.capabilities: ungültig ({e}); bitte das Feld capabilities verwenden")
+        })?;
+        if list.is_empty() {
+            return Err("settings.capabilities darf nicht leer sein".into());
+        }
+        list.sort();
+        list.dedup();
+        let mut cur = self.capabilities.clone();
+        cur.sort();
+        cur.dedup();
+        if !cur.is_empty() && cur != list {
+            return Err(
+                "capabilities steht abweichend in settings.capabilities und capabilities – nur \
+                 capabilities verwenden"
+                    .into(),
+            );
+        }
+        self.capabilities = list;
+        self.settings.remove("capabilities");
+        Ok(())
+    }
+
+    /// Wirksame Fähigkeiten (leer = nur `chat`).
+    pub fn effective_capabilities(&self) -> Vec<ModelCapability> {
+        if self.capabilities.is_empty() {
+            vec![ModelCapability::Chat]
+        } else {
+            self.capabilities.clone()
+        }
+    }
 }
 
 /// Kapazität eines Deployments (für das Routing).
@@ -1067,6 +1184,40 @@ mod tests {
             serde_json::Value::Object(b.merged_config()),
             json!({"mode": "mask", "failMode": "open", "timeoutMs": 150, "locked": true,
                 "outputRejectMode": "error", "inherit": "override"})
+        );
+    }
+
+    #[test]
+    fn model_group_capabilities_typed_and_legacy() {
+        let g = |v: serde_json::Value| serde_json::from_value::<ModelGroupSpec>(v);
+        let new = g(json!({"capabilities": ["embeddings", "images"]})).unwrap();
+        assert_eq!(
+            new.capabilities,
+            [ModelCapability::Embeddings, ModelCapability::Images]
+        );
+        // Alte Form in settings → Feld (sortiert), Schlüssel entfernt.
+        let old = g(json!({"settings": {"capabilities": ["images", "embeddings"],
+            "retry": {"maxAttempts": 2}}}))
+        .unwrap();
+        assert_eq!(old.capabilities, new.capabilities);
+        assert!(!old.settings.contains_key("capabilities"));
+        assert!(old.settings.contains_key("retry"));
+        // Ungültig, leer, Widerspruch.
+        assert!(g(json!({"capabilities": ["video"]})).is_err());
+        assert!(g(json!({"settings": {"capabilities": ["video"]}})).is_err());
+        assert!(g(json!({"settings": {"capabilities": []}})).is_err());
+        assert!(
+            g(json!({"capabilities": ["chat"], "settings": {"capabilities": ["images"]}}))
+                .is_err()
+        );
+        // Standard: nur Chat.
+        assert_eq!(
+            ModelGroupSpec::default().effective_capabilities(),
+            [ModelCapability::Chat]
+        );
+        assert_eq!(
+            serde_json::to_value(&new).unwrap()["capabilities"],
+            json!(["embeddings", "images"])
         );
     }
 

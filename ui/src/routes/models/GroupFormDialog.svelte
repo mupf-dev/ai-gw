@@ -23,7 +23,15 @@
     onsaved,
   }: { open?: boolean; editName?: string | null; groups: string[]; onsaved: (name: string) => void } = $props();
 
-  const blank = () => ({ name: '', aliases: '', routing: 'weighted' as S['RoutingStrategy'], fallbacks: [] as S['Fallback'][], settings: '' });
+  // Fähigkeiten (F123): leer = nur Chat.
+  const CAPABILITIES: { value: S['ModelCapability']; label: string }[] = [
+    { value: 'chat', label: 'Chat' },
+    { value: 'embeddings', label: 'Embeddings' },
+    { value: 'images', label: 'Bilder' },
+    { value: 'audio-transcription', label: 'Transkription' },
+    { value: 'audio-speech', label: 'Sprachausgabe' },
+  ];
+  const blank = () => ({ name: '', aliases: '', routing: 'weighted' as S['RoutingStrategy'], fallbacks: [] as S['Fallback'][], capabilities: ['chat'] as S['ModelCapability'][], settings: '' });
   let form = $state(blank());
   let loaded = $state<ModelGroup | null>(null);
   let etag = $state<string | null>(null);
@@ -59,6 +67,7 @@
         aliases: (s.aliases ?? []).join(', '),
         routing: s.routing ?? 'weighted',
         fallbacks: (s.fallbacks ?? []).map((f) => ({ modelGroup: f.modelGroup, on: [...(f.on ?? [])] })),
+        capabilities: s.capabilities?.length ? [...s.capabilities] : ['chat'],
         settings: s.settings && Object.keys(s.settings).length ? JSON.stringify(s.settings, null, 2) : '',
       };
     } catch (e) {
@@ -89,6 +98,7 @@
     const settings = parseSettings();
     if (settings === null) e.settings = 'Kein gültiges JSON-Objekt.';
     if (form.fallbacks.some((f) => !f.modelGroup)) e.fallbacks = 'Jeder Fallback braucht eine Ziel-Gruppe.';
+    if (!form.capabilities.length) e.capabilities = 'Mindestens eine Fähigkeit wählen.';
     errors = e;
     formError = null;
     if (Object.keys(e).length) return;
@@ -98,6 +108,8 @@
       aliases,
       routing: form.routing,
       fallbacks: form.fallbacks.map((f) => ({ modelGroup: f.modelGroup, on: f.on?.length ? f.on : [] })),
+      // Nur Chat = Standard (Feld weglassen).
+      capabilities: form.capabilities.length === 1 && form.capabilities[0] === 'chat' ? [] : CAPABILITIES.map((c) => c.value).filter((c) => form.capabilities.includes(c)),
       settings: (settings ?? {}) as S['ModelGroupSpec']['settings'],
     };
     busy = true;
@@ -147,6 +159,25 @@
           <Input {id} bind:value={form.aliases} aria-describedby={describedby} aria-invalid={invalid || undefined} placeholder="gpt-4o-latest, openai/gpt-4o" autocomplete="off" />
         {/snippet}
       </Field>
+
+      <fieldset class="flex flex-col gap-1.5 sm:col-span-2" data-testid="capabilities">
+        <legend class="mb-1.5 text-sm font-medium text-fg">Fähigkeiten <span class="text-xs font-normal text-fg-subtle">(Arten von Anfragen, die die Gruppe annimmt)</span></legend>
+        <div class="flex flex-wrap gap-x-4 gap-y-1.5" role="group" aria-label="Fähigkeiten">
+          {#each CAPABILITIES as c (c.value)}
+            <label class="flex items-center gap-1.5 text-sm">
+              <Checkbox.Root
+                checked={form.capabilities.includes(c.value)}
+                onCheckedChange={(v) => (form.capabilities = v ? [...form.capabilities, c.value] : form.capabilities.filter((x) => x !== c.value))}
+                class={checkbox}
+              >
+                {#snippet children({ checked })}{#if checked}<Icon name="check" size={12} />{/if}{/snippet}
+              </Checkbox.Root>
+              {c.label}
+            </label>
+          {/each}
+        </div>
+        {#if errors.capabilities}<p class="flex items-center gap-1 text-xs text-danger-fg"><Icon name="alert" size={12} />{errors.capabilities}</p>{/if}
+      </fieldset>
 
       <fieldset class="flex flex-col gap-2 sm:col-span-2" data-testid="fallbacks">
         <legend class="mb-1.5 text-sm font-medium text-fg">Fallback-Kette <span class="text-xs font-normal text-fg-subtle">(in Reihenfolge, ohne Zyklen)</span></legend>
