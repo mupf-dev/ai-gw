@@ -18,7 +18,7 @@ Grundlage: [00-entscheidungen.md](00-entscheidungen.md) (E1–E6)
 
 ## 2. Prozess- und Crate-Struktur
 
-Ein Binary `aigw` mit zwei Listenern (getrennt konfigurierbar, getrennte Ports empfohlen):
+Ein Binary `aigw` mit zwei Listenern (Standard: getrennte Ports; per Konfiguration auf einen Port zusammenlegbar):
 
 - **Datenebene** (`:4000`): OpenAI-kompatible API, Anthropic-Messages-API, MCP-Gateway
 - **Steuerebene** (`:4001`): Admin-API `/admin/api/v1`, Admin-UI `/admin/`, `/metrics`, `/healthz`, `/readyz`
@@ -73,8 +73,9 @@ Client ──► [1 Annahme] ──► [2 Auth] ──► [3 Kontext] ──► 
 
 - **Eingangsformate:** OpenAI (Chat Completions, Responses, Embeddings, Images, Audio, Models) und **Anthropic Messages** (`/v1/messages`). Damit funktionieren Werkzeuge wie Claude Code oder Anthropic-SDKs direkt.
 - **Kanonische Zwischenform (IR)** in `aigw-core`: Nachrichten, Content-Teile (Text, Bild, Audio, Datei), Tools und Tool-Aufrufe, Sampling-Parameter, Reasoning-Einstellungen, Antwortformat (JSON-Schema). Unbekannte Felder werden in `extra` mitgeführt, damit nichts verloren geht.
-- **Durchreiche-Pfad (Fast Path):** Passt das Eingangsformat zum Anbieterformat (z. B. OpenAI → OpenAI, Anthropic → Anthropic) und braucht kein aktives Plugin den Body, wird der Body **nicht** in die IR übersetzt. Es werden nur `model`, `stream` und `max_tokens` (bzw. `max_completion_tokens`) per selektivem Parsing gelesen. Der Body geht byte-genau weiter, nur `model` wird ersetzt. Das ist der Normalfall für Q1.
-- **Übersetzungspfad:** Bei abweichenden Formaten oder wenn Plugins den Inhalt brauchen: Eingang → IR → Anbieter.
+- **Immer über die IR (Entscheidung 2026-11-13):** Jede Anfrage wird vollständig in die IR geparst, validiert und für den Anbieter neu serialisiert, auch wenn Eingangs- und Anbieterformat gleich sind. Das ergibt einheitliches Verhalten, Validierung und eine einzige Codebasis für Plugins.
+  - Damit neue Anbieter-Features nicht verloren gehen, werden unbekannte Felder in `extra` mitgeführt und bei **gleichem** Zielformat unverändert wieder ausgegeben (Best Effort); bei anderem Zielformat werden sie verworfen und als Warnung geloggt.
+  - Effizienz: Parsen mit geliehenen Strings (`Cow<'_, str>`) aus dem `Bytes`-Puffer, wenig Kopieren; Ziel Q1 wird durch Benchmarks in AIGW-57 abgesichert.
 - **Fehlerformat:** immer im Fehlerformat des Eingangs (OpenAI `{"error":{…}}` bzw. Anthropic `{"type":"error",…}`), mit Header `x-aigw-request-id`.
 
 ## 5. Anbieter-Adapter
@@ -83,7 +84,7 @@ Client ──► [1 Annahme] ──► [2 Auth] ──► [3 Kontext] ──► 
 pub trait Provider: Send + Sync {
     fn kind(&self) -> ProviderKind;
     fn capabilities(&self) -> &Capabilities;          // Chat, Tools, Vision, Embeddings …
-    fn native_format(&self) -> WireFormat;             // für den Durchreiche-Pfad
+    fn native_format(&self) -> WireFormat;             // Zielformat (für `extra`-Weitergabe)
     fn build_request(&self, req: &IrRequest, dep: &Deployment) -> Result<http::Request<Body>>;
     fn parse_response(&self, resp: Bytes) -> Result<IrResponse>;
     fn stream_decoder(&self) -> Box<dyn StreamDecoder>; // inkrementell: Bytes → IR-Events
@@ -113,7 +114,7 @@ Zugangsdaten der Anbieter werden **verschlüsselt** gespeichert (AES-256-GCM, Ma
 
 ## 7. Streaming
 
-- Upstream-Bytes → inkrementeller SSE-/Event-Stream-Decoder → bei Übersetzung IR-Events → Encoder im Client-Format. Auf dem Durchreiche-Pfad werden die Chunks unverändert weitergeleitet, nur parallel mitgelesen, um die Usage zu erfassen.
+- Upstream-Bytes → inkrementeller SSE-/Event-Stream-Decoder → bei Übersetzung IR-Events → Encoder im Client-Format. Auch Stream-Chunks laufen immer durch Decoder → IR-Event → Encoder.
 - **Backpressure:** Gelesen wird nur, wenn der Client Daten abnimmt; es gibt keinen unbegrenzten Puffer.
 - **Client-Abbruch:** Die Upstream-Anfrage wird sofort abgebrochen. Ohne Usage-Event wird die Usage geschätzt (bisher gesendete Tokens) und markiert (`usage_estimated=true`).
 - **Usage:** Bei OpenAI-Streams wird `stream_options.include_usage` serverseitig erzwungen; der Usage-Chunk wird entfernt, wenn der Client ihn nicht angefordert hat.
@@ -150,7 +151,6 @@ pub trait CounterBackend: Send + Sync {
 #[async_trait]
 pub trait Plugin: Send + Sync {
     fn name(&self) -> &'static str;
-    fn needs_body(&self) -> bool;                              // schaltet den Durchreiche-Pfad ab
     async fn on_request(&self, ctx: &mut ReqCtx) -> Flow;      // Continue | Respond(..) | Reject(..)
     async fn on_response(&self, ctx: &mut RespCtx) -> Flow;    // nicht-streamend
     fn on_chunk(&self, ctx: &mut ChunkCtx, ev: &mut IrEvent) -> Flow; // synchron, kein await im Chunk-Pfad
@@ -159,12 +159,18 @@ pub trait Plugin: Send + Sync {
 
 - **Konfiguration** je Ebene: global, Organisation, Team, Key, Modellgruppe, Route. Die Kette wird beim Snapshot-Aufbau zusammengesetzt und als `Arc<[Box<dyn Plugin>]>` abgelegt.
 - **Eingebaute Plugins (MVP):** `pii` (Erkennung per Regex und Prüfsumme: E-Mail, IBAN, Kreditkarte mit Luhn-Prüfung, Telefon, Steuer-ID usw.; Modi maskieren, ablehnen oder pseudonymisieren mit Rückübersetzung in der Antwort), `prompt-filter` (Listen, Regex, Prompt-Injection-Heuristiken), `content-safety` (externe Dienste: Azure Content Safety, OpenAI Moderation, Llama Guard über ein konfiguriertes Modell), `cache`, `header` (Header setzen oder entfernen), `request-transform` (Standardparameter setzen oder überschreiben, z. B. `max_tokens`-Deckel).
-- **Eigene Plugins** von Nutzern: nach dem MVP über WASM (wasmtime, Component Model). Die Trait-Schnittstelle wird so entworfen, dass sie sich darauf abbilden lässt.
+- **Eigene Plugins von Nutzern (Entscheidung 2026-11-13):**
+  - **MVP: Webhook-Plugin** `webhook`: ruft einen externen HTTP-Dienst in den Phasen `on_request` / `on_response` auf (JSON mit IR-Anfrage/-Antwort + Kontext ohne Geheimnisse). Antwort: `continue` / `modify` (geänderte IR) / `reject` (Status + Meldung). Konfigurierbar: Timeout (Standard 200 ms), Verhalten bei Fehler (`fail-open` / `fail-closed`), HMAC-Signatur der Aufrufe, Keep-Alive-Pool, SSRF-Schutz. Nicht im Chunk-Pfad (zu teuer pro Token); für Ausgaben nur bei gepufferter Route.
+  - **Nach dem MVP: WASM-Plugins** (wasmtime, Component Model, WIT-Schnittstelle aus dem Plugin-Trait abgeleitet), auch im Chunk-Pfad nutzbar, mit Speicher-/Zeitgrenzen je Aufruf. Die Trait-Schnittstelle wird im MVP so entworfen, dass sie sich ohne Umbau darauf abbilden lässt.
 
 ## 10. Cache
 
 - **Exakt:** Schlüssel = BLAKE3 über (Scope, Modellgruppe, normalisierter Request ohne `user`/`stream`). Ablage im RAM als LRU mit Größengrenze in Bytes, optional zusätzlich in Redis. Gestreamte Antworten werden aus dem Cache als Stream wiedergegeben.
-- **Semantisch:** Embedding der letzten Nutzernachricht (plus Hash des Systemprompts als harter Filter) über eine konfigurierte Embedding-Modellgruppe. **Eigener HNSW-Index im RAM** je Scope, Kosinus-Schwelle konfigurierbar, TTL und persistente Ablage in der DB für den Warmstart.
+- **Semantisch (Entscheidung 2026-11-13):** Embedding der letzten Nutzernachricht (plus Hash des Systemprompts als harter Filter) über eine konfigurierte Embedding-Modellgruppe. Vektor-Backend als Trait `VectorIndex` (`insert`, `search(k, threshold)`, `evict`), analog zum Zähler-Trait:
+  - `memory` (Standard): **eigener HNSW-Index im RAM** je Scope, Kosinus-Schwelle konfigurierbar, TTL; persistente Ablage in der DB für den Warmstart.
+  - `pgvector`: gemeinsamer Cache über alle Instanzen in Postgres (Erweiterung `vector`).
+  - `redis`: Redis Stack / Valkey Search (`FT.SEARCH` KNN) für gemeinsamen Cache.
+  Bei Ausfall eines externen Backends: Cache-Miss, keine Fehlerweitergabe.
 - **Scope** (Standard: Team) verhindert, dass Antworten zwischen Mandanten durchsickern. Nie mandantenübergreifend.
 - Antwort-Header `x-aigw-cache: hit-exact | hit-semantic | miss`; ein Cache-Treffer verbraucht keine Upstream-Tokens, wird aber im Log gezählt.
 
@@ -233,8 +239,8 @@ pub trait Plugin: Send + Sync {
 
 Diese Punkte sind im Konzept als Vorschlag gesetzt und werden einzeln mit dem User abgestimmt:
 
-1. Anthropic-Messages-API zusätzlich als **Eingangsformat** (nicht nur als Anbieter).
-2. Durchreiche-Pfad ohne IR-Übersetzung als Standard (§4).
-3. Eigene Plugins von Nutzern erst nach dem MVP über WASM (§9).
-4. Eigener HNSW-Index statt externer Vektor-Datenbank (§10).
-5. Getrennte Ports für Daten- und Steuerebene (§2).
+1. ✅ **Angenommen (2026-11-13):** Anthropic-Messages-API zusätzlich als **Eingangsformat** (nicht nur als Anbieter).
+2. ❌ **Abgelehnt (2026-11-13):** Durchreiche-Pfad – stattdessen immer Übersetzung über die IR (§4).
+3. ✅ **Angenommen mit Ergänzung (2026-11-13):** Webhook-Plugins im MVP, WASM-Plugins nach dem MVP (§9).
+4. ✅ **Angenommen erweitert (2026-11-13):** Eigener HNSW-Index im RAM als Standard, zusätzlich optional pgvector oder Redis als Vektor-Backend (§10).
+5. ✅ **Angenommen (2026-11-13):** Getrennte Listener als Standard (`:4000` Daten, `:4001` Steuerung), per Konfiguration auf einen Port zusammenlegbar (§2).
