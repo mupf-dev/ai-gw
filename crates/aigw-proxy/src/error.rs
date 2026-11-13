@@ -34,7 +34,9 @@ impl ErrorFormat {
         let (status, body) = match self {
             Self::OpenAi => (err.status(), serde_json::to_vec(&openai::encode_error(err))),
             Self::Anthropic => (
-                anthropic::error_status(err.kind),
+                // F152: exakter Status vor dem der Klasse.
+                err.exact_status
+                    .unwrap_or_else(|| anthropic::error_status(err.kind)),
                 serde_json::to_vec(&anthropic::encode_error(err, request_id)),
             ),
         };

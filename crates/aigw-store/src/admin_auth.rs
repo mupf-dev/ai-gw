@@ -18,7 +18,7 @@ use time::OffsetDateTime;
 
 use crate::db::{DbRow, Q, Val};
 use crate::keys::generate_admin_api_key;
-use crate::repo::audit::{AuditEvent, BOOTSTRAP_TOKEN_KIND, event_query};
+use crate::repo::audit::{AuditEvent, BOOTSTRAP_TOKEN_KIND, append_event};
 use crate::repo::{Action, AdminTx, Expect, Row, map_db, now};
 use crate::{Store, StoreError};
 
@@ -133,7 +133,7 @@ impl Store {
         .execute(&mut tx)
         .await
         .map_err(|e| map_db(e, "admin_session"))?;
-        event_query(event, version).execute(&mut tx).await?;
+        append_event(&mut tx, event, version).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -156,7 +156,7 @@ impl Store {
         let version = Q::new("SELECT version FROM config_version WHERE id = 1")
             .fetch_i64(&mut tx)
             .await?;
-        event_query(event, version).execute(&mut tx).await?;
+        append_event(&mut tx, event, version).await?;
         tx.commit().await?;
         Ok(true)
     }

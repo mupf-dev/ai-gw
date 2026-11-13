@@ -101,6 +101,13 @@ gitops:
   # Verzeichnis (F52; ohne: keine Dateien). Die CLI ist nicht eingeschränkt.
   # secret_dir: /run/aigw/secrets
 
+# Audit-Log (docs/konzept/08-admin-api.md): Hash-Kette gegen Manipulation (immer aktiv,
+# Prüfung: `aigw audit verify` bzw. GET /admin/api/v1/audit-log/verify) und Aufbewahrung.
+audit:
+  # Einträge älter als N Tage löschen (0 = unbegrenzt); die Kette bleibt prüfbar (Anker)
+  retention_days: 0
+  sweep_interval_secs: 3600
+
 # Ausgehende Verbindungen (Anbieter, Webhooks, MCP, OIDC, Guardrail-Dienste, OTLP;
 # docs/konzept/06-streaming-und-anbieter.md §4). Je Deployment zusätzlich settings.caFile.
 upstream:

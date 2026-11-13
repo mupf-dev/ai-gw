@@ -105,6 +105,33 @@ impl ResourceKind {
     }
 }
 
+impl ResourceKind {
+    /// Bezeichner im Audit-Log (`kind`, F115: einheitlich kebab-case wie `admin-session`).
+    pub fn audit_name(self) -> &'static str {
+        match self {
+            Self::Organization => "organization",
+            Self::Team => "team",
+            Self::User => "user",
+            Self::ApiKey => "api-key",
+            Self::ProviderCredential => "provider-credential",
+            Self::ModelGroup => "model-group",
+            Self::Deployment => "deployment",
+            Self::Price => "price",
+            Self::PluginBinding => "plugin-binding",
+            Self::McpServer => "mcp-server",
+            Self::McpGrant => "mcp-grant",
+        }
+    }
+
+    /// Art zu einem Namen in YAML-Schreibweise (`ApiKey`) oder Audit-Schreibweise
+    /// (`api-key`).
+    pub fn parse_any(s: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|k| k.as_str() == s || k.audit_name() == s)
+    }
+}
+
 impl fmt::Display for ResourceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())

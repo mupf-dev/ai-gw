@@ -14,6 +14,7 @@
 
 mod api_key;
 pub mod audit;
+pub mod audit_chain;
 pub(crate) mod credential;
 mod extras;
 mod kinds;
@@ -375,7 +376,8 @@ impl AdminTx {
         before: Option<&B>,
         after: Option<&A>,
     ) -> Result<(), StoreError> {
-        self.audit_kind(action, kind.as_str(), id, name, before, after)
+        // F115: Arten im Audit-Log einheitlich kebab-case (`api-key`, `model-group` …).
+        self.audit_kind(action, kind.audit_name(), id, name, before, after)
             .await
     }
 
@@ -401,29 +403,18 @@ impl AdminTx {
             Some(v) => self.scope_of(kind, name, v).await?,
             None => scope_before.clone(),
         };
-        Q::new(
-            "INSERT INTO audit_log (id, at, actor, action, kind, object_id, object_name, config_version,
-                                    before_json, after_json, organization, team,
-                                    organization_before, team_before)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
-        )
-        .bind(Val::uuid(new_id()))
-        .bind(Val::time(now()))
-        .bind(Val::text(self.actor.clone()))
-        .bind(Val::text(action.as_str()))
-        .bind(Val::text(kind))
-        .bind(Val::Uuid(id))
-        .bind(Val::text(name))
-        .bind(Val::int(self.version))
-        .bind(Val::Json(before))
-        .bind(Val::Json(after))
-        .bind(Val::Text(scope_after.organization))
-        .bind(Val::Text(scope_after.team))
-        .bind(Val::Text(scope_before.organization))
-        .bind(Val::Text(scope_before.team))
-        .execute(&mut self.tx)
-        .await?;
-        Ok(())
+        // F116: über die Hash-Kette anhängen.
+        let mut row =
+            audit_chain::NewAuditRow::new(&self.actor, action.as_str(), kind, self.version);
+        row.object_id = id;
+        row.object_name = Some(name.to_owned());
+        row.before = before;
+        row.after = after;
+        row.organization = scope_after.organization;
+        row.team = scope_after.team;
+        row.organization_before = scope_before.organization;
+        row.team_before = scope_before.team;
+        audit_chain::append(&mut self.tx, &row).await
     }
 
     /// ID einer Ressource über ihren Namen.

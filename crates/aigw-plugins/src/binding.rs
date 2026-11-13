@@ -3,10 +3,13 @@
 
 //! Kettensteuerung einer Plugin-Bindung.
 //!
-//! `PluginBindingSpec.config` enthält neben der Plugin-Konfiguration fünf reservierte
-//! Schlüssel, die die Kette auswertet und die nicht an das Plugin gehen:
+//! Seit F117 stehen die Steuerfelder als eigene Felder in `PluginBindingSpec` (`inherit`,
+//! `locked`, `failMode`, `timeoutMs`, `outputRejectMode`); ältere Bindungen mit diesen
+//! Schlüsseln in `config` werden beim Lesen übernommen
+//! ([`aigw_core::resource::PluginBindingSpec::lift_legacy_control`]). Ausgewertet wird
+//! [`split_spec`]: Steuerfelder + Plugin-Konfiguration (alle übrigen Schlüssel).
 //!
-//! | Schlüssel | Werte | Standard | Bedeutung |
+//! | Feld | Werte | Standard | Bedeutung |
 //! |---|---|---|---|
 //! | `inherit` | `append` / `override` / `disable` | `append` | Verhältnis zu Bindungen desselben Plugins auf äußeren Ebenen |
 //! | `locked` | bool | `false` | innere Ebenen dürfen diese Bindung weder ersetzen noch abschalten |
@@ -16,76 +19,19 @@
 
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use aigw_core::resource::PluginBindingSpec;
+use serde::Deserialize;
 use serde_json::{Map, Value};
 
-/// Reservierte Schlüssel in `config`.
-pub const CONTROL_KEYS: [&str; 5] = [
-    "inherit",
-    "locked",
-    "failMode",
-    "timeoutMs",
-    "outputRejectMode",
-];
+pub use aigw_core::resource::{
+    OutputRejectMode, PluginFailMode as FailMode, PluginInherit as Inherit,
+};
+
+/// Schlüssel der Kettensteuerung (in `config` nur noch aus Abwärtskompatibilität).
+pub const CONTROL_KEYS: [&str; 5] = aigw_core::resource::PLUGIN_CONTROL_KEYS;
 
 /// Größtes zulässiges Zeitlimit eines asynchronen Hakens.
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// Verhalten bei Fehlern eines Plugins.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum FailMode {
-    /// Fehler protokollieren, Plugin überspringen (Anfrage läuft weiter).
-    Open,
-    /// Anfrage ablehnen (`500 plugin_error`) bzw. Stream mit Fehler beenden.
-    Closed,
-}
-
-impl FailMode {
-    /// Bezeichner.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Open => "open",
-            Self::Closed => "closed",
-        }
-    }
-}
-
-/// Wirkung einer Guardrail-Ablehnung **der Ausgabe** ([`crate::Flow::Block`] in der
-/// Antwort- bzw. Stream-Phase, F160). Eingabe-Ablehnungen sind immer Fehler (`400`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum OutputRejectMode {
-    /// Wie Azure OpenAI: `200`, Inhalt entfernt, `finish_reason: content_filter` (OpenAI) bzw.
-    /// `stop_reason: refusal` (Anthropic); im Stream sauberer Abschluss statt Fehlerereignis.
-    #[default]
-    Finish,
-    /// Fehlerantwort (`400`) bzw. Fehlerereignis im Stream.
-    Error,
-}
-
-impl OutputRejectMode {
-    /// Bezeichner.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Finish => "finish",
-            Self::Error => "error",
-        }
-    }
-}
-
-/// Verhältnis einer Bindung zu Bindungen desselben Plugins auf äußeren Ebenen.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Inherit {
-    /// Zusätzlich ausführen (Standard).
-    #[default]
-    Append,
-    /// Geerbte Bindungen desselben Plugins ersetzen.
-    Override,
-    /// Geerbte Bindungen desselben Plugins abschalten (die Bindung selbst läuft nicht).
-    Disable,
-}
 
 /// Ausgewertete Kettensteuerung.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -129,7 +75,14 @@ pub struct Split {
     pub plugin_config: Value,
 }
 
-/// Trennt `config` in Kettensteuerung und Plugin-Konfiguration.
+/// Kettensteuerung und Plugin-Konfiguration einer Bindung (Steuerfelder vor alten
+/// Schlüsseln in `config`).
+pub fn split_spec(spec: &PluginBindingSpec) -> Split {
+    split(&spec.merged_config())
+}
+
+/// Trennt `config` (mit Steuerschlüsseln, Form vor F117) in Kettensteuerung und
+/// Plugin-Konfiguration.
 pub fn split(config: &Map<String, Value>) -> Split {
     let mut control = Map::new();
     let mut rest = Map::new();

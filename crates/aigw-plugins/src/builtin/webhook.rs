@@ -415,7 +415,10 @@ fn reject(
         })
         .unwrap_or_else(|| "webhook_rejected".to_owned());
     Ok(Flow::Reject(
-        ApiError::new(ErrorKind::from_status(status), message).with_code(code),
+        // F152: Status unverändert (z. B. 422), Klasse nur für `type` im Fehlerobjekt.
+        ApiError::new(ErrorKind::from_status(status), message)
+            .with_code(code)
+            .with_status(status),
     ))
 }
 
@@ -619,5 +622,11 @@ mod tests {
         };
         assert_eq!(e.status(), 403);
         assert_eq!(e.code.as_deref(), Some("webhook_rejected"));
+        // F152: exakter Status (422 bleibt 422, nicht 400).
+        let Ok(Flow::Reject(e)) = reject(Some(422), None, Some("policy".into())) else {
+            panic!()
+        };
+        assert_eq!(e.status(), 422);
+        assert_eq!(e.kind, ErrorKind::InvalidRequest);
     }
 }

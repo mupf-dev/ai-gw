@@ -61,6 +61,29 @@ pub struct Config {
     pub mcp: McpConfig,
     /// Ausgehende Verbindungen: Wurzelzertifikate und zusätzliche CAs (AIGW-72).
     pub upstream: UpstreamConfig,
+    /// Audit-Log: Aufbewahrung (F116).
+    pub audit: AuditConfig,
+}
+
+/// Audit-Log (F116): Aufbewahrung. Die Hash-Kette ist immer aktiv; geprüft wird sie mit
+/// `aigw audit verify` bzw. `GET /admin/api/v1/audit-log/verify`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AuditConfig {
+    /// Einträge älter als so viele Tage löschen (`0` = unbegrenzt aufbewahren, Standard).
+    /// Die Kette bleibt prüfbar: der letzte gelöschte Eintrag wird zum Anker.
+    pub retention_days: u32,
+    /// Abstand der Löschläufe (Sekunden).
+    pub sweep_interval_secs: u64,
+}
+
+impl Default for AuditConfig {
+    fn default() -> Self {
+        Self {
+            retention_days: 0,
+            sweep_interval_secs: 3600,
+        }
+    }
 }
 
 impl Config {

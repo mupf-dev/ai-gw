@@ -264,7 +264,7 @@ fn build_binding(
 ) -> Option<Built> {
     let name = &b.metadata.name;
     let plugin = &b.spec.plugin;
-    let split = binding::split(&b.spec.config);
+    let split = binding::split_spec(&b.spec);
     let factory = registry.get(plugin);
     let invalid = |reason: String, fail_mode: Option<FailMode>| -> Option<Built> {
         let mode = fail_mode.unwrap_or(opts.invalid_binding);

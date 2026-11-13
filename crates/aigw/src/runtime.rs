@@ -47,6 +47,8 @@ pub(crate) struct Runtime {
     /// Ereignis-Webhooks (nur mit `events.webhooks`).
     events: Option<(aigw_webhook::EventDispatcher, aigw_webhook::EventTask)>,
     budget_sync: BudgetSyncTask,
+    /// Aufbewahrung des Audit-Logs (F116; nur mit `audit.retention_days`).
+    audit_retention: Option<tokio::task::JoinHandle<()>>,
     reloader: ReloaderTask,
     observe: crate::observe::Observe,
 }
@@ -142,6 +144,7 @@ impl Runtime {
             webhooks,
             events,
             budget_sync,
+            audit_retention: crate::cli_audit::spawn_retention(&store, &config.audit),
             observer: observe.log.observer(),
             observe_metrics: Arc::clone(observe.log.metrics()),
             observe,
@@ -203,6 +206,9 @@ impl Runtime {
             );
         }
         self.budget_sync.shutdown().await;
+        if let Some(t) = self.audit_retention {
+            t.abort();
+        }
         if let Some((d, task)) = self.events {
             drop(d);
             task.shutdown(Duration::from_secs(5)).await;

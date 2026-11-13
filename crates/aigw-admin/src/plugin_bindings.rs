@@ -50,10 +50,10 @@ use crate::resources::{
 /// Prüft eine Bindung mit der Registry der Plugin-Kette und den SSRF-Regeln `policy`
 /// (`admin.*`). Auch als `ApplyOptions::plugin_bindings` für GitOps
 /// (`aigw config validate|diff|apply`, `config:apply`).
-pub fn check(policy: &UpstreamPolicy, plugin: &str, config: &JsonObject) -> Result<(), String> {
+pub fn check(policy: &UpstreamPolicy, spec: &PluginBindingSpec) -> Result<(), String> {
     Registry::for_validation(policy)
-        .validate(plugin, config)
-        .map_err(|e| format!("Plugin-Bindung ({plugin}): {e}"))
+        .validate_spec(spec)
+        .map_err(|e| format!("Plugin-Bindung ({}): {e}", spec.plugin))
 }
 
 /// Standardwerte der Plugin-Arten (unabhängig von Host und SSRF-Regeln).
@@ -91,7 +91,7 @@ pub struct EffectivePluginControl {
 /// Wirksame Steuerung (`None` bei unbekanntem Plugin oder ungültiger Steuerung – z. B. vor
 /// F118 per GitOps gespeicherte Bindungen).
 fn effective(o: &Object<PluginBindingSpec>) -> Option<EffectivePluginControl> {
-    let e = DEFAULTS.effective(&o.spec.plugin, &o.spec.config).ok()?;
+    let e = DEFAULTS.effective_spec(&o.spec).ok()?;
     Some(EffectivePluginControl {
         fail_mode: e.fail_mode.as_str().to_owned(),
         fail_mode_source: if e.fail_mode_default {
@@ -203,7 +203,7 @@ impl AdminResource for PluginBindingSpec {
         spec: &Self,
         _current: Option<&Object<Self>>,
     ) -> Result<(), Problem> {
-        check(&st.upstreams, &spec.plugin, &spec.config).map_err(Problem::invalid)
+        check(&st.upstreams, spec).map_err(Problem::invalid)
     }
 }
 
@@ -323,28 +323,47 @@ pub(crate) fn router() -> axum::Router<AdminState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aigw_core::resource::JsonObject;
     use serde_json::json;
 
-    fn obj(v: serde_json::Value) -> JsonObject {
-        match v {
-            serde_json::Value::Object(m) => m,
-            _ => JsonObject::new(),
+    fn spec(plugin: &str, v: serde_json::Value) -> PluginBindingSpec {
+        PluginBindingSpec {
+            scope: aigw_core::resource::Scope::global(),
+            plugin: plugin.into(),
+            order: 0,
+            enabled: true,
+            inherit: None,
+            locked: false,
+            fail_mode: None,
+            timeout_ms: None,
+            output_reject_mode: None,
+            config: match v {
+                serde_json::Value::Object(m) => m,
+                _ => JsonObject::new(),
+            },
         }
     }
 
     #[test]
     fn check_reports_plugin_errors() {
         let strict = UpstreamPolicy::strict();
-        assert!(check(&strict, "pii", &obj(json!({"action": "mask"}))).is_ok());
-        let e = check(&strict, "pii", &obj(json!({"acton": "mask"}))).unwrap_err();
+        assert!(check(&strict, &spec("pii", json!({"action": "mask"}))).is_ok());
+        let e = check(&strict, &spec("pii", json!({"acton": "mask"}))).unwrap_err();
         assert!(e.starts_with("Plugin-Bindung (pii): "), "{e}");
         assert!(e.contains("acton"), "{e}");
-        assert!(check(&strict, "gibt-es-nicht", &JsonObject::new()).is_err());
-        assert!(check(&strict, "pii", &obj(json!({"failMode": "maybe"}))).is_err());
+        assert!(check(&strict, &spec("gibt-es-nicht", json!({}))).is_err());
+        // Alter Steuerschlüssel mit ungültigem Wert (nicht übernehmbar) bleibt ein Fehler.
+        assert!(check(&strict, &spec("pii", json!({"failMode": "maybe"}))).is_err());
+        // Steuerfelder (F117) werden mitgeprüft.
+        let mut s = spec("pii", json!({}));
+        s.timeout_ms = Some(0);
+        assert!(check(&strict, &s).is_err());
+        s.timeout_ms = Some(500);
+        s.fail_mode = Some(aigw_core::resource::PluginFailMode::Open);
+        assert!(check(&strict, &s).is_ok());
         let e = check(
             &strict,
-            "webhook",
-            &obj(json!({"url": "https://169.254.169.254/latest"})),
+            &spec("webhook", json!({"url": "https://169.254.169.254/latest"})),
         )
         .unwrap_err();
         assert!(e.contains("url"), "{e}");

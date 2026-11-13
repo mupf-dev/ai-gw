@@ -282,6 +282,11 @@ fn binding(
         id: uuid::Uuid::now_v7(),
         metadata: ObjectMeta::named(name),
         spec: PluginBindingSpec {
+            inherit: None,
+            locked: false,
+            fail_mode: None,
+            timeout_ms: None,
+            output_reject_mode: None,
             scope: Scope {
                 level,
                 target: target.map(str::to_owned),

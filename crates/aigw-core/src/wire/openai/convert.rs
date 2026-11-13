@@ -1233,6 +1233,7 @@ pub fn decode_error(status: u16, body: &[u8]) -> ApiError {
                     Value::Number(n) => Some(n.to_string()),
                     _ => None,
                 }),
+                exact_status: None,
             },
             _ => ApiError::new(kind, String::from_utf8_lossy(body)),
         },

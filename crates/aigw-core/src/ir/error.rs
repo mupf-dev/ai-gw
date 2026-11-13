@@ -89,6 +89,11 @@ pub struct ApiError {
     /// Maschinenlesbarer Code (OpenAI `code`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
+    /// Exakter HTTP-Status, falls er von dem der Klasse abweicht (F152, z. B. 422 aus einem
+    /// Webhook-`reject` oder einem Upstream). Nur 400–599; wird nicht serialisiert (der Status
+    /// steht in der HTTP-Antwort, nicht im Fehlerobjekt).
+    #[serde(default, skip)]
+    pub exact_status: Option<u16>,
 }
 
 impl ApiError {
@@ -99,6 +104,7 @@ impl ApiError {
             message: message.into(),
             param: None,
             code: None,
+            exact_status: None,
         }
     }
 
@@ -121,9 +127,17 @@ impl ApiError {
         self
     }
 
-    /// HTTP-Statuscode.
+    /// Setzt einen exakten HTTP-Status (F152). Werte außerhalb 400–599 werden ignoriert;
+    /// die Klasse (`kind`) bleibt für `type` im Fehlerobjekt maßgeblich.
+    #[must_use]
+    pub fn with_status(mut self, status: u16) -> Self {
+        self.exact_status = (400..=599).contains(&status).then_some(status);
+        self
+    }
+
+    /// HTTP-Statuscode: exakter Status, sonst der der Klasse.
     pub fn status(&self) -> u16 {
-        self.kind.status()
+        self.exact_status.unwrap_or_else(|| self.kind.status())
     }
 }
 

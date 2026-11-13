@@ -858,7 +858,12 @@ pub fn classify_openai_error(
         message,
         param: wire.param,
         code: wire.code,
+        exact_status: None,
     };
+    // F152: sonstige 4xx (z. B. 422) mit exaktem Status durchreichen.
+    if class == ErrorClass::InvalidRequest && s != 400 {
+        api = api.with_status(s);
+    }
     match class {
         ErrorClass::Auth => {
             api = ApiError::new(
@@ -988,6 +993,7 @@ fn stream_error(data: &str) -> Option<ApiError> {
         message,
         param: w.param,
         code: w.code,
+        exact_status: None,
     })
 }
 

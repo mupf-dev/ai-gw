@@ -840,7 +840,7 @@ fn check_rules(
                 // Plugin-Kette (F118/F165): wie in der Admin-API.
                 ResourceSpec::PluginBinding(b) => opts
                     .plugin_bindings
-                    .map_or(Ok(()), |f| f(&opts.upstreams, &b.plugin, &b.config)),
+                    .map_or(Ok(()), |f| f(&opts.upstreams, b)),
                 _ => Ok(()),
             };
             if let Err(e) = res {

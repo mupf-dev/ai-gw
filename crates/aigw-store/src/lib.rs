@@ -47,6 +47,7 @@ pub use reload::{ReloadMetrics, ReloadOptions, Reloader, ReloaderTask};
 pub use repo::audit::{
     ActorType, AuditCursor, AuditEvent, AuditPage, AuditQuery, AuditScope, ScopeRule,
 };
+pub use repo::audit_chain::{AUDIT_LOG_KIND, AuditChainIssue, AuditChainReport};
 pub use repo::list::{ListFilter, ListQuery, Page};
 pub use repo::{AuditEntry, Expect, PlainResource, Resource, WriteExtras};
 pub use snapshot::{Fallback, Incremental, load_incremental, load_parts, load_snapshot};
@@ -170,6 +171,11 @@ const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
         "observe",
         include_str!("../migrations/sqlite/0004_observe.sql"),
     ),
+    (
+        5,
+        "restpunkte",
+        include_str!("../migrations/sqlite/0005_restpunkte.sql"),
+    ),
 ];
 
 /// Migrationssatz für Postgres (`migrations/postgres/`), gleiche Versionen wie SQLite.
@@ -193,6 +199,11 @@ const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
         4,
         "observe",
         include_str!("../migrations/postgres/0004_observe.sql"),
+    ),
+    (
+        5,
+        "restpunkte",
+        include_str!("../migrations/postgres/0005_restpunkte.sql"),
     ),
 ];
 

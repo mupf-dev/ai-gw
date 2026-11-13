@@ -131,8 +131,21 @@ impl Registry {
         self.factories.keys().copied()
     }
 
-    /// Prüft eine Bindungs-Konfiguration (Kettensteuerung + Plugin-Konfiguration), ohne sie
-    /// zu verwenden – z. B. für Admin-API und `aigw config validate`.
+    /// Prüft eine Bindung (Steuerfelder + Plugin-Konfiguration, F117), ohne sie zu verwenden –
+    /// z. B. für Admin-API und `aigw config validate`.
+    pub fn validate_spec(&self, spec: &aigw_core::resource::PluginBindingSpec) -> Result<(), String> {
+        self.validate(&spec.plugin, &spec.merged_config())
+    }
+
+    /// Wirksame Kettensteuerung einer Bindung (Steuerfelder, F117).
+    pub fn effective_spec(
+        &self,
+        spec: &aigw_core::resource::PluginBindingSpec,
+    ) -> Result<EffectiveControl, String> {
+        self.effective(&spec.plugin, &spec.merged_config())
+    }
+
+    /// Prüft eine Bindungs-Konfiguration in der Form vor F117 (Steuerschlüssel in `config`).
     pub fn validate(
         &self,
         plugin: &str,

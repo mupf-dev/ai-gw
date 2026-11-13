@@ -19,11 +19,11 @@
 //! **Geheimnisse:** Vorher/Nachher sind die Darstellungen der Admin-API – ohne Werte von
 //! Zugangsdaten, ohne Key-Hashes und -Klartexte (`SecretString` serialisiert `<redacted>`).
 
-use aigw_core::resource::{Id, ResourceKind, new_id};
+use aigw_core::resource::{Id, ResourceKind};
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use super::{AdminTx, Row, Val, millis, now};
+use super::{AdminTx, Row, Val, millis};
 use crate::db::{DbRow, Q};
 use crate::{Store, StoreError};
 
@@ -74,19 +74,19 @@ impl AdminTx {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned)
         };
-        if kind == ResourceKind::Organization.as_str() {
+        if kind == ResourceKind::Organization.audit_name() {
             return Ok(Scope {
                 organization: Some(name.to_owned()),
                 team: None,
             });
         }
-        if kind == ResourceKind::Team.as_str() {
+        if kind == ResourceKind::Team.audit_name() {
             return Ok(Scope {
                 organization: spec_str("organization"),
                 team: Some(name.to_owned()),
             });
         }
-        if kind == ResourceKind::ApiKey.as_str() {
+        if kind == ResourceKind::ApiKey.audit_name() {
             // F3: jeder Key hat eine Organisation (mit Team: die des Teams).
             return Ok(Scope {
                 organization: spec_str("organization"),
@@ -110,7 +110,8 @@ impl AdminTx {
             .await?;
         if n > 0 {
             let details = serde_json::json!({"reason": reason, "sessions": n});
-            event_query(
+            append_event(
+                &mut self.tx,
                 &AuditEvent {
                     actor: self.actor.clone(),
                     action: "revoke".into(),
@@ -121,7 +122,6 @@ impl AdminTx {
                 },
                 self.version,
             )
-            .execute(&mut self.tx)
             .await?;
         }
         Ok(n)
@@ -145,22 +145,17 @@ pub struct AuditEvent {
     pub details: Option<serde_json::Value>,
 }
 
-/// `INSERT` eines Ereignisses mit der Konfigurationsversion `version`.
-pub(crate) fn event_query(ev: &AuditEvent, version: i64) -> Q {
-    Q::new(
-        "INSERT INTO audit_log (id, at, actor, action, kind, object_id, object_name, config_version,
-                                before_json, after_json)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9)",
-    )
-    .bind(Val::uuid(new_id()))
-    .bind(Val::time(now()))
-    .bind(Val::text(ev.actor.clone()))
-    .bind(Val::text(ev.action.clone()))
-    .bind(Val::text(ev.kind.clone()))
-    .bind(Val::Uuid(ev.object_id))
-    .bind(Val::Text(ev.object_name.clone()))
-    .bind(Val::int(version))
-    .bind(Val::Json(ev.details.clone()))
+/// Hängt ein Ereignis mit der Konfigurationsversion `version` an die Hash-Kette an (F116).
+pub(crate) async fn append_event(
+    tx: &mut crate::db::Tx,
+    ev: &AuditEvent,
+    version: i64,
+) -> Result<(), StoreError> {
+    let mut row = super::audit_chain::NewAuditRow::new(&ev.actor, &ev.action, &ev.kind, version);
+    row.object_id = ev.object_id;
+    row.object_name = ev.object_name.clone();
+    row.after = ev.details.clone();
+    super::audit_chain::append(tx, &row).await
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -184,8 +179,10 @@ pub struct AuditEntry {
     /// `create` | `update` | `delete` | `rotate` | `revoke` | `reactivate` | `login` |
     /// `login-failed` | `logout` | `first-use` | `disable` | `clamp` | `force` (AIGW-67).
     pub action: String,
-    /// Art (`Organization`, `Team`, `User`, `ApiKey`, `ModelGroup`, `Deployment`,
-    /// `ProviderCredential`, `Price` …, `admin-api-key`, `admin-session`, `bootstrap-token`).
+    /// Art, einheitlich kebab-case (F115): `organization`, `team`, `user`, `api-key`,
+    /// `model-group`, `deployment`, `provider-credential`, `secret`, `price`, `plugin-binding`,
+    /// `mcp-server`, `mcp-grant`, `admin-api-key`, `admin-session`, `bootstrap-token`,
+    /// `audit-log`.
     pub kind: String,
     /// Objekt-ID.
     #[schema(value_type = Option<String>, format = Uuid)]
@@ -422,7 +419,9 @@ impl Store {
     /// kein Snapshot-Neubau).
     pub async fn record_audit_event(&self, ev: &AuditEvent) -> Result<(), StoreError> {
         let version = self.config_version().await?;
-        event_query(ev, version).execute(&self.pool).await?;
+        let mut tx = self.pool.begin().await?;
+        append_event(&mut tx, ev, version).await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -454,7 +453,16 @@ impl Store {
             let parts: Vec<&str> = q.actor_types.iter().map(|t| t.sql()).collect();
             w.conds.push(format!("({})", parts.join(" OR ")));
         }
-        w.any_of("kind", &q.kinds);
+        // F115: Arten auch in der alten Schreibweise (`ApiKey`) annehmen.
+        let kinds: Vec<String> = q
+            .kinds
+            .iter()
+            .map(|k| match ResourceKind::parse_any(k) {
+                Some(rk) => rk.audit_name().to_owned(),
+                None => k.clone(),
+            })
+            .collect();
+        w.any_of("kind", &kinds);
         w.any_of("action", &q.actions);
         if let Some(o) = &q.object {
             let a = w.text(o);
@@ -524,7 +532,7 @@ impl Store {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use aigw_core::resource::{
-        ApiKeySpec, ObjectMeta, OrganizationSpec, Role, RoleBinding, TeamSpec, UserSpec,
+        ApiKeySpec, ObjectMeta, OrganizationSpec, Role, RoleBinding, TeamSpec, UserSpec, new_id,
     };
     use time::Duration;
 
@@ -716,6 +724,8 @@ mod tests {
             2
         );
         assert_eq!(count(&s, q(&|q| q.kinds = vec!["Team".into()])).await, 2);
+        assert_eq!(count(&s, q(&|q| q.kinds = vec!["team".into()])).await, 2);
+        assert_eq!(all.items[0].kind, "api-key");
         assert_eq!(
             count(
                 &s,

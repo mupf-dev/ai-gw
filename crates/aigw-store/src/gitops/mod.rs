@@ -46,10 +46,10 @@ pub const SECRET_ENV_PREFIX: &str = "AIGW_SECRET_";
 /// Prüffunktion für `ModelGroup.spec.settings` (siehe [`ApplyOptions::group_settings`]).
 pub type SettingsCheck = fn(&aigw_core::resource::JsonObject) -> Result<(), String>;
 
-/// Prüffunktion für Plugin-Bindungen (Plugin-Name, `config`; SSRF-Regeln aus
+/// Prüffunktion für Plugin-Bindungen (Spezifikation mit Steuerfeldern; SSRF-Regeln aus
 /// [`ApplyOptions::upstreams`]), siehe [`ApplyOptions::plugin_bindings`].
 pub type PluginBindingCheck =
-    fn(&UpstreamPolicy, &str, &aigw_core::resource::JsonObject) -> Result<(), String>;
+    fn(&UpstreamPolicy, &aigw_core::resource::PluginBindingSpec) -> Result<(), String>;
 
 /// Umgang mit `ApiKey`-Manifesten.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]

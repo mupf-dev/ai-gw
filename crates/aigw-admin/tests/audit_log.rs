@@ -489,7 +489,7 @@ async fn scenario(store: Store) {
         .map(|l| serde_json::from_str(l).unwrap())
         .collect();
     assert_eq!(lines.len(), 2);
-    assert!(lines.iter().all(|e| field(e, "kind") == "ApiKey"));
+    assert!(lines.iter().all(|e| field(e, "kind") == "api-key"));
     // Kein Geheimnis, kein Key-Hash im gesamten Log (JSON und NDJSON)
     let dump = format!("{text}{}", serde_json::to_string(&all_now).unwrap());
     for s in secrets {

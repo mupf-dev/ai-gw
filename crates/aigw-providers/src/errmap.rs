@@ -94,7 +94,12 @@ pub(crate) fn upstream_error(
         message,
         param: None,
         code,
+        exact_status: None,
     };
+    // F152: sonstige 4xx (z. B. 422) mit exaktem Status durchreichen.
+    if class == ErrorClass::InvalidRequest && status != 400 {
+        api = api.with_status(status);
+    }
     match class {
         ErrorClass::Auth => {
             api = ApiError::new(

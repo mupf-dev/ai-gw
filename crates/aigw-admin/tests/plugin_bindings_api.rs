@@ -152,12 +152,6 @@ async fn bindings_are_validated_and_show_effective_fail_mode() {
     // Ungültig → 422 mit der Meldung des Plugins.
     let cases = [
         ("pii", json!({"acton": "mask"}), "acton"),
-        ("pii", json!({"failMode": "sometimes"}), "Kettensteuerung"),
-        (
-            "pii",
-            json!({"outputRejectMode": "drop"}),
-            "Kettensteuerung",
-        ),
         (
             "pii",
             json!({"entropy": {"minLength": 4}}),
@@ -189,6 +183,37 @@ async fn bindings_are_validated_and_show_effective_fail_mode() {
             "{plugin}: {detail}"
         );
     }
+    // F117: Steuerfelder als eigene Felder – ungültige Werte (auch in der alten Form in
+    // `config`) werden schon beim Lesen der Eingabe abgelehnt.
+    for (spec_extra, want) in [
+        (json!({"config": {"failMode": "sometimes"}}), "failMode"),
+        (json!({"config": {"outputRejectMode": "drop"}}), "outputRejectMode"),
+        (json!({"failMode": "sometimes"}), "failMode"),
+        (json!({"failMode": "open", "config": {"failMode": "closed"}}), "failMode"),
+        (json!({"timeoutMs": 0}), "timeoutMs"),
+    ] {
+        let mut body = binding("x", "pii", json!({}));
+        for (k, v) in spec_extra.as_object().unwrap() {
+            body["spec"][k] = v.clone();
+        }
+        let (s, v) = call(&app, Method::POST, BASE, Some(body)).await;
+        assert!(s.is_client_error(), "{spec_extra}: {s} {v}");
+        let detail = v["detail"].as_str().unwrap_or_default();
+        assert!(detail.contains(want), "{spec_extra}: {detail}");
+    }
+    // Neue Form: Steuerfelder neben `config`, gelesen als eigene Felder.
+    let mut body = binding("pii-ctl", "pii", json!({"action": "mask"}));
+    body["spec"]["failMode"] = json!("open");
+    body["spec"]["timeoutMs"] = json!(750);
+    let (s, v) = call(&app, Method::POST, BASE, Some(body)).await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["spec"]["failMode"], "open");
+    assert!(v["spec"]["config"].get("failMode").is_none());
+    assert_eq!(v["effective"]["failMode"], "open");
+    assert_eq!(v["effective"]["failModeSource"], "binding");
+    assert_eq!(v["effective"]["timeoutMs"], 750);
+    let (s, _) = call(&app, Method::DELETE, &format!("{BASE}/pii-ctl"), None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
 
     // Ersetzen: Fehlermodus der Bindung überschreibt den Standard; ungültig → 422.
     let (s, v) = call(
@@ -206,6 +231,10 @@ async fn bindings_are_validated_and_show_effective_fail_mode() {
     assert_eq!(v["effective"]["failMode"], "closed");
     assert_eq!(v["effective"]["failModeSource"], "binding");
     assert_eq!(v["effective"]["timeoutMs"], 500);
+    // Alte Form (Steuerschlüssel in `config`) wird in die Felder übernommen.
+    assert_eq!(v["spec"]["failMode"], "closed");
+    assert_eq!(v["spec"]["timeoutMs"], 500);
+    assert!(v["spec"]["config"].get("failMode").is_none());
     let (s, _) = call(
         &app,
         Method::PUT,

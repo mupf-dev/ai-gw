@@ -559,7 +559,12 @@ pub fn classify_anthropic_error(
         message,
         param: None,
         code: kind,
+        exact_status: None,
     };
+    // F152: sonstige 4xx (z. B. 422) mit exaktem Status durchreichen.
+    if class == ErrorClass::InvalidRequest && s != 400 {
+        api = api.with_status(s);
+    }
     match class {
         ErrorClass::Auth => {
             api = ApiError::new(

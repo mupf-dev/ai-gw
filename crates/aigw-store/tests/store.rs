@@ -307,6 +307,11 @@ async fn run(store: Store) {
             ACTOR,
             meta("pii-team"),
             PluginBindingSpec {
+                inherit: None,
+                locked: false,
+                fail_mode: None,
+                timeout_ms: None,
+                output_reject_mode: None,
                 scope: Scope {
                     level: ScopeLevel::Team,
                     target: Some("platform".into()),
@@ -328,6 +333,11 @@ async fn run(store: Store) {
                 ACTOR,
                 meta("bad-scope"),
                 PluginBindingSpec {
+                    inherit: None,
+                    locked: false,
+                    fail_mode: None,
+                    timeout_ms: None,
+                    output_reject_mode: None,
                     scope: Scope {
                         level: ScopeLevel::Global,
                         target: Some("x".into())

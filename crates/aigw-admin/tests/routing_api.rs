@@ -1232,7 +1232,7 @@ async fn audit_has_no_secrets(env: &Env) {
     assert!(
         entries
             .iter()
-            .any(|e| e.kind == "ProviderCredential" && e.action == "update")
+            .any(|e| e.kind == "provider-credential" && e.action == "update")
     );
     let text = serde_json::to_string(&entries).unwrap();
     assert_no_secrets(&text);

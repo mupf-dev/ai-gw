@@ -381,19 +381,46 @@ impl Resource for PluginBindingSpec {
             ("plugin", Col::text(self.plugin.clone())),
             ("position", Col::int(i64::from(self.order))),
             ("enabled", Col::bool(self.enabled)),
+            // Kettensteuerung als eigene Spalten (F117, Migration 0002).
+            ("inherit", Col::opt_text(self.inherit.map(|i| i.as_str()))),
+            ("locked", Col::bool(self.locked)),
+            ("fail_mode", Col::opt_text(self.fail_mode.map(|f| f.as_str()))),
+            ("timeout_ms", u64_col(self.timeout_ms)?),
+            (
+                "output_reject_mode",
+                Col::opt_text(self.output_reject_mode.map(|o| o.as_str())),
+            ),
             ("config", Col::json(&self.config)?),
         ])
     }
 
     fn from_row(row: &Row<'_>) -> Result<Self, StoreError> {
-        Ok(Self {
+        fn opt_enum<T: DeserializeOwned>(row: &Row<'_>, col: &str) -> Result<Option<T>, StoreError> {
+            row.opt_text(col)?
+                .map(|s| serde_json::from_value(serde_json::Value::String(s)))
+                .transpose()
+                .map_err(StoreError::from)
+        }
+        let mut spec = Self {
             scope: scope_from_row(row, "level", "target_id")?,
             plugin: row.text("plugin")?,
             order: i32::try_from(row.int("position")?)
                 .map_err(|_| StoreError::Corrupt("position außerhalb i32".into()))?,
             enabled: row.bool("enabled")?,
+            inherit: opt_enum(row, "inherit")?,
+            locked: row.bool("locked")?,
+            fail_mode: opt_enum(row, "fail_mode")?,
+            timeout_ms: row.opt_u64("timeout_ms")?,
+            output_reject_mode: opt_enum(row, "output_reject_mode")?,
             config: row.json("config")?,
-        })
+        };
+        // Bindungen vor F117: Steuerschlüssel aus `config` übernehmen. Nicht übernehmbare
+        // Werte bleiben in `config` – die Plugin-Kette behandelt die Bindung dann als ungültig
+        // (mit ihrem failMode), statt den ganzen Snapshot scheitern zu lassen.
+        if let Err(e) = spec.lift_legacy_control() {
+            tracing::warn!(plugin = %spec.plugin, error = %e, "Plugin-Bindung: alte Steuerschlüssel in config ungültig");
+        }
+        Ok(spec)
     }
 
     fn validate(&self) -> Result<(), StoreError> {

@@ -303,9 +303,47 @@ fn export(store: Store, query: AuditQuery, limit: Option<u64>) -> Response {
     res
 }
 
+/// Prüft die Hash-Kette des Audit-Logs (F116) – nur globaler `admin`/`auditor`.
+///
+/// Liefert immer `200` mit dem Prüfbericht (`ok: false` bei Abweichungen). `headHash` kann
+/// extern gesichert und später verglichen werden (Schutz gegen Neuberechnung der ganzen
+/// Kette durch jemanden mit Schreibrechten auf die Datenbank).
+#[utoipa::path(
+    get, path = "/admin/api/v1/audit-log/verify", tag = "audit-log",
+    responses(
+        (status = 200, description = "Prüfbericht", body = aigw_store::AuditChainReport),
+        (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
+        (status = 403, description = "Nur globaler admin/auditor", body = Problem, content_type = "application/problem+json"),
+    ),
+    security(("bearer" = []), ("session" = []))
+)]
+pub(crate) async fn verify_audit_log(
+    State(st): State<AdminState>,
+    Extension(p): Extension<Principal>,
+) -> Result<Response, Problem> {
+    if visibility(&p)? != AuditScope::All {
+        return Err(Problem::forbidden(
+            "Prüfung der Hash-Kette: nur globaler admin oder auditor",
+        ));
+    }
+    let report = st.store.verify_audit_chain().await?;
+    if !report.ok {
+        tracing::error!(
+            issues = report.issues.len(),
+            "Audit-Log: Hash-Kette verletzt (Manipulation oder Datenverlust)"
+        );
+    }
+    let mut res = Json(report).into_response();
+    res.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(res)
+}
+
 /// Routen (mit Anmeldung).
 pub(crate) fn router() -> Router<AdminState> {
-    Router::new().route("/admin/api/v1/audit-log", get(audit_log))
+    Router::new()
+        .route("/admin/api/v1/audit-log", get(audit_log))
+        .route("/admin/api/v1/audit-log/verify", get(verify_audit_log))
 }
 
 #[cfg(test)]

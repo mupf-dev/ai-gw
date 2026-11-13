@@ -9,6 +9,7 @@
 //! - `aigw openapi` gibt die OpenAPI-Spezifikation der Admin-API aus (für `ui/` → TS-Typen).
 //! - `aigw config export|diff|apply|validate` – GitOps (siehe [`cli_config`]).
 
+mod cli_audit;
 mod cli_config;
 mod keygen;
 mod observe;
@@ -51,6 +52,9 @@ enum Command {
     /// Erzeugt einen Master-Key (Hex oder Base64) für `secrets.master_key_file` bzw.
     /// `AIGW_MASTER_KEY` – auf die Standardausgabe oder in eine Datei (Rechte 0600).
     Keygen(keygen::KeygenArgs),
+    /// Audit-Log: Hash-Kette prüfen (F116).
+    #[command(subcommand)]
+    Audit(cli_audit::AuditCommand),
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -113,6 +117,10 @@ fn main() -> ExitCode {
         Command::Config(cmd) => {
             init_tracing(cli.log_format);
             cli_config::run(cmd)
+        }
+        Command::Audit(cmd) => {
+            init_tracing(cli.log_format);
+            cli_audit::run(cmd)
         }
         Command::Serve { config } => {
             let traces = init_tracing(cli.log_format);

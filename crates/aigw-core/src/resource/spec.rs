@@ -677,9 +677,87 @@ impl Scope {
     }
 }
 
+/// Verhältnis einer Plugin-Bindung zu Bindungen desselben Plugins auf äußeren Ebenen.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum PluginInherit {
+    /// Zusätzlich ausführen (Standard).
+    #[default]
+    Append,
+    /// Geerbte Bindungen desselben Plugins ersetzen.
+    Override,
+    /// Geerbte Bindungen desselben Plugins abschalten (die Bindung selbst läuft nicht).
+    Disable,
+}
+
+impl PluginInherit {
+    /// Bezeichner.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Append => "append",
+            Self::Override => "override",
+            Self::Disable => "disable",
+        }
+    }
+}
+
+/// Verhalten bei Fehlern eines Plugins.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum PluginFailMode {
+    /// Fehler protokollieren, Plugin überspringen (Anfrage läuft weiter).
+    Open,
+    /// Anfrage ablehnen (`500 plugin_error`) bzw. Stream mit Fehler beenden.
+    Closed,
+}
+
+impl PluginFailMode {
+    /// Bezeichner.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Closed => "closed",
+        }
+    }
+}
+
+/// Wirkung einer Guardrail-Ablehnung **der Ausgabe** (F160). Eingabe-Ablehnungen sind immer
+/// Fehler (`400`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum OutputRejectMode {
+    /// Wie Azure OpenAI: `200`, Inhalt entfernt, `finish_reason: content_filter` (OpenAI) bzw.
+    /// `stop_reason: refusal` (Anthropic); im Stream sauberer Abschluss statt Fehlerereignis.
+    #[default]
+    Finish,
+    /// Fehlerantwort (`400`) bzw. Fehlerereignis im Stream.
+    Error,
+}
+
+impl OutputRejectMode {
+    /// Bezeichner.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Finish => "finish",
+            Self::Error => "error",
+        }
+    }
+}
+
 /// Plugin-Bindung: ein Plugin mit Konfiguration auf einer Ebene.
+///
+/// Die Kettensteuerung (`inherit`, `locked`, `failMode`, `timeoutMs`, `outputRejectMode`)
+/// steht in eigenen Feldern (F117). Abwärtskompatibilität: Stehen diese Schlüssel (wie vor
+/// F117) in `config`, werden sie beim Lesen in die Felder übernommen; steht derselbe Schlüssel
+/// in beiden mit verschiedenen Werten, ist die Eingabe ungültig.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    rename_all = "camelCase",
+    deny_unknown_fields,
+    try_from = "RawPluginBindingSpec"
+)]
 pub struct PluginBindingSpec {
     /// Geltungsbereich.
     pub scope: Scope,
@@ -691,10 +769,162 @@ pub struct PluginBindingSpec {
     /// Aktiv?
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Verhältnis zu Bindungen desselben Plugins auf äußeren Ebenen (Standard `append`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inherit: Option<PluginInherit>,
+    /// Innere Ebenen dürfen diese Bindung weder ersetzen noch abschalten.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
+    /// Fehlermodus (Standard je Plugin-Art, F148).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fail_mode: Option<PluginFailMode>,
+    /// Zeitlimit asynchroner Haken in Millisekunden (1–60000; Standard je Plugin-Art).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    /// Wirkung einer Ausgabe-Ablehnung (Standard `finish`, F160).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_reject_mode: Option<OutputRejectMode>,
     /// Plugin-Konfiguration (Schema je Plugin).
     #[serde(default, skip_serializing_if = "JsonObject::is_empty")]
     #[schema(value_type = Object)]
     pub config: JsonObject,
+}
+
+/// Schlüssel der Kettensteuerung, die vor F117 in `config` standen.
+pub const PLUGIN_CONTROL_KEYS: [&str; 5] = [
+    "inherit",
+    "locked",
+    "failMode",
+    "timeoutMs",
+    "outputRejectMode",
+];
+
+/// Eingabeform von [`PluginBindingSpec`] (vor der Übernahme alter Steuerschlüssel).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RawPluginBindingSpec {
+    scope: Scope,
+    plugin: String,
+    #[serde(default)]
+    order: i32,
+    #[serde(default = "default_true")]
+    enabled: bool,
+    #[serde(default)]
+    inherit: Option<PluginInherit>,
+    #[serde(default)]
+    locked: bool,
+    #[serde(default)]
+    fail_mode: Option<PluginFailMode>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+    #[serde(default)]
+    output_reject_mode: Option<OutputRejectMode>,
+    #[serde(default)]
+    config: JsonObject,
+}
+
+impl TryFrom<RawPluginBindingSpec> for PluginBindingSpec {
+    type Error = String;
+
+    fn try_from(r: RawPluginBindingSpec) -> Result<Self, String> {
+        let mut spec = Self {
+            scope: r.scope,
+            plugin: r.plugin,
+            order: r.order,
+            enabled: r.enabled,
+            inherit: r.inherit,
+            locked: r.locked,
+            fail_mode: r.fail_mode,
+            timeout_ms: r.timeout_ms,
+            output_reject_mode: r.output_reject_mode,
+            config: r.config,
+        };
+        spec.lift_legacy_control()?;
+        Ok(spec)
+    }
+}
+
+impl PluginBindingSpec {
+    /// Übernimmt Steuerschlüssel aus `config` (Form vor F117) in die eigenen Felder und
+    /// entfernt sie aus `config`. Fehler bei ungültigem Wert oder Widerspruch zu einem
+    /// gesetzten Feld; der betroffene Schlüssel bleibt dann in `config` (die Plugin-Kette
+    /// behandelt die Bindung als ungültig).
+    pub fn lift_legacy_control(&mut self) -> Result<(), String> {
+        fn take<T: serde::de::DeserializeOwned + PartialEq>(
+            config: &mut JsonObject,
+            key: &str,
+            field: &mut Option<T>,
+        ) -> Result<(), String> {
+            let Some(v) = config.get(key) else {
+                return Ok(());
+            };
+            let parsed: T = serde_json::from_value(v.clone())
+                .map_err(|e| format!("config.{key}: ungültiger Wert ({e})"))?;
+            if field.as_ref().is_some_and(|cur| *cur != parsed) {
+                return Err(format!(
+                    "{key} steht abweichend in `config.{key}` und `{key}` – nur `{key}` verwenden"
+                ));
+            }
+            *field = Some(parsed);
+            config.remove(key);
+            Ok(())
+        }
+        let mut locked = self.locked.then_some(true);
+        let results = [
+            take(&mut self.config, "inherit", &mut self.inherit),
+            take(&mut self.config, "failMode", &mut self.fail_mode),
+            take(&mut self.config, "timeoutMs", &mut self.timeout_ms),
+            take(
+                &mut self.config,
+                "outputRejectMode",
+                &mut self.output_reject_mode,
+            ),
+            // `locked: false` in `config` ohne gesetztes Feld ist kein Widerspruch.
+            if self.config.get("locked") == Some(&serde_json::Value::Bool(false)) {
+                self.config.remove("locked");
+                Ok(())
+            } else {
+                take(&mut self.config, "locked", &mut locked)
+            },
+        ];
+        self.locked = locked.unwrap_or(false);
+        let errors: Vec<String> = results.into_iter().filter_map(Result::err).collect();
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
+    }
+
+    /// Gesetzte Steuerfelder als JSON-Objekt (camelCase-Schlüssel wie früher in `config`).
+    pub fn control_entries(&self) -> JsonObject {
+        let mut m = JsonObject::new();
+        let s = |v: &str| serde_json::Value::String(v.to_owned());
+        if let Some(i) = self.inherit {
+            m.insert("inherit".into(), s(i.as_str()));
+        }
+        if self.locked {
+            m.insert("locked".into(), serde_json::Value::Bool(true));
+        }
+        if let Some(f) = self.fail_mode {
+            m.insert("failMode".into(), s(f.as_str()));
+        }
+        if let Some(t) = self.timeout_ms {
+            m.insert("timeoutMs".into(), serde_json::Value::from(t));
+        }
+        if let Some(o) = self.output_reject_mode {
+            m.insert("outputRejectMode".into(), s(o.as_str()));
+        }
+        m
+    }
+
+    /// `config` zusammen mit den Steuerfeldern (Felder gewinnen) – die Form, die die
+    /// Plugin-Kette auswertet.
+    pub fn merged_config(&self) -> JsonObject {
+        let mut m = self.config.clone();
+        m.extend(self.control_entries());
+        m
+    }
 }
 
 /// Transport zu einem Upstream-MCP-Server.
@@ -742,4 +972,82 @@ pub struct McpGrantSpec {
     /// Freigegebene Tools; leer = alle Tools des Servers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn binding(v: serde_json::Value) -> Result<PluginBindingSpec, serde_json::Error> {
+        serde_json::from_value(v)
+    }
+
+    #[test]
+    fn plugin_control_fields_and_legacy_keys() {
+        // Neue Form (F117).
+        let b = binding(json!({"scope": {"level": "global"}, "plugin": "pii",
+            "failMode": "open", "timeoutMs": 150, "locked": true,
+            "outputRejectMode": "error", "inherit": "override", "config": {"mode": "mask"}}))
+        .unwrap();
+        assert_eq!(b.fail_mode, Some(PluginFailMode::Open));
+        assert_eq!(b.timeout_ms, Some(150));
+        assert!(b.locked);
+        assert_eq!(b.inherit, Some(PluginInherit::Override));
+        assert_eq!(b.output_reject_mode, Some(OutputRejectMode::Error));
+        // Alte Form: Schlüssel in config werden übernommen und entfernt.
+        let legacy = binding(json!({"scope": {"level": "global"}, "plugin": "pii",
+            "config": {"mode": "mask", "failMode": "open", "timeoutMs": 150, "locked": true,
+                "outputRejectMode": "error", "inherit": "override"}}))
+        .unwrap();
+        assert_eq!(legacy, b);
+        // Rundreise: Steuerfelder auf oberster Ebene.
+        let v = serde_json::to_value(&b).unwrap();
+        assert_eq!(v["failMode"], "open");
+        assert!(v["config"].get("failMode").is_none());
+        // Widerspruch und ungültige Werte.
+        assert!(
+            binding(json!({"scope": {"level": "global"}, "plugin": "pii",
+                "failMode": "closed", "config": {"failMode": "open"}}))
+            .is_err()
+        );
+        assert!(
+            binding(json!({"scope": {"level": "global"}, "plugin": "pii",
+                "config": {"failMode": "sometimes"}}))
+            .is_err()
+        );
+        // Gleicher Wert doppelt und `locked: false` sind kein Widerspruch.
+        let same = binding(json!({"scope": {"level": "global"}, "plugin": "pii",
+            "failMode": "open", "config": {"failMode": "open", "locked": false}}))
+        .unwrap();
+        assert!(same.config.is_empty());
+        assert!(!same.locked);
+        assert_eq!(
+            serde_json::Value::Object(b.merged_config()),
+            json!({"mode": "mask", "failMode": "open", "timeoutMs": 150, "locked": true,
+                "outputRejectMode": "error", "inherit": "override"})
+        );
+    }
+
+    #[test]
+    fn lenient_lift_keeps_invalid_key() {
+        let mut b = PluginBindingSpec {
+            scope: Scope::global(),
+            plugin: "pii".into(),
+            order: 0,
+            enabled: true,
+            inherit: None,
+            locked: false,
+            fail_mode: None,
+            timeout_ms: None,
+            output_reject_mode: None,
+            config: json!({"failMode": "closed", "timeoutMs": "x"})
+                .as_object()
+                .cloned()
+                .unwrap_or_default(),
+        };
+        assert!(b.lift_legacy_control().is_err());
+        assert_eq!(b.fail_mode, Some(PluginFailMode::Closed));
+        assert!(b.config.contains_key("timeoutMs"));
+    }
 }
