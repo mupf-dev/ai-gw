@@ -324,3 +324,10 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 183. [x] Plugin-Bindungen je Scope (Org/Team-Admins, locked respektiert) → Folgeticket (Umsetzung nötig)
 184. [x] Reine Stream-Plugins im gepufferten Modus nach Antwort-Haken → Empfehlung übernommen
 - F183: Plugin-Bindungen mit RBAC-Ziel je Scope-Ebene (org-admin/team-admin), locked von oben respektiert
+
+## AIGW-70 – Empfehlungen übernommen (2026-11-13)
+185. [x] exposeReasoning je Key vorerst über Key-Metadatum, als Spec-Feld mit F30 nachziehen → Empfehlung übernommen (Umsetzung nötig)
+186. [x] Responses API gibt reasoning-Items unabhängig von exposeReasoning aus → Empfehlung übernommen
+187. [x] connectMs je Deployment wirksam machen (eigene Pool-Variante in aigw-outbound) → Folgeticket (Umsetzung nötig)
+188. [x] n in Responses API als ai-gw-Erweiterung → bestätigt (entspricht F12)
+- F185/F187: ApiKeySpec.exposeReasoning (mit F30), aigw-outbound Pool-Variante je connectMs; UI-Kennzeichnung mock (F85)
