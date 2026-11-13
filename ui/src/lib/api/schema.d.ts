@@ -132,6 +132,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/audit-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Liest das Audit-Log (gefiltert, seitenweise) oder exportiert es als JSON Lines. */
+        get: operations["audit_log"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/auth/info": {
         parameters: {
             query?: never;
@@ -679,6 +696,65 @@ export interface components {
             configVersion: number;
             /** @description Plan (bei `applied` genau das, was geschrieben wurde). */
             plan: components["schemas"]["Plan"];
+        };
+        /** @description Eintrag im Audit-Log. */
+        AuditEntry: {
+            /**
+             * @description `create` | `update` | `delete` | `rotate` | `revoke` | `reactivate` | `login` |
+             *     `login-failed` | `logout` | `first-use` | `disable`.
+             */
+            action: string;
+            /**
+             * @description Wer: `user:<name>`, `admin-key:<name>`, `bootstrap-admin`, `gitops` bzw.
+             *     `gitops:<principal>`, `oidc-login`, `system`.
+             */
+            actor: string;
+            /** @description Zustand nachher bzw. Einzelheiten eines Ereignisses (Geheimnisse redigiert). */
+            after?: Record<string, never> | null;
+            /**
+             * Format: date-time
+             * @description Zeitpunkt.
+             */
+            at: string;
+            /** @description Zustand vorher (Geheimnisse redigiert). */
+            before?: Record<string, never> | null;
+            /**
+             * Format: int64
+             * @description Konfigurationsversion nach der Änderung (Ereignisse: die damals aktuelle).
+             */
+            configVersion: number;
+            /**
+             * Format: uuid
+             * @description ID (UUIDv7).
+             */
+            id: string;
+            /**
+             * @description Art (`Organization`, `Team`, `User`, `ApiKey`, `ModelGroup`, `Deployment`,
+             *     `ProviderCredential`, `Price` …, `admin-api-key`, `admin-session`, `bootstrap-token`).
+             */
+            kind: string;
+            /**
+             * Format: uuid
+             * @description Objekt-ID.
+             */
+            objectId?: string | null;
+            /** @description Objektname. */
+            objectName?: string | null;
+            /** @description Organisation des Objekts (nachher; beim Löschen: vorher). */
+            organization?: string | null;
+            /** @description Organisation vor der Änderung. */
+            organizationBefore?: string | null;
+            /** @description Team des Objekts (nachher; beim Löschen: vorher). */
+            team?: string | null;
+            /** @description Team vor der Änderung. */
+            teamBefore?: string | null;
+        };
+        /** @description Eine Seite des Audit-Logs. */
+        AuditLogPage: {
+            /** @description Einträge (neueste zuerst bzw. nach `order`). */
+            items: components["schemas"]["AuditEntry"][];
+            /** @description Fortsetzung; fehlt auf der letzten Seite. */
+            nextCursor?: string | null;
         };
         /**
          * @description Anmeldeverfahren und – falls angemeldet – der Principal (ohne Anmeldung abrufbar, immer
@@ -2167,6 +2243,84 @@ export interface operations {
             };
             /** @description ETag passt nicht */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    audit_log: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Seitengröße (1–500, Standard 50). Beim NDJSON-Export: Höchstzahl der Einträge
+                 *     (ohne Angabe: alle).
+                 */
+                limit?: number;
+                /** @description Fortsetzung (`nextCursor` der vorigen Seite). */
+                cursor?: string;
+                /** @description Ab diesem Zeitpunkt (einschließlich, RFC 3339). */
+                from?: string;
+                /** @description Bis zu diesem Zeitpunkt (ausschließlich, RFC 3339). */
+                to?: string;
+                /** @description Akteure, exakt und kommagetrennt (z. B. `user:anna,admin-key:ci`). */
+                actor?: string;
+                /**
+                 * @description Akteursarten, kommagetrennt: `user`, `admin-key`, `bootstrap`, `gitops`, `oidc-login`,
+                 *     `system`.
+                 */
+                actorType?: string;
+                /** @description Ressourcenarten, kommagetrennt (z. B. `Team,ApiKey,admin-api-key,admin-session`). */
+                kind?: string;
+                /**
+                 * @description Aktionen, kommagetrennt (`create`, `update`, `delete`, `rotate`, `revoke`,
+                 *     `reactivate`, `login`, `login-failed`, `logout`, `first-use`, `disable`).
+                 */
+                action?: string;
+                /** @description Objekt: Name oder ID (exakt). */
+                object?: string;
+                /** @description Sortierung: `desc` (Standard, neueste zuerst) oder `asc`. */
+                order?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Einträge mit Vorher/Nachher (Geheimnisse redigiert). Mit `Accept: application/x-ndjson`: alle passenden Einträge als JSON Lines (je Zeile ein `AuditEntry`, gestreamt). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLogPage"];
+                    "application/x-ndjson": components["schemas"]["AuditEntry"];
+                };
+            };
+            /** @description Ungültiger Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung (z. B. viewer) */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

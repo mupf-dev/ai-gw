@@ -1242,6 +1242,164 @@
         ]
       }
     },
+    "/admin/api/v1/audit-log": {
+      "get": {
+        "tags": [
+          "audit-log"
+        ],
+        "summary": "Liest das Audit-Log (gefiltert, seitenweise) oder exportiert es als JSON Lines.",
+        "operationId": "audit_log",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Seitengröße (1–500, Standard 50). Beim NDJSON-Export: Höchstzahl der Einträge\n(ohne Angabe: alle).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Fortsetzung (`nextCursor` der vorigen Seite).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Ab diesem Zeitpunkt (einschließlich, RFC 3339).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Bis zu diesem Zeitpunkt (ausschließlich, RFC 3339).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "description": "Akteure, exakt und kommagetrennt (z. B. `user:anna,admin-key:ci`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actorType",
+            "in": "query",
+            "description": "Akteursarten, kommagetrennt: `user`, `admin-key`, `bootstrap`, `gitops`, `oidc-login`,\n`system`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Ressourcenarten, kommagetrennt (z. B. `Team,ApiKey,admin-api-key,admin-session`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "description": "Aktionen, kommagetrennt (`create`, `update`, `delete`, `rotate`, `revoke`,\n`reactivate`, `login`, `login-failed`, `logout`, `first-use`, `disable`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "object",
+            "in": "query",
+            "description": "Objekt: Name oder ID (exakt).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "description": "Sortierung: `desc` (Standard, neueste zuerst) oder `asc`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Einträge mit Vorher/Nachher (Geheimnisse redigiert). Mit `Accept: application/x-ndjson`: alle passenden Einträge als JSON Lines (je Zeile ein `AuditEntry`, gestreamt).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditLogPage"
+                }
+              },
+              "application/x-ndjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültiger Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung (z. B. viewer)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/auth/info": {
       "get": {
         "tags": [
@@ -5791,6 +5949,127 @@
           }
         }
       },
+      "AuditEntry": {
+        "type": "object",
+        "description": "Eintrag im Audit-Log.",
+        "required": [
+          "id",
+          "at",
+          "actor",
+          "action",
+          "kind",
+          "configVersion"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "`create` | `update` | `delete` | `rotate` | `revoke` | `reactivate` | `login` |\n`login-failed` | `logout` | `first-use` | `disable`."
+          },
+          "actor": {
+            "type": "string",
+            "description": "Wer: `user:<name>`, `admin-key:<name>`, `bootstrap-admin`, `gitops` bzw.\n`gitops:<principal>`, `oidc-login`, `system`."
+          },
+          "after": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Zustand nachher bzw. Einzelheiten eines Ereignisses (Geheimnisse redigiert)."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Zeitpunkt."
+          },
+          "before": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Zustand vorher (Geheimnisse redigiert)."
+          },
+          "configVersion": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Konfigurationsversion nach der Änderung (Ereignisse: die damals aktuelle)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID (UUIDv7)."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Art (`Organization`, `Team`, `User`, `ApiKey`, `ModelGroup`, `Deployment`,\n`ProviderCredential`, `Price` …, `admin-api-key`, `admin-session`, `bootstrap-token`)."
+          },
+          "objectId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Objekt-ID."
+          },
+          "objectName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Objektname."
+          },
+          "organization": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Organisation des Objekts (nachher; beim Löschen: vorher)."
+          },
+          "organizationBefore": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Organisation vor der Änderung."
+          },
+          "team": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Team des Objekts (nachher; beim Löschen: vorher)."
+          },
+          "teamBefore": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Team vor der Änderung."
+          }
+        }
+      },
+      "AuditLogPage": {
+        "type": "object",
+        "description": "Eine Seite des Audit-Logs.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditEntry"
+            },
+            "description": "Einträge (neueste zuerst bzw. nach `order`)."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fortsetzung; fehlt auf der letzten Seite."
+          }
+        }
+      },
       "AuthInfo": {
         "type": "object",
         "description": "Anmeldeverfahren und – falls angemeldet – der Principal (ohne Anmeldung abrufbar, immer\n`200`; so prüft die UI beim Start ohne `401` in der Browser-Konsole).",
@@ -7664,6 +7943,10 @@
     {
       "name": "usage",
       "description": "Verbrauch und Budgetstände"
+    },
+    {
+      "name": "audit-log",
+      "description": "Audit-Log: Änderungen und Anmeldeereignisse, Export als JSON Lines"
     }
   ]
 }
