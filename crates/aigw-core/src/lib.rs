@@ -10,6 +10,7 @@
 pub mod config;
 pub mod error;
 pub mod ir;
+pub mod mcp;
 pub mod observe;
 pub mod resource;
 pub mod snapshot;

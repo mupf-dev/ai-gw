@@ -183,6 +183,8 @@ pub trait Plugin: Send + Sync {
 - Zugangsdaten zu Upstream-MCP-Servern liegen verschlüsselt wie die der Anbieter. OAuth-Weiterleitung ist optional.
 - Jeder Tool-Aufruf wird protokolliert (Argumente maskierbar). Limits und Plugins (z. B. PII) greifen auch hier.
 - **SSRF-Schutz:** Upstream-URLs werden gegen eine Allowlist geprüft; private Adressbereiche sind standardmäßig gesperrt.
+- Umsetzung (AIGW-41): Crate `aigw-mcp`, Endpunkte `/mcp` und `/mcp/{server}`, Details in
+  [15-mcp-gateway.md](15-mcp-gateway.md).
 
 ## 12. Beobachtung
 

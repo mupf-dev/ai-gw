@@ -2666,6 +2666,1053 @@
         ]
       }
     },
+    "/admin/api/v1/mcp-grants": {
+      "get": {
+        "tags": [
+          "mcp-grants"
+        ],
+        "summary": "Listet MCP-Freigaben (nur im lesbaren Geltungsbereich).",
+        "operationId": "list_mcp_grants",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Seitengröße (1–500, Standard 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Fortsetzung (`nextCursor` der vorigen Seite).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Teilstring im Namen.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "description": "Label-Selektor `k=v,k2`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "server",
+            "in": "query",
+            "description": "Nur Freigaben für diesen Server.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "query",
+            "description": "Nur Freigaben für dieses Team.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "apiKey",
+            "in": "query",
+            "description": "Nur Freigaben für diesen API-Key.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpGrantList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "mcp-grants"
+        ],
+        "summary": "Legt eine MCP-Freigabe an.",
+        "operationId": "create_mcp_grant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpGrantInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Angelegt",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version"
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Pfad"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpGrant"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name bereits vergeben",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe oder Verweis",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/mcp-grants/{name}": {
+      "get": {
+        "tags": [
+          "mcp-grants"
+        ],
+        "summary": "Liest eine MCP-Freigabe.",
+        "operationId": "get_mcp_grant",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gefunden",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version für If-Match"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpGrant"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "mcp-grants"
+        ],
+        "summary": "Ersetzt Labels und Spezifikation einer MCP-Freigabe.",
+        "operationId": "put_mcp_grant",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpGrantInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Geändert",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Neue Version"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpGrant"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe oder Verweis",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "mcp-grants"
+        ],
+        "summary": "Löscht eine MCP-Freigabe.",
+        "operationId": "delete_mcp_grant",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Gelöscht"
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/mcp-servers": {
+      "get": {
+        "tags": [
+          "mcp-servers"
+        ],
+        "operationId": "list_mcp_servers",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Seitengröße (1–500, Standard 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Fortsetzung (`nextCursor` der vorigen Seite).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Teilstring im Namen oder in der URL.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "description": "Label-Selektor `k=v,k2`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "transport",
+            "in": "query",
+            "description": "Nur dieser Transport.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/McpTransport"
+            }
+          },
+          {
+            "name": "credential",
+            "in": "query",
+            "description": "Nur Server mit diesen Zugangsdaten (Name).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "enabled",
+            "in": "query",
+            "description": "Nur aktive (`true`) bzw. deaktivierte (`false`).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "mcp-servers"
+        ],
+        "operationId": "create_mcp_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpServerInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Angelegt",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version"
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Pfad"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name bereits vergeben",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe oder Verweis",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/mcp-servers/{name}": {
+      "get": {
+        "tags": [
+          "mcp-servers"
+        ],
+        "operationId": "get_mcp_server",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gefunden",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version für If-Match"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServer"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "mcp-servers"
+        ],
+        "operationId": "put_mcp_server",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpServerInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Geändert",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Neue Version"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt (z. B. bestehende Objekte über neuen Grenzen)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe oder Verweis",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "mcp-servers"
+        ],
+        "operationId": "delete_mcp_server",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen (optimistische Sperre)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Gelöscht"
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Wird noch verwendet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/model-groups": {
       "get": {
         "tags": [
@@ -7900,6 +8947,203 @@
           }
         }
       },
+      "McpGrant": {
+        "type": "object",
+        "description": "MCP-Freigabe (gelesen).",
+        "required": [
+          "id",
+          "metadata",
+          "spec"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID (UUIDv7)."
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/McpGrantSpec",
+            "description": "Spezifikation."
+          }
+        }
+      },
+      "McpGrantInput": {
+        "type": "object",
+        "description": "MCP-Freigabe (Eingabe für Anlegen und Ersetzen).",
+        "required": [
+          "metadata",
+          "spec"
+        ],
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert)."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/McpGrantSpec",
+            "description": "Spezifikation."
+          }
+        },
+        "additionalProperties": false
+      },
+      "McpGrantList": {
+        "type": "object",
+        "description": "Seite einer Liste: MCP-Freigaben.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpGrant"
+            },
+            "description": "Einträge (nach Name sortiert)."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite."
+          }
+        }
+      },
+      "McpGrantSpec": {
+        "type": "object",
+        "description": "Freigabe von MCP-Tools für einen API-Key oder ein Team.",
+        "required": [
+          "server",
+          "subject"
+        ],
+        "properties": {
+          "server": {
+            "type": "string",
+            "description": "MCP-Server (Name)."
+          },
+          "subject": {
+            "$ref": "#/components/schemas/Scope",
+            "description": "Empfänger der Freigabe (`level` = `team` oder `api-key`)."
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Freigegebene Tools; leer = alle Tools des Servers."
+          }
+        },
+        "additionalProperties": false
+      },
+      "McpServer": {
+        "type": "object",
+        "required": [
+          "id",
+          "metadata",
+          "spec"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID (UUIDv7)."
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/McpServerSpec",
+            "description": "Spezifikation."
+          }
+        }
+      },
+      "McpServerInput": {
+        "type": "object",
+        "required": [
+          "metadata",
+          "spec"
+        ],
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert)."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/McpServerSpec",
+            "description": "Spezifikation."
+          }
+        },
+        "additionalProperties": false
+      },
+      "McpServerList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpServer"
+            },
+            "description": "Einträge (nach Name sortiert)."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite."
+          }
+        }
+      },
+      "McpServerSpec": {
+        "type": "object",
+        "description": "Upstream-MCP-Server.",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "credential": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Zugangsdaten (Name einer `ProviderCredential`)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Aktiv?"
+          },
+          "settings": {
+            "type": "object",
+            "description": "Weitere Einstellungen (Header, Timeouts …)."
+          },
+          "transport": {
+            "$ref": "#/components/schemas/McpTransport",
+            "description": "Transport."
+          },
+          "url": {
+            "type": "string",
+            "description": "URL (HTTP-Transporte) bzw. Befehl (stdio)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "McpTransport": {
+        "type": "string",
+        "description": "Transport zu einem Upstream-MCP-Server.",
+        "enum": [
+          "streamable-http",
+          "sse",
+          "stdio"
+        ]
+      },
       "Metric": {
         "type": "string",
         "description": "Kennzahl.",
@@ -9005,6 +10249,38 @@
           "cost"
         ]
       },
+      "Scope": {
+        "type": "object",
+        "description": "Ziel einer Bindung: Ebene + Name des Ziels (bei `global` ohne Ziel).",
+        "required": [
+          "level"
+        ],
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/ScopeLevel",
+            "description": "Ebene."
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name des Ziels (Organisation, Team, API-Key oder Modellgruppe)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScopeLevel": {
+        "type": "string",
+        "description": "Ebene, auf der eine Plugin-Bindung oder Freigabe gilt.",
+        "enum": [
+          "global",
+          "organization",
+          "team",
+          "api-key",
+          "model-group"
+        ]
+      },
       "SecretString": {
         "type": "string",
         "format": "password",
@@ -9749,6 +11025,14 @@
     {
       "name": "prices",
       "description": "Preise je Anbieter-Modell, versioniert über validFrom"
+    },
+    {
+      "name": "mcp-servers",
+      "description": "Upstream-MCP-Server des MCP-Gateways"
+    },
+    {
+      "name": "mcp-grants",
+      "description": "Freigaben von MCP-Servern und -Tools für Teams und API-Keys"
     },
     {
       "name": "gitops",

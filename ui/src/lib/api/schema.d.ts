@@ -286,6 +286,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/mcp-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listet MCP-Freigaben (nur im lesbaren Geltungsbereich). */
+        get: operations["list_mcp_grants"];
+        put?: never;
+        /** Legt eine MCP-Freigabe an. */
+        post: operations["create_mcp_grant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/mcp-grants/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Liest eine MCP-Freigabe. */
+        get: operations["get_mcp_grant"];
+        /** Ersetzt Labels und Spezifikation einer MCP-Freigabe. */
+        put: operations["put_mcp_grant"];
+        post?: never;
+        /** Löscht eine MCP-Freigabe. */
+        delete: operations["delete_mcp_grant"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/mcp-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_mcp_servers"];
+        put?: never;
+        post: operations["create_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/mcp-servers/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_mcp_server"];
+        put: operations["put_mcp_server"];
+        post?: never;
+        delete: operations["delete_mcp_server"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/model-groups": {
         parameters: {
             query?: never;
@@ -1187,6 +1256,82 @@ export interface components {
             /** @description Hierhin navigieren (Logout beim IdP oder die Admin-UI). */
             redirectUrl: string;
         };
+        /** @description MCP-Freigabe (gelesen). */
+        McpGrant: {
+            /**
+             * Format: uuid
+             * @description ID (UUIDv7).
+             */
+            id: string;
+            /** @description Metadaten. */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Spezifikation. */
+            spec: components["schemas"]["McpGrantSpec"];
+        };
+        /** @description MCP-Freigabe (Eingabe für Anlegen und Ersetzen). */
+        McpGrantInput: {
+            /** @description Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert). */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Spezifikation. */
+            spec: components["schemas"]["McpGrantSpec"];
+        };
+        /** @description Seite einer Liste: MCP-Freigaben. */
+        McpGrantList: {
+            /** @description Einträge (nach Name sortiert). */
+            items: components["schemas"]["McpGrant"][];
+            /** @description Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite. */
+            nextCursor?: string | null;
+        };
+        /** @description Freigabe von MCP-Tools für einen API-Key oder ein Team. */
+        McpGrantSpec: {
+            /** @description MCP-Server (Name). */
+            server: string;
+            /** @description Empfänger der Freigabe (`level` = `team` oder `api-key`). */
+            subject: components["schemas"]["Scope"];
+            /** @description Freigegebene Tools; leer = alle Tools des Servers. */
+            tools?: string[];
+        };
+        McpServer: {
+            /**
+             * Format: uuid
+             * @description ID (UUIDv7).
+             */
+            id: string;
+            /** @description Metadaten. */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Spezifikation. */
+            spec: components["schemas"]["McpServerSpec"];
+        };
+        McpServerInput: {
+            /** @description Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert). */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Spezifikation. */
+            spec: components["schemas"]["McpServerSpec"];
+        };
+        McpServerList: {
+            /** @description Einträge (nach Name sortiert). */
+            items: components["schemas"]["McpServer"][];
+            /** @description Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite. */
+            nextCursor?: string | null;
+        };
+        /** @description Upstream-MCP-Server. */
+        McpServerSpec: {
+            /** @description Zugangsdaten (Name einer `ProviderCredential`). */
+            credential?: string | null;
+            /** @description Aktiv? */
+            enabled?: boolean;
+            /** @description Weitere Einstellungen (Header, Timeouts …). */
+            settings?: Record<string, never>;
+            /** @description Transport. */
+            transport?: components["schemas"]["McpTransport"];
+            /** @description URL (HTTP-Transporte) bzw. Befehl (stdio). */
+            url: string;
+        };
+        /**
+         * @description Transport zu einem Upstream-MCP-Server.
+         * @enum {string}
+         */
+        McpTransport: "streamable-http" | "sse" | "stdio";
         /**
          * @description Kennzahl.
          * @enum {string}
@@ -1601,6 +1746,18 @@ export interface components {
          * @enum {string}
          */
         RoutingStrategy: "weighted" | "least-latency" | "least-busy" | "cost";
+        /** @description Ziel einer Bindung: Ebene + Name des Ziels (bei `global` ohne Ziel). */
+        Scope: {
+            /** @description Ebene. */
+            level: components["schemas"]["ScopeLevel"];
+            /** @description Name des Ziels (Organisation, Team, API-Key oder Modellgruppe). */
+            target?: string | null;
+        };
+        /**
+         * @description Ebene, auf der eine Plugin-Bindung oder Freigabe gilt.
+         * @enum {string}
+         */
+        ScopeLevel: "global" | "organization" | "team" | "api-key" | "model-group";
         /**
          * Format: password
          * @description Geheimer Klartext (z. B. API-Key eines Anbieters).
@@ -3425,6 +3582,690 @@ export interface operations {
         };
     };
     delete_deployment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gelöscht */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Wird noch verwendet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_mcp_grants: {
+        parameters: {
+            query?: {
+                /** @description Seitengröße (1–500, Standard 50). */
+                limit?: number;
+                /** @description Fortsetzung (`nextCursor` der vorigen Seite). */
+                cursor?: string;
+                /** @description Teilstring im Namen. */
+                q?: string;
+                /** @description Label-Selektor `k=v,k2`. */
+                label?: string;
+                /** @description Nur Freigaben für diesen Server. */
+                server?: string;
+                /** @description Nur Freigaben für dieses Team. */
+                team?: string;
+                /** @description Nur Freigaben für diesen API-Key. */
+                apiKey?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Seite */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpGrantList"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_mcp_grant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpGrantInput"];
+            };
+        };
+        responses: {
+            /** @description Angelegt */
+            201: {
+                headers: {
+                    /** @description Version */
+                    ETag?: string;
+                    /** @description Pfad */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpGrant"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Name bereits vergeben */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe oder Verweis */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_mcp_grant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gefunden */
+            200: {
+                headers: {
+                    /** @description Version für If-Match */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpGrant"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    put_mcp_grant: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpGrantInput"];
+            };
+        };
+        responses: {
+            /** @description Geändert */
+            200: {
+                headers: {
+                    /** @description Neue Version */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpGrant"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe oder Verweis */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_mcp_grant: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gelöscht */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_mcp_servers: {
+        parameters: {
+            query?: {
+                /** @description Seitengröße (1–500, Standard 50). */
+                limit?: number;
+                /** @description Fortsetzung (`nextCursor` der vorigen Seite). */
+                cursor?: string;
+                /** @description Teilstring im Namen oder in der URL. */
+                q?: string;
+                /** @description Label-Selektor `k=v,k2`. */
+                label?: string;
+                /** @description Nur dieser Transport. */
+                transport?: components["schemas"]["McpTransport"];
+                /** @description Nur Server mit diesen Zugangsdaten (Name). */
+                credential?: string;
+                /** @description Nur aktive (`true`) bzw. deaktivierte (`false`). */
+                enabled?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Seite */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerList"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_mcp_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerInput"];
+            };
+        };
+        responses: {
+            /** @description Angelegt */
+            201: {
+                headers: {
+                    /** @description Version */
+                    ETag?: string;
+                    /** @description Pfad */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServer"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Name bereits vergeben */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe oder Verweis */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_mcp_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gefunden */
+            200: {
+                headers: {
+                    /** @description Version für If-Match */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServer"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    put_mcp_server: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag aus dem letzten Lesen (optimistische Sperre) */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerInput"];
+            };
+        };
+        responses: {
+            /** @description Geändert */
+            200: {
+                headers: {
+                    /** @description Neue Version */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServer"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Konflikt (z. B. bestehende Objekte über neuen Grenzen) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe oder Verweis */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_mcp_server: {
         parameters: {
             query?: never;
             header?: {

@@ -14,6 +14,7 @@ use utoipa::{Modify, OpenApi, ToSchema};
 
 use crate::credentials as c;
 use crate::deployments as d;
+use crate::mcp as m;
 use crate::prices as pr;
 use crate::problem::Problem;
 use crate::resources as r;
@@ -38,6 +39,10 @@ use crate::{admin_keys as ak, session as s};
         c::list_credentials, c::create_credential, c::get_credential, c::put_credential,
         c::patch_credential, c::delete_credential,
         pr::list_prices, pr::create_price, pr::get_price, pr::put_price, pr::delete_price,
+        m::list_mcp_servers, m::create_mcp_server, m::get_mcp_server, m::put_mcp_server,
+        m::delete_mcp_server,
+        m::list_mcp_grants, m::create_mcp_grant, m::get_mcp_grant, m::put_mcp_grant,
+        m::delete_mcp_grant,
         crate::gitops::export_config, crate::gitops::apply_config,
         s::login, s::callback, s::logout, s::session_info, s::auth_info,
         ak::list_admin_api_keys, ak::create_admin_api_key, ak::get_admin_api_key,
@@ -60,6 +65,8 @@ use crate::{admin_keys as ak, session as s};
         (name = "deployments", description = "Deployments: Anbieter-Modelle hinter Modellgruppen"),
         (name = "provider-credentials", description = "Zugangsdaten der Anbieter (Werte nur schreibbar)"),
         (name = "prices", description = "Preise je Anbieter-Modell, versioniert über validFrom"),
+        (name = "mcp-servers", description = "Upstream-MCP-Server des MCP-Gateways"),
+        (name = "mcp-grants", description = "Freigaben von MCP-Servern und -Tools für Teams und API-Keys"),
         (name = "gitops", description = "YAML-Export und -Apply aller Ressourcen (aigw/v1alpha1)"),
         (name = "auth", description = "Anmeldung: OIDC-Login, Session, Abmeldung"),
         (name = "admin-api-keys", description = "Admin-API-Keys für Automatisierung"),
@@ -192,6 +199,8 @@ mod tests {
             "/admin/api/v1/deployments/{name}",
             "/admin/api/v1/provider-credentials/{name}",
             "/admin/api/v1/prices",
+            "/admin/api/v1/mcp-servers/{name}",
+            "/admin/api/v1/mcp-grants",
         ] {
             assert!(json["paths"][p].is_object(), "Pfad {p} fehlt");
         }
@@ -207,6 +216,8 @@ mod tests {
             "ProviderCredential",
             "ProviderCredentialPatch",
             "PriceList",
+            "McpServerInput",
+            "McpGrantList",
         ] {
             assert!(
                 json["components"]["schemas"][s].is_object(),

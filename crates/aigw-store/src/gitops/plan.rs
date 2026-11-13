@@ -737,7 +737,8 @@ fn collect_refs(
 /// Inhaltliche Regeln wie in der Admin-API ([`aigw_core::validate`]) für alle Dokumente des
 /// Manifests: Aliasse, Fallbacks (Ziele, Zyklen im Endzustand), Deployments (SSRF,
 /// Pflichtfelder, Zugangsdaten desselben Anbieters), Feldnamen/Pflichtfelder der Zugangsdaten,
-/// Preise (Beträge; gültige Versionen unveränderlich).
+/// Preise (Beträge; gültige Versionen unveränderlich), MCP-Server (SSRF, Einstellungen) und
+/// MCP-Freigaben (Tool-Muster).
 fn check_rules(
     fin: &Final<'_>,
     state: &State,
@@ -797,6 +798,11 @@ fn check_rules(
                         _ => Ok(()),
                     }
                 }),
+                // MCP-Gateway (AIGW-41): wie in der Admin-API.
+                ResourceSpec::McpServer(s) => {
+                    aigw_core::mcp::validate_server(&opts.upstreams, name, s)
+                }
+                ResourceSpec::McpGrant(g) => aigw_core::mcp::validate_grant(g),
                 _ => Ok(()),
             };
             if let Err(e) = res {

@@ -259,6 +259,57 @@ pub struct RequestRecord {
     pub attempts: Vec<Attempt>,
     /// Erkennungen der Guardrail-Plugins (Zähler je Plugin/Kategorie/Aktion, ohne Inhalte).
     pub guardrails: Vec<GuardrailHit>,
+    /// MCP-Tool-Aufruf (nur bei `ingress` = [`WireFormat::Mcp`], AIGW-41).
+    pub mcp: Option<Box<McpCall>>,
+}
+
+/// Ergebnis eines MCP-Tool-Aufrufs (Label `status` von `aigw_mcp_calls_total`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpOutcome {
+    /// Erfolgreich (`isError` nicht gesetzt).
+    Ok,
+    /// Tool meldet einen Fehler (`isError: true`).
+    ToolError,
+    /// Tool oder Server unbekannt.
+    NotFound,
+    /// Nicht freigegeben.
+    Denied,
+    /// Limit oder Budget überschritten.
+    RateLimited,
+    /// Upstream nicht erreichbar oder Protokollfehler (auch JSON-RPC-Fehler des Upstreams).
+    UpstreamError,
+    /// Zeitlimit überschritten.
+    Timeout,
+    /// Vom Client abgebrochen (`notifications/cancelled` oder Verbindungsabbruch).
+    Cancelled,
+}
+
+impl McpOutcome {
+    /// Bezeichner (Label-Wert).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::ToolError => "tool_error",
+            Self::NotFound => "not_found",
+            Self::Denied => "denied",
+            Self::RateLimited => "rate_limited",
+            Self::UpstreamError => "upstream_error",
+            Self::Timeout => "timeout",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// Kennzahlen eines MCP-Tool-Aufrufs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpCall {
+    /// MCP-Server (Name der Ressource).
+    pub server: String,
+    /// Tool-Name beim Upstream (ohne Namensraum).
+    pub tool: String,
+    /// Ergebnis.
+    pub outcome: McpOutcome,
 }
 
 impl RequestRecord {
@@ -291,6 +342,7 @@ impl RequestRecord {
             payload: None,
             attempts: Vec::new(),
             guardrails: Vec::new(),
+            mcp: None,
         }
     }
 

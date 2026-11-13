@@ -351,6 +351,27 @@ echo "--- GET /admin/api/v1/usage/budgets (AIGW-31)"
 curl -fsS "$CBASE/admin/api/v1/usage/budgets?level=api-key" -H "authorization: Bearer $TOKEN" |
   tee "$TMP/budgets.json"; echo
 grep -q '"targetName":"smoke-rl"' "$TMP/budgets.json"
+echo "--- MCP-Gateway (AIGW-41): Server per REST (SSRF → 422), /mcp initialize + tools/list"
+adm POST /mcp-servers '{"metadata":{"name":"smoke-meta"},"spec":{"url":"http://169.254.169.254/mcp"}}' >/dev/null
+expect 422
+adm POST /mcp-servers '{"metadata":{"name":"smoke-mcp"},"spec":{"url":"https://mcp.example.org/mcp","enabled":false}}'; echo
+expect 201
+curl -fsS -D "$TMP/m1.txt" -o "$TMP/m1.json" "$BASE/mcp" -H "authorization: Bearer $KEY" \
+  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}'
+cat "$TMP/m1.json"; echo
+grep -q '"protocolVersion":"2025-06-18"' "$TMP/m1.json"
+MCP_SID=$(grep -i '^mcp-session-id:' "$TMP/m1.txt" | cut -d' ' -f2 | tr -d '\r')
+test -n "$MCP_SID"
+curl -fsS "$BASE/mcp" -H "authorization: Bearer $KEY" -H "mcp-session-id: $MCP_SID" \
+  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+  -H 'mcp-protocol-version: 2025-06-18' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | tee "$TMP/m2.json"; echo
+grep -q '"tools":\[\]' "$TMP/m2.json"
+test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/mcp/unknown" -H "authorization: Bearer $KEY" \
+  -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}')" = 404
+test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/mcp" -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}')" = 401
 if [[ -n "${OTLP_PID:-}" ]]; then
   echo "--- OTLP-Export an den Fake-Collector (Traces + Logs)"
   for _ in $(seq 1 50); do

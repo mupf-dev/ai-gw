@@ -100,6 +100,15 @@ pub struct DeploymentCtx {
     pub credential: Option<Arc<CredentialData>>,
 }
 
+/// MCP-Server mit aufgelösten Zugangsdaten (AIGW-41).
+#[derive(Debug, Clone)]
+pub struct McpServerCtx {
+    /// Server.
+    pub server: McpServer,
+    /// Entschlüsselte Zugangsdaten (falls zugeordnet).
+    pub credential: Option<Arc<CredentialData>>,
+}
+
 /// Modellgruppe mit ihren aktiven Deployments (nach Priorität, dann Name sortiert).
 #[derive(Debug, Clone)]
 pub struct ModelGroupCtx {
@@ -139,8 +148,8 @@ pub struct Snapshot {
     pub prices: HashMap<(Option<ProviderKind>, String), Vec<Arc<Price>>>,
     /// Plugin-Bindungen, sortiert nach Ebene und `order`.
     pub plugin_bindings: Vec<Arc<PluginBinding>>,
-    /// MCP-Server nach Name.
-    pub mcp_servers: HashMap<String, Arc<McpServer>>,
+    /// Aktive MCP-Server nach Name.
+    pub mcp_servers: HashMap<String, Arc<McpServerCtx>>,
     /// MCP-Freigaben.
     pub mcp_grants: Vec<Arc<McpGrant>>,
 }

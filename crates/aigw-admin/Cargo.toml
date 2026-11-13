@@ -39,6 +39,7 @@ url.workspace = true
 utoipa.workspace = true
 
 [dev-dependencies]
+aigw-mcp.workspace = true
 sqlx.workspace = true
 tower.workspace = true
 

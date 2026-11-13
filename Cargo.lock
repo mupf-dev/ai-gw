@@ -44,6 +44,7 @@ version = "0.1.0"
 dependencies = [
  "aigw-billing",
  "aigw-core",
+ "aigw-mcp",
  "aigw-proxy",
  "aigw-store",
  "aws-lc-rs",
@@ -140,6 +141,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "aigw-mcp"
+version = "0.1.0"
+dependencies = [
+ "aigw-core",
+ "aws-lc-rs",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "aigw-observe"
 version = "0.1.0"
 dependencies = [
@@ -227,6 +250,7 @@ dependencies = [
  "aigw-cache",
  "aigw-core",
  "aigw-counters",
+ "aigw-mcp",
  "aigw-plugins",
  "aigw-providers",
  "aigw-store",

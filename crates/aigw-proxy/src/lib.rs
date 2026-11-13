@@ -30,6 +30,9 @@
 //! Die Plugin-Kette ([`PluginChains`], AIGW-36) hängt nach Auth/Modellfreigabe (und den
 //! Limits) vor dem Routing (Pre-Plugins), vor dem Encoder (Post-Plugins) und im Stream-Pfad
 //! (Stream-Haken je IR-Ereignis); siehe `docs/konzept/12-plugins.md`.
+//!
+//! Das MCP-Gateway (AIGW-41) hängt mit eigenem Router ([`mcp::router`]) an `/mcp` und
+//! `/mcp/{server}`; siehe `docs/konzept/15-mcp-gateway.md`.
 
 pub mod auth;
 pub mod cache;
@@ -38,6 +41,7 @@ mod error;
 mod guard_host;
 mod handlers;
 pub mod limits;
+pub mod mcp;
 pub mod mock;
 mod observe;
 mod pipeline;
@@ -69,6 +73,7 @@ pub use routing::{GroupRoute, RoutesTask, SnapshotRoutes};
 
 pub use aigw_cache::ResponseCache;
 pub use aigw_core::config::{DEFAULT_MAX_AUDIO_BYTES, DEFAULT_MAX_BODY_BYTES};
+pub use aigw_mcp::McpGateway;
 pub use aigw_plugins::{IndexOptions, PluginChains, Registry as PluginRegistry};
 pub use cache::{CACHE_HEADER, CACHE_TTL_HEADER};
 pub use guard_host::GatewayHost;

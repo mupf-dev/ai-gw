@@ -13,6 +13,7 @@ members = [
     "crates/aigw-cache",
     "crates/aigw-core",
     "crates/aigw-counters",
+    "crates/aigw-mcp",
     "crates/aigw-observe",
     "crates/aigw-pii",
     "crates/aigw-plugins",
@@ -37,6 +38,7 @@ aigw-billing = { path = "crates/aigw-billing" }
 aigw-cache = { path = "crates/aigw-cache" }
 aigw-core = { path = "crates/aigw-core" }
 aigw-counters = { path = "crates/aigw-counters" }
+aigw-mcp = { path = "crates/aigw-mcp" }
 aigw-observe = { path = "crates/aigw-observe" }
 aigw-pii = { path = "crates/aigw-pii" }
 aigw-plugins = { path = "crates/aigw-plugins" }

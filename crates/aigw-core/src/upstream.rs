@@ -235,7 +235,8 @@ impl UpstreamPolicy {
     /// Wie [`UpstreamPolicy::ip_allowed`], berücksichtigt aber den Hostnamen, über den `ip`
     /// aufgelöst wurde: Ist der **Name** in `admin.allow_private_upstreams` freigeschaltet
     /// (z. B. `hooks.internal`), sind auch private Adressen erlaubt (nie die immer
-    /// verbotenen). Für Clients mit eigener Namensauflösung (Webhooks, AIGW-61).
+    /// verbotenen). Für Clients mit eigener Namensauflösung (Webhooks, AIGW-61;
+    /// MCP-Client, AIGW-41).
     pub fn resolved_ip_allowed(&self, host: &str, ip: IpAddr) -> bool {
         let ip = canonical(ip);
         if always_forbidden(ip) {
@@ -491,6 +492,15 @@ mod tests {
         assert!(!p.ip_allowed("::ffff:10.0.0.1".parse().unwrap()));
         assert!(!p.ip_allowed("169.254.169.254".parse().unwrap()));
         assert!(!p.ip_allowed("0.0.0.0".parse().unwrap()));
+        let named = UpstreamPolicy::from_config(&AdminConfig {
+            allow_private_upstreams: vec!["mcp.internal".into()],
+            ..AdminConfig::default()
+        })
+        .unwrap();
+        assert!(named.resolved_ip_allowed("mcp.internal", "10.1.2.3".parse().unwrap()));
+        assert!(!named.resolved_ip_allowed("evil.example", "10.1.2.3".parse().unwrap()));
+        assert!(named.resolved_ip_allowed("evil.example", "1.1.1.1".parse().unwrap()));
+        assert!(!named.resolved_ip_allowed("mcp.internal", "0.0.0.0".parse().unwrap()));
     }
 
     #[test]

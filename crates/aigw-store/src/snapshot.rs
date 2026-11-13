@@ -10,7 +10,7 @@ use aigw_core::resource::{
     ApiKeySpec, ApiKeyState, DeploymentSpec, McpGrantSpec, McpServerSpec, ModelGroupSpec,
     OrganizationSpec, PluginBindingSpec, PriceSpec, ResourceKind, ScopeLevel, TeamSpec,
 };
-use aigw_core::snapshot::{DeploymentCtx, KeyCtx, ModelGroupCtx, Snapshot};
+use aigw_core::snapshot::{DeploymentCtx, KeyCtx, McpServerCtx, ModelGroupCtx, Snapshot};
 
 use crate::crypto::Keyring;
 use crate::repo::Resource as _;
@@ -185,8 +185,19 @@ async fn build(store: &Store, keyring: &Keyring, version: i64) -> Result<Snapsho
     // MCP
     for s in store.list::<McpServerSpec>().await? {
         if s.spec.enabled {
-            snap.mcp_servers
-                .insert(s.metadata.name.clone(), Arc::new(s));
+            let credential = s
+                .spec
+                .credential
+                .as_ref()
+                .and_then(|c| creds.get(c))
+                .cloned();
+            snap.mcp_servers.insert(
+                s.metadata.name.clone(),
+                Arc::new(McpServerCtx {
+                    server: s,
+                    credential,
+                }),
+            );
         }
     }
     snap.mcp_grants = store

@@ -42,6 +42,8 @@ pub enum WireFormat {
     OpenAiImages,
     /// OpenAI Audio (`/v1/audio/transcriptions`, `/translations`, `/speech`).
     OpenAiAudio,
+    /// MCP-Tool-Aufruf über das MCP-Gateway (AIGW-41; nur Eingangsformat im Request-Log).
+    Mcp,
 }
 
 /// Deserialisiert ein JSON-Objekt (bereits als Map gelesen) in einen Wire-Typ.

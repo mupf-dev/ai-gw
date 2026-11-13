@@ -259,7 +259,22 @@ fn serve(
             ..runtime_state.metrics_sources()
         }));
         let control = aigw_admin::read_only::apply(control, config.gitops.read_only_admin);
-        server::run(listeners, state, control, shutdown_signal()).await?;
+        // MCP-Gateway (AIGW-41): `/mcp`, `/mcp/{server}` auf der Datenebene.
+        let mut data_router = aigw_proxy::router(state.clone());
+        let mut mcp_task = None;
+        if config.mcp.enabled {
+            let gateway = std::sync::Arc::new(
+                aigw_proxy::McpGateway::new(
+                    &config.mcp,
+                    aigw_admin::UpstreamPolicy::from_config(&config.admin)?,
+                )
+                .map_err(|e| format!("MCP-Gateway: {e}"))?,
+            );
+            mcp_task = Some(gateway.spawn(runtime_state.snapshot.clone()));
+            data_router = data_router.merge(aigw_proxy::mcp::router(state, gateway));
+        }
+        server::run(listeners, data_router, control, shutdown_signal()).await?;
+        drop(mcp_task);
         drop(routes_task);
         drop(plugins_task);
         drop(cache_rt);

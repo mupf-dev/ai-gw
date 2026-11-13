@@ -55,6 +55,8 @@ pub struct Config {
     pub events: EventsConfig,
     /// Antwort-Cache, exakt und semantisch (AIGW-39/40).
     pub cache: CacheConfig,
+    /// MCP-Gateway (AIGW-41).
+    pub mcp: McpConfig,
 }
 
 impl Config {
@@ -369,6 +371,49 @@ impl Default for LimitsConfig {
         Self {
             default_max_tokens: 4096,
             response_headers: true,
+        }
+    }
+}
+
+/// MCP-Gateway (AIGW-41, `docs/konzept/15-mcp-gateway.md`).
+///
+/// Die Upstream-MCP-Server und ihre Freigaben sind Ressourcen (`McpServer`, `McpGrant`); hier
+/// steht nur, wie die Datenebene sie betreibt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct McpConfig {
+    /// Endpunkte `/mcp` und `/mcp/{server}` auf der Datenebene anbieten.
+    pub enabled: bool,
+    /// Programme (absolute Pfade), die als stdio-MCP-Server gestartet werden dürfen. Leer =
+    /// stdio aus (Standard). **Sicherheit:** ein stdio-Server läuft als Kindprozess mit den
+    /// Rechten des Gateways – nur vertrauenswürdige Programme eintragen.
+    pub allow_stdio_commands: Vec<String>,
+    /// Client-Sessions (`Mcp-Session-Id`) enden nach so vielen Sekunden ohne Anfrage.
+    pub session_idle_timeout_secs: u64,
+    /// Höchstzahl gleichzeitiger Client-Sessions je Instanz.
+    pub max_sessions: usize,
+    /// Zeitlimit je Upstream-Anfrage (Sekunden), falls der Server keins setzt (`timeoutMs`).
+    pub call_timeout_secs: u64,
+    /// Zeitlimit für den Verbindungsaufbau zum Upstream (Sekunden).
+    pub connect_timeout_secs: u64,
+    /// Höchstgröße einer einzelnen Nachricht vom Upstream (Bytes).
+    pub max_message_bytes: usize,
+    /// Tool-, Prompt- und Ressourcenlisten der Upstreams so lange zwischenspeichern
+    /// (Sekunden; `list_changed` leert sofort).
+    pub list_cache_secs: u64,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            allow_stdio_commands: Vec::new(),
+            session_idle_timeout_secs: 3600,
+            max_sessions: 10_000,
+            call_timeout_secs: 120,
+            connect_timeout_secs: 10,
+            max_message_bytes: 16 * 1024 * 1024,
+            list_cache_secs: 300,
         }
     }
 }

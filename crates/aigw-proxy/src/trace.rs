@@ -29,6 +29,7 @@ fn ingress_name(f: WireFormat) -> &'static str {
         WireFormat::OpenAiEmbeddings => "openai-embeddings",
         WireFormat::OpenAiImages => "openai-images",
         WireFormat::OpenAiAudio => "openai-audio",
+        WireFormat::Mcp => "mcp",
     }
 }
 

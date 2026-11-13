@@ -12,7 +12,6 @@ use std::io;
 use std::net::SocketAddr;
 
 use aigw_core::config::ServerConfig;
-use aigw_proxy::ProxyState;
 use axum::Router;
 use axum::routing::get;
 use axum::serve::ListenerExt as _;
@@ -63,15 +62,15 @@ fn control_router(control: Router, with_healthz: bool) -> Router {
 
 /// Betreibt die Listener, bis `shutdown` fertig ist; wartet dann auf laufende Anfragen.
 ///
-/// `control` ist der vollständige Router der Steuerebene (Admin-API/-UI aus
+/// `data_router` ist der Router der Datenebene (`aigw_proxy::router(…)`, ggf. mit `/mcp`),
+/// `control` der vollständige Router der Steuerebene (Admin-API/-UI aus
 /// `aigw_admin::router_with(…)`, zusammengeführt mit `/metrics`).
 pub(crate) async fn run(
     listeners: Listeners,
-    state: ProxyState,
+    data_router: Router,
     control_plane: Router,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
-    let data_router = aigw_proxy::router(state);
     // TCP_NODELAY: SSE-Chunks sofort senden statt auf ACKs zu warten (Nagle, Q4).
     let data_listener = listeners.data.tap_io(|tcp| {
         let _ = tcp.set_nodelay(true);
@@ -148,7 +147,7 @@ mod tests {
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         let task = tokio::spawn(run(
             listeners,
-            ProxyState::mock(),
+            aigw_proxy::router(aigw_proxy::ProxyState::mock()),
             aigw_admin::router(),
             async move {
                 let _ = rx.await;
@@ -190,7 +189,7 @@ mod tests {
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         let task = tokio::spawn(run(
             listeners,
-            ProxyState::mock(),
+            aigw_proxy::router(aigw_proxy::ProxyState::mock()),
             aigw_admin::router(),
             async move {
                 let _ = rx.await;

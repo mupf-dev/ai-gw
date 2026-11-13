@@ -302,6 +302,49 @@ impl Recorder {
         }
     }
 
+    /// MCP-Tool-Aufruf (AIGW-41): Server, Tool, Ergebnis; `model_requested` im Request-Log
+    /// ist der Name im Namensraum (`<server>__<tool>`).
+    pub(crate) fn set_mcp(
+        &mut self,
+        server: &str,
+        tool: &str,
+        outcome: aigw_core::observe::McpOutcome,
+    ) {
+        if let Some(r) = self.rec() {
+            r.model_alias = Some(format!("{server}{}{tool}", aigw_core::mcp::NAMESPACE_SEP));
+            r.mcp = Some(Box::new(aigw_core::observe::McpCall {
+                server: server.to_owned(),
+                tool: tool.to_owned(),
+                outcome,
+            }));
+        }
+        if !self.span.is_disabled() {
+            self.span.record(
+                "otel.name",
+                format!(
+                    "mcp tools/call {server}{}{tool}",
+                    aigw_core::mcp::NAMESPACE_SEP
+                ),
+            );
+        }
+    }
+
+    /// Ergebnis eines MCP-Tool-Aufrufs: Ergebnisklasse, Statusäquivalent, Fehlerart.
+    pub(crate) fn set_mcp_outcome(
+        &mut self,
+        outcome: aigw_core::observe::McpOutcome,
+        status: u16,
+        error: Option<aigw_core::ir::ErrorKind>,
+    ) {
+        if let Some(r) = self.rec() {
+            r.status = status;
+            r.error_kind = error;
+            if let Some(m) = r.mcp.as_mut() {
+                m.outcome = outcome;
+            }
+        }
+    }
+
     /// Fehler vor dem ersten Byte.
     pub(crate) fn fail(&mut self, status: u16, err: &UpstreamError) {
         if let Some(r) = self.rec() {

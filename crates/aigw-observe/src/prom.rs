@@ -319,7 +319,15 @@ pub struct GatewayMetrics {
     counter_degraded: OnceLock<Box<dyn Fn() -> bool + Send + Sync>>,
     /// `aigw_guardrail_hits_total{plugin,category,action}` (nur angefasst bei Erkennungen).
     guardrails: Mutex<BTreeMap<GuardrailKey, u64>>,
+    /// MCP-Tool-Aufrufe (AIGW-41) je (Server, Tool, Ergebnis): (Anzahl, Dauer in µs).
+    mcp: Mutex<BTreeMap<McpKey, (u64, u64)>>,
 }
+
+/// Serie von `aigw_mcp_calls_total`: (Server, Tool, Ergebnis).
+type McpKey = (String, String, &'static str);
+
+/// Höchstzahl der Serien von `aigw_mcp_calls_total`; darüber wird `tool` zu `other`.
+const MAX_MCP_SERIES: usize = 2000;
 
 impl fmt::Debug for GatewayMetrics {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -354,6 +362,7 @@ impl GatewayMetrics {
             upstream_errors: Default::default(),
             counter_degraded: OnceLock::new(),
             guardrails: Mutex::new(BTreeMap::new()),
+            mcp: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -387,12 +396,30 @@ impl GatewayMetrics {
         }
     }
 
+    /// Zählt einen MCP-Tool-Aufruf (`aigw_mcp_calls_total`, Dauer).
+    fn observe_mcp(&self, m: &aigw_core::observe::McpCall, d: Duration) {
+        let Ok(mut map) = self.mcp.lock() else {
+            return;
+        };
+        let status = m.outcome.as_str();
+        let mut key = (m.server.clone(), m.tool.clone(), status);
+        if !map.contains_key(&key) && map.len() >= MAX_MCP_SERIES {
+            key.1 = OTHER.to_owned();
+        }
+        let e = map.entry(key).or_insert((0, 0));
+        e.0 += 1;
+        e.1 = e.1.saturating_add(micros(d));
+    }
+
     /// Zählt eine abgeschlossene Anfrage (Hot Path).
     #[inline]
     pub fn observe(&self, r: &RequestRecord) {
         self.inflight.fetch_sub(1, Ordering::Relaxed);
         if !r.guardrails.is_empty() {
             self.count_guardrails(r);
+        }
+        if let Some(m) = &r.mcp {
+            self.observe_mcp(m, r.duration);
         }
         // Upstream-Fehler: jeder fehlgeschlagene Versuch (Retries/Fallbacks) und ein Fehler
         // nach erfolgreichem letztem Versuch (im Stream).
@@ -653,6 +680,45 @@ impl GatewayMetrics {
             "aigw_inflight_requests {}",
             self.inflight.load(Ordering::Relaxed).max(0)
         );
+        let mcp: Vec<(McpKey, (u64, u64))> = self
+            .mcp
+            .lock()
+            .map(|m| m.iter().map(|(k, v)| (k.clone(), *v)).collect())
+            .unwrap_or_default();
+        if !mcp.is_empty() {
+            header(
+                out,
+                "aigw_mcp_calls_total",
+                "counter",
+                "MCP-Tool-Aufrufe je Server, Tool und Ergebnis",
+            );
+            for ((server, tool, status), (n, _)) in &mcp {
+                let _ = writeln!(
+                    out,
+                    "aigw_mcp_calls_total{{server=\"{}\",tool=\"{}\",status=\"{status}\"}} {n}",
+                    escape(server),
+                    escape(tool)
+                );
+            }
+            header(
+                out,
+                "aigw_mcp_call_duration_seconds",
+                "summary",
+                "Dauer der MCP-Tool-Aufrufe",
+            );
+            for ((server, tool, status), (n, us)) in &mcp {
+                let l = format!(
+                    "server=\"{}\",tool=\"{}\",status=\"{status}\"",
+                    escape(server),
+                    escape(tool)
+                );
+                let _ = writeln!(
+                    out,
+                    "aigw_mcp_call_duration_seconds_sum{{{l}}} {}\naigw_mcp_call_duration_seconds_count{{{l}}} {n}",
+                    seconds(*us)
+                );
+            }
+        }
         if let Some(f) = self.counter_degraded.get() {
             header(
                 out,
@@ -978,6 +1044,30 @@ mod tests {
         assert!(out.contains(
             "aigw_guardrail_hits_total{plugin=\"prompt-filter\",category=\"injection\",action=\"reject\"} 1\n"
         ));
+    }
+
+    #[test]
+    fn mcp_calls() {
+        let m = GatewayMetrics::default();
+        let mut r = RequestRecord::new("x", WireFormat::Mcp, 200);
+        r.duration = Duration::from_millis(250);
+        r.mcp = Some(Box::new(aigw_core::observe::McpCall {
+            server: "gh".into(),
+            tool: "search".into(),
+            outcome: aigw_core::observe::McpOutcome::Ok,
+        }));
+        m.request_started();
+        m.observe(&r);
+        let mut out = String::new();
+        m.render_prometheus(&mut out);
+        assert!(
+            out.contains("aigw_mcp_calls_total{server=\"gh\",tool=\"search\",status=\"ok\"} 1"),
+            "{out}"
+        );
+        assert!(out.contains(
+            "aigw_mcp_call_duration_seconds_count{server=\"gh\",tool=\"search\",status=\"ok\"} 1"
+        ));
+        assert!(out.contains("ingress=\"mcp\""), "{out}");
     }
 
     #[test]
