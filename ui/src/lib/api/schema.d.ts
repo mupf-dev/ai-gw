@@ -41,6 +41,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/analytics/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** KPIs im Zeitraum und Vergleich mit der gleich langen Vorperiode. */
+        get: operations["summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/analytics/timeseries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Zeitreihe einer Kennzahl. */
+        get: operations["timeseries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/analytics/top": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rangliste einer Dimension nach einer Kennzahl. */
+        get: operations["top"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/api-keys": {
         parameters: {
             query?: never;
@@ -372,6 +423,57 @@ export interface paths {
         patch: operations["patch_credential"];
         trace?: never;
     };
+    "/admin/api/v1/request-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Log-Explorer: Anfragen, neueste zuerst. */
+        get: operations["list_request_logs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/request-logs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Eine Anfrage mit Upstream-Versuchen und – für `admin`/`auditor` – dem Payload. */
+        get: operations["get_request_log"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/request-logs/{id}/payload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Nur der gespeicherte Payload einer Anfrage (`admin`, `auditor`). */
+        get: operations["get_request_payload"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/session": {
         parameters: {
             query?: never;
@@ -616,6 +718,29 @@ export interface components {
          * @example 2.50
          */
         Amount: string;
+        /** @description KPIs. */
+        AnalyticsSummary: {
+            /** @description Cache-Trefferquote (0–1). */
+            cacheHitRate: components["schemas"]["Kpi"];
+            /** @description Kosten. */
+            cost: components["schemas"]["Kpi"];
+            /** @description Fehlerquote (0–1). */
+            errorRate: components["schemas"]["Kpi"];
+            /** @description Beginn. */
+            from: string;
+            /** @description Latenz p95 (ms). */
+            latencyP95Ms: components["schemas"]["Kpi"];
+            /** @description Beginn der Vorperiode (gleich lang, direkt davor). */
+            previousFrom: string;
+            /** @description Ende der Vorperiode (= `from`). */
+            previousTo: string;
+            /** @description Anfragen. */
+            requests: components["schemas"]["Kpi"];
+            /** @description Ende (exklusive). */
+            to: string;
+            /** @description Tokens (Eingabe + Ausgabe). */
+            tokens: components["schemas"]["Kpi"];
+        };
         /** @description API-Key (gelesene Sicht): Spezifikation plus vom Server verwaltete Felder. */
         ApiKey: {
             /**
@@ -696,6 +821,27 @@ export interface components {
             configVersion: number;
             /** @description Plan (bei `applied` genau das, was geschrieben wurde). */
             plan: components["schemas"]["Plan"];
+        };
+        /** @description Ein Upstream-Versuch einer Anfrage (Spalte `request_log.attempts`, JSON-Array; AIGW-46). */
+        AttemptRow: {
+            /** @description Name des Deployments. */
+            deployment: string;
+            /** @description ID des Deployments. */
+            deploymentId?: string | null;
+            /**
+             * Format: int64
+             * @description Dauer bis zur Antwort, zum ersten Stream-Ereignis bzw. zum Fehler (ms).
+             */
+            durationMs: number;
+            /** @description Fehlerklasse (`snake_case` wie `ErrorClass`); fehlt = erfolgreich. */
+            error?: string | null;
+            /** @description Modellgruppe des Deployments (bei Fallbacks die Ziel-Gruppe). */
+            modelGroup?: string | null;
+            /**
+             * Format: int32
+             * @description HTTP-Status des Anbieters bei Fehlern.
+             */
+            upstreamStatus?: number | null;
         };
         /** @description Eintrag im Audit-Log. */
         AuditEntry: {
@@ -959,6 +1105,11 @@ export interface components {
              */
             weight?: number;
         };
+        /**
+         * @description Dimension für Gruppierung und Ranglisten.
+         * @enum {string}
+         */
+        Dimension: "model_group" | "deployment" | "provider" | "team" | "key" | "org";
         /** @description Fallback auf eine andere Modellgruppe. */
         Fallback: {
             /** @description Ziel-Modellgruppe (Name). */
@@ -981,6 +1132,26 @@ export interface components {
             path: string;
             /** @description Geheimer Wert: nur „geändert“, nie der Inhalt. */
             secret?: boolean;
+        };
+        /** @description Eine KPI mit Vergleich. */
+        Kpi: {
+            amount?: components["schemas"]["Amount"] | null;
+            /**
+             * Format: double
+             * @description Änderung in Prozent ((Wert − Vorperiode) / Vorperiode · 100); `null` ohne Vorwert.
+             */
+            deltaPercent?: number | null;
+            /**
+             * Format: double
+             * @description Wert in der Vorperiode.
+             */
+            previous?: number | null;
+            previousAmount?: components["schemas"]["Amount"] | null;
+            /**
+             * Format: double
+             * @description Wert im Zeitraum.
+             */
+            value?: number | null;
         };
         /**
          * @description Ebene der Mandantenhierarchie.
@@ -1016,6 +1187,11 @@ export interface components {
             /** @description Hierhin navigieren (Logout beim IdP oder die Admin-UI). */
             redirectUrl: string;
         };
+        /**
+         * @description Kennzahl.
+         * @enum {string}
+         */
+        Metric: "requests" | "tokens" | "input_tokens" | "output_tokens" | "cost" | "errors" | "error_rate" | "latency_avg" | "latency_p50" | "latency_p95" | "latency_p99" | "ttft_p95" | "cache_hit_rate";
         ModelGroup: {
             /**
              * Format: uuid
@@ -1104,6 +1280,11 @@ export interface components {
             /** @description Freie Metadaten. */
             metadata?: components["schemas"]["BTreeMap"];
         };
+        /**
+         * @description Zugriff auf den Payload einer Anfrage.
+         * @enum {string}
+         */
+        PayloadStatus: "available" | "forbidden" | "not-stored";
         /** @description Ergebnis des Soll/Ist-Vergleichs. */
         Plan: {
             /** @description Umgang mit API-Keys. */
@@ -1121,6 +1302,17 @@ export interface components {
             summary: components["schemas"]["Summary"];
             /** @description Warnungen (z. B. übersprungene Keys). */
             warnings: string[];
+        };
+        /** @description Ein Punkt einer Zeitreihe. */
+        Point: {
+            amount?: components["schemas"]["Amount"] | null;
+            /** @description Bucket-Beginn (RFC 3339). */
+            t: string;
+            /**
+             * Format: double
+             * @description Wert; `null` ohne Anfragen (Quoten, Latenzen). Kosten in Währungseinheiten (gerundet).
+             */
+            v?: number | null;
         };
         Price: {
             /**
@@ -1251,6 +1443,123 @@ export interface components {
          * @enum {string}
          */
         ProviderKind: "openai" | "anthropic" | "azure-openai" | "bedrock" | "vertex" | "mistral" | "ollama" | "vllm" | "openai-compatible" | "mock";
+        /** @description Einzelanfrage. */
+        RequestLogDetail: components["schemas"]["RequestLogItem"] & {
+            /** @description Upstream-Versuche in Reihenfolge (leer bei älteren Einträgen bzw. ohne Upstream). */
+            attempts: components["schemas"]["AttemptRow"][];
+            payload?: components["schemas"]["RequestPayload"] | null;
+            /** @description Zugriff auf den Payload. */
+            payloadStatus: components["schemas"]["PayloadStatus"];
+        };
+        /** @description Eine Anfrage im Log-Explorer. */
+        RequestLogItem: {
+            /** @description API-Key-Name. */
+            apiKey?: string | null;
+            /** @description API-Key-ID. */
+            apiKeyId?: string | null;
+            /** @description Annahme (RFC 3339). */
+            at: string;
+            /** @description Anzahl Upstream-Versuche (Retries, Fallbacks). */
+            attemptCount: number;
+            /** @description Cache-Ergebnis. */
+            cache?: string | null;
+            /**
+             * Format: int64
+             * @description In den Anbieter-Cache geschriebene Tokens.
+             */
+            cacheWriteTokens: number;
+            /**
+             * Format: int64
+             * @description Aus dem Anbieter-Cache gelesene Tokens.
+             */
+            cachedTokens: number;
+            /** @description Client-Abbruch. */
+            clientAborted: boolean;
+            /** @description Client-Adresse. */
+            clientIp?: string | null;
+            /** @description Request-ID des Clients (`x-request-id` / `x-client-request-id`). */
+            clientRequestId?: string | null;
+            /** @description Kosten. */
+            cost: components["schemas"]["Amount"];
+            /** @description Deployment-Name. */
+            deployment?: string | null;
+            /** @description Deployment-ID (zuletzt verwendet). */
+            deploymentId?: string | null;
+            /** @description Eingangsformat (`openai-chat`, `anthropic-messages` …). */
+            endpoint: string;
+            /** @description Fehlerklasse. */
+            errorCode?: string | null;
+            /** @description Payload gespeichert (lesbar nur mit `admin`/`auditor`). */
+            hasPayload: boolean;
+            /** @description Request-ID. */
+            id: string;
+            /**
+             * Format: int64
+             * @description Eingabe-Tokens.
+             */
+            inputTokens: number;
+            /**
+             * Format: int64
+             * @description Gesamtdauer (ms).
+             */
+            latencyMs: number;
+            /** @description Modellgruppe. */
+            modelGroup?: string | null;
+            /** @description Angefordertes Modell. */
+            modelRequested?: string | null;
+            /** @description Organisations-Name. */
+            organization?: string | null;
+            /** @description Organisations-ID. */
+            organizationId?: string | null;
+            /**
+             * Format: int64
+             * @description Ausgabe-Tokens.
+             */
+            outputTokens: number;
+            /** @description Anbieter. */
+            provider?: string | null;
+            /** @description Anbieter-Modell. */
+            providerModel?: string | null;
+            /**
+             * Format: int64
+             * @description Reasoning-Tokens.
+             */
+            reasoningTokens: number;
+            /**
+             * Format: int64
+             * @description HTTP-Status an den Client.
+             */
+            status: number;
+            /** @description Streaming. */
+            stream: boolean;
+            /** @description Team-Name. */
+            team?: string | null;
+            /** @description Team-ID. */
+            teamId?: string | null;
+            /**
+             * Format: int64
+             * @description Zeit bis zum ersten Token (ms).
+             */
+            ttftMs?: number | null;
+            /** @description Usage geschätzt. */
+            usageEstimated: boolean;
+        };
+        /** @description Seite des Log-Explorers. */
+        RequestLogList: {
+            /** @description Einträge, neueste zuerst. */
+            items: components["schemas"]["RequestLogItem"][];
+            /** @description Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite. */
+            nextCursor?: string | null;
+        };
+        /** @description Gespeicherter Payload (bereits gefiltert bzw. maskiert, siehe `observe.payload`). */
+        RequestPayload: {
+            /** @description Request-ID. */
+            id: string;
+            /** @description Modus beim Speichern (`metadata`, `masked`, `full`). */
+            mode: string;
+            /** @description `{"request": {…}, "response": {…}}`. */
+            payload: Record<string, never>;
+        };
         /**
          * @description Art einer Ressource (`kind` in YAML).
          * @enum {string}
@@ -1301,6 +1610,26 @@ export interface components {
          *     Admin-API).
          */
         SecretString: string;
+        /** @description Eine Reihe (Gruppe). */
+        Series: {
+            /**
+             * @description Gruppenschlüssel: ID (Key, Team, Organisation, Deployment), Name (Modellgruppe,
+             *     Anbieter), `""` = ohne Wert, `__other__` = alle übrigen, `total` ohne `groupBy`.
+             */
+            key: string;
+            /** @description Anzeigename (fehlt bei unbekannten bzw. gelöschten Objekten). */
+            name?: string | null;
+            /** @description Sammelgruppe jenseits der Top-N. */
+            other: boolean;
+            /** @description Punkte, lückenlos je Bucket. */
+            points: components["schemas"]["Point"][];
+            /**
+             * Format: double
+             * @description Wert über den ganzen Zeitraum.
+             */
+            total?: number | null;
+            totalAmount?: components["schemas"]["Amount"] | null;
+        };
         /** @description Angemeldeter Principal. */
         SessionInfo: {
             /** @description CSRF-Token für schreibende Anfragen (Header `X-CSRF-Token`; nur bei Sessions). */
@@ -1321,6 +1650,11 @@ export interface components {
             /** @description Kennung im Audit-Log (`user:<name>`, `admin-key:<name>`, `bootstrap-admin`). */
             subject: string;
         };
+        /**
+         * @description Bucket-Breite einer Zeitreihe.
+         * @enum {string}
+         */
+        Step: "1m" | "5m" | "1h" | "1d";
         /** @description Anzahl je Aktion. */
         Summary: {
             /** @description Anzulegen. */
@@ -1373,6 +1707,27 @@ export interface components {
             /** @description Organisation (Name). */
             organization: string;
         };
+        /** @description Zeitreihe. */
+        Timeseries: {
+            /** @description Beginn (auf `step` ausgerichtet). */
+            from: string;
+            groupBy?: components["schemas"]["Dimension"] | null;
+            /** @description Kennzahl. */
+            metric: components["schemas"]["Metric"];
+            /** @description Reihen (nach Rang, `__other__` zuletzt). */
+            series: components["schemas"]["Series"][];
+            /** @description Bucket-Breite. */
+            step: components["schemas"]["Step"];
+            /**
+             * Format: int64
+             * @description Bucket-Breite in Sekunden.
+             */
+            stepSeconds: number;
+            /** @description Ende (exklusive, auf `step` ausgerichtet). */
+            to: string;
+            /** @description Einheit. */
+            unit: components["schemas"]["Unit"];
+        };
         /** @description Preise je 1 Mio. Tokens bzw. je Einheit; fehlende Werte gelten als 0. */
         TokenPrices: {
             audioInput?: components["schemas"]["Amount"] | null;
@@ -1384,6 +1739,49 @@ export interface components {
             output?: components["schemas"]["Amount"] | null;
             reasoning?: components["schemas"]["Amount"] | null;
         };
+        /** @description Eintrag einer Rangliste. */
+        TopItem: {
+            amount?: components["schemas"]["Amount"] | null;
+            /** @description Schlüssel (wie [`Series::key`]). */
+            key: string;
+            /** @description Anzeigename. */
+            name?: string | null;
+            /**
+             * Format: int64
+             * @description Anfragen.
+             */
+            requests: number;
+            /**
+             * Format: double
+             * @description Anteil am Gesamtwert (0–1, nur summierbare Kennzahlen).
+             */
+            share?: number | null;
+            /**
+             * Format: double
+             * @description Wert.
+             */
+            value?: number | null;
+        };
+        /** @description Rangliste. */
+        TopList: {
+            /** @description Dimension. */
+            dimension: components["schemas"]["Dimension"];
+            /** @description Beginn. */
+            from: string;
+            /** @description Einträge, absteigend nach Wert (ohne Wert zuletzt). */
+            items: components["schemas"]["TopItem"][];
+            /** @description Kennzahl. */
+            metric: components["schemas"]["Metric"];
+            /** @description Ende (exklusive). */
+            to: string;
+            /** @description Einheit. */
+            unit: components["schemas"]["Unit"];
+        };
+        /**
+         * @description Einheit einer Kennzahl.
+         * @enum {string}
+         */
+        Unit: "count" | "tokens" | "currency" | "ms" | "ratio";
         User: {
             /**
              * Format: uuid
@@ -1719,6 +2117,239 @@ export interface operations {
             };
             /** @description Nicht gefunden */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    summary: {
+        parameters: {
+            query?: {
+                /** @description Beginn (RFC 3339; Standard: `to` − 24 h). Auf die Minute abgerundet. */
+                from?: string;
+                /** @description Ende (RFC 3339, exklusive; Standard: jetzt). Auf die Minute aufgerundet. */
+                to?: string;
+                /** @description Modellgruppen. */
+                modelGroup?: string;
+                /** @description Deployments (Name oder ID). */
+                deployment?: string;
+                /** @description Anbieter. */
+                provider?: string;
+                /** @description Teams (Name oder ID). */
+                team?: string;
+                /** @description API-Keys (Name oder ID). */
+                key?: string;
+                /** @description Organisationen (Name oder ID). */
+                organization?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description KPIs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyticsSummary"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Filter außerhalb des Geltungsbereichs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unbekannter Name in einem Filter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    timeseries: {
+        parameters: {
+            query: {
+                /** @description Kennzahl. */
+                metric: components["schemas"]["Metric"];
+                /** @description Beginn (RFC 3339; Standard: `to` − 24 h). Wird auf `step` abgerundet. */
+                from?: string;
+                /** @description Ende (RFC 3339, exklusive; Standard: jetzt). Wird auf `step` aufgerundet. */
+                to?: string;
+                /** @description Bucket-Breite; ohne Angabe die kleinste mit höchstens 300 Punkten. */
+                step?: components["schemas"]["Step"];
+                /** @description Gruppierung (Top-N + `__other__`). */
+                groupBy?: components["schemas"]["Dimension"];
+                /** @description Anzahl Gruppen (1–20, Standard 5). */
+                limit?: number;
+                /** @description Modellgruppen. */
+                modelGroup?: string;
+                /** @description Deployments (Name oder ID). */
+                deployment?: string;
+                /** @description Anbieter (`openai`, `anthropic` …). */
+                provider?: string;
+                /** @description Teams (Name oder ID). */
+                team?: string;
+                /** @description API-Keys (Name oder ID). */
+                key?: string;
+                /** @description Organisationen (Name oder ID). */
+                organization?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Zeitreihe */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Timeseries"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Filter außerhalb des Geltungsbereichs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unbekannter Name in einem Filter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    top: {
+        parameters: {
+            query: {
+                /** @description Dimension. */
+                dimension: components["schemas"]["Dimension"];
+                /** @description Kennzahl (Standard `requests`); absteigend sortiert. */
+                metric?: components["schemas"]["Metric"];
+                /** @description Beginn (RFC 3339; Standard: `to` − 24 h). */
+                from?: string;
+                /** @description Ende (RFC 3339, exklusive; Standard: jetzt). */
+                to?: string;
+                /** @description Anzahl (1–100, Standard 10). */
+                limit?: number;
+                /** @description Modellgruppen. */
+                modelGroup?: string;
+                /** @description Deployments (Name oder ID). */
+                deployment?: string;
+                /** @description Anbieter. */
+                provider?: string;
+                /** @description Teams (Name oder ID). */
+                team?: string;
+                /** @description API-Keys (Name oder ID). */
+                key?: string;
+                /** @description Organisationen (Name oder ID). */
+                organization?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rangliste */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopList"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Filter außerhalb des Geltungsbereichs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unbekannter Name in einem Filter */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4346,6 +4977,195 @@ export interface operations {
             };
             /** @description Ungültige Eingabe */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_request_logs: {
+        parameters: {
+            query?: {
+                /** @description Ab (RFC 3339, inklusive). */
+                from?: string;
+                /** @description Bis (RFC 3339, exklusive). */
+                to?: string;
+                /** @description Status: Code (`429`), Klasse (`4xx`), `error` (≥ 400 oder Fehlerklasse) oder `success`. */
+                status?: string;
+                /** @description Fehlerklassen (`error_code`, kommagetrennt, z. B. `rate_limited`). */
+                errorCode?: string;
+                /** @description Modellgruppen. */
+                modelGroup?: string;
+                /** @description Deployments (Name oder ID). */
+                deployment?: string;
+                /** @description Anbieter. */
+                provider?: string;
+                /** @description Teams (Name oder ID). */
+                team?: string;
+                /** @description API-Keys (Name oder ID). */
+                key?: string;
+                /** @description Organisationen (Name oder ID). */
+                organization?: string;
+                /** @description Genau diese Request-ID. */
+                requestId?: string;
+                /** @description Genau diese Client-Request-ID (`x-request-id` / `x-client-request-id` des Clients). */
+                clientRequestId?: string;
+                /** @description Nur Streams (`true`) bzw. keine Streams (`false`). */
+                stream?: boolean;
+                /** @description Cache: `hit`, `miss`, `none`, `hit-exact`, `hit-semantic`. */
+                cache?: string;
+                /** @description Seitengröße (1–500, Standard 50). */
+                limit?: number;
+                /** @description Fortsetzung (`nextCursor` der vorigen Seite). */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Seite */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestLogList"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Filter außerhalb des Geltungsbereichs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unbekannter Name in einem Filter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_request_log: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Request-ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Anfrage */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestLogDetail"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Außerhalb des Geltungsbereichs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unbekannt bzw. abgelaufen */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_request_payload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Request-ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Payload */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestPayload"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Rolle darf Payloads nicht lesen bzw. außerhalb des Geltungsbereichs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Anfrage unbekannt oder kein Payload gespeichert */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

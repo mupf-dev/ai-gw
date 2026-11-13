@@ -386,6 +386,502 @@
         ]
       }
     },
+    "/admin/api/v1/analytics/summary": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "KPIs im Zeitraum und Vergleich mit der gleich langen Vorperiode.",
+        "operationId": "summary",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Beginn (RFC 3339; Standard: `to` − 24 h). Auf die Minute abgerundet.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Ende (RFC 3339, exklusive; Standard: jetzt). Auf die Minute aufgerundet.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "modelGroup",
+            "in": "query",
+            "description": "Modellgruppen.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "deployment",
+            "in": "query",
+            "description": "Deployments (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "description": "Anbieter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "query",
+            "description": "Teams (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "description": "API-Keys (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "description": "Organisationen (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "KPIs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyticsSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Filter außerhalb des Geltungsbereichs",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unbekannter Name in einem Filter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/analytics/timeseries": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Zeitreihe einer Kennzahl.",
+        "operationId": "timeseries",
+        "parameters": [
+          {
+            "name": "metric",
+            "in": "query",
+            "description": "Kennzahl.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Metric"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Beginn (RFC 3339; Standard: `to` − 24 h). Wird auf `step` abgerundet.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Ende (RFC 3339, exklusive; Standard: jetzt). Wird auf `step` aufgerundet.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "step",
+            "in": "query",
+            "description": "Bucket-Breite; ohne Angabe die kleinste mit höchstens 300 Punkten.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Step"
+            }
+          },
+          {
+            "name": "groupBy",
+            "in": "query",
+            "description": "Gruppierung (Top-N + `__other__`).",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Dimension"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Anzahl Gruppen (1–20, Standard 5).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "modelGroup",
+            "in": "query",
+            "description": "Modellgruppen.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "deployment",
+            "in": "query",
+            "description": "Deployments (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "description": "Anbieter (`openai`, `anthropic` …).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "query",
+            "description": "Teams (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "description": "API-Keys (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "description": "Organisationen (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Zeitreihe",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Timeseries"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Filter außerhalb des Geltungsbereichs",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unbekannter Name in einem Filter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/analytics/top": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Rangliste einer Dimension nach einer Kennzahl.",
+        "operationId": "top",
+        "parameters": [
+          {
+            "name": "dimension",
+            "in": "query",
+            "description": "Dimension.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Dimension"
+            }
+          },
+          {
+            "name": "metric",
+            "in": "query",
+            "description": "Kennzahl (Standard `requests`); absteigend sortiert.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Metric"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Beginn (RFC 3339; Standard: `to` − 24 h).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Ende (RFC 3339, exklusive; Standard: jetzt).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Anzahl (1–100, Standard 10).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "modelGroup",
+            "in": "query",
+            "description": "Modellgruppen.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "deployment",
+            "in": "query",
+            "description": "Deployments (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "description": "Anbieter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "query",
+            "description": "Teams (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "description": "API-Keys (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "description": "Organisationen (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rangliste",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Filter außerhalb des Geltungsbereichs",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unbekannter Name in einem Filter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/api-keys": {
       "get": {
         "tags": [
@@ -4404,6 +4900,363 @@
         ]
       }
     },
+    "/admin/api/v1/request-logs": {
+      "get": {
+        "tags": [
+          "request-logs"
+        ],
+        "summary": "Log-Explorer: Anfragen, neueste zuerst.",
+        "operationId": "list_request_logs",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Ab (RFC 3339, inklusive).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Bis (RFC 3339, exklusive).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Status: Code (`429`), Klasse (`4xx`), `error` (≥ 400 oder Fehlerklasse) oder `success`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "errorCode",
+            "in": "query",
+            "description": "Fehlerklassen (`error_code`, kommagetrennt, z. B. `rate_limited`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "modelGroup",
+            "in": "query",
+            "description": "Modellgruppen.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "deployment",
+            "in": "query",
+            "description": "Deployments (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "description": "Anbieter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "query",
+            "description": "Teams (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "description": "API-Keys (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "description": "Organisationen (Name oder ID).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "query",
+            "description": "Genau diese Request-ID.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "clientRequestId",
+            "in": "query",
+            "description": "Genau diese Client-Request-ID (`x-request-id` / `x-client-request-id` des Clients).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "stream",
+            "in": "query",
+            "description": "Nur Streams (`true`) bzw. keine Streams (`false`).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cache",
+            "in": "query",
+            "description": "Cache: `hit`, `miss`, `none`, `hit-exact`, `hit-semantic`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Seitengröße (1–500, Standard 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Fortsetzung (`nextCursor` der vorigen Seite).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestLogList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Filter außerhalb des Geltungsbereichs",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unbekannter Name in einem Filter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/request-logs/{id}": {
+      "get": {
+        "tags": [
+          "request-logs"
+        ],
+        "summary": "Eine Anfrage mit Upstream-Versuchen und – für `admin`/`auditor` – dem Payload.",
+        "operationId": "get_request_log",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Request-ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestLogDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Außerhalb des Geltungsbereichs",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unbekannt bzw. abgelaufen",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/request-logs/{id}/payload": {
+      "get": {
+        "tags": [
+          "request-logs"
+        ],
+        "summary": "Nur der gespeicherte Payload einer Anfrage (`admin`, `auditor`).",
+        "operationId": "get_request_payload",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Request-ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestPayload"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rolle darf Payloads nicht lesen bzw. außerhalb des Geltungsbereichs",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Anfrage unbekannt oder kein Payload gespeichert",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/session": {
       "get": {
         "tags": [
@@ -5910,6 +6763,64 @@
         "description": "Geldbetrag in Nano-Einheiten der Abrechnungswährung.",
         "example": "2.50"
       },
+      "AnalyticsSummary": {
+        "type": "object",
+        "description": "KPIs.",
+        "required": [
+          "from",
+          "to",
+          "previousFrom",
+          "previousTo",
+          "requests",
+          "tokens",
+          "cost",
+          "latencyP95Ms",
+          "errorRate",
+          "cacheHitRate"
+        ],
+        "properties": {
+          "cacheHitRate": {
+            "$ref": "#/components/schemas/Kpi",
+            "description": "Cache-Trefferquote (0–1)."
+          },
+          "cost": {
+            "$ref": "#/components/schemas/Kpi",
+            "description": "Kosten."
+          },
+          "errorRate": {
+            "$ref": "#/components/schemas/Kpi",
+            "description": "Fehlerquote (0–1)."
+          },
+          "from": {
+            "type": "string",
+            "description": "Beginn."
+          },
+          "latencyP95Ms": {
+            "$ref": "#/components/schemas/Kpi",
+            "description": "Latenz p95 (ms)."
+          },
+          "previousFrom": {
+            "type": "string",
+            "description": "Beginn der Vorperiode (gleich lang, direkt davor)."
+          },
+          "previousTo": {
+            "type": "string",
+            "description": "Ende der Vorperiode (= `from`)."
+          },
+          "requests": {
+            "$ref": "#/components/schemas/Kpi",
+            "description": "Anfragen."
+          },
+          "to": {
+            "type": "string",
+            "description": "Ende (exklusive)."
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/Kpi",
+            "description": "Tokens (Eingabe + Ausgabe)."
+          }
+        }
+      },
       "ApiKey": {
         "type": "object",
         "description": "API-Key (gelesene Sicht): Spezifikation plus vom Server verwaltete Felder.",
@@ -6102,6 +7013,55 @@
           "plan": {
             "$ref": "#/components/schemas/Plan",
             "description": "Plan (bei `applied` genau das, was geschrieben wurde)."
+          }
+        }
+      },
+      "AttemptRow": {
+        "type": "object",
+        "description": "Ein Upstream-Versuch einer Anfrage (Spalte `request_log.attempts`, JSON-Array; AIGW-46).",
+        "required": [
+          "deployment",
+          "durationMs"
+        ],
+        "properties": {
+          "deployment": {
+            "type": "string",
+            "description": "Name des Deployments."
+          },
+          "deploymentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ID des Deployments."
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Dauer bis zur Antwort, zum ersten Stream-Ereignis bzw. zum Fehler (ms)."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fehlerklasse (`snake_case` wie `ErrorClass`); fehlt = erfolgreich."
+          },
+          "modelGroup": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Modellgruppe des Deployments (bei Fallbacks die Ziel-Gruppe)."
+          },
+          "upstreamStatus": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "HTTP-Status des Anbieters bei Fehlern.",
+            "minimum": 0
           }
         }
       },
@@ -6738,6 +7698,18 @@
         },
         "additionalProperties": false
       },
+      "Dimension": {
+        "type": "string",
+        "description": "Dimension für Gruppierung und Ranglisten.",
+        "enum": [
+          "model_group",
+          "deployment",
+          "provider",
+          "team",
+          "key",
+          "org"
+        ]
+      },
       "Fallback": {
         "type": "object",
         "description": "Fallback auf eine andere Modellgruppe.",
@@ -6798,6 +7770,58 @@
           "secret": {
             "type": "boolean",
             "description": "Geheimer Wert: nur „geändert“, nie der Inhalt."
+          }
+        }
+      },
+      "Kpi": {
+        "type": "object",
+        "description": "Eine KPI mit Vergleich.",
+        "properties": {
+          "amount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Kosten exakt (nur `cost`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deltaPercent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Änderung in Prozent ((Wert − Vorperiode) / Vorperiode · 100); `null` ohne Vorwert."
+          },
+          "previous": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Wert in der Vorperiode."
+          },
+          "previousAmount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Kosten der Vorperiode exakt (nur `cost`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Wert im Zeitraum."
           }
         }
       },
@@ -6875,6 +7899,25 @@
             "description": "Hierhin navigieren (Logout beim IdP oder die Admin-UI)."
           }
         }
+      },
+      "Metric": {
+        "type": "string",
+        "description": "Kennzahl.",
+        "enum": [
+          "requests",
+          "tokens",
+          "input_tokens",
+          "output_tokens",
+          "cost",
+          "errors",
+          "error_rate",
+          "latency_avg",
+          "latency_p50",
+          "latency_p95",
+          "latency_p99",
+          "ttft_p95",
+          "cache_hit_rate"
+        ]
       },
       "ModelGroup": {
         "type": "object",
@@ -7114,6 +8157,15 @@
         },
         "additionalProperties": false
       },
+      "PayloadStatus": {
+        "type": "string",
+        "description": "Zugriff auf den Payload einer Anfrage.",
+        "enum": [
+          "available",
+          "forbidden",
+          "not-stored"
+        ]
+      },
       "Plan": {
         "type": "object",
         "description": "Ergebnis des Soll/Ist-Vergleichs.",
@@ -7156,6 +8208,38 @@
               "type": "string"
             },
             "description": "Warnungen (z. B. übersprungene Keys)."
+          }
+        }
+      },
+      "Point": {
+        "type": "object",
+        "description": "Ein Punkt einer Zeitreihe.",
+        "required": [
+          "t"
+        ],
+        "properties": {
+          "amount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Kosten exakt (nur `metric=cost`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "t": {
+            "type": "string",
+            "description": "Bucket-Beginn (RFC 3339)."
+          },
+          "v": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Wert; `null` ohne Anfragen (Quoten, Latenzen). Kosten in Währungseinheiten (gerundet)."
           }
         }
       },
@@ -7512,6 +8596,308 @@
           "mock"
         ]
       },
+      "RequestLogDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RequestLogItem",
+            "description": "Metadaten."
+          },
+          {
+            "type": "object",
+            "required": [
+              "attempts",
+              "payloadStatus"
+            ],
+            "properties": {
+              "attempts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AttemptRow"
+                },
+                "description": "Upstream-Versuche in Reihenfolge (leer bei älteren Einträgen bzw. ohne Upstream)."
+              },
+              "payload": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/RequestPayload",
+                    "description": "Payload (nur bei `payloadStatus = available`)."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "payloadStatus": {
+                "$ref": "#/components/schemas/PayloadStatus",
+                "description": "Zugriff auf den Payload."
+              }
+            }
+          }
+        ],
+        "description": "Einzelanfrage."
+      },
+      "RequestLogItem": {
+        "type": "object",
+        "description": "Eine Anfrage im Log-Explorer.",
+        "required": [
+          "id",
+          "at",
+          "endpoint",
+          "status",
+          "inputTokens",
+          "outputTokens",
+          "cachedTokens",
+          "cacheWriteTokens",
+          "reasoningTokens",
+          "usageEstimated",
+          "cost",
+          "latencyMs",
+          "stream",
+          "clientAborted",
+          "attemptCount",
+          "hasPayload"
+        ],
+        "properties": {
+          "apiKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "API-Key-Name."
+          },
+          "apiKeyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "API-Key-ID."
+          },
+          "at": {
+            "type": "string",
+            "description": "Annahme (RFC 3339)."
+          },
+          "attemptCount": {
+            "type": "integer",
+            "description": "Anzahl Upstream-Versuche (Retries, Fallbacks).",
+            "minimum": 0
+          },
+          "cache": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cache-Ergebnis."
+          },
+          "cacheWriteTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "In den Anbieter-Cache geschriebene Tokens."
+          },
+          "cachedTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Aus dem Anbieter-Cache gelesene Tokens."
+          },
+          "clientAborted": {
+            "type": "boolean",
+            "description": "Client-Abbruch."
+          },
+          "clientIp": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Client-Adresse."
+          },
+          "clientRequestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Request-ID des Clients (`x-request-id` / `x-client-request-id`)."
+          },
+          "cost": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "Kosten."
+          },
+          "deployment": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Deployment-Name."
+          },
+          "deploymentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Deployment-ID (zuletzt verwendet)."
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Eingangsformat (`openai-chat`, `anthropic-messages` …)."
+          },
+          "errorCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fehlerklasse."
+          },
+          "hasPayload": {
+            "type": "boolean",
+            "description": "Payload gespeichert (lesbar nur mit `admin`/`auditor`)."
+          },
+          "id": {
+            "type": "string",
+            "description": "Request-ID."
+          },
+          "inputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Eingabe-Tokens."
+          },
+          "latencyMs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Gesamtdauer (ms)."
+          },
+          "modelGroup": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Modellgruppe."
+          },
+          "modelRequested": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Angefordertes Modell."
+          },
+          "organization": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Organisations-Name."
+          },
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Organisations-ID."
+          },
+          "outputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Ausgabe-Tokens."
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Anbieter."
+          },
+          "providerModel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Anbieter-Modell."
+          },
+          "reasoningTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Reasoning-Tokens."
+          },
+          "status": {
+            "type": "integer",
+            "format": "int64",
+            "description": "HTTP-Status an den Client."
+          },
+          "stream": {
+            "type": "boolean",
+            "description": "Streaming."
+          },
+          "team": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Team-Name."
+          },
+          "teamId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Team-ID."
+          },
+          "ttftMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Zeit bis zum ersten Token (ms)."
+          },
+          "usageEstimated": {
+            "type": "boolean",
+            "description": "Usage geschätzt."
+          }
+        }
+      },
+      "RequestLogList": {
+        "type": "object",
+        "description": "Seite des Log-Explorers.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequestLogItem"
+            },
+            "description": "Einträge, neueste zuerst."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite."
+          }
+        }
+      },
+      "RequestPayload": {
+        "type": "object",
+        "description": "Gespeicherter Payload (bereits gefiltert bzw. maskiert, siehe `observe.payload`).",
+        "required": [
+          "id",
+          "mode",
+          "payload"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Request-ID."
+          },
+          "mode": {
+            "type": "string",
+            "description": "Modus beim Speichern (`metadata`, `masked`, `full`)."
+          },
+          "payload": {
+            "type": "object",
+            "description": "`{\"request\": {…}, \"response\": {…}}`."
+          }
+        }
+      },
       "ResourceKind": {
         "type": "string",
         "description": "Art einer Ressource (`kind` in YAML).",
@@ -7624,6 +9010,58 @@
         "format": "password",
         "description": "Geheimer Klartext (z. B. API-Key eines Anbieters).\n\n`Debug`, `Display` und `Serialize` geben nur [`REDACTED`] aus; der Wert ist ausschließlich\nüber [`SecretString::expose`] erreichbar. Deserialisieren ist erlaubt (Eingabe über die\nAdmin-API)."
       },
+      "Series": {
+        "type": "object",
+        "description": "Eine Reihe (Gruppe).",
+        "required": [
+          "key",
+          "other",
+          "points"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Gruppenschlüssel: ID (Key, Team, Organisation, Deployment), Name (Modellgruppe,\nAnbieter), `\"\"` = ohne Wert, `__other__` = alle übrigen, `total` ohne `groupBy`."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Anzeigename (fehlt bei unbekannten bzw. gelöschten Objekten)."
+          },
+          "other": {
+            "type": "boolean",
+            "description": "Sammelgruppe jenseits der Top-N."
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "description": "Punkte, lückenlos je Bucket."
+          },
+          "total": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Wert über den ganzen Zeitraum."
+          },
+          "totalAmount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Kosten exakt über den ganzen Zeitraum (nur `metric=cost`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "SessionInfo": {
         "type": "object",
         "description": "Angemeldeter Principal.",
@@ -7678,6 +9116,16 @@
             "description": "Kennung im Audit-Log (`user:<name>`, `admin-key:<name>`, `bootstrap-admin`)."
           }
         }
+      },
+      "Step": {
+        "type": "string",
+        "description": "Bucket-Breite einer Zeitreihe.",
+        "enum": [
+          "1m",
+          "5m",
+          "1h",
+          "1d"
+        ]
       },
       "Summary": {
         "type": "object",
@@ -7836,6 +9284,64 @@
         },
         "additionalProperties": false
       },
+      "Timeseries": {
+        "type": "object",
+        "description": "Zeitreihe.",
+        "required": [
+          "metric",
+          "unit",
+          "from",
+          "to",
+          "step",
+          "stepSeconds",
+          "series"
+        ],
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "Beginn (auf `step` ausgerichtet)."
+          },
+          "groupBy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Dimension",
+                "description": "Gruppierung."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metric": {
+            "$ref": "#/components/schemas/Metric",
+            "description": "Kennzahl."
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Series"
+            },
+            "description": "Reihen (nach Rang, `__other__` zuletzt)."
+          },
+          "step": {
+            "$ref": "#/components/schemas/Step",
+            "description": "Bucket-Breite."
+          },
+          "stepSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bucket-Breite in Sekunden."
+          },
+          "to": {
+            "type": "string",
+            "description": "Ende (exklusive, auf `step` ausgerichtet)."
+          },
+          "unit": {
+            "$ref": "#/components/schemas/Unit",
+            "description": "Einheit."
+          }
+        }
+      },
       "TokenPrices": {
         "type": "object",
         "description": "Preise je 1 Mio. Tokens bzw. je Einheit; fehlende Werte gelten als 0.",
@@ -7930,6 +9436,111 @@
           }
         },
         "additionalProperties": false
+      },
+      "TopItem": {
+        "type": "object",
+        "description": "Eintrag einer Rangliste.",
+        "required": [
+          "key",
+          "requests"
+        ],
+        "properties": {
+          "amount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "Kosten exakt (nur `metric=cost`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "key": {
+            "type": "string",
+            "description": "Schlüssel (wie [`Series::key`])."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Anzeigename."
+          },
+          "requests": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Anfragen."
+          },
+          "share": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Anteil am Gesamtwert (0–1, nur summierbare Kennzahlen)."
+          },
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Wert."
+          }
+        }
+      },
+      "TopList": {
+        "type": "object",
+        "description": "Rangliste.",
+        "required": [
+          "dimension",
+          "metric",
+          "unit",
+          "from",
+          "to",
+          "items"
+        ],
+        "properties": {
+          "dimension": {
+            "$ref": "#/components/schemas/Dimension",
+            "description": "Dimension."
+          },
+          "from": {
+            "type": "string",
+            "description": "Beginn."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TopItem"
+            },
+            "description": "Einträge, absteigend nach Wert (ohne Wert zuletzt)."
+          },
+          "metric": {
+            "$ref": "#/components/schemas/Metric",
+            "description": "Kennzahl."
+          },
+          "to": {
+            "type": "string",
+            "description": "Ende (exklusive)."
+          },
+          "unit": {
+            "$ref": "#/components/schemas/Unit",
+            "description": "Einheit."
+          }
+        }
+      },
+      "Unit": {
+        "type": "string",
+        "description": "Einheit einer Kennzahl.",
+        "enum": [
+          "count",
+          "tokens",
+          "currency",
+          "ms",
+          "ratio"
+        ]
       },
       "User": {
         "type": "object",
@@ -8158,6 +9769,14 @@
     {
       "name": "audit-log",
       "description": "Audit-Log: Änderungen und Anmeldeereignisse, Export als JSON Lines"
+    },
+    {
+      "name": "analytics",
+      "description": "Dashboards: Zeitreihen, KPIs, Ranglisten aus den Rollups"
+    },
+    {
+      "name": "request-logs",
+      "description": "Log-Explorer: einzelne Anfragen, Versuche, Payloads"
     }
   ]
 }

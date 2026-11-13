@@ -519,7 +519,7 @@ pub struct Kpi {
 /// KPIs.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Summary {
+pub struct AnalyticsSummary {
     /// Beginn.
     pub from: String,
     /// Ende (exklusive).
@@ -1358,7 +1358,7 @@ fn kpi(metric: Metric, cur: &RollupCounts, prev: &RollupCounts) -> Kpi {
 #[utoipa::path(
     get, path = "/admin/api/v1/analytics/summary", tag = "analytics", params(SummaryQuery),
     responses(
-        (status = 200, description = "KPIs", body = Summary),
+        (status = 200, description = "KPIs", body = AnalyticsSummary),
         (status = 400, description = "Ungültige Parameter", body = Problem, content_type = "application/problem+json"),
         (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
         (status = 403, description = "Filter außerhalb des Geltungsbereichs", body = Problem, content_type = "application/problem+json"),
@@ -1370,7 +1370,7 @@ pub(crate) async fn summary(
     State(st): State<AnalyticsState>,
     Extension(p): Extension<Principal>,
     q: Result<Query<SummaryQuery>, QueryRejection>,
-) -> Result<Json<Summary>, Problem> {
+) -> Result<Json<AnalyticsSummary>, Problem> {
     let Query(q) = q?;
     let (from, to) = range(q.from.as_deref(), q.to.as_deref())?;
     let prev_from = from - (to - from);
@@ -1388,7 +1388,7 @@ pub(crate) async fn summary(
         totals(&st.store, from, to, filter),
         totals(&st.store, prev_from, from, filter)
     )?;
-    Ok(Json(Summary {
+    Ok(Json(AnalyticsSummary {
         from: rfc3339(from),
         to: rfc3339(to),
         previous_from: rfc3339(prev_from),
