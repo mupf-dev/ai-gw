@@ -545,3 +545,52 @@ impl Resource for McpGrantSpec {
     }
 }
 impl PlainResource for McpGrantSpec {}
+
+impl Resource for aigw_core::tools::ToolPolicySpec {
+    const KIND: ResourceKind = ResourceKind::ToolPolicy;
+    const REFS: &'static [RefCol] = &[RefCol::ByLevel("target_id", "level")];
+
+    fn to_columns(&self) -> Result<Vec<(&'static str, Col)>, StoreError> {
+        Ok(vec![
+            ("level", Col::text(self.scope.level.as_str())),
+            ("target_id", scope_ref(&self.scope)?),
+            ("action", Col::text(self.action.as_str())),
+            ("tools", Col::json(&self.tools)?),
+            ("servers", Col::json(&self.servers)?),
+            (
+                "unapproved",
+                Col::opt_text(self.unapproved.map(|u| match u {
+                    aigw_core::tools::UnapprovedAction::Strip => "strip",
+                    aigw_core::tools::UnapprovedAction::Reject => "reject",
+                })),
+            ),
+            ("locked", Col::bool(self.locked)),
+            ("enabled", Col::bool(self.enabled)),
+            ("description", Col::opt_text(self.description.as_deref())),
+        ])
+    }
+
+    fn from_row(row: &Row<'_>) -> Result<Self, StoreError> {
+        let action = row.text("action")?;
+        let unapproved = row
+            .opt_text("unapproved")?
+            .map(|s| serde_json::from_value(serde_json::Value::String(s)))
+            .transpose()?;
+        Ok(Self {
+            scope: scope_from_row(row, "level", "target_id")?,
+            tools: row.json("tools")?,
+            servers: row.json("servers")?,
+            action: serde_json::from_value(serde_json::Value::String(action))?,
+            unapproved,
+            locked: row.bool("locked")?,
+            enabled: row.bool("enabled")?,
+            description: row.opt_text("description")?,
+        })
+    }
+
+    fn validate(&self) -> Result<(), StoreError> {
+        self.check().map_err(StoreError::Invalid)?;
+        scope_ref(&self.scope).map(drop)
+    }
+}
+impl PlainResource for aigw_core::tools::ToolPolicySpec {}

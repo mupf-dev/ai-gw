@@ -26,6 +26,7 @@ pub mod reload;
 pub mod repo;
 mod snapshot;
 pub mod snapshot_cache;
+pub mod tools;
 
 use std::str::FromStr as _;
 use std::sync::Arc;
@@ -187,6 +188,11 @@ const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
         "credential_auth",
         include_str!("../migrations/sqlite/0007_credential_auth.sql"),
     ),
+    (
+        9,
+        "tools",
+        include_str!("../migrations/sqlite/0009_tools.sql"),
+    ),
 ];
 
 /// Migrationssatz für Postgres (`migrations/postgres/`), gleiche Versionen wie SQLite.
@@ -225,6 +231,11 @@ const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
         7,
         "credential_auth",
         include_str!("../migrations/postgres/0007_credential_auth.sql"),
+    ),
+    (
+        9,
+        "tools",
+        include_str!("../migrations/postgres/0009_tools.sql"),
     ),
 ];
 

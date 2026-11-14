@@ -92,6 +92,8 @@ pub(crate) struct MetricsSources {
     pub(crate) plugins: Option<Arc<aigw_plugins::PluginMetrics>>,
     /// Verbindungen der Listener: `aigw_server_*` (S-32, AIGW-80).
     pub(crate) server: Option<ServerMetricsSource>,
+    /// Tool-Richtlinien und Tool-Inventar (AIGW-87).
+    pub(crate) tools: Option<Arc<aigw_proxy::tools::ToolMetrics>>,
 }
 
 /// Verbindungsmetriken der Listener für `/metrics`.
@@ -122,6 +124,9 @@ impl MetricsSources {
         }
         if let Some(s) = &self.server {
             s.metrics.render_prometheus(&mut out, s.with_control);
+        }
+        if let Some(t) = &self.tools {
+            t.render_prometheus(&mut out);
         }
         out
     }

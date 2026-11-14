@@ -71,11 +71,13 @@ pub enum ResourceKind {
     McpServer,
     /// [`McpGrantSpec`]
     McpGrant,
+    /// [`crate::tools::ToolPolicySpec`] (AIGW-87)
+    ToolPolicy,
 }
 
 impl ResourceKind {
     /// Alle Arten in Abhängigkeitsreihenfolge (Verweisziele zuerst) – für Import und Export.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Organization,
         Self::Team,
         Self::User,
@@ -88,6 +90,7 @@ impl ResourceKind {
         Self::McpServer,
         Self::McpGrant,
         Self::PluginBinding,
+        Self::ToolPolicy,
     ];
 
     /// Name wie in YAML (`kind`).
@@ -105,6 +108,7 @@ impl ResourceKind {
             Self::PluginBinding => "PluginBinding",
             Self::McpServer => "McpServer",
             Self::McpGrant => "McpGrant",
+            Self::ToolPolicy => "ToolPolicy",
         }
     }
 }
@@ -125,6 +129,7 @@ impl ResourceKind {
             Self::PluginBinding => "plugin-binding",
             Self::McpServer => "mcp-server",
             Self::McpGrant => "mcp-grant",
+            Self::ToolPolicy => "tool-policy",
         }
     }
 

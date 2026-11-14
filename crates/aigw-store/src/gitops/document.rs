@@ -190,6 +190,9 @@ pub(crate) fn validate_spec(spec: &ResourceSpec) -> Result<(), String> {
         ResourceSpec::PluginBinding(s) => <PluginBindingSpec as Resource>::validate(s),
         ResourceSpec::McpServer(s) => <McpServerSpec as Resource>::validate(s),
         ResourceSpec::McpGrant(s) => <McpGrantSpec as Resource>::validate(s),
+        ResourceSpec::ToolPolicy(s) => {
+            <aigw_core::tools::ToolPolicySpec as Resource>::validate(s)
+        }
     };
     r.map_err(|e| match e {
         crate::StoreError::Invalid(m) => m,

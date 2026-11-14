@@ -18,6 +18,7 @@ aigw-cache.workspace = true
 aigw-core.workspace = true
 aigw-counters.workspace = true
 aigw-mcp.workspace = true
+aigw-pii.workspace = true
 aigw-outbound.workspace = true
 aigw-plugins.workspace = true
 aigw-providers.workspace = true
@@ -25,6 +26,8 @@ aigw-tokenizer.workspace = true
 arc-swap.workspace = true
 aws-lc-rs.workspace = true
 axum.workspace = true
+# Tool-Inventar (AIGW-87): Hashes von Beschreibung und Schema.
+blake3.workspace = true
 bytes.workspace = true
 dashmap.workspace = true
 futures-util.workspace = true

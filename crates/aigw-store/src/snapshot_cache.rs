@@ -141,6 +141,9 @@ struct Body {
     plugin_bindings: Vec<PluginBinding>,
     mcp_servers: Vec<McpServer>,
     mcp_grants: Vec<McpGrant>,
+    /// Tool-Richtlinien (AIGW-87; ältere Caches ohne Feld lesbar).
+    #[serde(default)]
+    tool_policies: Vec<aigw_core::tools::ToolPolicy>,
 }
 
 impl Body {
@@ -186,6 +189,7 @@ impl Body {
             plugin_bindings: p.plugin_bindings,
             mcp_servers: p.mcp_servers,
             mcp_grants: p.mcp_grants,
+            tool_policies: p.tool_policies,
         }
     }
 
@@ -228,6 +232,7 @@ impl Body {
             plugin_bindings: self.plugin_bindings,
             mcp_servers: self.mcp_servers,
             mcp_grants: self.mcp_grants,
+            tool_policies: self.tool_policies,
         })
     }
 }

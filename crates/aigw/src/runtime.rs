@@ -186,6 +186,11 @@ impl Runtime {
         }
     }
 
+    /// Ereignis-Webhooks (nur mit `events.webhooks`).
+    pub(crate) fn event_dispatcher(&self) -> Option<aigw_webhook::EventDispatcher> {
+        self.events.as_ref().map(|(d, _)| d.clone())
+    }
+
     /// Quellen für `/metrics` (Gateway, Snapshot, Request-Log, OTLP).
     pub(crate) fn metrics_sources(&self) -> crate::observe::MetricsSources {
         crate::observe::MetricsSources {
@@ -198,6 +203,7 @@ impl Runtime {
             cache: None,
             plugins: None,
             server: None,
+            tools: None,
         }
     }
 

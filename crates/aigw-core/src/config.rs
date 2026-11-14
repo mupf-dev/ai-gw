@@ -63,6 +63,42 @@ pub struct Config {
     pub upstream: UpstreamConfig,
     /// Audit-Log: Aufbewahrung (F116).
     pub audit: AuditConfig,
+    /// Tool-Inventar und Tool-Richtlinien (AIGW-87).
+    pub tools: ToolsConfig,
+}
+
+/// Tool-Inventar (AIGW-87, `docs/konzept/16-tools.md`). Die Richtlinien selbst sind Ressourcen
+/// (`ToolPolicy`) und gelten unabhängig von `inventory`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ToolsConfig {
+    /// Von Anwendungen mitgeschickte Tools inventarisieren (Hashes, Zähler, Clients).
+    pub inventory: bool,
+    /// Abstand der gepufferten Schreibvorgänge (Millisekunden).
+    pub flush_interval_ms: u64,
+    /// Höchstzahl im RAM abgeglichener Einträge (darüber wird nur noch gezählt, was schon
+    /// bekannt ist; neue Einträge werden verworfen und gezählt).
+    pub max_entries: usize,
+    /// Geänderte Beschreibung/Schema eines bekannten Tools: `warn` (Ereignis, Audit,
+    /// Markierung) oder `block` (zusätzlich Sperre `block-strip` auf Ebene des Keys).
+    pub on_change: crate::tools::ToolChangeAction,
+    /// Beschreibungen mit dem Prompt-Injection-Erkenner (`prompt-filter`) prüfen.
+    pub injection_check: bool,
+    /// Header, aus dem der Client gelesen wird (vor `user-agent`; z. B. `x-aigw-client`).
+    pub client_headers: Vec<String>,
+}
+
+impl Default for ToolsConfig {
+    fn default() -> Self {
+        Self {
+            inventory: true,
+            flush_interval_ms: 5_000,
+            max_entries: 100_000,
+            on_change: crate::tools::ToolChangeAction::Warn,
+            injection_check: true,
+            client_headers: vec!["x-aigw-client".into(), "x-title".into()],
+        }
+    }
 }
 
 /// Audit-Log (F116): Aufbewahrung. Die Hash-Kette ist immer aktiv; geprüft wird sie mit

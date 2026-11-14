@@ -749,6 +749,7 @@ fn collect_refs(
             }
         }
         ResourceSpec::PluginBinding(b) => scope_ref("spec.scope", &b.scope, refs, errs),
+        ResourceSpec::ToolPolicy(t) => scope_ref("spec.scope", &t.scope, refs, errs),
         ResourceSpec::McpServer(s) => {
             if let Some(c) = &s.credential {
                 refs.push(r("spec.credential", ResourceKind::ProviderCredential, c));

@@ -252,6 +252,13 @@ fn serve(
         )
         .await
         .map_err(|e| format!("cache: {e}"))?;
+        // Tool-Inventar (AIGW-87): RAM-Abgleich, gepuffertes Schreiben, Ereignisse
+        // `tool.changed`/`tool.suspicious` an die Ereignis-Webhooks.
+        let tools = tool_inventory(&config, &runtime_state).await;
+        let tools_task = tools
+            .enabled()
+            .then(|| tools.spawn(std::time::Duration::from_millis(config.tools.flush_interval_ms)));
+        let tool_metrics = tools.metrics();
         let state = aigw_proxy::ProxyState {
             routes: routes.clone(),
             auth: std::sync::Arc::new(aigw_proxy::SnapshotAuthenticator::new(
@@ -266,6 +273,7 @@ fn serve(
             )),
             plugins,
             cache: Some(std::sync::Arc::clone(&cache_rt.cache)),
+            tools: std::sync::Arc::clone(&tools),
             config: aigw_proxy::ProxyConfig::from(&config.server.data),
         };
         // Semantischer Cache: Embeddings über das interne Routing (AIGW-21/40).
@@ -393,6 +401,7 @@ fn serve(
             cache: Some(std::sync::Arc::clone(&cache_rt.cache)),
             plugins: Some(plugin_metrics),
             server: Some(listeners.metrics()),
+            tools: Some(tool_metrics),
             ..runtime_state.metrics_sources()
         }));
         let control = aigw_admin::read_only::apply(control, config.gitops.read_only_admin);
@@ -421,10 +430,55 @@ fn serve(
         drop(routes_task);
         drop(plugins_task);
         drop(cache_rt);
+        // Gepuffertes Tool-Inventar schreiben (AIGW-87).
+        drop(tools_task);
+        tools.flush().await;
         runtime_state.shutdown().await;
         tracing::info!("ai-gw beendet");
         Ok(())
     })
+}
+
+/// Tool-Inventar mit Store-Persistenz, Warmstart der bekannten Hashes und Ereignis-Webhooks.
+async fn tool_inventory(
+    config: &aigw_core::Config,
+    rt: &runtime::Runtime,
+) -> std::sync::Arc<aigw_proxy::tools::ToolInventory> {
+    let sink = aigw_store::tools::StoreToolSink::new(
+        rt.store.clone(),
+        aigw_store::tools::ToolSinkOptions {
+            on_change: config.tools.on_change,
+        },
+    );
+    let mut inv = aigw_proxy::tools::ToolInventory::new(std::sync::Arc::new(sink), &config.tools);
+    if let Some(events) = rt.event_dispatcher() {
+        inv = inv.with_hook(std::sync::Arc::new(move |ev: &aigw_core::tools::ToolEvent| {
+            if ev.kind == aigw_core::tools::ToolEventKind::Discovered {
+                return;
+            }
+            events.emit(aigw_webhook::Event::new(
+                ev.kind.event_type(),
+                serde_json::json!({
+                    "toolId": ev.id,
+                    "tool": &*ev.key.name,
+                    "origin": ev.origin,
+                    "organizationId": ev.key.organization,
+                    "teamId": ev.key.team,
+                    "apiKeyId": ev.key.api_key,
+                    "signals": ev.signals,
+                    "blockedBy": ev.blocked_by,
+                }),
+            ));
+        }));
+    }
+    if inv.enabled() {
+        let limit = u32::try_from(config.tools.max_entries).unwrap_or(u32::MAX);
+        match rt.store.tool_inventory_known(limit).await {
+            Ok(known) => inv.preload(known),
+            Err(e) => tracing::warn!(error = %e, "Tool-Inventar: Warmstart fehlgeschlagen"),
+        }
+    }
+    std::sync::Arc::new(inv)
 }
 
 /// Umgebungsvariable mit dem Bootstrap-Admin-Token.

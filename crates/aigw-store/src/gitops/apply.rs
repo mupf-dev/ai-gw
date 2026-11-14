@@ -161,6 +161,7 @@ async fn upsert(
         ResourceSpec::PluginBinding(s) => upsert_plain(tx, existing, meta, s).await,
         ResourceSpec::McpServer(s) => upsert_plain(tx, existing, meta, s).await,
         ResourceSpec::McpGrant(s) => upsert_plain(tx, existing, meta, s).await,
+        ResourceSpec::ToolPolicy(s) => upsert_plain(tx, existing, meta, s).await,
         ResourceSpec::ProviderCredential(s) => {
             let Resolved::Credential(values) = resolved else {
                 return Err(StoreError::Invalid(format!(

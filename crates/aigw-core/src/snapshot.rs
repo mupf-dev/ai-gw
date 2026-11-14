@@ -223,6 +223,11 @@ pub struct Snapshot {
     pub mcp_servers: HashMap<String, Arc<McpServerCtx>>,
     /// MCP-Freigaben.
     pub mcp_grants: Vec<Arc<McpGrant>>,
+    /// Aktive Tool-Richtlinien (AIGW-87), nach Name sortiert.
+    pub tool_policies: Vec<Arc<crate::tools::ToolPolicy>>,
+    /// Vorberechneter Index der Tool-Richtlinien (Hot Path). Gepflegt von
+    /// [`Snapshot::from_parts`] und [`Snapshot::apply_patch`].
+    pub tool_index: Arc<crate::tools::ToolPolicyIndex>,
 }
 
 impl Snapshot {

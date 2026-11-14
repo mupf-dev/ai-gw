@@ -543,6 +543,21 @@ async fn responses_inner(
     p.rec.set_request(&req);
     // Prompt-Tokens mit dem Tokenizer der Modellgruppe (F46); die Freigabe prüft `route`.
     let group = auth.authorize_model(&req.model).ok().flatten();
+    // Tool-Richtlinien und Tool-Inventar (AIGW-87) wie im Chat-Pfad.
+    let mut req = req;
+    let tool_group = group
+        .as_ref()
+        .map_or(req.model.as_str(), |g| g.group.metadata.name.as_str())
+        .to_owned();
+    let tool_guard = crate::tools::begin(
+        &p.state().tools,
+        &auth,
+        &tool_group,
+        headers,
+        &mut req,
+        p.rec.payload_mode(),
+        p.request_id(),
+    )?;
     let est = p.state().limits.estimate(&req, group.as_ref());
     let route = p.route(&auth, &req.model, Capability::Chat, est).await?;
     let response_model = route.policy().response_model;
@@ -602,6 +617,9 @@ async fn responses_inner(
             if choices > 1 {
                 events = crate::choices::sequential(events);
             }
+            if let Some(g) = tool_guard {
+                events = g.wrap_stream(events);
+            }
             return Ok(ResponsesReply::Stream(
                 plugins.wrap_stream(events, ChunkMode::Live),
                 Box::new(echo),
@@ -609,6 +627,12 @@ async fn responses_inner(
         }
         Outcome::Json(resp) => resp,
     };
+    let mut resp = resp;
+    if let Some(g) = &tool_guard
+        && g.check_response(&mut resp)
+    {
+        crate::tools::guardrail_header(&mut p.info_mut().plugin_headers);
+    }
     let resp = if plugins.hooks(PluginPhase::Response) > 0 {
         let span = crate::trace::plugins_span("response", plugins.hooks(PluginPhase::Response));
         plugins

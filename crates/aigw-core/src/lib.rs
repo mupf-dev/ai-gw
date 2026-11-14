@@ -15,6 +15,7 @@ pub mod observe;
 pub mod paths;
 pub mod resource;
 pub mod snapshot;
+pub mod tools;
 pub mod types;
 pub mod upstream;
 pub mod validate;

@@ -25,6 +25,7 @@ use crate::resource::{
 };
 
 use super::{DeploymentCtx, KeyCtx, KeyHash, McpServerCtx, ModelGroupCtx, Snapshot};
+use crate::tools::{ToolPolicy, ToolPolicyIndex};
 
 /// Rohdaten einer Konfigurationsversion.
 ///
@@ -56,6 +57,8 @@ pub struct SnapshotParts {
     pub mcp_servers: Vec<McpServer>,
     /// MCP-Freigaben.
     pub mcp_grants: Vec<McpGrant>,
+    /// Tool-Richtlinien (AIGW-87).
+    pub tool_policies: Vec<ToolPolicy>,
 }
 
 /// Änderung eines Objekts: neuer Stand (wie in der Datenbank, auch inaktiv/deaktiviert) oder
@@ -100,6 +103,10 @@ pub struct SnapshotPatch {
     pub mcp_grants: Vec<Change<McpGrant>>,
     /// Alle MCP-Freigaben neu (wie `replace_plugin_bindings`).
     pub replace_mcp_grants: Option<Vec<McpGrant>>,
+    /// Tool-Richtlinien (einzelne Änderungen, AIGW-87).
+    pub tool_policies: Vec<Change<ToolPolicy>>,
+    /// Alle Tool-Richtlinien neu (wie `replace_plugin_bindings`).
+    pub replace_tool_policies: Option<Vec<ToolPolicy>>,
 }
 
 impl SnapshotPatch {
@@ -116,6 +123,7 @@ impl SnapshotPatch {
             + self.plugin_bindings.len()
             + self.mcp_servers.len()
             + self.mcp_grants.len()
+            + self.tool_policies.len()
     }
 
     /// Keine Änderungen?
@@ -123,6 +131,7 @@ impl SnapshotPatch {
         self.len() == 0
             && self.replace_plugin_bindings.is_none()
             && self.replace_mcp_grants.is_none()
+            && self.replace_tool_policies.is_none()
     }
 }
 
@@ -153,6 +162,13 @@ fn sort_bindings(b: &mut [Arc<PluginBinding>]) {
 
 fn sort_grants(g: &mut [Arc<McpGrant>]) {
     g.sort_by(|a, b| a.metadata.name.cmp(&b.metadata.name));
+}
+
+/// Tool-Richtlinien sortieren und den Index neu bauen (AIGW-87).
+fn set_tool_policies(snap: &mut Snapshot, mut list: Vec<Arc<ToolPolicy>>) {
+    list.sort_by(|a, b| a.metadata.name.cmp(&b.metadata.name));
+    snap.tool_index = Arc::new(ToolPolicyIndex::new(list.iter().map(|p| &**p)));
+    snap.tool_policies = list;
 }
 
 fn sort_deployments(d: &mut [DeploymentCtx]) {
@@ -326,6 +342,13 @@ impl Snapshot {
         }
         snap.mcp_grants = parts.mcp_grants.into_iter().map(Arc::new).collect();
         sort_grants(&mut snap.mcp_grants);
+        let tools = parts
+            .tool_policies
+            .into_iter()
+            .filter(|p| p.spec.enabled)
+            .map(Arc::new)
+            .collect();
+        set_tool_policies(&mut snap, tools);
         snap
     }
 
@@ -384,6 +407,7 @@ impl Snapshot {
                 s.id
             }),
             mcp_grants: sorted(self.mcp_grants.iter().map(|g| (**g).clone()), |g| g.id),
+            tool_policies: sorted(self.tool_policies.iter().map(|p| (**p).clone()), |p| p.id),
         }
     }
 
@@ -695,6 +719,21 @@ impl Snapshot {
             |_| true,
         );
         sort_grants(&mut s.mcp_grants);
+
+        // Tool-Richtlinien (AIGW-87): Index nur bei Änderungen neu bauen.
+        if patch.replace_tool_policies.is_none() && patch.tool_policies.is_empty() {
+            s.tool_policies = self.tool_policies.clone();
+            s.tool_index = Arc::clone(&self.tool_index);
+        } else {
+            let list = apply_list(
+                &self.tool_policies,
+                patch.replace_tool_policies,
+                patch.tool_policies,
+                |p| p.id,
+                |p| p.spec.enabled,
+            );
+            set_tool_policies(&mut s, list);
+        }
         s
     }
 }

@@ -31,6 +31,9 @@
 //! Limits) vor dem Routing (Pre-Plugins), vor dem Encoder (Post-Plugins) und im Stream-Pfad
 //! (Stream-Haken je IR-Ereignis); siehe `docs/konzept/12-plugins.md`.
 //!
+//! Tool-Richtlinien und Tool-Inventar ([`tools`], AIGW-87) laufen nach der Modellfreigabe vor
+//! Limits und Plugin-Kette; siehe `docs/konzept/16-tools.md`.
+//!
 //! Das MCP-Gateway (AIGW-41) hängt mit eigenem Router ([`mcp::router`]) an `/mcp` und
 //! `/mcp/{server}`; siehe `docs/konzept/15-mcp-gateway.md`.
 
@@ -53,6 +56,7 @@ mod request_id;
 pub mod routes;
 pub mod routing;
 mod stream;
+pub mod tools;
 mod trace;
 
 use std::fmt;
@@ -141,6 +145,9 @@ pub struct ProxyState {
     pub plugins: Arc<PluginChains>,
     /// Antwort-Cache (AIGW-39/40); wirksam nur, wo eine `cache`-Bindung gilt.
     pub cache: Option<Arc<ResponseCache>>,
+    /// Tool-Inventar (AIGW-87); die Tool-Richtlinien kommen aus dem Snapshot und wirken auch
+    /// ohne Inventar.
+    pub tools: Arc<tools::ToolInventory>,
     /// Einstellungen.
     pub config: ProxyConfig,
 }
@@ -170,6 +177,7 @@ impl ProxyState {
             limits: Arc::new(Limiter::local()),
             plugins: Arc::new(PluginChains::default()),
             cache: None,
+            tools: Arc::default(),
             config: ProxyConfig::default(),
         }
     }

@@ -360,6 +360,21 @@ async fn chat_inner(
     // Tokenizer der Modellgruppe (F46); `route` prüft die Freigabe verbindlich.
     let group = auth.authorize_model(&req.model)?;
     p.rec.set_request(&req);
+    // Tool-Richtlinien und Tool-Inventar (AIGW-87): nach der Modellfreigabe, vor Limits und
+    // Plugin-Kette – entfernte Tools zählen nicht zur Schätzung, Guardrails sehen sie nicht.
+    let tool_group = group
+        .as_ref()
+        .map_or(req.model.as_str(), |g| g.group.metadata.name.as_str())
+        .to_owned();
+    let tool_guard = crate::tools::begin(
+        &p.state().tools,
+        &auth,
+        &tool_group,
+        headers,
+        &mut req,
+        p.rec.payload_mode(),
+        p.request_id(),
+    )?;
     let est = p.state().limits.estimate(&req, group.as_ref());
     // Route, Fähigkeit `chat` und Limits/Budgets (Schritt 4): genau eine Reservierung je
     // Client-Anfrage – Retries und Fallbacks laufen darin; abgeschlossen im Recorder.
@@ -489,6 +504,11 @@ async fn chat_inner(
             if choices > 1 && plugins.streams_live() {
                 events = crate::choices::sequential(events);
             }
+            // Tool-Aufrufe zählen, nicht erlaubte unterbinden (AIGW-87) – vor den
+            // Stream-Plugins (innerste Schicht).
+            if let Some(g) = tool_guard {
+                events = g.wrap_stream(events);
+            }
             return Ok(Reply::Stream(
                 plugins.wrap_stream(events, ChunkMode::Live),
                 include_usage,
@@ -496,6 +516,13 @@ async fn chat_inner(
         }
         Outcome::Json(resp) => resp,
     };
+    // Tool-Aufrufe zählen, nicht erlaubte unterbinden (AIGW-87), vor den Post-Plugins.
+    let mut resp = resp;
+    if let Some(g) = &tool_guard
+        && g.check_response(&mut resp)
+    {
+        crate::tools::guardrail_header(&mut p.info_mut().plugin_headers);
+    }
     // Schritt 10: Post-Plugins auf der ganzen Antwort, vor dem Encoder.
     let resp = if plugins.hooks(PluginPhase::Response) > 0 {
         let span = crate::trace::plugins_span("response", plugins.hooks(PluginPhase::Response));

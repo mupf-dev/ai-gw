@@ -43,6 +43,8 @@ pub enum ResourceSpec {
     McpServer(McpServerSpec),
     /// MCP-Freigabe.
     McpGrant(McpGrantSpec),
+    /// Tool-Richtlinie (AIGW-87).
+    ToolPolicy(crate::tools::ToolPolicySpec),
 }
 
 impl ResourceSpec {
@@ -61,6 +63,7 @@ impl ResourceSpec {
             Self::PluginBinding(_) => ResourceKind::PluginBinding,
             Self::McpServer(_) => ResourceKind::McpServer,
             Self::McpGrant(_) => ResourceKind::McpGrant,
+            Self::ToolPolicy(_) => ResourceKind::ToolPolicy,
         }
     }
 
@@ -78,6 +81,7 @@ impl ResourceSpec {
             Self::PluginBinding(s) => serde_json::to_value(s),
             Self::McpServer(s) => serde_json::to_value(s),
             Self::McpGrant(s) => serde_json::to_value(s),
+            Self::ToolPolicy(s) => serde_json::to_value(s),
         }
     }
 
@@ -96,6 +100,7 @@ impl ResourceSpec {
             ResourceKind::PluginBinding => Self::PluginBinding(f(v)?),
             ResourceKind::McpServer => Self::McpServer(f(v)?),
             ResourceKind::McpGrant => Self::McpGrant(f(v)?),
+            ResourceKind::ToolPolicy => Self::ToolPolicy(f(v)?),
         })
     }
 }

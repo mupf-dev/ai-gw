@@ -126,6 +126,10 @@ async fn load_once(store: &Store, keyring: Option<&Keyring>) -> Result<State, St
             ResourceKind::McpGrant => {
                 plain::<McpGrantSpec>(store, out, ResourceSpec::McpGrant).await?;
             }
+            ResourceKind::ToolPolicy => {
+                plain::<aigw_core::tools::ToolPolicySpec>(store, out, ResourceSpec::ToolPolicy)
+                    .await?;
+            }
             ResourceKind::ApiKey => {
                 let rows = store
                     .fetch_rows(ResourceKind::ApiKey, ApiKeySpec::REFS, "", None)
@@ -363,6 +367,7 @@ impl ScopeSet {
             ResourceSpec::ApiKey(_) => self.keys.contains(name),
             ResourceSpec::PluginBinding(b) => self.covers(&b.scope),
             ResourceSpec::McpGrant(g) => self.covers(&g.subject),
+            ResourceSpec::ToolPolicy(t) => self.covers(&t.scope),
             _ => false,
         }
     }

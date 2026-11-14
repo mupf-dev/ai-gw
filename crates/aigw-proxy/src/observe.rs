@@ -193,6 +193,13 @@ impl Recorder {
         self.record.as_mut()
     }
 
+    /// Wirksamer Payload-Modus dieser Anfrage (nach der Schlüsselprüfung).
+    pub(crate) fn payload_mode(&self) -> aigw_core::observe::PayloadMode {
+        self.payload
+            .as_ref()
+            .map_or(aigw_core::observe::PayloadMode::Off, |p| p.mode)
+    }
+
     /// `true`, wenn Request/Antwort mitgeschnitten werden sollen.
     pub(crate) fn captures(&self) -> bool {
         self.payload.is_some()

@@ -60,10 +60,12 @@ pub enum ListFilter {
     EffectiveAt(OffsetDateTime),
     /// Plugin-Art: Plugin-Bindungen.
     Plugin(String),
-    /// Ebene (`global`, `organization` …): Plugin-Bindungen.
+    /// Ebene (`global`, `organization` …): Plugin-Bindungen, Tool-Richtlinien.
     Level(String),
-    /// Ziel (Name, auf jeder Ebene): Plugin-Bindungen.
+    /// Ziel (Name, auf jeder Ebene): Plugin-Bindungen, Tool-Richtlinien.
     Target(String),
+    /// Aktion (`allow`, `block-strip` …): Tool-Richtlinien.
+    Action(String),
 }
 
 /// Abfrage einer Listenseite.
@@ -190,7 +192,8 @@ fn scope_sql(kind: ResourceKind, scope: &AuditScope, q: &mut Q) -> Option<String
         | ResourceKind::ProviderCredential
         | ResourceKind::Secret
         | ResourceKind::McpServer
-        | ResourceKind::PluginBinding => return None,
+        | ResourceKind::PluginBinding
+        | ResourceKind::ToolPolicy => return None,
         ResourceKind::User => "1 = 0".to_owned(),
     })
 }
@@ -265,13 +268,16 @@ fn filter_sql(kind: ResourceKind, f: &ListFilter, q: &mut Q) -> Result<String, S
                  AND p2.valid_from <= {p1})"
             )
         }
+        ListFilter::Action(a) if kind == K::ToolPolicy => {
+            format!("t.action = {}", q.arg(Val::text(a.clone())))
+        }
         ListFilter::Plugin(p) if kind == K::PluginBinding => {
             format!("t.plugin = {}", q.arg(Val::text(p.clone())))
         }
-        ListFilter::Level(l) if kind == K::PluginBinding => {
+        ListFilter::Level(l) if matches!(kind, K::PluginBinding | K::ToolPolicy) => {
             format!("t.level = {}", q.arg(Val::text(l.clone())))
         }
-        ListFilter::Target(name) if kind == K::PluginBinding => {
+        ListFilter::Target(name) if matches!(kind, K::PluginBinding | K::ToolPolicy) => {
             let mut ors = Vec::new();
             for level in [
                 ScopeLevel::Organization,

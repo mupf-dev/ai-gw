@@ -52,6 +52,7 @@ pub(crate) fn table(kind: ResourceKind) -> &'static str {
         ResourceKind::PluginBinding => "plugin_binding",
         ResourceKind::McpServer => "mcp_server",
         ResourceKind::McpGrant => "mcp_grant",
+        ResourceKind::ToolPolicy => "tool_policy",
     }
 }
 
@@ -664,6 +665,12 @@ impl AdminTx {
                 .bind(Val::uuid(id))
                 .execute(&mut self.tx)
                 .await?;
+            // Tool-Richtlinien des Ziels (AIGW-87).
+            Q::new("DELETE FROM tool_policy WHERE level = $1 AND target_id = $2")
+                .bind(Val::text(level.as_str()))
+                .bind(Val::uuid(id))
+                .execute(&mut self.tx)
+                .await?;
         }
         let mut q =
             Q::new(format!("DELETE FROM {} WHERE id = $1", table(kind))).bind(Val::uuid(id));
@@ -996,6 +1003,9 @@ impl Store {
             }
             ResourceKind::McpGrant => {
                 serde_json::to_value(self.get::<r::McpGrantSpec>(name).await?)
+            }
+            ResourceKind::ToolPolicy => {
+                serde_json::to_value(self.get::<aigw_core::tools::ToolPolicySpec>(name).await?)
             }
         };
         Ok(v?)

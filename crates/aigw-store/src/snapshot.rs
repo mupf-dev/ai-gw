@@ -28,6 +28,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use aigw_core::tools::ToolPolicySpec;
 use aigw_core::resource::{
     ApiKeySpec, DeploymentSpec, Id, McpGrantSpec, McpServerSpec, ModelGroupSpec, Object,
     OrganizationSpec, PluginBindingSpec, PriceSpec, ResourceKind, TeamSpec,
@@ -108,6 +109,7 @@ async fn read_all(
         plugin_bindings: store.list::<PluginBindingSpec>().await?,
         mcp_servers: store.list::<McpServerSpec>().await?,
         mcp_grants: store.list::<McpGrantSpec>().await?,
+        tool_policies: store.list::<ToolPolicySpec>().await?,
     })
 }
 
@@ -271,7 +273,8 @@ fn snapshot_kind(s: &str) -> Option<ResourceKind> {
         | ResourceKind::Price
         | ResourceKind::PluginBinding
         | ResourceKind::McpServer
-        | ResourceKind::McpGrant => Some(kind),
+        | ResourceKind::McpGrant
+        | ResourceKind::ToolPolicy => Some(kind),
     }
 }
 
@@ -333,6 +336,7 @@ async fn fetch_patch(
         plugin_bindings: changes_of::<PluginBindingSpec>(store, changed).await?,
         mcp_servers: changes_of::<McpServerSpec>(store, changed).await?,
         mcp_grants: changes_of::<McpGrantSpec>(store, changed).await?,
+        tool_policies: changes_of::<ToolPolicySpec>(store, changed).await?,
         ..SnapshotPatch::default()
     };
 
@@ -440,6 +444,7 @@ async fn fetch_patch(
     if target_deleted {
         patch.replace_plugin_bindings = Some(store.list::<PluginBindingSpec>().await?);
         patch.replace_mcp_grants = Some(store.list::<McpGrantSpec>().await?);
+        patch.replace_tool_policies = Some(store.list::<ToolPolicySpec>().await?);
     }
     Ok(patch)
 }
