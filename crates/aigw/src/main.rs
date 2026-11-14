@@ -308,8 +308,32 @@ fn serve(
         } else {
             None
         };
+        // Preisvorschläge (AIGW-85): Azure Retail Prices + Preiskatalog, SSRF-Regeln aus
+        // `admin.*`, fest erlaubte Hosts aus der Startkonfiguration.
+        let price_suggester = if config.billing.price_suggestions.enabled {
+            let client = aigw_outbound::OutboundClient::new(aigw_outbound::AddressGuard::policy(
+                aigw_admin::UpstreamPolicy::from_config(&config.admin)?,
+            ))
+            .map_err(|e| format!("Preisvorschläge: {e}"))?;
+            let s = std::sync::Arc::new(aigw_billing::suggest::Suggester::from_config(
+                &config.billing.price_suggestions,
+                &client,
+            )?);
+            let every = config.billing.price_suggestions.check_interval_secs;
+            if every > 0 {
+                aigw_admin::price_suggestions::spawn_check(
+                    runtime_state.store.clone(),
+                    std::sync::Arc::clone(&s),
+                    std::time::Duration::from_secs(every.max(60)),
+                );
+            }
+            Some(s)
+        } else {
+            None
+        };
         let control = aigw_admin::router_with(
             admin
+                .with_price_suggester(price_suggester)
                 .with_keyring(std::sync::Arc::clone(&runtime_state.keyring))
                 .with_upstream_policy(upstreams.clone())
                 .with_read_only(config.gitops.read_only_admin)

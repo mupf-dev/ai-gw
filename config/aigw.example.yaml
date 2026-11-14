@@ -212,6 +212,20 @@ limits:
 billing:
   timezone: UTC
   budget_sync_ms: 1000
+  # Preisvorschläge (AIGW-85, docs/konzept/11-limits-und-budgets.md §4a): nur Anzeige auf der
+  # Preise-Seite bzw. GET /admin/api/v1/price-suggestions, Übernahme ausdrücklich per Admin-API.
+  price_suggestions:
+    enabled: true
+    azure:                      # Azure Retail Prices API (öffentlich, ohne Anmeldung), USD
+      enabled: true
+      # default_region: swedencentral   # wenn settings.pricing.region fehlt
+      default_deployment_type: global   # global | data-zone | regional
+      cache_ttl_secs: 86400
+    catalog:                    # mitgelieferter Katalog; Aktualisierung per URL standardmäßig aus
+      # url: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+      format: aigw              # aigw | litellm
+      refresh_secs: 86400
+    check_interval_secs: 0      # periodischer Abgleich mit Warnung im Log (0 = aus)
 
 # Ereignis-Webhooks (Budget-Warnung/-Erschöpfung; docs/konzept/11-limits-und-budgets.md):
 # asynchron, gepuffert, Wiederholung mit Backoff, im Cluster je Ereignis nur einmal

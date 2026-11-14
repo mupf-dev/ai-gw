@@ -9,6 +9,18 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Hinzugefügt
 
+- **Preisvorschläge (AIGW-85):** `GET /admin/api/v1/price-suggestions` vergleicht je Deployment
+  den aktuellen Preis mit einem Vorschlag aus der Azure Retail Prices API (Azure OpenAI/Foundry,
+  je Region und Bereitstellungsart, USD, Zwischenspeicher, fehlertolerant) bzw. dem
+  mitgelieferten Preiskatalog (`crates/aigw-billing/catalog/prices.yaml`: OpenAI, Anthropic,
+  Mistral, Gemini; optional per URL aktualisierbar, auch im LiteLLM-Format);
+  `POST …/price-suggestions:accept` legt neue Preisversionen mit Labels und Audit an, manuelle
+  Preise nur mit `overrideManual`. Admin-UI: Abschnitt „Preisvorschläge“ auf der Preise-Seite
+  mit Auswahl, Übernahme und Hinweis auf Deployments ohne Preis. Konfiguration
+  `billing.price_suggestions`, Deployment-Einstellung `settings.pricing`
+  (`region`, `deploymentType`, `model`, `meter`, `source`), optionaler periodischer Abgleich
+  mit Warnung (`check_interval_secs`, Standard aus); Pflegehilfe `scripts/price-catalog-check.py`.
+
 - **Claude in Azure AI Foundry:** Anthropic-Anbieter mit `settings.auth: entraId`
   (`Authorization: Bearer` statt `x-api-key`, alle Entra-ID-Arten inkl. Managed Identity,
   gemeinsame Token-Quelle mit Azure OpenAI), Zugangsdaten-Alternativen

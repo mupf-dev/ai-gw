@@ -573,6 +573,8 @@ pub struct BillingConfig {
     pub timezone: String,
     /// Abstand des Budget-Abgleichs mit der Datenbank (`budget_usage`) in Millisekunden.
     pub budget_sync_ms: u64,
+    /// Preisvorschläge (AIGW-85): Azure Retail Prices API und mitgelieferter Preiskatalog.
+    pub price_suggestions: PriceSuggestionsConfig,
 }
 
 impl Default for BillingConfig {
@@ -580,6 +582,99 @@ impl Default for BillingConfig {
         Self {
             timezone: "UTC".to_owned(),
             budget_sync_ms: 1000,
+            price_suggestions: PriceSuggestionsConfig::default(),
+        }
+    }
+}
+
+/// Preisvorschläge (AIGW-85, `billing.price_suggestions`).
+///
+/// Vorschläge sind nur Lesehilfen: übernommen wird erst per Admin-API
+/// (`POST /admin/api/v1/price-suggestions:accept`), manuelle Preise haben Vorrang.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PriceSuggestionsConfig {
+    /// Vorschläge anbieten (Standard `true`; ohne Netzwerkzugriff, solange niemand die Seite
+    /// öffnet bzw. kein Abgleich eingestellt ist).
+    pub enabled: bool,
+    /// Azure Retail Prices API für Azure-OpenAI- und Foundry-Deployments.
+    pub azure: AzureRetailConfig,
+    /// Mitgelieferter Preiskatalog der direkten Anbieter, optional per URL aktualisiert.
+    pub catalog: PriceCatalogConfig,
+    /// Periodischer Abgleich in Sekunden (`0` = aus, Standard): Warnung im Log und in
+    /// `GET /admin/api/v1/price-suggestions` bei abweichenden Preisen.
+    pub check_interval_secs: u64,
+}
+
+impl Default for PriceSuggestionsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            azure: AzureRetailConfig::default(),
+            catalog: PriceCatalogConfig::default(),
+            check_interval_secs: 0,
+        }
+    }
+}
+
+/// Azure Retail Prices API (`billing.price_suggestions.azure`); öffentlich, ohne Anmeldung.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AzureRetailConfig {
+    /// Abfrage aktiv (Standard `true`).
+    pub enabled: bool,
+    /// Adresse der API. Nur dieser Host wird abgefragt (auch für Folgeseiten); er ist von den
+    /// SSRF-Regeln ausgenommen, weil er aus der Startkonfiguration des Betreibers stammt.
+    pub api_url: String,
+    /// `serviceName` der Modell-Meter (Standard `Foundry Models`).
+    pub service_name: String,
+    /// Region, wenn das Deployment keine nennt (`settings.pricing.region`) und sie sich nicht
+    /// aus dem Endpunkt ablesen lässt, z. B. `swedencentral`.
+    pub default_region: Option<String>,
+    /// Bereitstellungsart ohne `settings.pricing.deploymentType`: `global` (GlobalStandard,
+    /// Standard), `data-zone` (DataZone Standard) oder `regional` (Standard).
+    pub default_deployment_type: String,
+    /// Gültigkeit des Zwischenspeichers je Region in Sekunden (Standard 24 h). Bei Fehlern
+    /// bleiben ältere Daten in Gebrauch.
+    pub cache_ttl_secs: u64,
+    /// Zeitlimit je Seite in Sekunden.
+    pub timeout_secs: u64,
+}
+
+impl Default for AzureRetailConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            api_url: "https://prices.azure.com/api/retail/prices".to_owned(),
+            service_name: "Foundry Models".to_owned(),
+            default_region: None,
+            default_deployment_type: "global".to_owned(),
+            cache_ttl_secs: 86_400,
+            timeout_secs: 30,
+        }
+    }
+}
+
+/// Preiskatalog (`billing.price_suggestions.catalog`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PriceCatalogConfig {
+    /// Aktualisierung per URL (Standard aus): ersetzt den mitgelieferten Katalog, solange die
+    /// Datei geladen werden kann.
+    pub url: Option<String>,
+    /// Format der URL: `aigw` (Format des mitgelieferten Katalogs, Standard) oder `litellm`
+    /// (`model_prices_and_context_window.json`).
+    pub format: String,
+    /// Abstand der Aktualisierung in Sekunden (Standard 24 h).
+    pub refresh_secs: u64,
+}
+
+impl Default for PriceCatalogConfig {
+    fn default() -> Self {
+        Self {
+            url: None,
+            format: "aigw".to_owned(),
+            refresh_secs: 86_400,
         }
     }
 }

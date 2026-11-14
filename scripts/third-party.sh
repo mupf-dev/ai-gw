@@ -62,7 +62,13 @@ print("| Datei | Herkunft | Lizenz |")
 print("|---|---|---|")
 print("| `crates/aigw-tokenizer/data/cl100k_base.bin`, `o200k_base.bin` | BPE-Rangtabellen aus den "
       "von OpenAI veröffentlichten `*.tiktoken`-Dateien (Projekt tiktoken), umkodiert | MIT "
-      "(`LICENSES/MIT.txt`; **vor einem öffentlichen Release rechtlich bestätigen**) |\n")
+      "(`LICENSES/MIT.txt`; **vor einem öffentlichen Release rechtlich bestätigen**) |")
+print("| `crates/aigw-billing/catalog/prices.yaml` | Eigene, gepflegte Datei (AIGW-85): Listenpreise "
+      "(Fakten) aus den öffentlichen Preisseiten von OpenAI, Anthropic, Mistral und Google (Gemini API); "
+      "Werte abgeglichen mit LiteLLM `model_prices_and_context_window.json` (BerriAI, MIT) – keine "
+      "Übernahme der fremden Datei | AGPL-3.0-or-later (wie der Code) |")
+print("| Laufzeit: Azure Retail Prices API (`prices.azure.com`) | Öffentliche Preisabfrage von Microsoft "
+      "ohne Anmeldung, nur zur Anzeige von Vorschlägen; nichts wird mitgeliefert | – |\n")
 total = sum(len(v) for v in by_license.values())
 print(f"## Rust-Abhängigkeiten des Binaries ({total} Crates)\n")
 print("| Lizenz (SPDX-Ausdruck) | Anzahl | Crates |")

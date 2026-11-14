@@ -3,6 +3,7 @@
 <script lang="ts">
   // Preise (AIGW-49): Versionen je (Anbieter, Modell) mit Zustand „gültig“, „abgelöst“, „künftig“. Gültige und
   // abgelöste Versionen sind unveränderlich (Server: 409) – neue Version anlegen; künftige dürfen geändert/gelöscht werden.
+  // Darunter Preisvorschläge (AIGW-85) aus Azure Retail Prices und Preiskatalog.
   import { prices, PROVIDERS, providerLabel, type Price } from '../lib/api/resources';
   import AsyncState from '../lib/admin/AsyncState.svelte';
   import ConfirmDialog from '../lib/admin/ConfirmDialog.svelte';
@@ -18,6 +19,7 @@
   import PageHeader from '../lib/ui/PageHeader.svelte';
   import Select from '../lib/ui/Select.svelte';
   import PriceFormDialog from './prices/PriceFormDialog.svelte';
+  import PriceSuggestions from './prices/PriceSuggestions.svelte';
 
   const data = new Loader(() => prices.list());
   let provider = $state('');
@@ -175,6 +177,10 @@
       {/snippet}
     </AsyncState>
   </Card>
+
+<div class="mt-6">
+  <PriceSuggestions {writable} onaccepted={() => void data.reload()} />
+</div>
 
 <PriceFormDialog
   bind:open={formOpen}

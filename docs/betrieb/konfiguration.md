@@ -84,6 +84,34 @@ anschließendem Snapshot-Aufbau. Wer ein Feld umbenennt, merkt es dort.
 - **Mock-Anbieter:** `admin.allow_mock: true` ist Standard (Demos, Smoke-Tests). Für
   Produktion `false`, ebenso `admin.ui.mock: false`.
 
+### Preisvorschläge (Azure Retail Prices, Preiskatalog)
+
+Die Preise-Seite zeigt je Deployment einen Preisvorschlag neben dem aktuellen Preis
+(Details [11-limits-und-budgets.md](../konzept/11-limits-und-budgets.md) §4a). Abschnitt
+`billing.price_suggestions`:
+
+- Ausgehend nur **`prices.azure.com`** (HTTPS, öffentlich, ohne Anmeldung), und nur wenn jemand
+  die Vorschläge abruft bzw. `check_interval_secs > 0` ist. In abgeschotteten Netzen
+  `azure.enabled: false` setzen – dann gilt nur der mitgelieferte Katalog.
+- Region je Azure-Deployment in `settings.pricing.region` (aus `*.openai.azure.com` nicht
+  ablesbar) oder einmal global `azure.default_region`; Bereitstellungsart
+  `settings.pricing.deploymentType` (`global`, `data-zone`, `regional`). Weicht der Deployment-
+  Name vom Modell ab: `settings.pricing.model: gpt-5.4-mini`.
+- Katalog per URL aktualisieren (Standard aus): `catalog.url` + `catalog.format: litellm` für
+  die LiteLLM-Datei. Der Host der URL ist – wie `azure.api_url` – von den SSRF-Regeln
+  ausgenommen, weil er aus der Startkonfiguration stammt.
+- Übernahme nur ausdrücklich (UI „Übernehmen“ bzw. `POST …/price-suggestions:accept`); manuelle
+  Preise werden nur nach Bestätigung ersetzt.
+
+```yaml
+billing:
+  price_suggestions:
+    azure:
+      default_region: swedencentral
+      default_deployment_type: data-zone
+    check_interval_secs: 86400   # tägliche Warnung bei Preisänderungen
+```
+
 ### Azure OpenAI mit Entra ID
 
 Statt eines API-Keys meldet sich das Gateway per Entra ID an – empfohlen über Zugangsdaten

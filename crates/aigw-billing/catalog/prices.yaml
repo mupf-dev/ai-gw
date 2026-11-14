@@ -1,0 +1,253 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Preiskatalog der direkten Anbieter für Preisvorschläge (AIGW-85).
+#
+# Eigene, gepflegte Datei: Listenpreise in USD je 1 Mio. Tokens aus den öffentlichen Preisseiten der
+# Anbieter (Quelle je Abschnitt), abgeglichen mit LiteLLM `model_prices_and_context_window.json` (MIT).
+# Preise sind Fakten; aus fremden Dateien wird nichts übernommen. Pflege: scripts/price-catalog-check.py
+# zeigt Abweichungen gegenüber LiteLLM.
+#
+# Felder je Modell: provider (Anbieterart wie Deployment.provider), model (providerModel), aliases
+# (weitere Namen, z. B. Snapshots mit Datum), optional validFrom (JJJJ-MM-TT), perMillionTokens
+# (input, cachedInput, cacheWrite, output, reasoning, audioInput, audioOutput, imageInput) und
+# perRequest/perImage/perAudioMinute/perMillionCharacters – wie die Ressource `Price`.
+# Gemini steht unter `vertex` (Gemini-API-Listenpreise; Vertex AI kann abweichen).
+# Claude in Azure AI Foundry wird zu Anthropic-Listenpreisen abgerechnet (Marketplace) und nutzt
+# daher die Einträge unter `anthropic`.
+version: "2026-11-14"
+currency: USD
+models:
+  # openai – https://openai.com/api/pricing/
+  - provider: openai
+    model: gpt-6-sol
+    perMillionTokens: {input: "2", cachedInput: "0.2", cacheWrite: "2.5", output: "10"}
+  - provider: openai
+    model: gpt-6-luna
+    perMillionTokens: {input: "0.1", cachedInput: "0.01", cacheWrite: "0.125", output: "0.5"}
+  - provider: openai
+    model: gpt-6.1-sol
+    perMillionTokens: {input: "2", cachedInput: "0.1", cacheWrite: "2.5", output: "10"}
+  - provider: openai
+    model: gpt-6.1-terra
+    perMillionTokens: {input: "1", cachedInput: "0.05", cacheWrite: "1.25", output: "5"}
+  - provider: openai
+    model: gpt-5.6
+    perMillionTokens: {input: "4", cachedInput: "0.4", cacheWrite: "5", output: "20"}
+  - provider: openai
+    model: gpt-5.6-sol
+    perMillionTokens: {input: "4", cachedInput: "0.4", cacheWrite: "5", output: "20"}
+  - provider: openai
+    model: gpt-5.6-terra
+    perMillionTokens: {input: "2", cachedInput: "0.2", cacheWrite: "2.5", output: "12"}
+  - provider: openai
+    model: gpt-5.6-luna
+    perMillionTokens: {input: "0.2", cachedInput: "0.02", cacheWrite: "0.25", output: "1.2"}
+  - provider: openai
+    model: gpt-5.5
+    aliases: [gpt-5.5-2026-04-23]
+    perMillionTokens: {input: "5", cachedInput: "0.5", output: "30"}
+  - provider: openai
+    model: gpt-5.4
+    aliases: [gpt-5.4-2026-03-05]
+    perMillionTokens: {input: "2.5", cachedInput: "0.25", output: "15"}
+  - provider: openai
+    model: gpt-5.4-mini
+    aliases: [gpt-5.4-mini-2026-03-17]
+    perMillionTokens: {input: "0.75", cachedInput: "0.075", output: "4.5"}
+  - provider: openai
+    model: gpt-5.4-nano
+    aliases: [gpt-5.4-nano-2026-03-17]
+    perMillionTokens: {input: "0.2", cachedInput: "0.02", output: "1.25"}
+  - provider: openai
+    model: gpt-5.2
+    aliases: [gpt-5.2-2025-12-11]
+    perMillionTokens: {input: "1.75", cachedInput: "0.175", output: "14"}
+  - provider: openai
+    model: gpt-5.1
+    aliases: [gpt-5.1-2025-11-13]
+    perMillionTokens: {input: "1.25", cachedInput: "0.125", output: "10"}
+  - provider: openai
+    model: gpt-5
+    aliases: [gpt-5-2025-08-07]
+    perMillionTokens: {input: "1.25", cachedInput: "0.125", output: "10"}
+  - provider: openai
+    model: gpt-5-mini
+    aliases: [gpt-5-mini-2025-08-07]
+    perMillionTokens: {input: "0.25", cachedInput: "0.025", output: "2"}
+  - provider: openai
+    model: gpt-5-nano
+    aliases: [gpt-5-nano-2025-08-07]
+    perMillionTokens: {input: "0.05", cachedInput: "0.005", output: "0.4"}
+  - provider: openai
+    model: gpt-4.1
+    aliases: [gpt-4.1-2025-04-14]
+    perMillionTokens: {input: "2", cachedInput: "0.5", output: "8"}
+  - provider: openai
+    model: gpt-4.1-mini
+    aliases: [gpt-4.1-mini-2025-04-14]
+    perMillionTokens: {input: "0.4", cachedInput: "0.1", output: "1.6"}
+  - provider: openai
+    model: gpt-4.1-nano
+    aliases: [gpt-4.1-nano-2025-04-14]
+    perMillionTokens: {input: "0.1", cachedInput: "0.025", output: "0.4"}
+  - provider: openai
+    model: gpt-4o
+    aliases: [gpt-4o-2024-08-06, gpt-4o-2024-11-20]
+    perMillionTokens: {input: "2.5", cachedInput: "1.25", output: "10"}
+  - provider: openai
+    model: gpt-4o-mini
+    aliases: [gpt-4o-mini-2024-07-18]
+    perMillionTokens: {input: "0.15", cachedInput: "0.075", output: "0.6"}
+  - provider: openai
+    model: o3
+    aliases: [o3-2025-04-16]
+    perMillionTokens: {input: "2", cachedInput: "0.5", output: "8"}
+  - provider: openai
+    model: o4-mini
+    aliases: [o4-mini-2025-04-16]
+    perMillionTokens: {input: "1.1", cachedInput: "0.275", output: "4.4"}
+  - provider: openai
+    model: o3-mini
+    aliases: [o3-mini-2025-01-31]
+    perMillionTokens: {input: "1.1", cachedInput: "0.55", output: "4.4"}
+  - provider: openai
+    model: o1
+    aliases: [o1-2024-12-17]
+    perMillionTokens: {input: "15", cachedInput: "7.5", output: "60"}
+  - provider: openai
+    model: text-embedding-3-small
+    perMillionTokens: {input: "0.02"}
+  - provider: openai
+    model: text-embedding-3-large
+    perMillionTokens: {input: "0.13"}
+  - provider: openai
+    model: text-embedding-ada-002
+    perMillionTokens: {input: "0.1"}
+
+  # anthropic – https://www.anthropic.com/pricing#api
+  - provider: anthropic
+    model: claude-fable-5-2
+    perMillionTokens: {input: "8", cachedInput: "0.2", cacheWrite: "10", output: "40"}
+  - provider: anthropic
+    model: claude-opus-5-5
+    perMillionTokens: {input: "4", cachedInput: "0.2", cacheWrite: "5", output: "20"}
+  - provider: anthropic
+    model: claude-opus-5
+    perMillionTokens: {input: "5", cachedInput: "0.5", cacheWrite: "6.25", output: "25"}
+  - provider: anthropic
+    model: claude-opus-4-8
+    perMillionTokens: {input: "5", cachedInput: "0.5", cacheWrite: "6.25", output: "25"}
+  - provider: anthropic
+    model: claude-opus-4-7
+    aliases: [claude-opus-4-7-20260416]
+    perMillionTokens: {input: "5", cachedInput: "0.5", cacheWrite: "6.25", output: "25"}
+  - provider: anthropic
+    model: claude-opus-4-6
+    aliases: [claude-opus-4-6-20260205]
+    perMillionTokens: {input: "5", cachedInput: "0.5", cacheWrite: "6.25", output: "25"}
+  - provider: anthropic
+    model: claude-opus-4-5
+    aliases: [claude-opus-4-5-20251101]
+    perMillionTokens: {input: "5", cachedInput: "0.5", cacheWrite: "6.25", output: "25"}
+  - provider: anthropic
+    model: claude-sonnet-5-5
+    perMillionTokens: {input: "2", cachedInput: "0.1", cacheWrite: "2.5", output: "10"}
+  - provider: anthropic
+    model: claude-sonnet-5
+    aliases: [claude-sonnet-5-5]
+    perMillionTokens: {input: "2", cachedInput: "0.2", cacheWrite: "2.5", output: "10"}
+  - provider: anthropic
+    model: claude-sonnet-4-6
+    perMillionTokens: {input: "3", cachedInput: "0.3", cacheWrite: "3.75", output: "15"}
+  - provider: anthropic
+    model: claude-sonnet-4-5
+    aliases: [claude-sonnet-4-5-20250929]
+    perMillionTokens: {input: "3", cachedInput: "0.3", cacheWrite: "3.75", output: "15"}
+  - provider: anthropic
+    model: claude-haiku-5-5
+    perMillionTokens: {input: "0.1", cachedInput: "0.01", cacheWrite: "0.125", output: "0.5"}
+  - provider: anthropic
+    model: claude-haiku-4-5
+    aliases: [claude-haiku-4-5-20251001]
+    perMillionTokens: {input: "1", cachedInput: "0.1", cacheWrite: "1.25", output: "5"}
+
+  # mistral – https://mistral.ai/pricing#api-pricing
+  - provider: mistral
+    model: mistral-large-4
+    aliases: [mistral-large-4-0]
+    perMillionTokens: {input: "0.7", cachedInput: "0.07", output: "2.1"}
+  - provider: mistral
+    model: mistral-large-3
+    perMillionTokens: {input: "0.5", cachedInput: "0.05", output: "1.5"}
+  - provider: mistral
+    model: mistral-medium-3.5
+    perMillionTokens: {input: "1.5", cachedInput: "0.15", output: "7.5"}
+  - provider: mistral
+    model: mistral-small-latest
+    perMillionTokens: {input: "0.15", cachedInput: "0.015", output: "0.6"}
+  - provider: mistral
+    model: ministral-14b-latest
+    perMillionTokens: {input: "0.2", cachedInput: "0.02", output: "0.2"}
+  - provider: mistral
+    model: ministral-8b-latest
+    perMillionTokens: {input: "0.15", cachedInput: "0.015", output: "0.15"}
+  - provider: mistral
+    model: ministral-3b-latest
+    perMillionTokens: {input: "0.1", cachedInput: "0.01", output: "0.1"}
+  - provider: mistral
+    model: magistral-medium-latest
+    perMillionTokens: {input: "1.5", cachedInput: "0.15", output: "7.5"}
+  - provider: mistral
+    model: magistral-small-latest
+    perMillionTokens: {input: "0.15", cachedInput: "0.015", output: "0.6"}
+  - provider: mistral
+    model: codestral-latest
+    perMillionTokens: {input: "0.3", cachedInput: "0.03", output: "0.9"}
+  - provider: mistral
+    model: devstral-medium-latest
+    perMillionTokens: {input: "0.4", cachedInput: "0.04", output: "2"}
+  - provider: mistral
+    model: devstral-small-latest
+    perMillionTokens: {input: "0.1", cachedInput: "0.01", output: "0.3"}
+  - provider: mistral
+    model: pixtral-large-latest
+    perMillionTokens: {input: "2", cachedInput: "0.2", output: "6"}
+
+  # vertex – https://ai.google.dev/gemini-api/docs/pricing
+  - provider: vertex
+    model: gemini-4-argon
+    perMillionTokens: {input: "2", cachedInput: "0.1", output: "10"}
+  - provider: vertex
+    model: gemini-4-carbon
+    perMillionTokens: {input: "2", cachedInput: "0.1", output: "10"}
+  - provider: vertex
+    model: gemini-4-hydrogen
+    perMillionTokens: {input: "1.5", cachedInput: "0.075", output: "7.5"}
+  - provider: vertex
+    model: gemini-3.8-flash
+    perMillionTokens: {input: "0.75", cachedInput: "0.075", output: "3.75"}
+  - provider: vertex
+    model: gemini-3.5-flash
+    perMillionTokens: {input: "1.5", cachedInput: "0.15", output: "9"}
+  - provider: vertex
+    model: gemini-3.5-flash-lite
+    perMillionTokens: {input: "0.3", cachedInput: "0.03", output: "2.5"}
+  - provider: vertex
+    model: gemini-3.1-pro-preview
+    perMillionTokens: {input: "2", cachedInput: "0.2", output: "12"}
+  - provider: vertex
+    model: gemini-3.1-flash-lite
+    perMillionTokens: {input: "0.25", cachedInput: "0.025", output: "1.5"}
+  - provider: vertex
+    model: gemini-2.5-pro
+    perMillionTokens: {input: "1.25", cachedInput: "0.125", output: "10"}
+  - provider: vertex
+    model: gemini-2.5-flash
+    perMillionTokens: {input: "0.3", cachedInput: "0.03", output: "2.5"}
+  - provider: vertex
+    model: gemini-2.5-flash-lite
+    perMillionTokens: {input: "0.1", cachedInput: "0.01", output: "0.4"}
+  - provider: vertex
+    model: gemini-embedding-001
+    perMillionTokens: {input: "0.15"}

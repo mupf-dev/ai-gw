@@ -27,6 +27,9 @@ printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "1
   "$PORT" "$PORT" "$RUN" > "$RUN/aigw.yaml"
 # AIGW-77: Link-Vorlage zum Tracing-System (Log-Explorer).
 printf 'admin:\n  ui:\n    trace_url: "https://tracing.example.org/trace/{traceId}"\n' >> "$RUN/aigw.yaml"
+# AIGW-85: Preisvorschläge gegen eine lokale Fake-Retail-API (kein Internet nötig).
+RETAIL_PORT=$((PORT + 2))
+printf 'billing:\n  price_suggestions:\n    azure:\n      api_url: "http://127.0.0.1:%s/api/retail/prices"\n' "$RETAIL_PORT" >> "$RUN/aigw.yaml"
 # Zweiter Server mit OIDC (Einladungen, F90): Issuer wird erst beim Login abgefragt, der Test meldet sich per
 # Bootstrap-Token an (sessionStorage) und erzeugt nur Einladungslinks.
 OIDC_PORT=$((PORT + 1))
@@ -41,7 +44,9 @@ PID=$!
 (cd "$RUN/oidc" && AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') AIGW_BOOTSTRAP_TOKEN="$TOKEN" \
   exec "$BIN" serve --config "$RUN/oidc/aigw.yaml") > "$OUT/server-oidc.log" 2>&1 &
 PID2=$!
-trap 'kill $PID $PID2 2>/dev/null || true; rm -rf "$RUN"' EXIT
+python3 "$E2E/fake-retail.py" "$RETAIL_PORT" > "$OUT/fake-retail.log" 2>&1 &
+PID3=$!
+trap 'kill $PID $PID2 $PID3 2>/dev/null || true; rm -rf "$RUN"' EXIT
 for _ in $(seq 1 50); do curl -fsS -o /dev/null "http://127.0.0.1:$PORT/admin/" && break; sleep 0.2; done
 for _ in $(seq 1 50); do curl -fsS -o /dev/null "http://127.0.0.1:$OIDC_PORT/admin/api/v1/version" && break; sleep 0.2; done
 curl -fsS -D "$OUT/headers-admin.txt" -o /dev/null "http://127.0.0.1:$PORT/admin/"

@@ -250,6 +250,56 @@ pub fn deployment_settings(settings: &JsonObject) -> Res {
         None | Some(Value::Null | Value::Bool(_)) => {}
         Some(_) => return Err("settings.propagateTraceContext muss true/false sein".into()),
     }
+    pricing_settings(settings.get("pricing"))
+}
+
+/// Erlaubte Schlüssel in `settings.pricing` (Preisvorschläge, AIGW-85).
+pub const PRICING_KEYS: &[&str] = &["source", "region", "deploymentType", "model", "meter"];
+/// Werte von `settings.pricing.source`.
+pub const PRICING_SOURCES: &[&str] = &["auto", "azure", "catalog", "none"];
+/// Werte von `settings.pricing.deploymentType`.
+pub const PRICING_DEPLOYMENT_TYPES: &[&str] = &["global", "data-zone", "regional"];
+
+/// `settings.pricing`: Zuordnung eines Deployments zu Preisvorschlägen (AIGW-85).
+fn pricing_settings(v: Option<&Value>) -> Res {
+    let o = match v {
+        None | Some(Value::Null) => return Ok(()),
+        Some(Value::Object(o)) => o,
+        Some(_) => return Err("settings.pricing muss ein Objekt sein".into()),
+    };
+    for (k, v) in o {
+        if !PRICING_KEYS.contains(&k.as_str()) {
+            return Err(format!(
+                "settings.pricing.{k} unbekannt (erlaubt: {})",
+                PRICING_KEYS.join(", ")
+            ));
+        }
+        let Some(s) = v.as_str() else {
+            if v.is_null() {
+                continue;
+            }
+            return Err(format!("settings.pricing.{k} muss eine Zeichenkette sein"));
+        };
+        let ok = match k.as_str() {
+            "source" => PRICING_SOURCES.contains(&s),
+            "deploymentType" => PRICING_DEPLOYMENT_TYPES.contains(&s),
+            "region" => {
+                !s.is_empty()
+                    && s.len() <= 64
+                    && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+            }
+            _ => !s.trim().is_empty() && s.len() <= 256 && !s.chars().any(char::is_control),
+        };
+        if !ok {
+            let hint = match k.as_str() {
+                "source" => PRICING_SOURCES.join(", "),
+                "deploymentType" => PRICING_DEPLOYMENT_TYPES.join(", "),
+                "region" => "Azure-Region klein ohne Leerzeichen, z. B. swedencentral".into(),
+                _ => "1–256 Zeichen".into(),
+            };
+            return Err(format!("settings.pricing.{k} ungültig ({hint})"));
+        }
+    }
     Ok(())
 }
 
@@ -1146,6 +1196,29 @@ mod tests {
         let mut s = json!({"auth": "apiKey"}).as_object().unwrap().clone();
         assert!(!mi.apply_to(&mut s));
         assert_eq!(s.len(), 1);
+    }
+
+    #[test]
+    fn pricing_settings_rules() {
+        let check = |v: serde_json::Value| {
+            let serde_json::Value::Object(o) = serde_json::json!({ "pricing": v }) else {
+                unreachable!()
+            };
+            deployment_settings(&o)
+        };
+        assert!(
+            check(serde_json::json!({
+                "region": "swedencentral", "deploymentType": "data-zone",
+                "model": "gpt-5.4-mini", "source": "azure", "meter": "5.4 mini"
+            }))
+            .is_ok()
+        );
+        assert!(check(serde_json::json!({"region": "Sweden Central"})).is_err());
+        assert!(check(serde_json::json!({"deploymentType": "GlobalStandard"})).is_err());
+        assert!(check(serde_json::json!({"source": "web"})).is_err());
+        assert!(check(serde_json::json!({"regoin": "x"})).is_err());
+        assert!(check(serde_json::json!("swedencentral")).is_err());
+        assert!(check(serde_json::json!({"model": 5})).is_err());
     }
 
     #[test]

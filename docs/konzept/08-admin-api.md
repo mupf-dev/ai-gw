@@ -35,6 +35,7 @@ Instanz nach ca. 100 ms (Debounce), bei Postgres auf allen Instanzen per `NOTIFY
 | `/provider-credentials`, `/provider-credentials/{name}` | GET, POST · GET, PUT, PATCH, DELETE | Anbieter-Zugangsdaten (Werte nur schreibbar; Entra-ID-Anmeldung `spec.entra`) |
 | `/providers` | GET | Anbieter-Übersicht je Anbieter + Endpunkt: Anmeldeart, Deployments, Modellgruppen, Laufzeitzustand (AIGW-84, §2.4a) |
 | `/prices`, `/prices/{name}` | GET, POST · GET, PUT, DELETE | Preisversionen je Anbieter-Modell |
+| `/price-suggestions`, `/price-suggestions:accept` | GET · POST | Preisvorschläge (Azure Retail Prices, Preiskatalog) und Übernahme (AIGW-85) |
 | `/plugin-bindings`, `/plugin-bindings/{name}` | GET, POST · GET, PUT, DELETE | Plugin-Bindungen; Prüfung mit der Plugin-Registry (422), gelesen mit wirksamem `failMode` (`effective`), siehe [12-plugins.md](12-plugins.md) §3–4 |
 | `/plugins` | GET | Registrierte Plugins mit Standard-`failMode`/-Zeitlimit und `testable` (AIGW-52) |
 | `/plugin-bindings:test` | POST | Testlauf einer ungespeicherten Konfiguration auf einem Beispieltext (`phase` request/response) → `outcome` pass/modified/filtered/rejected, Text, Treffer; nur `pii`/`prompt-filter` (sonst 422), schreibt nichts, auch im Modus „nur YAML“ erlaubt (AIGW-52) |
@@ -279,6 +280,33 @@ POST /admin/api/v1/prices
   (Modellname klein, andere Zeichen als `a-z0-9-._` → `-`).
 - Filter: `?model=` (exakt), `?provider=` (`any` = ohne Anbieter), `?effectiveAt=<RFC 3339>`
   (nur die zu diesem Zeitpunkt gültige Version je (Anbieter, Modell)).
+
+**Preisvorschläge** (AIGW-85, Details 11 §4a):
+
+```json
+GET /admin/api/v1/price-suggestions?modelGroup=&deployment=&refresh=true
+→ 200 {"generatedAt": "…", "items": [{"deployment": "gpt54-se", "modelGroup": "gpt-5.4-mini",
+       "provider": "azure-openai", "providerModel": "gpt54mini", "source": "azure-retail",
+       "region": "swedencentral", "deploymentType": "global", "matched": "gpt-5.4-mini",
+       "meters": ["5.4 mini Inp Gl", "5.4 mini cd Inp Gl", "5.4 mini Opt Gl"],
+       "suggested": {"provider": "azure-openai", "model": "gpt54mini", "validFrom": "2026-03-01T00:00:00Z",
+                     "perMillionTokens": {"input": "0.75", "cachedInput": "0.075", "output": "4.5"}},
+       "status": "missing", "notes": ["Kein Preis hinterlegt – Kosten werden mit 0 gebucht"]}],
+       "sources": [{"source": "azure-retail", "scope": "swedencentral", "entries": 1234, "fetchedAt": "…"},
+                   {"source": "catalog", "scope": "builtin", "entries": 67, "version": "2026-11-14"}]}
+
+POST /admin/api/v1/price-suggestions:accept
+{"items": [{"deployment": "gpt54-se"}, {"deployment": "oa", "overrideManual": true}], "validFrom": null}
+→ 200 {"created": [Price, …], "skipped": [{"deployment": "…", "reason": "Preis bereits aktuell"}]}
+```
+
+- Lesen: jede wirksame Rolle (`Catalog`); Übernehmen: Schreibrecht auf `Catalog`.
+- Die Preise berechnet der Server bei der Übernahme neu – der Body nennt nur Deployments.
+- `409`: manueller Preis ohne `overrideManual`, zwei gewählte Deployments mit gleichem
+  Preisschlüssel und abweichendem Vorschlag, oder eine neuere Version existiert bereits;
+  `422`: unbekanntes Deployment, kein Vorschlag, `validFrom` in der Vergangenheit.
+  Erst wird alles geprüft, dann geschrieben (je Preis eine Transaktion mit Audit-Eintrag).
+- `404`, wenn `billing.price_suggestions.enabled: false`.
 
 **GitOps** (`aigw config apply`, `POST /config:apply`) wendet dieselben Regeln an – sie liegen
 gemeinsam in `aigw_core::validate` bzw. `aigw_core::upstream`: Aliasse, Fallback-Ziele und

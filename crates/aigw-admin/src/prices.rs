@@ -138,7 +138,7 @@ impl AdminResource for PriceSpec {
 }
 
 /// Standardname `<anbieter|any>-<modell>-<JJJJMMTT>` (mit `hhmmss`, wenn nicht Mitternacht).
-fn price_name(p: &PriceSpec) -> String {
+pub(crate) fn price_name(p: &PriceSpec) -> String {
     let t = p.valid_from.to_offset(time::UtcOffset::UTC);
     let mut stamp = format!("{:04}{:02}{:02}", t.year(), u8::from(t.month()), t.day());
     if (t.hour(), t.minute(), t.second()) != (0, 0, 0) {

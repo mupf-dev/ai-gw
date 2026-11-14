@@ -44,6 +44,7 @@ pub mod oidc;
 pub mod playground;
 pub mod plugin_bindings;
 pub mod plugins;
+pub mod price_suggestions;
 pub mod prices;
 pub mod problem;
 pub mod providers;
@@ -99,6 +100,8 @@ pub struct AdminState {
     pub(crate) ui_mock: bool,
     /// Link-Vorlage zum Tracing-System (`admin.ui.trace_url`, für `GET /auth/info`).
     pub(crate) trace_url: Option<String>,
+    /// Preisvorschläge (AIGW-85; ohne: `404` auf `/price-suggestions`).
+    pub(crate) price_suggester: Option<Arc<aigw_billing::suggest::Suggester>>,
 }
 
 /// Einstellungen der Anmeldung (aus `admin.auth`).
@@ -139,6 +142,7 @@ impl AdminState {
             bootstrap: None,
             ui_mock: true,
             trace_url: None,
+            price_suggester: None,
         }
     }
 
@@ -162,6 +166,16 @@ impl AdminState {
     #[must_use]
     pub fn with_trace_url(mut self, trace_url: Option<String>) -> Self {
         self.trace_url = trace_url.filter(|u| !u.trim().is_empty());
+        self
+    }
+
+    /// Preisvorschläge (`billing.price_suggestions`, AIGW-85).
+    #[must_use]
+    pub fn with_price_suggester(
+        mut self,
+        suggester: Option<Arc<aigw_billing::suggest::Suggester>>,
+    ) -> Self {
+        self.price_suggester = suggester;
         self
     }
 
@@ -231,6 +245,7 @@ impl AdminState {
             bootstrap: gate,
             ui_mock: true,
             trace_url: None,
+            price_suggester: None,
         })
     }
 
@@ -289,6 +304,7 @@ pub fn router_with(state: AdminState) -> Router {
         .merge(credentials::router())
         .merge(secrets::router())
         .merge(prices::router())
+        .merge(price_suggestions::router())
         .merge(mcp::router())
         .merge(plugin_bindings::router())
         .merge(plugins::router())

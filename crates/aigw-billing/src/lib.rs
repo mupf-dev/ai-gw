@@ -11,16 +11,21 @@
 //! - [`budget`] – Budgetstände im RAM mit Abgleich gegen ein [`BudgetLedger`] (Tabelle
 //!   `budget_usage`), harte Grenze und Warnschwellen.
 //!
+//! - [`suggest`] – Preisvorschläge (AIGW-85) aus der Azure Retail Prices API und dem
+//!   mitgelieferten Preiskatalog (`catalog/prices.yaml`).
+//!
 //! Eigenes Crate statt Modul im Proxy, weil drei Schichten dieselbe Logik brauchen: der Proxy
 //! (prüfen und buchen), `aigw-store` (implementiert [`BudgetLedger`] für SQLite/Postgres) und
 //! die Admin-API (Zeiträume für `GET /admin/api/v1/usage/budgets`). Das Crate selbst hat
-//! keine Datenbank- oder HTTP-Abhängigkeit.
+//! keine Datenbank-Abhängigkeit; ausgehende HTTP-Aufrufe nur in [`suggest`] über
+//! `aigw-outbound`.
 //!
 //! Ausführlich: `docs/konzept/11-limits-und-budgets.md`.
 
 pub mod budget;
 pub mod calendar;
 pub mod cost;
+pub mod suggest;
 pub mod webhook;
 
 pub use budget::{

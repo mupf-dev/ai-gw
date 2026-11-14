@@ -93,6 +93,7 @@ limits:
 billing:
   timezone: UTC               # IANA-Name, z. B. Europe/Berlin
   budget_sync_ms: 1000        # Abgleich mit budget_usage
+  price_suggestions: {}       # Preisvorschläge, §4a
 ```
 
 ## 3. Limits (AIGW-30)
@@ -182,6 +183,65 @@ Status `429`, Fehler im Eingangsformat (`rate_limit_exceeded` bzw. Anthropic
   Verbrauch scheiterte.
 - Gerechnet wird mit dem zuletzt verwendeten Deployment (nach Retries/Fallbacks das, dessen
   Antwort der Client bekam) und der gemeldeten bzw. geschätzten Usage.
+
+## 4a. Preisvorschläge (AIGW-85)
+
+Preise (`Price`) werden weiterhin als Ressource gepflegt; das Gateway schlägt sie nur vor.
+Deployments ohne Preis werden mit Kosten 0 gebucht – die Preise-Seite und
+`GET /admin/api/v1/price-suggestions` weisen darauf hin.
+
+**Quellen** (Crate `aigw-billing`, Modul `suggest`):
+
+1. **Azure Retail Prices API** (`https://prices.azure.com/api/retail/prices`, öffentlich, ohne
+   Anmeldung) für Deployments mit `provider: azure-openai` oder Azure-Endpunkt
+   (`*.openai.azure.com`, `*.services.ai.azure.com`, `*.cognitiveservices.azure.com`,
+   `*.models.ai.azure.com` …). Abfrage je Region mit `currencyCode=USD` (das Gateway rechnet in
+   USD, E-Entscheidung) und `$filter=serviceName eq 'Foundry Models' and armRegionName eq '<region>'
+   and type eq 'Consumption'`, Folgeseiten über `NextPageLink` nur auf demselben Host.
+   Zwischenspeicher je Region (`cache_ttl_secs`, Standard 24 h); bei Fehlern bleiben ältere
+   Daten in Gebrauch, neuer Versuch frühestens nach 60 s. Abruf über `aigw-outbound` mit den
+   SSRF-Regeln aus `admin.*`; der Host aus `azure.api_url` ist fest ausgenommen
+   (Startkonfiguration des Betreibers, nie aus der Admin-API).
+2. **Preiskatalog** `crates/aigw-billing/catalog/prices.yaml` (eigene, gepflegte Datei;
+   OpenAI, Anthropic, Mistral, Gemini unter `vertex`) für direkte Anbieter – und als Ersatz,
+   wenn Azure nichts liefert (Azure OpenAI → OpenAI-Listenpreis, als „Näherung“ markiert;
+   Claude in Foundry wird ohnehin zu Anthropic-Listenpreisen abgerechnet und steht nicht in der
+   Retail-API). Optional ersetzt eine Datei per URL den Katalog (`catalog.url`, Format `aigw`
+   oder `litellm`, Standard aus). Pflege: `scripts/price-catalog-check.py` zeigt Abweichungen
+   gegenüber LiteLLM.
+
+**Zuordnung Deployment → Meter** über `settings.pricing` (alle Felder optional, geprüft in
+`aigw_core::validate::deployment_settings`):
+
+| Feld | Bedeutung |
+|---|---|
+| `source` | `auto` (Standard: Azure bei Azure-Deployments, sonst Katalog), `azure` (nur Azure, kein Ersatz), `catalog`, `none` |
+| `region` | Azure-Region (`swedencentral`); sonst aus dem Endpunkt (`<region>.api.cognitive.microsoft.com`, `<name>.<region>.models.ai.azure.com`), sonst `azure.default_region` |
+| `deploymentType` | `global` (GlobalStandard), `data-zone` (DataZone Standard), `regional` (Standard); Standard `azure.default_deployment_type` |
+| `model` | Basismodell, wenn `providerModel` ein Azure-Deployment-Name ist (`gpt-5.4-mini`, mit Version `gpt-4o-2024-08-06`) |
+| `meter` | Modellteil des `skuName`, falls die Heuristik nicht greift (`Llama 4 Maverick 17B`) |
+
+Die `skuName`-Werte der Retail-API sind abgekürzt (`5.4 mini cd Inp Gl`,
+`gpt-4o-mini-0718-Outp-regnl`, `o4-mini 0416 Batch Inp Data Zone`). Die Heuristik zerlegt sie in
+Modell-Tokens, Bereitstellungsart und Token-Art (`Inp` → `input`, `cd`/`cached` → `cachedInput`,
+`Cd Wr` → `cacheWrite`, `Outp`/`Opt` → `output`) und übergeht Batch, Priority Processing,
+Fine-Tuning, Realtime/Audio und Long Context. `1K`-Meter werden auf 1 Mio. Tokens umgerechnet
+(exakt, ohne Gleitkomma). Ohne Version im Modellnamen gilt die jüngste Version (Hinweis mit den
+übrigen Versionen).
+
+**Vergleich und Übernahme.** Der Vorschlag wird mit dem aktuell gültigen Preis verglichen (wie
+`price_at`: Anbieter + `providerModel`, spezifisch vor generisch). Status: `missing` (kein
+Preis), `unchanged`, `differs`, `conflict` (Deployments mit gleichem Preisschlüssel, aber
+unterschiedlicher Region/Bereitstellungsart – Preise gelten je Anbieter und `providerModel`,
+deshalb nur einen übernehmen), `no-suggestion`. `POST …/price-suggestions:accept` legt neue
+Preisversionen an (`validFrom` = jetzt oder später, nie rückwirkend; Audit je Preis wie
+`POST /prices`) mit den Labels `aigw.io/price-source`, `aigw.io/price-region`,
+`aigw.io/price-deployment-type`, `aigw.io/price-deployment`. **Manuelle Preise** (ohne Label
+`aigw.io/price-source`) haben Vorrang: abweichende werden nur mit `overrideManual: true`
+ersetzt, die UI fragt dafür ausdrücklich nach.
+
+**Periodischer Abgleich** (`check_interval_secs`, Standard 0 = aus): Warnung im Log für neu
+abweichende oder fehlende Preise, Ergebnis als `lastCheck` in der Antwort.
 
 ## 5. Deployment-Kapazität für das Routing
 
