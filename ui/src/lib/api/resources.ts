@@ -181,3 +181,15 @@ export type PluginInfo = S['PluginInfo'];
 export const pluginCatalog = async () => (await unwrap<S['PluginCatalog']>(api.GET('/admin/api/v1/plugins'))).items;
 /** Testlauf einer ungespeicherten Plugin-Konfiguration (nur lokale Plugins, schreibt nichts). */
 export const testPlugin = (body: S['PluginTestRequest']) => unwrap<S['PluginTestResult']>(api.POST('/admin/api/v1/plugin-bindings:test', { body }));
+
+// ------------------------------------------------------------------ AIGW-86: Standard-Guardrail-Profile
+
+export type GuardrailProfile = S['GuardrailProfile'];
+export type GuardrailProfileApplyResult = S['GuardrailProfileApplyResult'];
+/** Eingebettete Profile (Basis, Streng, Offen) mit ihren Bindungen als PluginBinding-Specs. */
+export const guardrailProfiles = async () => (await unwrap<S['GuardrailProfileList']>(api.GET('/admin/api/v1/guardrail-profiles'))).items;
+/** Profil auf einen Scope anwenden; `dryRun: true` liefert nur den Diff. */
+export const applyGuardrailProfile = (name: string, body: S['GuardrailProfileApply']) =>
+  unwrap<GuardrailProfileApplyResult>(api.POST('/admin/api/v1/guardrail-profiles/{name}:apply', { params: { path: { name } }, body }));
+/** Plugins, die als Guardrail zählen (Hinweis „keine Guardrails aktiv“). */
+export const GUARDRAIL_PLUGINS = ['pii', 'prompt-filter', 'content-safety'];

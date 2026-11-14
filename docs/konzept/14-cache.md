@@ -98,7 +98,18 @@ wird im **Eingangsformat** wiedergegeben – gestreamt mit simuliertem Chunking
 Ein gestreamt gespeicherter Eintrag bedient auch nicht gestreamte Anfragen und umgekehrt.
 
 **Header** `x-aigw-cache: hit-exact | hit-semantic | miss | bypass` (nur wenn eine Bindung
-gilt; das Plugin `header` kann ihn entfernen).
+gilt; das Plugin `header` kann ihn entfernen). Bei `bypass` nennt `x-aigw-cache-reason` den
+Grund (AIGW-86): `temperature` = Anfrage ohne `temperature: 0` (auch ohne Angabe!) bei
+`cacheNonZeroTemperature: false`, `client` = Client-Steuerung (`no-cache`).
+
+> **Häufige Ursache für „immer bypass“ (Live-Test AIGW-86):** Zwei identische Anfragen ohne
+> `temperature` werden **nicht** gecacht – fehlende Angabe gilt als Anbieter-Standard > 0. Das
+> ist Absicht (nicht deterministische Antworten sollen nicht als „die“ Antwort wiederholt
+> werden), kein Fehler und unabhängig von `pii`/`prompt-filter`: der Cache-Schlüssel entsteht
+> aus der bereits maskierten Anfrage (stabile Platzhalter), identische Anfragen mit
+> `temperature: 0` treffen auch mit aktiver PII-Maskierung (Test
+> `cache::exact_cache_works_with_pii_and_prompt_filter`). Abhilfe: `temperature: 0` senden
+> oder `cacheNonZeroTemperature: true` an der Bindung.
 
 **Abrechnung:** Ein Treffer ruft keinen Upstream auf: `RequestRecord.usage` = 0, keine Kosten,
 Token-Reservierung der Limits wird vollständig freigegeben; die Anfrage zählt in Request-Limits,

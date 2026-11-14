@@ -155,6 +155,8 @@ pub(crate) struct RouteInfo {
     pub(crate) buffered: bool,
     /// Ergebnis des Antwort-Caches (AIGW-39/40), Header `x-aigw-cache`.
     pub(crate) cache: Option<aigw_core::observe::CacheOutcome>,
+    /// Grund bei `bypass` (Header `x-aigw-cache-reason`).
+    pub(crate) cache_reason: Option<&'static str>,
     /// Übersprungene, nicht freigegebene Fallback-Gruppen (F80).
     pub(crate) fallback_skipped: Vec<String>,
     /// Modell laut Anbieter (Header `x-aigw-model`, F49).
@@ -204,6 +206,12 @@ impl RouteInfo {
             res.headers_mut().insert(
                 crate::cache::CACHE_HEADER,
                 HeaderValue::from_static(c.as_str()),
+            );
+        }
+        if let Some(r) = self.cache_reason {
+            res.headers_mut().insert(
+                crate::cache::CACHE_REASON_HEADER,
+                HeaderValue::from_static(r),
             );
         }
         if self.buffered {
@@ -437,6 +445,7 @@ async fn chat_inner(
     };
     if let Some(c) = &cache {
         p.info_mut().cache = Some(c.outcome());
+        p.info_mut().cache_reason = c.reason();
         p.rec.set_cache(c.outcome());
     }
     let outcome = match cache.as_mut().and_then(crate::cache::CacheStep::take_hit) {

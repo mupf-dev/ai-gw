@@ -1,0 +1,67 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Guardrail-Profil „Streng“ (AIGW-86). Im Binary eingebettet; Änderungen am Inhalt erhöhen
+# `version`.
+name: streng
+version: 1
+title: Streng
+summary: Wie Basis, aber Kreditkarten und Geheimnisse werden abgelehnt, externe Inhaltsprüfung, Payload-Logging höchstens maskiert.
+description: |
+  Für Bereiche mit vertraulichen oder regulierten Daten. Kreditkartennummern, API-Keys/Tokens
+  und Zugangsdaten in URLs führen zur Ablehnung (Eingabe: 400 pii_detected; Ausgabe: 200 mit
+  finish_reason content_filter) – sie sollen gar nicht erst verarbeitet werden. Weitere PII
+  (E-Mail, Telefon, IBAN, deutsche Steuer-ID, Sozialversicherungs-, Ausweis- und Passnummern)
+  werden maskiert. Die Prompt-Injection-Heuristik greift früher (Schwelle 0,8), die
+  Größenlimits sind enger. Beide Bindungen sind gesperrt (locked): untere Ebenen können sie
+  nicht abschalten. Optional prüft content-safety Ein- und Ausgabe extern (Azure AI Content
+  Safety, OpenAI Moderation oder ein Prüfmodell über eine Modellgruppe des Gateways) – dafür
+  beim Anwenden Anbieter und Endpunkt bzw. Modellgruppe angeben. Payload-Logging wird auf
+  höchstens „masked“ begrenzt (Organisation/Team: payloadModeMax).
+logging:
+  payloadModeMax: masked
+bindings:
+  - note: Prompt-Injection-Heuristik (Schwelle 0,8) und engere Größenlimits; gesperrt.
+    spec:
+      scope: {level: global}
+      plugin: prompt-filter
+      order: 10
+      locked: true
+      config:
+        action: reject
+        roles: [user, tool]
+        injection: {threshold: 0.8, action: reject}
+        limits: {maxMessages: 100, maxChars: 200000, maxMessageChars: 50000, action: reject}
+  - note: Kreditkarten, API-Keys und URL-Zugangsdaten ablehnen, übrige PII maskieren; gesperrt.
+    spec:
+      scope: {level: global}
+      plugin: pii
+      order: 20
+      locked: true
+      config:
+        action: mask
+        direction: both
+        categories:
+          email: mask
+          phone: mask
+          iban: mask
+          taxIdDe: mask
+          socialSecurityDe: mask
+          idCardDe: mask
+          passportDe: mask
+          creditCard: reject
+          apiKey: reject
+          urlCredentials: reject
+  - note: Externe Inhaltsprüfung von Ein- und Ausgabe (gepuffert), Fehler des Dienstes lehnen ab (failMode closed). Nur mit Angaben beim Anwenden.
+    requires: contentSafety
+    spec:
+      scope: {level: global}
+      plugin: content-safety
+      order: 30
+      failMode: closed
+      timeoutMs: 3000
+      config:
+        provider: azure
+        direction: both
+        outputMode: buffered
+        action: reject

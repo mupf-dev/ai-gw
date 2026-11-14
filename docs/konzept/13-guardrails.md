@@ -360,3 +360,62 @@ Entschieden und umgesetzt (AIGW-69): Ausgabe-Ablehnung mit `content_filter`/`ref
 Admin-API und GitOps (F165), Zwiebelprinzip (F167b), Fehlermodus je Plugin-Art (F148).
 Offen: Persistenz der Zähler im Request-Log (F161, Folgeticket); Satzmodus mit
 `sentenceOnError` statt `failMode` (F163, vorerst so).
+
+## 10. Standard-Profile (AIGW-86)
+
+Vorschläge für den Einstieg, versioniert im Binary (`crates/aigw-admin/profiles/*.yaml`,
+`include_str!`). Ein Profil = Plugin-Bindungs-Specs (Platzhalter-Scope) + Erklärungstext +
+optionale Payload-Logging-Obergrenze. Inhaltliche Änderungen erhöhen `version`.
+
+| Profil | Bindungen | Payload-Logging |
+|---|---|---|
+| **Basis** | `prompt-filter` (Order 10): Injection-Heuristik Schwelle 1,0 → reject, Grenzen 200 Nachrichten / 400 000 Zeichen / 100 000 je Nachricht. `pii` (Order 20): `mask`, `both` für `email`, `phone`, `iban`, `creditCard`, `apiKey`, `urlCredentials` | unverändert |
+| **Streng** | `prompt-filter` (gesperrt): Schwelle 0,8, Grenzen 100 / 200 000 / 50 000. `pii` (gesperrt): `creditCard`, `apiKey`, `urlCredentials` → **reject**; `email`, `phone`, `iban`, `taxIdDe`, `socialSecurityDe`, `idCardDe`, `passportDe` → mask. Optional `content-safety` (Order 30, `direction: both`, `outputMode: buffered`, `failMode: closed`, 3000 ms) – nur mit Angaben beim Anwenden | `payloadModeMax: masked` |
+| **Offen** | `prompt-filter`: nur Grenzen 500 / 1 000 000 / 400 000 | `payloadModeMax: metadata` (kein Inhalt) |
+
+**Admin-API:**
+
+- `GET /admin/api/v1/guardrail-profiles` – Liste mit Inhalt (Lesen wie der Plugin-Katalog).
+- `POST /admin/api/v1/guardrail-profiles/{name}:apply`,
+  Body `{scope: {level, target}, dryRun, contentSafety?, logging?}`. Antwort: `changes[]`
+  (`kind` `plugin-binding`/`organization`/`team`, `action` `create|update|delete|unchanged`,
+  `before`/`after`) und `warnings[]`.
+  - Namen `<profil>-<plugin>-<ebene>[-<ziel>]` (z. B. `streng-pii-team-support`), Labels
+    `aigw.io/guardrail-profile` und `aigw.io/guardrail-profile-version`.
+  - **Idempotent:** gleiche Spec und Labels → `unchanged`, nichts geschrieben. Bindungen mit
+    Profil-Label auf demselben Scope, die nicht zum Profil gehören (anderes Profil, ausgelassenes
+    `content-safety`), werden entfernt – Profilwechsel ersetzt. Eigene Bindungen ohne Label
+    bleiben.
+  - **Rechte/Prüfung wie Plugin-Bindungen:** Schreibrecht auf das Ziel (F183), Registry-Prüfung
+    (`422`), Verweis auf Secret/Zugangsdaten in `contentSafety` nur globaler `admin` (AIGW-58,
+    `403`), `locked` von oben. Audit-Eintrag je geschriebenem Objekt. Unter der Schreibsperre wird
+    vor dem Schreiben neu geplant.
+  - `contentSafety`: erlaubt `provider`, `endpoint`, `secret`, `credential`, `model`,
+    `apiVersion`, `modelGroup`, `thresholds`, `categories`, `promptTemplate`; ohne Angabe
+    wird die Bindung ausgelassen (Hinweis).
+  - **Logging:** Organisation/Team bekommen `payloadModeMax` = Minimum aus bisher und Profil
+    (nur absenken; `payloadMode` darüber wird mit abgesenkt), über die normalen
+    Ressourcen-Abläufe (Grenzprüfung, Audit). Ohne Recht (Organisation: `admin`; Team: `admin`/
+    `org-admin`, S-09) sowie auf `global`/`api-key`/`model-group`: Hinweis statt Änderung. Das
+    Logging wird vor den Bindungen geschrieben – schlägt es fehl, ist nichts geändert.
+  - Im Modus „nur YAML“ wie alle Schreibwege gesperrt (auch Dry-Run, da `POST`).
+
+**Azure AI Content Safety mit Entra ID / Managed Identity:** `content-safety` mit
+`provider: azure` kann das **noch nicht** – es authentifiziert nur per
+`Ocp-Apim-Subscription-Key` aus einem Secret. **Folgepunkt:** `PluginHost` um ein Entra-Token
+(Scope `https://cognitiveservices.azure.com/.default`, Token-Quelle aus AIGW-82) erweitern und
+`auth: entraId` in `content-safety` erlauben. Bis dahin ohne API-Key: `provider: model` mit einer
+Modellgruppe, deren Deployment über Foundry per Managed Identity läuft (z. B. ein Llama-Guard-
+oder anderes Prüfmodell) – Routing, Retries und Entra-Auth übernimmt dann das Gateway.
+
+**Befunde aus dem Live-Test (AIGW-86):**
+
+- `pii` (`mask`, `both`) mit Claude über `anthropic`, Nicht-Stream, OpenAI-Format lieferte
+  `content: null`: **kein PII-Fehler** – mit `max_tokens: 60` hat das Modell alle Tokens für
+  (nicht ausgegebenes) Thinking verbraucht (`finish_reason: length`). Mit mehr Tokens kommt
+  „Meine Mail ist [EMAIL_1], meine IBAN ist [IBAN_1].“ Angepasst: ohne Text/Tool-Aufrufe ist
+  `content` jetzt `""` wie bei OpenAI (Test
+  `anthropic_thinking_only_max_tokens_gives_empty_openai_content`).
+- Exakter Cache meldete `bypass`: Anfragen ohne `temperature: 0` (siehe
+  [14-cache.md](14-cache.md), neuer Header `x-aigw-cache-reason: temperature`); mit `pii` +
+  `prompt-filter` und `temperature: 0` trifft der Cache.

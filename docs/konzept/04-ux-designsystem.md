@@ -331,6 +331,15 @@ setzen/entfernen, Werte nie lesbar), Löschen (409 nennt Verweise). `/mcp`: MCP-
 `/guardrails`: Plugin-Bindungen aller Ebenen mit Formular für die Steuerfelder (`inherit`, `locked`, `failMode`,
 `timeoutMs`, `outputRejectMode`, F117) und die Plugin-Konfiguration als JSON.
 
+**Guardrail-Profile (AIGW-86).** Dritter Reiter *Profile* (`/guardrails?tab=profiles`): je Standard-Profil
+(Basis, Streng, Offen) eine Karte mit Kurzbeschreibung, Erklärungstext, Version, den Bindungen (Plugin, Reihenfolge,
+gesperrt, optional, Erklärung), der Payload-Logging-Obergrenze und einer aufklappbaren Vorschau der Specs.
+„Anwenden auf …“ öffnet einen Dialog mit Ebene + Ziel, bei „Streng“ optional der externen Inhaltsprüfung (Azure,
+OpenAI, Prüfmodell über eine Modellgruppe) und dem Schalter für die Logging-Obergrenze. Erst „Diff anzeigen“
+(Dry-Run: neu/ändern/entfernen/unverändert, Hinweise), dann „Anwenden (n)“; jede Eingabe verwirft den Diff. Ist keine
+Guardrail-Bindung (`pii`, `prompt-filter`, `content-safety`) aktiv, zeigen Übersicht und `/guardrails` einen Hinweis
+mit Link zu den Profilen.
+
 **Editoren (AIGW-52).** `/guardrails` hat zwei Reiter. *Bindungen*: Formular mit strukturierten Feldern je Plugin
 (F214) für `pii` (Standardaktion/-richtung, „alle Kategorien“ oder Auswahl je Kategorie mit Aktion/Richtung,
 Allowlist, Entropie, Stream-Fenster), `prompt-filter` (Rollen, Wortliste, Regex-Regeln, Injection, Grenzen),
@@ -402,7 +411,7 @@ eingebunden). uPlot bleibt für einfache Zeitreihen.
 | Teams & Nutzer | `/teams`, `/teams/{name}`, `/organizations/{name}` | Organisationen, Teams (Detailseiten), Nutzer, Rollen, Einladungen | **echt** |
 | Admin-API-Keys | `/admin-keys` | Zugänge für Automatisierung mit Rollen und Ablauf | **echt** |
 | Limits & Budgets | `/limits` | Budgetverbrauch je Org/Team/Key, Hinweise zu ungenauen Limits; Prognose folgt | **echt** (Budgets) |
-| Guardrails & Plugins | `/guardrails` | Plugin-Bindungen je Ebene mit Steuerfeldern, wirksamem Fehlermodus, Formularen je Plugin, Testlauf und Kettenvorschau | **echt** (AIGW-52) |
+| Guardrails & Plugins | `/guardrails` | Plugin-Bindungen je Ebene mit Steuerfeldern, wirksamem Fehlermodus, Formularen je Plugin, Testlauf und Kettenvorschau; Standard-Profile mit Diff und Anwenden | **echt** (AIGW-52, AIGW-86) |
 | Cache | `/cache` | Exakt/semantisch, Trefferquote, Ersparnis, TTL-Regeln, Vektorindex, gezieltes Leeren | geplant |
 | MCP-Server | `/mcp` | MCP-Server registrieren/bearbeiten (Anmeldung per Secret-Verweis), Verbindungszustand, Freigaben je Team/Key mit Tool-Mustern | **echt** (AIGW-52) |
 | Logs | `/logs` | Request-Explorer mit Filtern, Detail-Sheet (Versuche, Guardrails, Trace-Link, Payload) | **echt** (AIGW-77) |

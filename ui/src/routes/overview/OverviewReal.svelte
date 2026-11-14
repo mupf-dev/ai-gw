@@ -6,7 +6,7 @@
   // Anbieter-Anteile, Fehler nach Klasse (F47), letzte Fehler aus dem Log-Explorer, Gateway-Info.
   import { Tabs, ToggleGroup } from 'bits-ui';
   import { amount, lastHours, requestLogs, summary, timeseries, top, type Dimension, type Kpi, type Metric } from '../../lib/api/observe';
-  import { providerLabel } from '../../lib/api/resources';
+  import { GUARDRAIL_PLUGINS, pluginBindingsRes, providerLabel } from '../../lib/api/resources';
   import AsyncState from '../../lib/admin/AsyncState.svelte';
   import { Loader } from '../../lib/admin/errors.svelte';
   import { RANGES, type RangeId } from '../../lib/admin/UsagePanel.svelte';
@@ -45,6 +45,10 @@
     ]);
     return { s, models, providers, errorsByClass, recent: recent.items };
   });
+  // AIGW-86: Hinweis, wenn keine Guardrail-Bindung aktiv ist (Fehler, z. B. fehlende Leserechte: kein Hinweis).
+  const guarded = new Loader(async () =>
+    (await pluginBindingsRes.list().catch(() => null))?.some((b) => b.spec.enabled !== false && GUARDRAIL_PLUGINS.includes(b.spec.plugin)) ?? true,
+  );
   const series = new Loader(() => timeseries(metric, rng(), scope()));
   const tree = new Loader(() => top(treeBy, rng(), scope(), { metric: 'cost', limit: 12 }));
   let first = true;
@@ -115,6 +119,13 @@
     </ToggleGroup.Root>
   {/snippet}
 </PageHeader>
+
+{#if guarded.data === false}
+  <p class="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-warning-fg/30 bg-warning-bg px-3 py-2 text-sm text-warning-fg" role="status" data-testid="no-guardrails">
+    Keine Guardrails aktiv – PII, Geheimnisse und Prompt-Injection werden nicht geprüft.
+    <a class="font-medium underline" href={href('/guardrails?tab=profiles')}>Standard-Profil anwenden</a>
+  </p>
+{/if}
 
 <AsyncState loader={base}>
   {#snippet children({ s, models, providers, errorsByClass, recent })}

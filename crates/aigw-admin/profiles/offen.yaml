@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Guardrail-Profil „Offen“ (AIGW-86). Im Binary eingebettet; Änderungen am Inhalt erhöhen
+# `version`.
+name: offen
+version: 1
+title: Offen
+summary: Nur Größenlimits, keine Inhaltsprüfung; Payload-Logging ohne Inhalt.
+description: |
+  Für Entwicklung, Tests und Teams, die Inhalte bewusst unverändert brauchen (z. B. Arbeit mit
+  synthetischen Testdaten). Es werden keine Inhalte geprüft oder verändert – nur großzügige
+  Größenlimits schützen vor versehentlich riesigen Anfragen. Damit keine Inhalte im Log landen,
+  wird Payload-Logging auf „metadata“ begrenzt (Größen und Header-Namen, kein Inhalt).
+  Bindungen äußerer Ebenen (z. B. ein globales Profil) gelten weiter.
+logging:
+  payloadModeMax: metadata
+bindings:
+  - note: Nur Größenlimits (Nachrichten, Zeichen gesamt und je Nachricht); keine Inhaltsprüfung.
+    spec:
+      scope: {level: global}
+      plugin: prompt-filter
+      order: 10
+      config:
+        action: reject
+        limits: {maxMessages: 500, maxChars: 1000000, maxMessageChars: 400000, action: reject}

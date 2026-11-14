@@ -329,6 +329,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/guardrail-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Liste der Standard-Guardrail-Profile mit ihren Bindungen. */
+        get: operations["list_guardrail_profiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/guardrail-profiles/{name}:apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Wendet ein Profil auf einen Scope an (bzw. zeigt mit `dryRun` den Diff). */
+        post: operations["apply_guardrail_profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/mcp-grants": {
         parameters: {
             query?: never;
@@ -1567,6 +1601,80 @@ export interface components {
             /** @description Geheimer Wert: nur „geändert“, nie der Inhalt. */
             secret?: boolean;
         };
+        /** @description Standard-Guardrail-Profil (eingebettet, versioniert). */
+        GuardrailProfile: {
+            /** @description Bindungen des Profils. */
+            bindings: components["schemas"]["GuardrailProfileBinding"][];
+            /** @description Erklärungstext. */
+            description: string;
+            logging?: components["schemas"]["GuardrailProfileLogging"] | null;
+            /** @description Name (Präfix der Bindungsnamen), z. B. `basis`. */
+            name: string;
+            /** @description Kurzbeschreibung (eine Zeile). */
+            summary: string;
+            /** @description Anzeigename. */
+            title: string;
+            /**
+             * Format: int32
+             * @description Version des Profilinhalts.
+             */
+            version: number;
+        };
+        /** @description Anfrage an `POST /guardrail-profiles/{name}:apply`. */
+        GuardrailProfileApply: {
+            /**
+             * @description Angaben für `content-safety` (Profil „Streng“): `provider`, `endpoint`, `secret` bzw.
+             *     `credential`, `modelGroup`, `apiVersion`, `model`, `thresholds`, `categories`,
+             *     `promptTemplate`. Ohne Angabe wird die Bindung ausgelassen.
+             */
+            contentSafety?: Record<string, never> | null;
+            /** @description Nur Diff berechnen, nichts schreiben. */
+            dryRun?: boolean;
+            /** @description Payload-Logging-Empfehlung anwenden (Standard `true`). */
+            logging?: boolean | null;
+            /** @description Ziel-Scope (`global` ohne `target`). */
+            scope: components["schemas"]["Scope"];
+        };
+        /** @description Ergebnis von `POST /guardrail-profiles/{name}:apply`. */
+        GuardrailProfileApplyResult: {
+            /** @description Änderungen (auch unveränderte Bindungen). */
+            changes: components["schemas"]["ProfileChange"][];
+            /** @description Nur Diff (nichts geschrieben)? */
+            dryRun: boolean;
+            /** @description Profil. */
+            profile: string;
+            /** @description Ziel-Scope. */
+            scope: components["schemas"]["Scope"];
+            /**
+             * Format: int32
+             * @description Angewendete Version.
+             */
+            version: number;
+            /** @description Hinweise (ausgelassene Bindungen, Logging nicht anwendbar …). */
+            warnings: string[];
+        };
+        /** @description Eine Bindung eines Profils. */
+        GuardrailProfileBinding: {
+            /** @description Erklärung der Bindung. */
+            note: string;
+            /**
+             * @description Benötigte Angabe beim Anwenden (`contentSafety`); fehlt sie, wird die Bindung
+             *     ausgelassen (Hinweis in `warnings`).
+             */
+            requires?: string | null;
+            /** @description Spezifikation der Bindung (Scope ist ein Platzhalter; beim Anwenden ersetzt). */
+            spec: components["schemas"]["PluginBindingSpec"];
+        };
+        /** @description Antwort von `GET /guardrail-profiles`. */
+        GuardrailProfileList: {
+            /** @description Profile (Reihenfolge: Basis, Streng, Offen). */
+            items: components["schemas"]["GuardrailProfile"][];
+        };
+        /** @description Payload-Logging-Empfehlung eines Profils. */
+        GuardrailProfileLogging: {
+            /** @description Obergrenze für `payloadMode` (Organisation/Team: `payloadModeMax`). */
+            payloadModeMax: components["schemas"]["PayloadMode"];
+        };
         /**
          * @description Erkennungen eines Guardrail-Plugins in einer Anfrage (Spalte `request_log.guardrails`,
          *     JSON-Array; F161).
@@ -2213,6 +2321,26 @@ export interface components {
              */
             violations?: components["schemas"]["Violation"][] | null;
         };
+        /** @description Eine Änderung im Diff. */
+        ProfileChange: {
+            /** @description Änderung. */
+            action: components["schemas"]["ProfileChangeAction"];
+            /** @description Neuer Stand. */
+            after?: Record<string, never> | null;
+            /** @description Bisheriger Stand (Bindung: Spec; Organisation/Team: Payload-Felder). */
+            before?: Record<string, never> | null;
+            /** @description Art des Objekts: `plugin-binding`, `organization` oder `team`. */
+            kind: string;
+            /** @description Name des Objekts. */
+            name: string;
+            /** @description Plugin (nur Bindungen). */
+            plugin?: string | null;
+        };
+        /**
+         * @description Art einer Änderung.
+         * @enum {string}
+         */
+        ProfileChangeAction: "create" | "update" | "delete" | "unchanged";
         /** @description Zugangsdaten (gelesen) – **ohne** Werte. */
         ProviderCredential: {
             /**
@@ -4730,6 +4858,116 @@ export interface operations {
             };
             /** @description If-Match fehlt (F38) */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_guardrail_profiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Profile */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuardrailProfileList"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    apply_guardrail_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Profil (`basis`, `streng`, `offen`) */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GuardrailProfileApply"];
+            };
+        };
+        responses: {
+            /** @description Diff bzw. angewendete Änderungen */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuardrailProfileApplyResult"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Profil unbekannt */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültiger Scope oder ungültige Bindung */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

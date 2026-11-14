@@ -122,6 +122,11 @@ struct Setup {
 }
 
 async fn setup(policy: Option<Value>, semantic: bool) -> Setup {
+    setup_with(policy, semantic, Vec::new()).await
+}
+
+/// Wie [`setup`], mit weiteren Plugins vor `cache` (z. B. `pii`, `prompt-filter`).
+async fn setup_with(policy: Option<Value>, semantic: bool, extra: Vec<Arc<Entry>>) -> Setup {
     let upstream = Arc::new(Counting {
         mock: Arc::new(MockProvider::new()),
         calls: AtomicUsize::new(0),
@@ -139,13 +144,14 @@ async fn setup(policy: Option<Value>, semantic: bool) -> Setup {
     if semantic {
         cache.set_embedder(Arc::new(WordEmbedder));
     }
-    let chain = match policy {
-        Some(p) => Chain::new(vec![Arc::new(Entry::new(
+    let mut entries = extra;
+    if let Some(p) = policy {
+        entries.push(Arc::new(Entry::new(
             "cache",
             builtin::cache::Factory.build(&p).unwrap(),
-        ))]),
-        None => Chain::new(Vec::new()),
-    };
+        )));
+    }
+    let chain = Chain::new(entries);
     let records = Arc::new(Records::default());
     let state = ProxyState {
         plugins: Arc::new(PluginChains::fixed(chain)),
@@ -183,6 +189,12 @@ struct Resp {
 impl Resp {
     fn cache(&self) -> Option<&str> {
         self.headers.get(CACHE_HEADER).and_then(|v| v.to_str().ok())
+    }
+
+    fn cache_reason(&self) -> Option<&str> {
+        self.headers
+            .get(aigw_proxy::CACHE_REASON_HEADER)
+            .and_then(|v| v.to_str().ok())
     }
 
     fn json(&self) -> Value {
@@ -453,8 +465,16 @@ async fn temperature_and_client_control() {
     for _ in 0..2 {
         let r = post(s.addr, "/v1/chat/completions", &[], hot.clone()).await;
         assert_eq!(r.cache(), Some("bypass"));
+        assert_eq!(r.cache_reason(), Some("temperature"));
     }
     assert_eq!(s.calls(), 2);
+    // Ohne Angabe (Anbieter-Standard > 0) ebenso – Ursache der „bypass“-Meldung im Live-Test.
+    let mut unset = openai("ohne", false);
+    unset.as_object_mut().unwrap().remove("temperature");
+    let r = post(s.addr, "/v1/chat/completions", &[], unset).await;
+    assert_eq!(r.cache(), Some("bypass"));
+    assert_eq!(r.cache_reason(), Some("temperature"));
+    assert_eq!(s.calls(), 3);
     assert_eq!(s.records.last().cache, Some(CacheOutcome::Bypass));
 
     // no-cache: nicht nachschlagen, aber speichern.
@@ -466,6 +486,7 @@ async fn temperature_and_client_control() {
     )
     .await;
     assert_eq!(r.cache(), Some("bypass"));
+    assert_eq!(r.cache_reason(), Some("client"));
     let r = post(
         s.addr,
         "/v1/chat/completions",
@@ -474,10 +495,11 @@ async fn temperature_and_client_control() {
     )
     .await;
     assert_eq!(r.cache(), Some("bypass"));
-    assert_eq!(s.calls(), 4);
+    assert_eq!(s.calls(), 5);
     let r = post(s.addr, "/v1/chat/completions", &[], openai("frisch", false)).await;
     assert_eq!(r.cache(), Some("hit-exact"));
-    assert_eq!(s.calls(), 4);
+    assert_eq!(r.cache_reason(), None);
+    assert_eq!(s.calls(), 5);
 
     // no-store: nachschlagen, nicht speichern.
     let r = post(
@@ -490,7 +512,7 @@ async fn temperature_and_client_control() {
     assert_eq!(r.cache(), Some("miss"));
     let r = post(s.addr, "/v1/chat/completions", &[], openai("geheim", false)).await;
     assert_eq!(r.cache(), Some("miss"));
-    assert_eq!(s.calls(), 6);
+    assert_eq!(s.calls(), 7);
 
     // x-aigw-cache-ttl: 0 → nicht speichern.
     post(
@@ -662,4 +684,38 @@ async fn routed_embedder_uses_internal_routing() {
     assert_eq!(a, b, "deterministisch");
     // Fehler des Upstreams (nach Retries) kommen als Fehler zurück (im Cache: Miss).
     assert!(e.embed("mock-error", "x").await.is_err());
+}
+
+/// AIGW-86: Exakter Cache zusammen mit `pii` (mask, beide Richtungen) und `prompt-filter`:
+/// Der Schlüssel entsteht aus der bereits maskierten Anfrage (stabil nummerierte
+/// Platzhalter) – zwei identische Anfragen mit `temperature: 0` treffen.
+#[tokio::test]
+async fn exact_cache_works_with_pii_and_prompt_filter() {
+    let pii = Arc::new(Entry::new(
+        "pii",
+        builtin::pii::Factory
+            .build(&json!({"action": "mask", "direction": "both"}))
+            .unwrap(),
+    ));
+    let pf = Arc::new(Entry::new(
+        "prompt-filter",
+        builtin::prompt_filter::Factory
+            .build(&json!({"injection": {"action": "reject"}}))
+            .unwrap(),
+    ));
+    let s = setup_with(
+        Some(json!({"mode": "exact", "scope": "team", "ttlSecs": 600})),
+        false,
+        vec![pf, pii],
+    )
+    .await;
+    let q = openai("Meine Mail ist max.mustermann@firma.de", false);
+    let a = post(s.addr, "/v1/chat/completions", &[], q.clone()).await;
+    assert_eq!(a.status, StatusCode::OK);
+    assert_eq!(a.cache(), Some("miss"));
+    settle().await;
+    let b = post(s.addr, "/v1/chat/completions", &[], q).await;
+    assert_eq!(b.cache(), Some("hit-exact"));
+    assert_eq!(s.calls(), 1);
+    assert!(!openai_text(&b.json()).contains("max.mustermann"));
 }

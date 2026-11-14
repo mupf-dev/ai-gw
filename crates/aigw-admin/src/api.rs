@@ -50,6 +50,8 @@ use crate::{admin_keys as ak, session as s};
         pb::list_plugin_bindings, pb::create_plugin_binding, pb::get_plugin_binding,
         pb::put_plugin_binding, pb::delete_plugin_binding,
         crate::plugins::plugin_catalog, crate::plugins::test_plugin,
+        crate::guardrail_profiles::list_guardrail_profiles,
+        crate::guardrail_profiles::apply_guardrail_profile,
         crate::gitops::export_config, crate::gitops::apply_config,
         s::login, s::callback, s::logout, s::session_info, s::auth_info,
         s::create_invitation, s::get_invitation, s::delete_invitation,
@@ -80,6 +82,7 @@ use crate::{admin_keys as ak, session as s};
         (name = "mcp-servers", description = "Upstream-MCP-Server des MCP-Gateways"),
         (name = "mcp-grants", description = "Freigaben von MCP-Servern und -Tools für Teams und API-Keys"),
         (name = "plugin-bindings", description = "Plugin-Kette: Bindungen je Ebene (Guardrails, Webhooks, Header …) mit wirksamem Fehlermodus"),
+        (name = "guardrail-profiles", description = "Standard-Guardrail-Profile (Basis, Streng, Offen) als Vorschläge: Inhalt ansehen, Diff berechnen, auf einen Scope anwenden"),
         (name = "gitops", description = "YAML-Export und -Apply aller Ressourcen (aigw/v1alpha1)"),
         (name = "auth", description = "Anmeldung: OIDC-Login, Session, Abmeldung"),
         (name = "admin-api-keys", description = "Admin-API-Keys für Automatisierung"),
@@ -264,6 +267,8 @@ mod tests {
             "/admin/api/v1/plugin-bindings/{name}",
             "/admin/api/v1/playground/chat",
             "/admin/api/v1/playground/models",
+            "/admin/api/v1/guardrail-profiles",
+            "/admin/api/v1/guardrail-profiles/{name}:apply",
         ] {
             assert!(json["paths"][p].is_object(), "Pfad {p} fehlt");
         }
@@ -286,6 +291,8 @@ mod tests {
             "McpGrantList",
             "PluginBindingList",
             "EffectivePluginControl",
+            "GuardrailProfileList",
+            "GuardrailProfileApplyResult",
         ] {
             assert!(
                 json["components"]["schemas"][s].is_object(),

@@ -15,9 +15,22 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   `tenantId`+`clientId`+`clientSecret`/`clientCertificate` für `anthropic`; Beispiel
   `config/examples/providers/resources-azure-foundry.yaml` (GPT + Claude, benutzerzugewiesene
   Managed Identity in Azure Container Apps).
+- **Standard-Guardrail-Profile (AIGW-86):** „Basis“, „Streng“, „Offen“ versioniert im Binary
+  (`crates/aigw-admin/profiles/*.yaml`); `GET /admin/api/v1/guardrail-profiles`,
+  `POST /admin/api/v1/guardrail-profiles/{name}:apply` mit Ziel-Scope, Dry-Run-Diff, idempotent,
+  Profilwechsel ersetzt Bindungen des alten Profils, Audit je Objekt, Rechte wie
+  Plugin-Bindungen; Payload-Logging-Obergrenze an Organisation/Team. UI: Reiter „Profile“ auf
+  `/guardrails`, Hinweis ohne aktive Guardrails in Übersicht und Guardrails-Seite.
+- Antwort-Header `x-aigw-cache-reason` (`temperature` | `client`) bei `x-aigw-cache: bypass`.
 - Doku und Tests: Managed Identity in Azure Container Apps (`IDENTITY_ENDPOINT`/
   `IDENTITY_HEADER`, benutzerzugewiesen), Postgres mit TLS (`sslmode=require`/`verify-full`,
   eingebettete Wurzeln für Azure Database for PostgreSQL).
+
+### Geändert
+
+- OpenAI-Antworten ohne Text, Ablehnung und Tool-Aufrufe (z. B. Claude hat `max_tokens`
+  komplett für Thinking verbraucht, `finish_reason: length`) haben `content: ""` statt `null`
+  – wie OpenAI selbst (AIGW-86).
 
 ## [0.1.0] – MVP – Datum offen
 

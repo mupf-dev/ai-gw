@@ -1126,6 +1126,12 @@ pub fn response_to_wire_with(
             if let Some(r) = reasoning {
                 extra.insert("reasoning_content".into(), Value::String(r));
             }
+            // Wie OpenAI selbst (z. B. Reasoning-Modelle bei `finish_reason: length`, wenn das
+            // Thinking alle Tokens verbraucht hat): ohne Text, Ablehnung und Tool-Aufrufe ist
+            // `content` ein leerer String, nicht `null` (AIGW-86).
+            if text.is_none() && refusal.is_none() && tool_calls.is_empty() {
+                text = Some(String::new());
+            }
             CompletionChoice {
                 index: c.index,
                 message: ResponseMessage {

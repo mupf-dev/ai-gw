@@ -233,8 +233,23 @@ fn respect_secret_refs(p: &Principal, spec: &PluginBindingSpec) -> Result<(), Pr
     Ok(())
 }
 
+/// Schreibrechte für eine Bindung wie bei `POST/PUT /plugin-bindings`: Ziel der Ebene (F183),
+/// Secret-Verweise (AIGW-58), `locked` von oben. Auch für Guardrail-Profile (AIGW-86).
+pub(crate) async fn authorize_write(
+    st: &AdminState,
+    p: &Principal,
+    spec: &PluginBindingSpec,
+) -> Result<(), Problem> {
+    p.require_on(Permission::Write, &binding_target(st, spec).await?)?;
+    respect_secret_refs(p, spec)?;
+    respect_locked(st, p, spec).await
+}
+
 /// RBAC-Ziel einer Bindung je Ebene (F183). Unbekanntes Ziel → `422`.
-async fn binding_target(st: &AdminState, spec: &PluginBindingSpec) -> Result<Target, Problem> {
+pub(crate) async fn binding_target(
+    st: &AdminState,
+    spec: &PluginBindingSpec,
+) -> Result<Target, Problem> {
     let name = || {
         spec.scope
             .target

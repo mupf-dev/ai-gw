@@ -267,6 +267,25 @@ fn anthropic_response_to_openai_and_back() {
     assert_eq!(back["usage"]["cache_read_input_tokens"], 100);
 }
 
+/// AIGW-86 (Live-Test): Claude verbraucht `max_tokens` komplett für Thinking – die Antwort
+/// enthält nur einen Thinking-Block. OpenAI-Clients bekommen dann wie bei OpenAI selbst
+/// `content: ""` (nicht `null`) mit `finish_reason: length`.
+#[test]
+fn anthropic_thinking_only_max_tokens_gives_empty_openai_content() {
+    let body = json!({
+        "id": "msg_1", "type": "message", "role": "assistant", "model": "claude-haiku-5-5",
+        "content": [{"type": "thinking", "thinking": "Ich überlege …", "signature": "sig"}],
+        "stop_reason": "max_tokens", "stop_sequence": null,
+        "usage": {"input_tokens": 40, "output_tokens": 60}
+    });
+    let ir = anthropic::decode_response(&serde_json::to_vec(&body).unwrap()).unwrap();
+    let mut losses = Losses::new();
+    let v = as_json(&openai::encode_response_with(ir, false, &mut losses).unwrap());
+    assert_eq!(v["choices"][0]["finish_reason"], "length");
+    assert_eq!(v["choices"][0]["message"]["content"], "");
+    assert!(v["choices"][0]["message"].get("tool_calls").is_none());
+}
+
 #[test]
 fn openai_response_to_anthropic() {
     let ir = openai::decode_response(&fixture("openai/response_tool_calls.json")).unwrap();

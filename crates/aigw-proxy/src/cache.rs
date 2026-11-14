@@ -45,6 +45,9 @@ use crate::provider::EventStream;
 pub const CACHE_HEADER: &str = "x-aigw-cache";
 /// Anfrage-Header: TTL (Sekunden) für das Speichern dieser Antwort.
 pub const CACHE_TTL_HEADER: &str = "x-aigw-cache-ttl";
+/// Antwort-Header: Grund für `x-aigw-cache: bypass` (`temperature` = Anfrage ohne
+/// `temperature: 0` bei `cacheNonZeroTemperature: false`, `client` = Client-Steuerung).
+pub const CACHE_REASON_HEADER: &str = "x-aigw-cache-reason";
 
 /// Client-Steuerung aus den Anfrage-Headern.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -216,6 +219,8 @@ pub(crate) struct CacheStep {
     policy: Arc<CachePolicy>,
     outcome: CacheOutcome,
     hit: Option<ChatResponse>,
+    /// Grund bei `bypass` (Header `x-aigw-cache-reason`).
+    reason: Option<&'static str>,
     /// Zum Speichern (nur bei Miss bzw. `no-cache`, wenn Speichern erlaubt).
     ticket: Option<StoreTicket>,
     ttl: Duration,
@@ -252,10 +257,16 @@ impl CacheStep {
             policy: Arc::clone(&policy),
             outcome: CacheOutcome::Bypass,
             hit: None,
+            reason: None,
             ticket: None,
             ttl: Duration::from_secs(ttl_secs),
         };
         if !cacheable_request(req, &policy) || (ctl.no_cache && !may_store) {
+            step.reason = Some(if cacheable_request(req, &policy) {
+                "client"
+            } else {
+                "temperature"
+            });
             cache.metrics().lookup(CacheOutcome::Bypass);
             return Some(step);
         }
@@ -294,6 +305,7 @@ impl CacheStep {
             }
             Lookup::Miss(ticket) => {
                 step.outcome = if ctl.no_cache {
+                    step.reason = Some("client");
                     CacheOutcome::Bypass
                 } else {
                     CacheOutcome::Miss
@@ -312,6 +324,11 @@ impl CacheStep {
     /// Ergebnis für Header und Request-Log.
     pub(crate) fn outcome(&self) -> CacheOutcome {
         self.outcome
+    }
+
+    /// Grund bei `bypass` (`temperature` | `client`).
+    pub(crate) fn reason(&self) -> Option<&'static str> {
+        self.reason
     }
 
     /// Treffer entnehmen.

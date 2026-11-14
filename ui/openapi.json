@@ -3013,6 +3013,155 @@
         ]
       }
     },
+    "/admin/api/v1/guardrail-profiles": {
+      "get": {
+        "tags": [
+          "guardrail-profiles"
+        ],
+        "summary": "Liste der Standard-Guardrail-Profile mit ihren Bindungen.",
+        "operationId": "list_guardrail_profiles",
+        "responses": {
+          "200": {
+            "description": "Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailProfileList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/guardrail-profiles/{name}:apply": {
+      "post": {
+        "tags": [
+          "guardrail-profiles"
+        ],
+        "summary": "Wendet ein Profil auf einen Scope an (bzw. zeigt mit `dryRun` den Diff).",
+        "operationId": "apply_guardrail_profile",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Profil (`basis`, `streng`, `offen`)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailProfileApply"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Diff bzw. angewendete Änderungen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailProfileApplyResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Profil unbekannt",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültiger Scope oder ungültige Bindung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/mcp-grants": {
       "get": {
         "tags": [
@@ -11400,6 +11549,195 @@
           }
         }
       },
+      "GuardrailProfile": {
+        "type": "object",
+        "description": "Standard-Guardrail-Profil (eingebettet, versioniert).",
+        "required": [
+          "name",
+          "version",
+          "title",
+          "summary",
+          "description",
+          "bindings"
+        ],
+        "properties": {
+          "bindings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailProfileBinding"
+            },
+            "description": "Bindungen des Profils."
+          },
+          "description": {
+            "type": "string",
+            "description": "Erklärungstext."
+          },
+          "logging": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GuardrailProfileLogging",
+                "description": "Payload-Logging-Empfehlung."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Name (Präfix der Bindungsnamen), z. B. `basis`."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Kurzbeschreibung (eine Zeile)."
+          },
+          "title": {
+            "type": "string",
+            "description": "Anzeigename."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Version des Profilinhalts.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "GuardrailProfileApply": {
+        "type": "object",
+        "description": "Anfrage an `POST /guardrail-profiles/{name}:apply`.",
+        "required": [
+          "scope"
+        ],
+        "properties": {
+          "contentSafety": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Angaben für `content-safety` (Profil „Streng“): `provider`, `endpoint`, `secret` bzw.\n`credential`, `modelGroup`, `apiVersion`, `model`, `thresholds`, `categories`,\n`promptTemplate`. Ohne Angabe wird die Bindung ausgelassen."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Nur Diff berechnen, nichts schreiben."
+          },
+          "logging": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Payload-Logging-Empfehlung anwenden (Standard `true`)."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/Scope",
+            "description": "Ziel-Scope (`global` ohne `target`)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "GuardrailProfileApplyResult": {
+        "type": "object",
+        "description": "Ergebnis von `POST /guardrail-profiles/{name}:apply`.",
+        "required": [
+          "profile",
+          "version",
+          "scope",
+          "dryRun",
+          "changes",
+          "warnings"
+        ],
+        "properties": {
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProfileChange"
+            },
+            "description": "Änderungen (auch unveränderte Bindungen)."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Nur Diff (nichts geschrieben)?"
+          },
+          "profile": {
+            "type": "string",
+            "description": "Profil."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/Scope",
+            "description": "Ziel-Scope."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Angewendete Version.",
+            "minimum": 0
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Hinweise (ausgelassene Bindungen, Logging nicht anwendbar …)."
+          }
+        }
+      },
+      "GuardrailProfileBinding": {
+        "type": "object",
+        "description": "Eine Bindung eines Profils.",
+        "required": [
+          "note",
+          "spec"
+        ],
+        "properties": {
+          "note": {
+            "type": "string",
+            "description": "Erklärung der Bindung."
+          },
+          "requires": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Benötigte Angabe beim Anwenden (`contentSafety`); fehlt sie, wird die Bindung\nausgelassen (Hinweis in `warnings`)."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/PluginBindingSpec",
+            "description": "Spezifikation der Bindung (Scope ist ein Platzhalter; beim Anwenden ersetzt)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "GuardrailProfileList": {
+        "type": "object",
+        "description": "Antwort von `GET /guardrail-profiles`.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailProfile"
+            },
+            "description": "Profile (Reihenfolge: Basis, Streng, Offen)."
+          }
+        }
+      },
+      "GuardrailProfileLogging": {
+        "type": "object",
+        "description": "Payload-Logging-Empfehlung eines Profils.",
+        "required": [
+          "payloadModeMax"
+        ],
+        "properties": {
+          "payloadModeMax": {
+            "$ref": "#/components/schemas/PayloadMode",
+            "description": "Obergrenze für `payloadMode` (Organisation/Team: `payloadModeMax`)."
+          }
+        },
+        "additionalProperties": false
+      },
       "GuardrailRow": {
         "type": "object",
         "description": "Erkennungen eines Guardrail-Plugins in einer Anfrage (Spalte `request_log.guardrails`,\nJSON-Array; F161).",
@@ -13024,6 +13362,60 @@
             "description": "Einzelne Grenzverstöße (AIGW-67: `422` beim Objekt selbst, `409` bei betroffenen\nbestehenden Keys/Teams); fehlt sonst. Geboxt, damit `Result<_, Problem>` klein bleibt."
           }
         }
+      },
+      "ProfileChange": {
+        "type": "object",
+        "description": "Eine Änderung im Diff.",
+        "required": [
+          "kind",
+          "name",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ProfileChangeAction",
+            "description": "Änderung."
+          },
+          "after": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Neuer Stand."
+          },
+          "before": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Bisheriger Stand (Bindung: Spec; Organisation/Team: Payload-Felder)."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Art des Objekts: `plugin-binding`, `organization` oder `team`."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name des Objekts."
+          },
+          "plugin": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Plugin (nur Bindungen)."
+          }
+        }
+      },
+      "ProfileChangeAction": {
+        "type": "string",
+        "description": "Art einer Änderung.",
+        "enum": [
+          "create",
+          "update",
+          "delete",
+          "unchanged"
+        ]
       },
       "ProviderCredential": {
         "type": "object",
@@ -14769,6 +15161,10 @@
     {
       "name": "plugin-bindings",
       "description": "Plugin-Kette: Bindungen je Ebene (Guardrails, Webhooks, Header …) mit wirksamem Fehlermodus"
+    },
+    {
+      "name": "guardrail-profiles",
+      "description": "Standard-Guardrail-Profile (Basis, Streng, Offen) als Vorschläge: Inhalt ansehen, Diff berechnen, auf einen Scope anwenden"
     },
     {
       "name": "gitops",

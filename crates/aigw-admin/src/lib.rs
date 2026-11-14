@@ -15,6 +15,8 @@
 //! - `/admin/api/v1/plugin-bindings` – Plugin-Kette, geprüft mit der Plugin-Registry
 //!   ([`plugin_bindings`], AIGW-69); `/admin/api/v1/plugins` und
 //!   `/admin/api/v1/plugin-bindings:test` – Katalog und Testlauf für die Editoren ([`plugins`], AIGW-52)
+//! - `/admin/api/v1/guardrail-profiles` – Standard-Guardrail-Profile anwenden
+//!   ([`guardrail_profiles`], AIGW-86)
 //! - `/admin/api/v1/admin-api-keys` – Admin-API-Keys ([`admin_keys`]),
 //!   `/admin/api/v1/session` – angemeldeter Principal
 //! - `/admin/api/v1/audit-log` – Audit-Log lesen und exportieren ([`audit`])
@@ -35,6 +37,7 @@ pub mod bounds;
 pub mod credentials;
 pub mod deployments;
 pub mod gitops;
+pub mod guardrail_profiles;
 pub mod mcp;
 pub mod mcp_status;
 pub mod oidc;
@@ -288,6 +291,7 @@ pub fn router_with(state: AdminState) -> Router {
         .merge(mcp::router())
         .merge(plugin_bindings::router())
         .merge(plugins::router())
+        .merge(guardrail_profiles::router())
         .merge(admin_keys::router())
         .merge(audit::router())
         .merge(session::protected_router())

@@ -8,20 +8,23 @@
   // AIGW-52: strukturierte Formulare je Plugin (pii, prompt-filter, content-safety, webhook; F214) mit JSON-Ansicht,
   // Testlauf mit Vorschau (POST /plugin-bindings:test), Kettenvorschau je Kontext (Zwiebelprinzip),
   // Standard-Fehlermodus je Plugin-Art aus GET /plugins, Backend-Fehler am betroffenen Feld.
+  // AIGW-86: Reiter „Profile“ (Standard-Guardrail-Profile anwenden), Hinweis ohne aktive Guardrails.
   import { DropdownMenu, Tabs } from 'bits-ui';
   import { untrack } from 'svelte';
   import { ApiError, listPage } from '../lib/api/client';
-  import { credentials, modelGroups, NAME_HINT, NAME_RE, pluginBindingsRes, pluginCatalog, secrets, type PluginBinding, type S } from '../lib/api/resources';
+  import { credentials, GUARDRAIL_PLUGINS, modelGroups, NAME_HINT, NAME_RE, pluginBindingsRes, pluginCatalog, secrets, type PluginBinding, type S } from '../lib/api/resources';
   import AsyncState from '../lib/admin/AsyncState.svelte';
   import ConfirmDialog from '../lib/admin/ConfirmDialog.svelte';
   import { formErrorOf, handleError, Loader } from '../lib/admin/errors.svelte';
   import ChainView from '../lib/admin/plugins/ChainView.svelte';
+  import GuardrailProfiles from '../lib/admin/plugins/GuardrailProfiles.svelte';
   import PluginConfigForm, { STRUCTURED } from '../lib/admin/plugins/PluginConfigForm.svelte';
   import PluginTest from '../lib/admin/plugins/PluginTest.svelte';
   import FormDialog from '../lib/admin/FormDialog.svelte';
   import { Paged } from '../lib/admin/paged.svelte';
   import { catalog, orgOfTeam } from '../lib/context.svelte';
   import { canWrite } from '../lib/rbac.svelte';
+  import { route } from '../lib/router.svelte';
   import { toast } from '../lib/toast.svelte';
   import Badge from '../lib/ui/Badge.svelte';
   import Button from '../lib/ui/Button.svelte';
@@ -64,7 +67,9 @@
   const testable = (name: string) => infoOf(name)?.testable ?? (name === 'pii' || name === 'prompt-filter');
 
   // Alle sichtbaren Bindungen für die Kettenvorschau.
-  let tab = $state('bindings');
+  let tab = $state(new URLSearchParams(route.search).get('tab') === 'profiles' ? 'profiles' : 'bindings');
+  // Hinweis, wenn keine Guardrail-Bindung (pii, prompt-filter, content-safety) aktiv ist.
+  const guarded = new Loader(async () => (await pluginBindingsRes.list()).some((b) => b.spec.enabled !== false && GUARDRAIL_PLUGINS.includes(b.spec.plugin)));
   const all = new Loader(() => (tab === 'chain' ? pluginBindingsRes.list() : Promise.resolve([] as PluginBinding[])));
   $effect(() => {
     if (tab === 'chain') untrack(() => void all.reload());
@@ -218,6 +223,7 @@
       dlgOpen = false;
       toast('success', 'Plugin-Bindung gespeichert', name);
       void list.reload();
+      void guarded.reload();
       if (tab === 'chain') void all.reload();
     } catch (err) {
       if (registryError(err)) return;
@@ -265,6 +271,7 @@
       await pluginBindingsRes.remove(del, tag);
       toast('success', 'Plugin-Bindung gelöscht', del);
       void list.reload();
+      void guarded.reload();
       if (tab === 'chain') void all.reload();
       return null;
     } catch (e) {
@@ -327,11 +334,28 @@
   {/snippet}
 </PageHeader>
 
+{#if guarded.data === false}
+  <p class="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-warning-fg/30 bg-warning-bg px-3 py-2 text-sm text-warning-fg" role="status" data-testid="no-guardrails">
+    Keine Guardrails aktiv – Anfragen und Antworten werden nicht auf PII, Geheimnisse oder Prompt-Injection geprüft.
+    {#if tab !== 'profiles'}<Button size="sm" variant="ghost" onclick={() => (tab = 'profiles')}>Profil auswählen</Button>{/if}
+  </p>
+{/if}
+
 <Tabs.Root bind:value={tab}>
   <Tabs.List class={cx(tabsList, 'mb-4')}>
     <Tabs.Trigger value="bindings" class={tabsTrigger} data-testid="tab-bindings">Bindungen</Tabs.Trigger>
     <Tabs.Trigger value="chain" class={tabsTrigger} data-testid="tab-chain">Kette</Tabs.Trigger>
+    <Tabs.Trigger value="profiles" class={tabsTrigger} data-testid="tab-profiles">Profile</Tabs.Trigger>
   </Tabs.List>
+  <Tabs.Content value="profiles">
+    <GuardrailProfiles
+      onapplied={() => {
+        void list.reload();
+        void guarded.reload();
+        if (tab === 'chain') void all.reload();
+      }}
+    />
+  </Tabs.Content>
   <Tabs.Content value="bindings">
 <Card flush>
   <AsyncState loader={list}>
