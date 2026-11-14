@@ -73,7 +73,7 @@
         if (cs.endpoint.trim()) c.endpoint = cs.endpoint.trim();
         if (cs.secret.trim()) c.secret = cs.secret.trim();
       }
-      b.contentSafety = c;
+      b.contentSafety = c as unknown as S['GuardrailProfileApply']['contentSafety'];
     }
     return b;
   }

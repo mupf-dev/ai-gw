@@ -70,6 +70,7 @@ dependencies = [
  "hyper-util",
  "rust-embed",
  "serde",
+ "serde-saphyr",
  "serde_json",
  "sqlx",
  "thiserror",
