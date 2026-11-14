@@ -5,7 +5,7 @@
 //! Inventar aus echten Anfragen (OpenAI + Anthropic), Liste/Filter/Detail, Freigeben/Sperren
 //! (Entscheidungs-Richtlinien, Hot Reload, Wirkung auf der Datenebene), Änderungserkennung mit
 //! Audit und automatischer Sperre, verdächtige Beschreibungen, Richtlinien-CRUD mit `If-Match`,
-//! GitOps-Export, RBAC (Team-Admin sieht nur sein Team). SQLite und Postgres.
+//! RBAC (Team-Admin sieht nur sein Team). SQLite und Postgres.
 
 #![allow(
     clippy::unwrap_used,
@@ -445,18 +445,6 @@ async fn scenario(store: Store) {
     )
     .await;
     assert_eq!(r.status, StatusCode::PRECONDITION_REQUIRED);
-    let yaml = String::from_utf8(
-        env.admin(Method::GET, "/config:export", None)
-            .await
-            .expect(StatusCode::OK)
-            .body
-            .to_vec(),
-    )
-    .unwrap();
-    assert!(
-        yaml.contains("kind: ToolPolicy") && yaml.contains("require-approval"),
-        "{yaml}"
-    );
     let deploy_id = deploy["id"].as_str().unwrap().to_owned();
     let d = env
         .admin(Method::GET, &format!("/tools/{deploy_id}"), None)

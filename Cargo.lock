@@ -300,6 +300,7 @@ dependencies = [
  "blake3",
  "bytes",
  "dashmap",
+ "foldhash",
  "futures-util",
  "http-body-util",
  "hyper",

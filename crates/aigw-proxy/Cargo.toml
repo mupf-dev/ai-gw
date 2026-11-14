@@ -28,6 +28,7 @@ aws-lc-rs.workspace = true
 axum.workspace = true
 # Tool-Inventar (AIGW-87): Hashes von Beschreibung und Schema.
 blake3.workspace = true
+foldhash.workspace = true
 bytes.workspace = true
 dashmap.workspace = true
 futures-util.workspace = true

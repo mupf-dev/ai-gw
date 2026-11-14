@@ -3,8 +3,8 @@
 
 //! Mikro-Benchmark des Tool-Schritts (AIGW-87): Kosten je Anfrage ohne Tools, mit 30 Tools
 //! (Claude-Code-ähnlich: Beschreibungen ~600 Zeichen, Schemas mit 8 Feldern) ohne Inventar und
-//! Richtlinien, mit 6 Richtlinien und mit Inventar. Das Klonen der Anfrage wird getrennt
-//! gemessen und abgezogen.
+//! Richtlinien, mit 6 Richtlinien und mit Inventar. Keine Richtlinie entfernt ein Tool, die
+//! Anfrage bleibt also unverändert und wird ohne Klonen wiederverwendet.
 //!
 //! `cargo run --release -p aigw-proxy --example tools_bench`
 
@@ -136,71 +136,23 @@ async fn main() {
     let with_policies = policies();
     let n = 20_000;
     println!("Tool-Schritt (AIGW-87), {n} Iterationen, 30 Tools je Anfrage\n");
-    let base0 = measure("Klonen der Anfrage ohne Tools (Basis)", n, 0.0, || {
-        black_box(none.clone());
+    let mut none = none;
+    let mut req = req;
+    let base = measure("ohne Tools", n, 0.0, || {
+        let _ = black_box(apply_request(&off, &plain, "m", &headers, &mut none, PayloadMode::Off));
     });
-    let base = measure("Klonen der Anfrage mit 30 Tools (Basis)", n, 0.0, || {
-        black_box(req.clone());
-    });
-    measure("ohne Tools", n, base0, || {
-        let mut r = none.clone();
-        let _ = black_box(apply_request(
-            &off,
-            &plain,
-            "m",
-            &headers,
-            &mut r,
-            PayloadMode::Off,
-        ));
-    });
-    measure("30 Tools, ohne Inventar, ohne Richtlinien", n, base, || {
-        let mut r = req.clone();
-        let _ = black_box(apply_request(
-            &off,
-            &plain,
-            "m",
-            &headers,
-            &mut r,
-            PayloadMode::Off,
-        ));
+    let base = measure("30 Tools, ohne Inventar, ohne Richtlinien", n, base, || {
+        let _ = black_box(apply_request(&off, &plain, "m", &headers, &mut req, PayloadMode::Off));
     });
     measure("30 Tools, ohne Inventar, 6 Richtlinien", n, base, || {
-        let mut r = req.clone();
-        let _ = black_box(apply_request(
-            &off,
-            &with_policies,
-            "m",
-            &headers,
-            &mut r,
-            PayloadMode::Off,
-        ));
+        let _ = black_box(apply_request(&off, &with_policies, "m", &headers, &mut req, PayloadMode::Off));
     });
-    measure(
-        "30 Tools, Inventar (bekannte Hashes), ohne Richtlinien",
-        n,
-        base,
-        || {
-            let mut r = req.clone();
-            let _ = black_box(apply_request(
-                &inv,
-                &plain,
-                "m",
-                &headers,
-                &mut r,
-                PayloadMode::Off,
-            ));
-        },
-    );
+    measure("30 Tools, Inventar (bekannte Hashes), ohne Richtlinien", n, base, || {
+        let _ = black_box(apply_request(&inv, &plain, "m", &headers, &mut req, PayloadMode::Off));
+    });
     measure("30 Tools, Inventar + 6 Richtlinien", n, base, || {
-        let mut r = req.clone();
-        let _ = black_box(apply_request(
-            &inv,
-            &with_policies,
-            "m",
-            &headers,
-            &mut r,
-            PayloadMode::Off,
-        ));
+        let _ = black_box(apply_request(&inv, &with_policies, "m", &headers, &mut req, PayloadMode::Off));
     });
+    assert_eq!(req.tools.len(), 30);
     inv.flush().await;
 }

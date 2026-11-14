@@ -1,0 +1,9 @@
+Tool-Schritt (AIGW-87), 20000 Iterationen, 30 Tools je Anfrage
+
+Klonen der Anfrage ohne Tools (Basis)                    0.06 µs/Anfrage (netto    0.06 µs)
+Klonen der Anfrage mit 30 Tools (Basis)                 68.81 µs/Anfrage (netto   68.81 µs)
+ohne Tools                                               0.07 µs/Anfrage (netto    0.01 µs)
+30 Tools, ohne Inventar, ohne Richtlinien               57.72 µs/Anfrage (netto  -11.10 µs)
+30 Tools, ohne Inventar, 6 Richtlinien                  64.33 µs/Anfrage (netto   -4.49 µs)
+30 Tools, Inventar (bekannte Hashes), ohne Richtlinien    70.84 µs/Anfrage (netto    2.03 µs)
+30 Tools, Inventar + 6 Richtlinien                      76.59 µs/Anfrage (netto    7.77 µs)

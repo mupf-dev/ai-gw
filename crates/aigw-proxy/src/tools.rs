@@ -60,57 +60,101 @@ fn hex(h: &Hash) -> String {
 }
 
 fn hash_str(s: &str) -> Hash {
-    let mut out = [0u8; 16];
-    out.copy_from_slice(&blake3::hash(s.as_bytes()).as_bytes()[..16]);
-    out
+    hash_bytes(s.as_bytes())
 }
 
-/// Hasht einen JSON-Baum ohne ihn zu serialisieren (Typ-Präfixe, Längen, Schlüssel in der
-/// Reihenfolge der Map – ohne `preserve_order` sortiert).
-fn hash_json(v: Option<&Value>) -> Hash {
-    fn walk(h: &mut blake3::Hasher, v: &Value) {
-        match v {
-            Value::Null => {
-                h.update(b"n");
+/// Kanonische Bytefolge eines JSON-Baums (Typ-Präfixe, Längen, Schlüssel in der Reihenfolge
+/// der Map – ohne `preserve_order` sortiert), ohne JSON-Serialisierung.
+fn encode_json(out: &mut Vec<u8>, v: &Value) {
+    match v {
+        Value::Null => out.push(b'n'),
+        Value::Bool(b) => out.push(if *b { b't' } else { b'f' }),
+        Value::Number(n) => {
+            out.push(b'#');
+            if let Some(i) = n.as_i64() {
+                out.push(b'i');
+                out.extend_from_slice(&i.to_le_bytes());
+            } else if let Some(u) = n.as_u64() {
+                out.push(b'u');
+                out.extend_from_slice(&u.to_le_bytes());
+            } else {
+                out.push(b'f');
+                out.extend_from_slice(&n.as_f64().unwrap_or_default().to_bits().to_le_bytes());
             }
-            Value::Bool(b) => {
-                h.update(if *b { b"t" } else { b"f" });
+        }
+        Value::String(s) => {
+            out.push(b's');
+            out.extend_from_slice(&(s.len() as u64).to_le_bytes());
+            out.extend_from_slice(s.as_bytes());
+        }
+        Value::Array(a) => {
+            out.push(b'[');
+            out.extend_from_slice(&(a.len() as u64).to_le_bytes());
+            for x in a {
+                encode_json(out, x);
             }
-            Value::Number(n) => {
-                h.update(b"#");
-                h.update(n.to_string().as_bytes());
-                h.update(b";");
-            }
-            Value::String(s) => {
-                h.update(b"s");
-                h.update(&(s.len() as u64).to_le_bytes());
-                h.update(s.as_bytes());
-            }
-            Value::Array(a) => {
-                h.update(b"[");
-                h.update(&(a.len() as u64).to_le_bytes());
-                for x in a {
-                    walk(h, x);
-                }
-            }
-            Value::Object(m) => {
-                h.update(b"{");
-                h.update(&(m.len() as u64).to_le_bytes());
-                for (k, x) in m {
-                    h.update(&(k.len() as u64).to_le_bytes());
-                    h.update(k.as_bytes());
-                    walk(h, x);
-                }
+        }
+        Value::Object(m) => {
+            out.push(b'{');
+            out.extend_from_slice(&(m.len() as u64).to_le_bytes());
+            for (k, x) in m {
+                out.extend_from_slice(&(k.len() as u64).to_le_bytes());
+                out.extend_from_slice(k.as_bytes());
+                encode_json(out, x);
             }
         }
     }
-    let mut h = blake3::Hasher::new();
-    if let Some(v) = v {
-        walk(&mut h, v);
-    }
+}
+
+thread_local! {
+    /// Wiederverwendeter Puffer für [`encode_json`].
+    static BUF: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// BLAKE3 (128 Bit) des Schemas über seine kanonische Bytefolge.
+fn hash_json(v: Option<&Value>) -> Hash {
+    BUF.with_borrow_mut(|buf| {
+        buf.clear();
+        if let Some(v) = v {
+            encode_json(buf, v);
+        }
+        hash_bytes(buf)
+    })
+}
+
+fn hash_bytes(b: &[u8]) -> Hash {
     let mut out = [0u8; 16];
-    out.copy_from_slice(&h.finalize().as_bytes()[..16]);
+    out.copy_from_slice(&blake3::hash(b).as_bytes()[..16]);
     out
+}
+
+/// Schneller Fingerabdruck (Beschreibung, Schema) mit prozesszufälligem Schlüssel
+/// (foldhash): nur im RAM, um bekannte Definitionen ohne BLAKE3 wiederzuerkennen. Ein Angreifer
+/// kennt den Schlüssel nicht und kann keine gezielten Kollisionen bauen.
+type Fp = (u64, u64);
+
+static FP_SEED: std::sync::LazyLock<foldhash::quality::RandomState> =
+    std::sync::LazyLock::new(foldhash::quality::RandomState::default);
+
+fn fingerprint(tv: &ToolView<'_>) -> Fp {
+    use std::hash::BuildHasher as _;
+    let d = FP_SEED.hash_one(tv.description.unwrap_or(""));
+    let s = BUF.with_borrow_mut(|buf| {
+        buf.clear();
+        if let Some(v) = tv.schema {
+            encode_json(buf, v);
+        }
+        FP_SEED.hash_one(buf.as_slice())
+    });
+    (d, s)
+}
+
+/// Bekannter Stand eines Tools (gespeicherte Hashes, ggf. mit Fingerabdruck).
+#[derive(Debug, Clone, Copy)]
+struct Known {
+    fp: Option<Fp>,
+    dh: Hash,
+    sh: Hash,
 }
 
 /// Sicht auf ein Tool der Anfrage.
@@ -174,6 +218,7 @@ struct Agg {
     requests: u64,
     calls: u64,
     blocked: u64,
+    fp: Fp,
     dh: Hash,
     sh: Hash,
     /// Definition für den Abgleich (nur neue/geänderte Hashes).
@@ -252,7 +297,7 @@ pub struct ToolInventory {
     max_entries: usize,
     injection_check: bool,
     agg: DashMap<ToolKey, Agg>,
-    known: DashMap<ToolKey, (Hash, Hash)>,
+    known: DashMap<ToolKey, Known>,
     metrics: Arc<ToolMetrics>,
     hook: Option<ToolEventHook>,
     flush_lock: tokio::sync::Mutex<()>,
@@ -341,8 +386,8 @@ impl ToolInventory {
     /// Bekannte Hashes (Warmstart aus der Datenbank).
     pub fn preload(&self, known: impl IntoIterator<Item = (ToolKey, (String, String))>) {
         for (k, (d, s)) in known {
-            if let (Some(d), Some(s)) = (parse_hex(&d), parse_hex(&s)) {
-                self.known.insert(k, (d, s));
+            if let (Some(dh), Some(sh)) = (parse_hex(&d), parse_hex(&s)) {
+                self.known.insert(k, Known { fp: None, dh, sh });
             }
         }
     }
@@ -363,7 +408,38 @@ impl ToolInventory {
         Some(v[..cut].into())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Hashes und ggf. Definition zu einem Fingerabdruck: bekannt → ohne BLAKE3.
+    fn resolve(
+        &self,
+        key: &ToolKey,
+        fp: Fp,
+        tv: &ToolView<'_>,
+        mode: PayloadMode,
+    ) -> (Hash, Hash, Option<PendingDef>) {
+        let known = self.known.get(key).map(|k| *k);
+        if let Some(k) = known
+            && k.fp == Some(fp)
+        {
+            return (k.dh, k.sh, None);
+        }
+        let dh = tv.description.map_or([0; 16], hash_str);
+        let sh = hash_json(tv.schema);
+        if known.is_some_and(|k| (k.dh, k.sh) == (dh, sh)) {
+            return (dh, sh, None);
+        }
+        let store = matches!(mode, PayloadMode::Full | PayloadMode::Masked).then_some(mode);
+        let def = PendingDef {
+            description: tv.description.map(str::to_owned),
+            schema: if store.is_some() {
+                tv.schema.and_then(|s| serde_json::to_string(s).ok())
+            } else {
+                None
+            },
+            store,
+        };
+        (dh, sh, Some(def))
+    }
+
     fn observe(
         &self,
         key: ToolKey,
@@ -373,21 +449,7 @@ impl ToolInventory {
         blocked: bool,
         mode: PayloadMode,
     ) {
-        let dh = tv.description.map_or([0; 16], hash_str);
-        let sh = hash_json(tv.schema);
-        let pending = || {
-            let store = matches!(mode, PayloadMode::Full | PayloadMode::Masked).then_some(mode);
-            Some(PendingDef {
-                description: tv.description.map(str::to_owned),
-                schema: if store.is_some() {
-                    tv.schema.and_then(|s| serde_json::to_string(s).ok())
-                } else {
-                    None
-                },
-                store,
-            })
-        };
-        let known_same = self.known.get(&key).is_some_and(|k| *k == (dh, sh));
+        let fp = fingerprint(tv);
         if let Some(mut a) = self.agg.get_mut(&key) {
             a.requests += 1;
             a.blocked += u64::from(blocked);
@@ -397,10 +459,12 @@ impl ToolInventory {
             {
                 a.client = Some(c.into());
             }
-            if (a.dh, a.sh) != (dh, sh) {
+            if a.fp != fp {
+                let (dh, sh, def) = self.resolve(&key, fp, tv, mode);
+                a.fp = fp;
                 a.dh = dh;
                 a.sh = sh;
-                a.def = if known_same { None } else { pending() };
+                a.def = def;
             }
             return;
         }
@@ -412,6 +476,7 @@ impl ToolInventory {
             Some((s, _)) => s.into(),
             None => CLIENT_ORIGIN.into(),
         };
+        let (dh, sh, def) = self.resolve(&key, fp, tv, mode);
         self.agg.insert(
             key,
             Agg {
@@ -423,9 +488,10 @@ impl ToolInventory {
                 requests: 1,
                 calls: 0,
                 blocked: u64::from(blocked),
+                fp,
                 dh,
                 sh,
-                def: if known_same { None } else { pending() },
+                def,
             },
         );
     }
@@ -441,7 +507,7 @@ impl ToolInventory {
             return;
         }
         // Eintrag inzwischen geschrieben: nur Zähler mit dem bekannten Stand nachreichen.
-        let Some((dh, sh)) = self.known.get(&key).map(|k| *k) else {
+        let Some(k) = self.known.get(&key).map(|k| *k) else {
             return;
         };
         if self.agg.len() >= self.max_entries {
@@ -459,8 +525,9 @@ impl ToolInventory {
             requests: 0,
             calls: 0,
             blocked: 0,
-            dh,
-            sh,
+            fp: k.fp.unwrap_or_default(),
+            dh: k.dh,
+            sh: k.sh,
             def: None,
         });
         self.record_calls(base, name, calls, blocked);
@@ -477,10 +544,19 @@ impl ToolInventory {
         let mut batch = ToolBatch {
             items: Vec::with_capacity(keys.len()),
         };
+        let mut fps: Vec<(ToolKey, Known)> = Vec::with_capacity(keys.len());
         for k in keys {
             let Some((key, a)) = self.agg.remove(&k) else {
                 continue;
             };
+            fps.push((
+                key.clone(),
+                Known {
+                    fp: (a.requests > 0).then_some(a.fp),
+                    dh: a.dh,
+                    sh: a.sh,
+                },
+            ));
             let definition = a.def.map(|d| {
                 let injection = match (&d.description, self.injection_check) {
                     (Some(text), true) => {
@@ -520,7 +596,11 @@ impl ToolInventory {
         }
         match sink.flush(batch).await {
             Ok(res) => {
-                self.preload(res.known);
+                // Gespeicherter Stand = gesendeter Stand (mit Fingerabdruck).
+                drop(res.known);
+                for (k, v) in fps {
+                    self.known.insert(k, v);
+                }
                 for ev in &res.events {
                     match ev.kind {
                         aigw_core::tools::ToolEventKind::Changed => {
