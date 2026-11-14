@@ -1,7 +1,7 @@
 Tool-Schritt (AIGW-87), 20000 Iterationen, 30 Tools je Anfrage
 
-ohne Tools                                               0.02 µs/Anfrage (netto    0.02 µs)
-30 Tools, ohne Inventar, ohne Richtlinien                2.53 µs/Anfrage (netto    2.51 µs)
-30 Tools, ohne Inventar, 6 Richtlinien                   7.71 µs/Anfrage (netto    5.18 µs)
-30 Tools, Inventar (bekannte Hashes), ohne Richtlinien    13.62 µs/Anfrage (netto   11.09 µs)
-30 Tools, Inventar + 6 Richtlinien                      18.55 µs/Anfrage (netto   16.02 µs)
+ohne Tools                                                   0.02 µs/Anfrage (Δ zur Bezugszeile   +0.02 µs)
+30 Tools, ohne Inventar, ohne Richtlinien                    2.56 µs/Anfrage (Δ zur Bezugszeile   +2.54 µs)
+30 Tools, ohne Inventar, 6 Richtlinien                       7.86 µs/Anfrage (Δ zur Bezugszeile   +5.30 µs)
+30 Tools, Inventar (bekannte Hashes), ohne Richtlinien      13.23 µs/Anfrage (Δ zur Bezugszeile  +10.67 µs)
+30 Tools, Inventar + 6 Richtlinien                          18.02 µs/Anfrage (Δ zur Bezugszeile  +15.46 µs)

@@ -57,7 +57,7 @@ nur die Hashes. Geprüft (Injection) wird die Beschreibung in jedem Fall – im 
 
 ### 2.3 Hot Path und Schreiben
 
-- Je Tool: zwei Hashes, ein Lookup in einer geshardeten Map (`DashMap`) mit Zählern; nur bei
+- Je Tool: ein schneller Fingerabdruck (foldhash, Schlüssel je Prozess zufällig), ein Lookup in einer geshardeten Map (`DashMap`) mit Zählern; nur bei
   **neuen oder geänderten** Hashes (Abgleich mit dem RAM-Stand bekannter Tools) wird die
   Definition für den Abgleich kopiert.
 - Ein Hintergrund-Task schreibt alle `tools.flush_interval_ms` (Standard 5 s) aggregiert in
@@ -68,7 +68,7 @@ nur die Hashes. Geprüft (Injection) wird die Beschreibung in jedem Fall – im 
   verworfen und gezählt (`aigw_tool_inventory_events_total{event="dropped"}`).
 - Mehrere Instanzen schreiben in dieselben Zeilen (Upsert, Zähler additiv).
 
-Messung (`cargo run --release -p aigw-proxy --example tools_bench`, Box cpx42): siehe §7.
+Messung: siehe §7.
 
 ### 2.4 Änderungen und verdächtige Beschreibungen
 
@@ -184,9 +184,23 @@ ENV wie üblich, z. B. `AIGW_TOOLS__ON_CHANGE=block`.
 
 ## 7. Messwerte
 
-Siehe [messwerte/87-tools-bench.txt](messwerte/87-tools-bench.txt): Kosten des Schritts je
-Anfrage ohne Tools, mit 30 Tools (Claude-Code-ähnlich) ohne Inventar/Richtlinien, mit
-Richtlinien und mit Inventar.
+`cargo run --release -p aigw-proxy --example tools_bench` (Box cpx42, ein Kern), 30 Tools je
+Anfrage (Claude-Code-ähnlich: Beschreibung ~600 Zeichen, Schema mit 8 Feldern), Rohdaten
+[messwerte/87-tools-bench.txt](messwerte/87-tools-bench.txt):
+
+| Fall | µs je Anfrage |
+|---|---|
+| ohne Tools | 0,02 |
+| 30 Tools, ohne Inventar, ohne Richtlinien | 2,6 |
+| 30 Tools, 6 Richtlinien | 7,9 |
+| 30 Tools, Inventar (bekannte Definitionen) | 13,2 |
+| 30 Tools, Inventar + 6 Richtlinien | 18,0 |
+
+Zum Vergleich: allein das Dekodieren eines solchen ~40-KB-Bodys kostet ein Vielfaches. Das
+Inventar erkennt bekannte Definitionen über einen schnellen, prozesszufällig geschlüsselten
+Fingerabdruck (foldhash) – BLAKE3 läuft nur für neue oder geänderte Definitionen. Ein erster
+Entwurf mit BLAKE3 je Tool und Anfrage lag bei ≈ 75 µs. Ohne Tools kostet der Schritt nichts
+Messbares; die Ziele Q1/Q4 (`docs/betrieb/leistung.md`) bleiben unberührt.
 
 ## 8. Grenzen und offene Punkte
 
