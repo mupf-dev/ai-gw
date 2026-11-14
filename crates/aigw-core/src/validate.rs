@@ -487,6 +487,15 @@ fn azure_auth(upstreams: &UpstreamPolicy, spec: &DeploymentSpec) -> Res {
         }
     }
     let method = setting_str(spec, "entraCredential")?;
+    match spec.settings.get("entraSendX5c") {
+        None | Some(Value::Null | Value::Bool(_)) => {}
+        Some(_) => return Err("settings.entraSendX5c muss true/false sein".into()),
+    }
+    if spec.settings.contains_key("entraSendX5c")
+        && method.is_some_and(|m| m != "clientCertificate")
+    {
+        return Err("settings.entraSendX5c: nur bei entraCredential clientCertificate".into());
+    }
     if let Some(m) = method
         && !ENTRA_CREDENTIALS.contains(&m)
     {
@@ -577,8 +586,13 @@ fn entra_values(
 /// (AIGW-84): Azure OpenAI und Claude in Azure AI Foundry.
 pub const ENTRA_PROVIDERS: &[ProviderKind] = &[ProviderKind::AzureOpenAi, ProviderKind::Anthropic];
 /// Erlaubte Felder in `spec.data` neben `spec.entra`.
-pub const ENTRA_DATA_FIELDS: &[&str] =
-    &["tenantId", "clientId", "clientSecret", "clientCertificate"];
+pub const ENTRA_DATA_FIELDS: &[&str] = &[
+    "tenantId",
+    "clientId",
+    "clientSecret",
+    "clientCertificate",
+    "clientCertificatePassword",
+];
 
 /// Zugangsdaten (AIGW-65/84): ohne `entra` wie [`credential_fields`]. Mit `entra` (nur
 /// [`ENTRA_PROVIDERS`]): `data` enthält höchstens [`ENTRA_DATA_FIELDS`] – das Geheimnis der
@@ -616,6 +630,21 @@ pub fn credential<'a>(
         if fields.contains(f) && secret != Some(f) {
             return Err(format!(
                 "spec.data.{f}: passt nicht zu spec.entra.credential {:?}",
+                e.credential.as_str()
+            ));
+        }
+    }
+    if e.credential != EntraCredentialKind::ClientCertificate {
+        if fields.contains("clientCertificatePassword") {
+            return Err(format!(
+                "spec.data.clientCertificatePassword: nur bei spec.entra.credential \
+                 \"clientCertificate\" (nicht {:?})",
+                e.credential.as_str()
+            ));
+        }
+        if e.send_x5c.is_some() {
+            return Err(format!(
+                "spec.entra.sendX5c: nur bei credential \"clientCertificate\" (nicht {:?})",
                 e.credential.as_str()
             ));
         }
@@ -1080,9 +1109,18 @@ mod tests {
             json!({"auth": "entraId", "entraCredential": "managedIdentity",
                    "entraScope": "https://management.azure.com/.default"}),
             json!({"auth": "entraId", "entraTenantId": "../x"}),
+            json!({"auth": "entraId", "entraSendX5c": "ja"}),
+            json!({"auth": "entraId", "entraCredential": "clientSecret", "entraSendX5c": true}),
         ] {
             assert!(check(bad.clone()).is_err(), "{bad}");
         }
+        assert!(
+            check(
+                json!({"auth": "entraId", "entraCredential": "clientCertificate",
+                         "entraSendX5c": true})
+            )
+            .is_ok()
+        );
         assert!(
             credential_fields(
                 ProviderKind::AzureOpenAi,
@@ -1099,6 +1137,7 @@ mod tests {
             client_id: None,
             authority: None,
             scope: None,
+            send_x5c: None,
         }
     }
 
@@ -1133,6 +1172,28 @@ mod tests {
         let bare = entra(K::ClientCertificate);
         assert!(check(az, &bare, &["clientCertificate"]).is_err());
         assert!(check(az, &bare, &["clientCertificate", "tenantId", "clientId"]).is_ok());
+        // AIGW-94: Passwort und x5c nur beim Zertifikat.
+        let cert_x5c = EntraAuth {
+            send_x5c: Some(true),
+            ..bare.clone()
+        };
+        let cert_fields = [
+            "clientCertificate",
+            "clientCertificatePassword",
+            "tenantId",
+            "clientId",
+        ];
+        assert!(check(az, &cert_x5c, &cert_fields).is_ok());
+        assert!(check(az, &sp, &["clientSecret", "clientCertificatePassword"]).is_err());
+        assert!(check(az, &mi, &["clientCertificatePassword"]).is_err());
+        let mi_x5c = EntraAuth {
+            send_x5c: Some(false),
+            ..mi.clone()
+        };
+        assert!(check(az, &mi_x5c, &[]).is_err());
+        let mut settings = JsonObject::new();
+        assert!(cert_x5c.apply_to(&mut settings));
+        assert_eq!(settings["entraSendX5c"], Value::Bool(true));
         // Authority/Scope/IDs wie bei settings.entra*.
         for bad in [
             EntraAuth {

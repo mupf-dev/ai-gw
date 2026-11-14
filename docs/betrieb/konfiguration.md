@@ -141,16 +141,17 @@ spec: {provider: azure-openai, credential: foundry-mi, …}   # keine entra*-Ein
 ```
 
 Die Tabelle nennt die Einstellungen der Inline-Variante; mit Zugangsdaten stehen dieselben
-Angaben in `spec.entra` (`credential`, `tenantId`, `clientId`, `authority`, `scope`). Die
+Angaben in `spec.entra` (`credential`, `tenantId`, `clientId`, `authority`, `scope`,
+`sendX5c`). Die
 Admin-UI zeigt unter **Anbieter** je Endpunkt Anmeldeart, Deployments und Zustand – auch für
 Inline-Deployments ohne Zugangsdaten.
 
 | Variante | Deployment-Einstellungen | Zugangsdaten / Umgebung |
 |---|---|---|
 | Service Principal mit Secret | `auth: entraId` | `tenantId`, `clientId`, `clientSecret` |
-| Service Principal mit Zertifikat | `auth: entraId` | `tenantId`, `clientId`, `clientCertificate` (PEM mit Zertifikat und unverschlüsseltem RSA-Schlüssel) |
+| Service Principal mit Zertifikat | `auth: entraId`, optional `entraSendX5c: true` (Subject Name + Issuer) | `tenantId`, `clientId`, `clientCertificate` (PEM mit Zertifikat(skette) und RSA-Schlüssel, unverschlüsselt oder `ENCRYPTED PRIVATE KEY`), dazu ggf. `clientCertificatePassword` |
 | Workload Identity (AKS) | `auth: entraId`, `entraCredential: workloadIdentity` | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_FEDERATED_TOKEN_FILE`, optional `AZURE_AUTHORITY_HOST` (setzt der AKS-Webhook) |
-| Managed Identity (VM, AKS-Knoten, App Service, Container Apps) | `auth: entraId`, `entraCredential: managedIdentity`, optional `entraClientId` | keine; App Service: `IDENTITY_ENDPOINT`/`IDENTITY_HEADER` |
+| Managed Identity (VM, AKS-Knoten, App Service, Container Apps, Azure Arc) | `auth: entraId`, `entraCredential: managedIdentity`, optional `entraClientId` (nicht bei Arc) | keine; App Service: `IDENTITY_ENDPOINT`/`IDENTITY_HEADER`; Arc: `IDENTITY_ENDPOINT`/`IMDS_ENDPOINT` (setzt der Arc-Agent) |
 
 - **Workload/Managed Identity freigeben (AIGW-90):** beide Varianten nutzen die Identität des
   Gateway-Prozesses und sind nur mit diesem Schalter erlaubt (Standard `false`):
@@ -164,6 +165,31 @@ Inline-Deployments ohne Zugangsdaten.
   Ohne Schalter sind solche Deployments „nicht nutzbar“ (Log: „Deployment nicht nutzbar –
   ausgelassen“ mit dem Schlüssel in der Meldung), beim Start warnt das Log mit allen
   betroffenen Zugangsdaten/Deployments. Service Principals brauchen den Schalter nicht.
+- **Verschlüsselter Zertifikatsschlüssel (AIGW-94):** PEM mit `ENCRYPTED PRIVATE KEY`
+  (PKCS#8, PBES2/PBKDF2/AES-CBC, z. B. `openssl pkcs8 -topk8 -v2 aes-256-cbc -in key.pem`),
+  Passwort im Feld `clientCertificatePassword`. Per Datei in GitOps-Manifesten:
+
+  ```yaml
+  kind: ProviderCredential
+  metadata: {name: aoai-cert}
+  spec:
+    provider: azure-openai
+    entra: {credential: clientCertificate, tenantId: contoso.onmicrosoft.com,
+            clientId: 11111111-2222-3333-4444-555555555555, sendX5c: true}
+    data:
+      clientCertificate: {valueFrom: {file: /run/secrets/aigw/aoai-cert.pem}}
+      clientCertificatePassword: {valueFrom: {file: /run/secrets/aigw/aoai-cert.pass}}
+  ```
+
+  (`valueFrom.file` nur unter `gitops.secret_dir`.) Altes OpenSSL-Format
+  (`Proc-Type: 4,ENCRYPTED`) und PBES1/3DES werden mit Hinweis abgelehnt – nach PKCS#8
+  umwandeln. `sendX5c: true` schickt die Zertifikatskette (`x5c`) mit; nötig, wenn die
+  App-Registrierung Zertifikate über Subject Name + Issuer statt Fingerabdruck akzeptiert.
+- **Azure Arc (Server außerhalb Azure, AIGW-94):** Der Arc-Agent setzt `IDENTITY_ENDPOINT`
+  und `IMDS_ENDPOINT`; ai-gw beantwortet die Challenge mit der Schlüsseldatei aus
+  `/var/opt/azcmagent/tokens` (nur dort, nur `.key`, ≤ 4 KiB). Der Dienstbenutzer von ai-gw
+  braucht Leserechte (Gruppe `himds`), dazu `upstream.entra.ambient_identity: true`. Nur
+  systemzugewiesene Identität (`entraClientId` weglassen).
 - Sovereign Clouds: `entraAuthority` (z. B. `https://login.microsoftonline.us`) und
   `entraScope` (z. B. `https://cognitiveservices.azure.us/.default`).
 - Die Identität braucht auf der Azure-OpenAI-Ressource die Rolle **Cognitive Services OpenAI

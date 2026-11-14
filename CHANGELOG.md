@@ -23,6 +23,16 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   sqlx 0.9.0 (neuestes Release) pinnt libsqlite3-sys <0.38, gepatcht ist erst 0.39; Ausnahme
   in `deny.toml` bleibt (Stand dort vermerkt).
 
+- **Entra ID: verschlüsselte Zertifikatsschlüssel, `x5c`, Azure Arc (AIGW-94):**
+  `clientCertificate` akzeptiert `ENCRYPTED PRIVATE KEY` (PKCS#8, PBES2/PBKDF2/AES-CBC) mit
+  dem Passwort im neuen Zugangsdaten-Feld `clientCertificatePassword` (Wert oder
+  `valueFrom.file`/`env`); Fehlermeldungen ohne Geheimnisse. `spec.entra.sendX5c` bzw.
+  `settings.entraSendX5c` schickt die Zertifikatskette als `x5c` mit (Subject Name + Issuer).
+  Managed Identity unter **Azure Arc** (`IDENTITY_ENDPOINT` + `IMDS_ENDPOINT`, Challenge mit
+  Schlüsseldatei nur aus dem Arc-Verzeichnis, S-35); unterliegt
+  `upstream.entra.ambient_identity`. Admin-UI: Passwortfeld und Schalter „x5c“ im
+  Zugangsdaten-Formular.
+
 - **content-safety mit Entra ID (AIGW-89):** `provider: azure` mit `auth: entraId` und
   `credential` = ProviderCredential mit `spec.entra` (Managed Identity, Workload Identity,
   Client Credentials mit Secret/Zertifikat) – `Authorization: Bearer` statt
@@ -124,6 +134,16 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   GitOps verlangen, dass `spec.secret` bzw. `spec.credential` existiert und das Token-Feld
   (`settings.credentialField`, Standard `apiKey`, sonst `value`) enthält – sonst `422` mit
   `issues`.
+
+### Behoben
+
+- **Redis-Ausfalltests stabil unter Last (AIGW-94):** `falls_back_and_recovers` und
+  `deferred_settles_replayed_after_outage` hingen an Wanduhrzeit: feste `CLIENT PAUSE`-Dauer
+  (600/700 ms), 100 ms Zeitlimit und ein 300-ms-Zeitraum. Unter Last (Load > 30, nachgestellt)
+  lief das Nachtragen in die Zeitüberschreitung und wurde erneut gebucht (`k2` ≠ 2) bzw. der
+  kurze Zeitraum endete schon vor dem Abgleich (`pending` < 2). Jetzt hält ein TCP-Proxy je Test
+  den Server an, bis der Test ihn freigibt; Zeitlimit 2 s, Zeitraumende relativ zum Ausfall.
+  Aussagen unverändert (alt 2 Fehler in 85 Läufen unter Last, neu 0 in 115).
 
 ## [0.1.0] – MVP – Datum offen
 

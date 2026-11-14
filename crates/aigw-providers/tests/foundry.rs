@@ -484,6 +484,7 @@ async fn managed_identity_from_credential_entra() {
         client_id: Some(UAMI.into()),
         authority: None,
         scope: None,
+        send_x5c: None,
     };
     let base = format!("http://foundry.test:{}", addr.port());
     // Deployment mit Zugangsdaten ohne Werte (Managed Identity speichert kein Geheimnis).

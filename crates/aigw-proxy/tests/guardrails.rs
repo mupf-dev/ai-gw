@@ -1188,6 +1188,7 @@ fn entra_cred(
                 client_id: Some("11111111-2222-3333-4444-555555555555".into()),
                 authority,
                 scope: None,
+                send_x5c: None,
             }),
             fields: Vec::new(),
             key_id: "k".into(),

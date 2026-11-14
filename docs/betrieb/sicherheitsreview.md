@@ -1,7 +1,7 @@
 # Sicherheitsreview ai-gw (AIGW-58)
 
 Stand: 2026-11-13, Basis `main` f4de6bd, Branch `p7-58-security`; Status nachgeführt bis
-AIGW-90 (2026-11-14). Defensives Review des
+AIGW-94 (2026-11-14). Defensives Review des
 eigenen Codes; Befunde mit Schweregrad wurden – soweit ohne Kollision mit parallelen Paketen
 möglich – direkt behoben und mit Regressionstests abgesichert. Betriebshinweise:
 [haertung.md](haertung.md).
@@ -98,6 +98,13 @@ Schweregrade: **hoch** – ausnutzbar mit geringen Rechten, deutlicher Schaden;
 |---|---|---|
 | S-33 | **Gateway-Identität für jedes Entra-Deployment** (Restrisiko AIGW-82/84): Wer Deployments bzw. Zugangsdaten anlegen durfte, konnte mit `managedIdentity`/`workloadIdentity` Tokens der Identität des Gateway-Prozesses (Scope Cognitive Services) an einen erlaubten Endpunkt schicken lassen – ohne dass der Betreiber das freigegeben hatte. | **behoben (AIGW-90):** Opt-in `upstream.entra.ambient_identity` (Standard `false`, ENV `AIGW_UPSTREAM__ENTRA__AMBIENT_IDENTITY`). Ohne Freigabe baut die Token-Quelle nicht (Deployment „nicht nutzbar“ mit Meldung inkl. Schlüssel), beim Start warnt das Log mit den betroffenen Zugangsdaten/Deployments. Restrisiko mit Freigabe wie bisher (Rolle der Identität eng fassen). Test `ambient_identity_requires_opt_in`. |
 | S-34 | **MCP-Server mit nicht auflösbarem Geheimnis:** Admin-API prüfte nur `credential`, nicht `secret`; ein fehlendes Token-Feld fiel erst zur Laufzeit auf. | **behoben (AIGW-90):** Admin-API (Anlegen/Ändern) prüft, dass `credential` bzw. `secret` existiert und das Feld `settings.credentialField` (Standard `apiKey`, sonst `value`) enthält – `422` mit `issues`; GitOps prüft das Feld ebenso (Existenz schon bisher). Tests `mcp_api.rs`, `reference_fields_aigw90`. |
+
+### Nachträge (AIGW-94)
+
+| ID | Befund | Status |
+|---|---|---|
+| S-35 | **Azure-Arc-Challenge als Datei-Lesegerät:** Der Arc-Agent nennt im `WWW-Authenticate`-Header einen Dateipfad, dessen Inhalt als `Authorization` zurückgeht. Ein manipulierter lokaler Endpunkt (oder ein umgebogenes `IDENTITY_ENDPOINT`) könnte so beliebige Dateien des Gateway-Prozesses (z. B. Master-Key-Datei) abfragen. | **vorgebeugt (AIGW-94):** nur `.key`-Dateien direkt im Arc-Verzeichnis (`/var/opt/azcmagent/tokens`), Prüfung lexikalisch **und** nach Auflösen symbolischer Links, nur reguläre Dateien ≤ 4 KiB; sonst Auth-Fehler ohne Inhalt, Pfad nur im Log. Arc nur mit `upstream.entra.ambient_identity`. Tests `arc_key_file_rules`, `azure_arc_rejects_key_files_outside_the_agent_directory`. |
+| S-36 | **Verschlüsselte Zertifikatsschlüssel:** Passwort und Schlüsselmaterial dürfen weder in Fehlermeldungen noch in `Debug`/Logs erscheinen; teure Schlüsselableitung als DoS beim Konfigurationsaufbau. | **umgesetzt (AIGW-94):** eigene, längengeprüfte DER-Auswertung, Meldungen ohne Geheimnisse (falsches Passwort = „Passwort falsch oder Schlüssel beschädigt“), Zwischenpuffer genullt, PBKDF2 höchstens 2 000 000 Iterationen; Passwort nur als Zugangsdaten-Wert (verschlüsselt gespeichert) bzw. `valueFrom`. Tests `encrypted_client_certificate_errors_without_secrets`, `decrypts_openssl_pbes2_fixtures`, `unsupported_and_limits`. |
 
 ### Info
 

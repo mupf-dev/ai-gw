@@ -26,6 +26,7 @@ pub mod bedrock;
 mod client;
 mod codec;
 pub mod entra;
+mod entra_key;
 mod errmap;
 pub mod local;
 pub mod mistral;

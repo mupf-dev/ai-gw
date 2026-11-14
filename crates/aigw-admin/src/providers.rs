@@ -437,6 +437,7 @@ mod tests {
                 client_id: Some("uami".into()),
                 authority: None,
                 scope: None,
+                send_x5c: None,
             }),
         );
         let a = auth_of(

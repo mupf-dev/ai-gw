@@ -496,6 +496,10 @@ pub struct EntraAuth {
     /// Scope (Standard `https://cognitiveservices.azure.com/.default`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
+    /// Zertifikatskette als `x5c` im Header der Client-Assertion mitsenden (AIGW-94; nur
+    /// `clientCertificate`; nötig für Subject-Name/Issuer-Anmeldung, „SNI“).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_x5c: Option<bool>,
 }
 
 impl EntraAuth {
@@ -519,8 +523,8 @@ impl EntraAuth {
     }
 
     /// Übernimmt die Anmeldung in Deployment-Einstellungen: fehlende Schlüssel (`auth`,
-    /// `entraCredential`, `entraTenantId`, `entraClientId`, `entraAuthority`, `entraScope`)
-    /// werden gesetzt, eigene Einstellungen des Deployments haben Vorrang. Setzt das
+    /// `entraCredential`, `entraTenantId`, `entraClientId`, `entraAuthority`, `entraScope`,
+    /// `entraSendX5c`) werden gesetzt, eigene Einstellungen des Deployments haben Vorrang. Setzt das
     /// Deployment `auth` auf etwas anderes als `entraId`, bleibt alles unverändert.
     /// Gibt zurück, ob sich etwas geändert hat.
     pub fn apply_to(&self, settings: &mut JsonObject) -> bool {
@@ -536,6 +540,12 @@ impl EntraAuth {
                 settings.insert(k.to_owned(), serde_json::Value::String(v.to_owned()));
                 changed = true;
             }
+        }
+        if let Some(b) = self.send_x5c
+            && !settings.contains_key("entraSendX5c")
+        {
+            settings.insert("entraSendX5c".to_owned(), serde_json::Value::Bool(b));
+            changed = true;
         }
         changed
     }

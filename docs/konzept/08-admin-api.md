@@ -210,14 +210,17 @@ POST /admin/api/v1/provider-credentials
   ```
   `credential`: `managedIdentity` | `workloadIdentity` (kein gespeichertes Geheimnis, `data`
   leer bzw. weggelassen) | `clientSecret` (`data.clientSecret` Pflicht) | `clientCertificate`
-  (`data.clientCertificate` Pflicht). Weitere Felder: `tenantId`, `clientId` (bei Service
+  (`data.clientCertificate` Pflicht, optional `data.clientCertificatePassword` für einen
+  verschlüsselten PKCS#8-Schlüssel, AIGW-94). Weitere Felder: `tenantId`, `clientId` (bei Service
   Principals Pflicht – entweder hier oder als Wert in `data`, nicht beides), `authority`
   (nur `https://host`, SSRF-Regeln, nicht bei `workloadIdentity`), `scope` (bei
-  Workload/Managed Identity nur die Cognitive-Services-Scopes). In `data` sind daneben nur
-  `tenantId`, `clientId`, `clientSecret`, `clientCertificate` erlaubt.
+  Workload/Managed Identity nur die Cognitive-Services-Scopes), `sendX5c` (nur
+  `clientCertificate`: Zertifikatskette als `x5c` in der Assertion, für Subject-Name/Issuer-
+  Anmeldung). In `data` sind daneben nur `tenantId`, `clientId`, `clientSecret`,
+  `clientCertificate`, `clientCertificatePassword` (nur bei `clientCertificate`) erlaubt.
   Deployments mit `credential: <name>` übernehmen die Anmeldung als Vorgabe für
   `settings.auth: entraId`, `entraCredential`, `entraTenantId`, `entraClientId`,
-  `entraAuthority`, `entraScope`; eigene Einstellungen des Deployments haben Vorrang.
+  `entraAuthority`, `entraScope`, `entraSendX5c`; eigene Einstellungen des Deployments haben Vorrang.
   Inline-Einstellungen ohne Zugangsdaten bleiben gültig. Deployments mit derselben Identität
   (gleiche Client-ID, Authority, Scope bzw. gleiches Geheimnis) teilen sich eine Token-Quelle.
   `PATCH` mit `"entra": {…}` ersetzt die Anmeldung als Ganzes, `"entra": null` entfernt sie,

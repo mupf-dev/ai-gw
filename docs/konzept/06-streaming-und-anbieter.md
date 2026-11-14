@@ -107,9 +107,9 @@ entfernt (OpenAI lehnt es sonst ab). Azure-Deployment-Namen werden auf `[A-Za-z0
 | `settings.entraCredential` | Ablauf | Herkunft der Angaben |
 |---|---|---|
 | `clientSecret` (Standard, wenn die Zugangsdaten `clientSecret` enthalten) | OAuth 2.0 Client Credentials | Zugangsdaten `tenantId`, `clientId`, `clientSecret` |
-| `clientCertificate` (Standard bei `clientCertificate`) | Client Credentials mit JWT-Assertion (RS256, Header `x5t` = SHA-1-Fingerabdruck) | Zugangsdaten `tenantId`, `clientId`, `clientCertificate` (PEM: `CERTIFICATE` + `PRIVATE KEY`/`RSA PRIVATE KEY`, unverschlüsselt) |
+| `clientCertificate` (Standard bei `clientCertificate`) | Client Credentials mit JWT-Assertion (RS256, Header `x5t` = SHA-1-Fingerabdruck, mit `settings.entraSendX5c: true` zusätzlich `x5c`) | Zugangsdaten `tenantId`, `clientId`, `clientCertificate` (PEM: `CERTIFICATE`-Block/-Kette + `PRIVATE KEY`/`RSA PRIVATE KEY` bzw. `ENCRYPTED PRIVATE KEY` mit `clientCertificatePassword`) |
 | `workloadIdentity` | Client Credentials mit föderiertem Token als `client_assertion` (bei jedem Abruf neu gelesen) | `AZURE_FEDERATED_TOKEN_FILE`; Tenant/Client: Zugangsdaten → `settings.entraTenantId`/`entraClientId` → `AZURE_TENANT_ID`/`AZURE_CLIENT_ID` |
-| `managedIdentity` | IMDS (`http://169.254.169.254/metadata/identity/oauth2/token`, `Metadata: true`, api-version 2018-02-01) bzw. App Service/Container Apps (`GET $IDENTITY_ENDPOINT?api-version=2019-08-01&resource=…&client_id=…` mit Header `X-IDENTITY-HEADER: $IDENTITY_HEADER`, Antwort mit `expires_on`; Container Apps: `http://localhost:<port>/msi/token`) | optional `clientId` (Zugangsdaten oder `settings.entraClientId`) für benutzerzugewiesene Identitäten |
+| `managedIdentity` | IMDS (`http://169.254.169.254/metadata/identity/oauth2/token`, `Metadata: true`, api-version 2018-02-01) bzw. App Service/Container Apps (`GET $IDENTITY_ENDPOINT?api-version=2019-08-01&resource=…&client_id=…` mit Header `X-IDENTITY-HEADER: $IDENTITY_HEADER`, Antwort mit `expires_on`; Container Apps: `http://localhost:<port>/msi/token`) bzw. Azure Arc (`IDENTITY_ENDPOINT` + `IMDS_ENDPOINT` ohne `IDENTITY_HEADER`; api-version 2020-06-01, Challenge siehe unten) | optional `clientId` (Zugangsdaten oder `settings.entraClientId`) für benutzerzugewiesene Identitäten (nicht bei Azure Arc) |
 
 - **Scope** `settings.entraScope`, Standard `https://cognitiveservices.azure.com/.default`
   (Managed Identity: als `resource` ohne `/.default`). Bei Workload/Managed Identity – der
@@ -155,6 +155,38 @@ entfernt (OpenAI lehnt es sonst ab). Azure-Deployment-Namen werden auf `[A-Za-z0
   lassen – gleiche Vertrauensstufe wie das Hinterlegen von Zugangsdaten. Die Gateway-Identität
   sollte daher nur die Rolle „Cognitive Services OpenAI User“ auf den vorgesehenen Ressourcen
   haben.
+
+- **Verschlüsselte Zertifikatsschlüssel (AIGW-94):** `ENCRYPTED PRIVATE KEY` (PKCS#8,
+  RFC 5958) mit PBES2 = PBKDF2 (HMAC-SHA1/-SHA256/-SHA384/-SHA512, höchstens 2 000 000
+  Iterationen) + AES-128/-192/-256-CBC – Standard von `openssl pkcs8 -topk8 -v2 aes-256-cbc`,
+  `openssl genpkey -aes-256-cbc`, .NET und Key-Vault-PEM-Exporten. Eigene DER-Auswertung
+  (`aigw_providers::entra_key`), Kryptografie aus aws-lc-rs. Das Passwort steht im
+  Zugangsdaten-Feld `clientCertificatePassword` – als Wert (Admin-API, verschlüsselt
+  gespeichert) oder in GitOps-Manifesten per `valueFrom.file` (unter `gitops.secret_dir`) bzw.
+  `valueFrom.env`. Nicht unterstützt (klare Meldung): PBES1/PKCS#12-PBE (z. B.
+  `PBE-SHA1-3DES`), scrypt, altes OpenSSL-Format (`Proc-Type: 4,ENCRYPTED`; umwandeln mit
+  `openssl pkcs8 -topk8 -v2 aes-256-cbc`). Ein Passwort zu einem unverschlüsselten Schlüssel
+  ist ein Konfigurationsfehler. Meldungen nennen nie Passwort oder Schlüsselmaterial; der
+  entschlüsselte Schlüssel liegt nur im `RsaKeyPair` (Zwischenpuffer werden genullt).
+- **`x5c` (AIGW-94):** `settings.entraSendX5c: true` bzw. `spec.entra.sendX5c: true` (nur
+  `clientCertificate`) schickt alle `CERTIFICATE`-Blöcke des PEM (Blatt zuerst, höchstens 10)
+  als `x5c` (Standard-Base64-DER, RFC 7515) im Header der Assertion mit. Das braucht die
+  Entra-Anmeldung per **Subject Name + Issuer** („SNI“, z. B. für Microsoft-interne bzw.
+  automatisch rotierte Zertifikate: die App vertraut Aussteller + Subject statt eines
+  hinterlegten Fingerabdrucks). `x5t` (SHA-1 des Blattzertifikats) bleibt im Header.
+- **Azure Arc (AIGW-94):** Erkennung über `IDENTITY_ENDPOINT` + `IMDS_ENDPOINT` (ohne
+  `IDENTITY_HEADER`, sonst App Service). Ablauf wie die Azure SDKs: erste Anfrage
+  (`Metadata: true`) → `401` mit `WWW-Authenticate: Basic realm=<Datei>`; die Datei muss ein
+  absoluter Pfad auf `.key` direkt im Arc-Verzeichnis sein (Linux
+  `/var/opt/azcmagent/tokens`, Windows `C:\ProgramData\AzureConnectedMachineAgent\Tokens`),
+  auch nach Auflösen symbolischer Links, reguläre Datei, höchstens 4 KiB. Ihr Inhalt geht als
+  `Authorization: Basic <inhalt>` in die zweite Anfrage. Andere Pfade werden nicht gelesen
+  (Auth-Fehler, Pfad nur im Log) – ein manipulierter lokaler Endpunkt kann so keine
+  beliebigen Dateien des Gateways abgreifen. Benutzerzugewiesene Identitäten gibt es unter Arc
+  nicht (`entraClientId` = Konfigurationsfehler). Der Gateway-Prozess braucht Leserechte auf
+  das Verzeichnis (Gruppe `himds`). Wie jede Managed Identity nur mit
+  `upstream.entra.ambient_identity: true`; SSRF-Ausnahme nur für den Host aus
+  `IDENTITY_ENDPOINT` (`localhost:40342`).
 
 `OpenAiAdapter::azure_with_token_source` bleibt für eigene `TokenSource`-Implementierungen.
 
@@ -653,8 +685,8 @@ Request-Log), Profil, Optimierungen (u. a. mimalloc), Lasttests und Kaltstart:
   Inhalt wird nie ausgegeben); eine Beschränkung auf ein Verzeichnis (wie `gitops.secret_dir`)
   wäre möglich.
 - `client_ip` füllt der Proxy noch nicht (braucht `ConnectInfo` im Listener).
-- Entra ID: verschlüsselte PEM-Schlüssel, `x5c` (Zertifikatskette für Subject-Name/Issuer-
-  Anmeldung), Azure-Arc-Managed-Identity, Weitergabe der Nutzeridentität (On-Behalf-Of).
+- Entra ID: Weitergabe der Nutzeridentität (On-Behalf-Of); PKCS#12/PFX direkt (bisher PEM
+  umwandeln), EC-Zertifikate.
 - Reasoning in Assistant-Nachrichten des Verlaufs von OpenAI-Clients (`reasoning_content`)
   wird noch nicht zurück in die IR übernommen (Anthropic bräuchte ohnehin die Signatur).
 - Mistral: Reasoning im Verlauf (`thinking`-Blöcke in Assistant-Nachrichten) wird nicht an

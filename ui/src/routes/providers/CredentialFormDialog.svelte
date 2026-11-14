@@ -32,7 +32,7 @@
 
   let form = $state({ name: '', provider: 'openai' as S['ProviderKind'], alt: '0' });
   let values = $state<Record<string, string>>({});
-  const NO_ENTRA = { tenantId: '', clientId: '', authority: '', scope: '' };
+  const NO_ENTRA = { tenantId: '', clientId: '', authority: '', scope: '', sendX5c: false };
   let entra = $state({ ...NO_ENTRA });
   let extra = $state<{ key: string; value: string }[]>([]);
   let remove = $state<Record<string, boolean>>({});
@@ -77,7 +77,7 @@
         : req.alternatives.findIndex((a) => !a.entra && a.fields.length > 0 && a.fields.every(has));
       // Ältere Form (IDs als Geheimwerte ohne spec.entra): Service-Principal-Variante vorschlagen.
       if (alt < 0 && !e) alt = req.alternatives.findIndex((a) => a.entra && a.fields.length > 0 && a.fields.every(has));
-      entra = { tenantId: e?.tenantId ?? '', clientId: e?.clientId ?? '', authority: e?.authority ?? '', scope: e?.scope ?? '' };
+      entra = { tenantId: e?.tenantId ?? '', clientId: e?.clientId ?? '', authority: e?.authority ?? '', scope: e?.scope ?? '', sendX5c: e?.sendX5c ?? false };
       form = { name: n, provider: r.data.spec.provider, alt: String(Math.max(0, alt)) };
     } catch (e) {
       handleError(e, { action: 'Zugangsdaten laden' });
@@ -111,9 +111,10 @@
       ...(c ? { clientId: c } : {}),
       ...(a && entraKind !== 'workloadIdentity' ? { authority: a } : {}),
       ...(sc ? { scope: sc } : {}),
+      ...(entraKind === 'clientCertificate' && entra.sendX5c ? { sendX5c: true } : {}),
     };
   }
-  const optional = $derived(req.optional.filter((f) => !required.includes(f)));
+  const optional = $derived([...req.optional, ...(req.alternatives[Number(form.alt)]?.optional ?? [])].filter((f) => !required.includes(f)));
   const fieldLabel = (f: string) => f.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
 
   function collect(): Record<string, S['CredentialValue']> | null {
@@ -220,6 +221,17 @@
     <Field label="Scope" optional hint="Standard: Cognitive Services" error={errors.scope}>
       {#snippet children({ id, describedby, invalid })}<Input {id} bind:value={entra.scope} aria-describedby={describedby} aria-invalid={invalid || undefined} placeholder="https://cognitiveservices.azure.com/.default" autocomplete="off" spellcheck={false} />{/snippet}
     </Field>
+    {#if entraKind === 'clientCertificate'}
+      <label class="flex items-start gap-2 text-sm sm:col-span-2" data-testid="credential-entra-x5c">
+        <Checkbox.Root bind:checked={entra.sendX5c} class="{checkbox} mt-0.5">
+          {#snippet children({ checked })}{#if checked}<Icon name="check" size={12} />{/if}{/snippet}
+        </Checkbox.Root>
+        <span>
+          <span class="block font-medium text-fg">Zertifikatskette mitsenden (x5c)</span>
+          <span class="block text-fg-muted">Für die Anmeldung über Subject Name + Issuer (SNI), z. B. bei automatisch rotierten Zertifikaten.</span>
+        </span>
+      </label>
+    {/if}
   </fieldset>
 {/snippet}
 

@@ -8,9 +8,22 @@
 //! | `settings.entraCredential` | Ablauf | Herkunft |
 //! |---|---|---|
 //! | `clientSecret` | OAuth 2.0 Client Credentials mit `client_secret` | Zugangsdaten `tenantId`, `clientId`, `clientSecret` |
-//! | `clientCertificate` | Client Credentials mit signierter JWT-Assertion (RS256, `x5t`) | Zugangsdaten `tenantId`, `clientId`, `clientCertificate` (PEM: Zertifikat + privater RSA-Schlüssel) |
+//! | `clientCertificate` | Client Credentials mit signierter JWT-Assertion (RS256, `x5t`, optional `x5c`) | Zugangsdaten `tenantId`, `clientId`, `clientCertificate` (PEM: Zertifikat(e) + privater RSA-Schlüssel, auch verschlüsselt mit `clientCertificatePassword`) |
 //! | `workloadIdentity` | Client Credentials mit föderiertem Token (`client_assertion` aus `AZURE_FEDERATED_TOKEN_FILE`) | Prozessumgebung (AKS), `tenantId`/`clientId` auch aus Zugangsdaten/Einstellungen |
-//! | `managedIdentity` | Azure-Metadatendienst (IMDS `169.254.169.254`) bzw. App Service (`IDENTITY_ENDPOINT`) | optional `clientId` (benutzerzugewiesen) |
+//! | `managedIdentity` | Azure-Metadatendienst (IMDS `169.254.169.254`), App Service (`IDENTITY_ENDPOINT` + `IDENTITY_HEADER`) bzw. Azure Arc (`IDENTITY_ENDPOINT` + `IMDS_ENDPOINT`, Challenge mit Schlüsseldatei) | optional `clientId` (benutzerzugewiesen; nicht bei Azure Arc) |
+//!
+//! **Client-Zertifikat (AIGW-94):** Verschlüsselte PKCS#8-Schlüssel (`ENCRYPTED PRIVATE KEY`,
+//! PBES2/PBKDF2/AES-CBC, siehe [`crate::entra_key`]) mit dem Passwort aus dem Zugangsdaten-Feld
+//! `clientCertificatePassword` (als Wert oder per `valueFrom` aus Datei/Umgebung).
+//! `settings.entraSendX5c: true` (bzw. `spec.entra.sendX5c`) schickt die Zertifikatskette als
+//! `x5c` im Header der Assertion mit – nötig für die Anmeldung über Subject Name + Issuer
+//! („SNI“, automatische Zertifikatsrotation ohne neuen Fingerabdruck in Entra).
+//!
+//! **Azure Arc (AIGW-94):** Der lokale Agent beantwortet die erste Anfrage mit `401` und
+//! `WWW-Authenticate: Basic realm=<Datei>`; die Datei muss im Arc-Verzeichnis
+//! ([`ARC_TOKEN_DIR`]) liegen, auf `.key` enden und höchstens 4 KiB groß sein (Pfad nach
+//! Auflösen symbolischer Links geprüft). Ihr Inhalt geht als `Authorization: Basic …` in die
+//! zweite Anfrage. Wie jede Managed Identity nur mit `upstream.entra.ambient_identity`.
 //!
 //! Ohne `entraCredential` gilt `clientSecret` bzw. `clientCertificate`, je nachdem, welches Feld
 //! die Zugangsdaten enthalten.
@@ -44,7 +57,7 @@ use aws_lc_rs::digest;
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
 use bytes::Bytes;
-use http::header::ACCEPT;
+use http::header::{ACCEPT, AUTHORIZATION, WWW_AUTHENTICATE};
 use http::{HeaderName, HeaderValue, Method, Uri};
 use serde_json::json;
 
@@ -72,6 +85,15 @@ pub const DEFAULT_AUTHORITY: &str = "https://login.microsoftonline.com";
 pub const IMDS_ENDPOINT: &str = "http://169.254.169.254/metadata/identity/oauth2/token";
 const IMDS_API_VERSION: &str = "2018-02-01";
 const APP_SERVICE_API_VERSION: &str = "2019-08-01";
+const ARC_API_VERSION: &str = "2020-06-01";
+/// Verzeichnis der Challenge-Schlüsseldateien des Azure-Arc-Agenten (Connected Machine).
+#[cfg(not(windows))]
+pub const ARC_TOKEN_DIR: &str = "/var/opt/azcmagent/tokens";
+/// Verzeichnis der Challenge-Schlüsseldateien des Azure-Arc-Agenten (Connected Machine).
+#[cfg(windows)]
+pub const ARC_TOKEN_DIR: &str = r"C:\ProgramData\AzureConnectedMachineAgent\Tokens";
+/// Höchstgröße der Arc-Schlüsseldatei (wie die Azure SDKs).
+const ARC_MAX_KEY_FILE: u64 = 4096;
 /// Lebensdauer der Client-Assertion (Entra: höchstens 10 Minuten sinnvoll).
 const ASSERTION_LIFETIME_SECS: u64 = 600;
 const CLIENT_ASSERTION_TYPE: &str = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
@@ -93,6 +115,12 @@ pub struct EntraEnv {
     pub identity_header: Option<SecretString>,
     /// IMDS-Endpunkt (Standard [`IMDS_ENDPOINT`]; nur Tests ändern ihn).
     pub imds_endpoint: Option<String>,
+    /// `IMDS_ENDPOINT` (Azure Arc setzt ihn zusammen mit `IDENTITY_ENDPOINT`; dient nur der
+    /// Erkennung).
+    pub arc_imds_endpoint: Option<String>,
+    /// Erlaubtes Verzeichnis der Arc-Schlüsseldateien (Standard [`ARC_TOKEN_DIR`]; nur Tests
+    /// ändern es).
+    pub arc_token_dir: Option<PathBuf>,
     /// Workload/Managed Identity (die Identität des Gateway-Prozesses) freigegeben?
     /// Startkonfiguration `upstream.entra.ambient_identity` (AIGW-90), Standard `false`.
     pub ambient_identity: bool,
@@ -127,6 +155,7 @@ impl fmt::Debug for EntraEnv {
                 "identity_header",
                 &self.identity_header.as_ref().map(|_| "***"),
             )
+            .field("arc_imds_endpoint", &self.arc_imds_endpoint)
             .field("ambient_identity", &self.ambient_identity)
             .finish_non_exhaustive()
     }
@@ -144,16 +173,22 @@ impl EntraEnv {
             identity_endpoint: var("IDENTITY_ENDPOINT"),
             identity_header: var("IDENTITY_HEADER").map(SecretString::new),
             imds_endpoint: None,
+            arc_imds_endpoint: var("IMDS_ENDPOINT"),
+            arc_token_dir: None,
             // Wird je Aufruf aus [`ambient_identity`] übernommen (siehe [`token_source`]).
             ambient_identity: false,
         }
     }
 }
 
-/// Zertifikat (DER des ersten `CERTIFICATE`-Blocks) und privater RSA-Schlüssel.
+/// Zertifikat (DER des ersten `CERTIFICATE`-Blocks), optional die Kette für `x5c` und der
+/// private RSA-Schlüssel.
 struct ClientCertificate {
     /// `x5t`: Base64url(SHA-1(DER)) – von Entra zur Zuordnung des Zertifikats verlangt.
     x5t: String,
+    /// `x5c`: alle `CERTIFICATE`-Blöcke (Blatt zuerst) als Standard-Base64 (RFC 7515 §4.1.6);
+    /// nur mit `sendX5c`.
+    x5c: Option<Vec<String>>,
     key: RsaKeyPair,
 }
 
@@ -161,9 +196,13 @@ impl fmt::Debug for ClientCertificate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientCertificate")
             .field("x5t", &self.x5t)
+            .field("x5c", &self.x5c.as_ref().map(Vec::len))
             .finish_non_exhaustive()
     }
 }
+
+/// Höchstzahl der Zertifikate in `x5c` (Blatt + Zwischenzertifikate).
+const MAX_X5C: usize = 10;
 
 /// Alle PEM-Blöcke mit `label` (z. B. `CERTIFICATE`) als DER.
 fn pem_blocks(pem: &str, label: &str) -> Result<Vec<Vec<u8>>, String> {
@@ -185,43 +224,76 @@ fn pem_blocks(pem: &str, label: &str) -> Result<Vec<Vec<u8>>, String> {
 }
 
 impl ClientCertificate {
-    fn from_pem(pem: &str) -> Result<Self, String> {
+    /// PEM mit Zertifikat(en) und privatem Schlüssel; `password` für einen verschlüsselten
+    /// PKCS#8-Schlüssel (`ENCRYPTED PRIVATE KEY`). Meldungen nennen nie Passwort oder Schlüssel.
+    fn from_pem(pem: &str, password: Option<&str>, send_x5c: bool) -> Result<Self, String> {
         let pem = pem.replace("\\n", "\n");
-        if pem.contains("-----BEGIN ENCRYPTED PRIVATE KEY-----") {
-            return Err(
-                "clientCertificate: verschlüsselte Schlüssel werden nicht unterstützt \
-                 (PEM ohne Passwort ablegen)"
-                    .into(),
-            );
-        }
-        let cert = pem_blocks(&pem, "CERTIFICATE")?
-            .into_iter()
-            .next()
+        let certs = pem_blocks(&pem, "CERTIFICATE")?;
+        let cert = certs
+            .first()
             .ok_or("clientCertificate: kein CERTIFICATE-Block")?;
-        if cert.first() != Some(&0x30) {
+        if certs.iter().any(|c| c.first() != Some(&0x30)) {
             return Err("clientCertificate: Zertifikat ist kein DER-Objekt".into());
         }
-        let key = if let Some(der) = pem_blocks(&pem, "PRIVATE KEY")?.into_iter().next() {
-            RsaKeyPair::from_pkcs8(&der)
-        } else if let Some(der) = pem_blocks(&pem, "RSA PRIVATE KEY")?.into_iter().next() {
-            RsaKeyPair::from_der(&der)
-        } else {
-            return Err(
-                "clientCertificate: kein privater Schlüssel (PRIVATE KEY bzw. RSA PRIVATE KEY)"
-                    .into(),
-            );
+        if send_x5c && certs.len() > MAX_X5C {
+            return Err(format!(
+                "clientCertificate: höchstens {MAX_X5C} Zertifikate für x5c"
+            ));
         }
-        .map_err(|_| "clientCertificate: privater Schlüssel ist kein gültiger RSA-Schlüssel")?;
-        let thumb = digest::digest(&digest::SHA1_FOR_LEGACY_USE_ONLY, &cert);
+        let invalid = "clientCertificate: privater Schlüssel ist kein gültiger RSA-Schlüssel";
+        let key = if let Some(der) = pem_blocks(&pem, "ENCRYPTED PRIVATE KEY")?
+            .into_iter()
+            .next()
+        {
+            let password = password.ok_or(
+                "clientCertificate: Schlüssel ist verschlüsselt – Passwort in \
+                 clientCertificatePassword angeben",
+            )?;
+            let mut plain = crate::entra_key::decrypt_pkcs8(&der, password.as_bytes())
+                .map_err(|e| format!("clientCertificate: {e}"))?;
+            let key = RsaKeyPair::from_pkcs8(&plain).map_err(|_| invalid.to_owned());
+            plain.fill(0);
+            key?
+        } else {
+            if password.is_some() {
+                return Err(
+                    "clientCertificatePassword angegeben, aber der Schlüssel ist nicht \
+                     verschlüsselt (ENCRYPTED PRIVATE KEY erwartet)"
+                        .into(),
+                );
+            }
+            if let Some(der) = pem_blocks(&pem, "PRIVATE KEY")?.into_iter().next() {
+                RsaKeyPair::from_pkcs8(&der).map_err(|_| invalid.to_owned())?
+            } else if pem.contains("Proc-Type: 4,ENCRYPTED") {
+                return Err(
+                    "clientCertificate: verschlüsselter Schlüssel im alten OpenSSL-Format – \
+                     nach PKCS#8 umwandeln (openssl pkcs8 -topk8 -v2 aes-256-cbc)"
+                        .into(),
+                );
+            } else if let Some(der) = pem_blocks(&pem, "RSA PRIVATE KEY")?.into_iter().next() {
+                RsaKeyPair::from_der(&der).map_err(|_| invalid.to_owned())?
+            } else {
+                return Err(
+                    "clientCertificate: kein privater Schlüssel (PRIVATE KEY, ENCRYPTED PRIVATE \
+                     KEY bzw. RSA PRIVATE KEY)"
+                        .into(),
+                );
+            }
+        };
+        let thumb = digest::digest(&digest::SHA1_FOR_LEGACY_USE_ONLY, cert);
         Ok(Self {
             x5t: base64url(thumb.as_ref()),
+            x5c: send_x5c.then(|| certs.iter().map(|c| codec::base64(c)).collect()),
             key,
         })
     }
 
     /// Signierte Client-Assertion (RFC 7523) für `client_id` an `audience` (Token-URL).
     fn assertion(&self, client_id: &str, audience: &str, now: u64) -> Result<String, String> {
-        let header = json!({ "alg": "RS256", "typ": "JWT", "x5t": self.x5t });
+        let mut header = json!({ "alg": "RS256", "typ": "JWT", "x5t": self.x5t });
+        if let Some(chain) = &self.x5c {
+            header["x5c"] = json!(chain);
+        }
         let claims = json!({
             "aud": audience,
             "iss": client_id,
@@ -255,6 +327,8 @@ enum MiEndpoint {
     Imds(Uri),
     /// App Service (`X-IDENTITY-HEADER`).
     AppService(Uri, HeaderValue),
+    /// Azure Arc (Challenge mit Schlüsseldatei aus dem erlaubten Verzeichnis).
+    Arc(Uri, PathBuf),
 }
 
 /// Art der Anmeldung.
@@ -336,6 +410,7 @@ impl EntraFetcher {
         let (base, version) = match endpoint {
             MiEndpoint::Imds(u) => (u, IMDS_API_VERSION),
             MiEndpoint::AppService(u, _) => (u, APP_SERVICE_API_VERSION),
+            MiEndpoint::Arc(u, _) => (u, ARC_API_VERSION),
         };
         let mut url = format!(
             "{base}?api-version={version}&resource={}",
@@ -345,20 +420,44 @@ impl EntraFetcher {
             url.push_str("&client_id=");
             url.push_str(&uri_encode(id, false));
         }
-        let mut req = http::Request::builder()
-            .method(Method::GET)
-            .uri(url)
-            .header(ACCEPT, HeaderValue::from_static("application/json"));
-        req = match endpoint {
-            MiEndpoint::Imds(_) => req.header("metadata", HeaderValue::from_static("true")),
-            MiEndpoint::AppService(_, h) => {
-                req.header(HeaderName::from_static("x-identity-header"), h.clone())
+        let build = |auth: Option<&HeaderValue>| {
+            let mut req = http::Request::builder()
+                .method(Method::GET)
+                .uri(url.as_str())
+                .header(ACCEPT, HeaderValue::from_static("application/json"));
+            req = match endpoint {
+                MiEndpoint::Imds(_) | MiEndpoint::Arc(..) => {
+                    req.header("metadata", HeaderValue::from_static("true"))
+                }
+                MiEndpoint::AppService(_, h) => {
+                    req.header(HeaderName::from_static("x-identity-header"), h.clone())
+                }
+            };
+            if let Some(a) = auth {
+                req = req.header(AUTHORIZATION, a.clone());
             }
+            req.body(Bytes::new())
+                .map_err(|e| token_error(ErrorClass::Internal, e.to_string(), Some(500)))
         };
-        let req = req
-            .body(Bytes::new())
-            .map_err(|e| token_error(ErrorClass::Internal, e.to_string(), Some(500)))?;
-        let reply = send_token_request(client, req).await?;
+        let mut reply = send_token_request(client, build(None)?).await?;
+        if let MiEndpoint::Arc(_, dir) = endpoint {
+            if reply.status != http::StatusCode::UNAUTHORIZED {
+                tracing::warn!(
+                    status = reply.status.as_u16(),
+                    "Azure Arc: Challenge (401) erwartet"
+                );
+                return Err(token_error(
+                    ErrorClass::Auth,
+                    format!(
+                        "Managed Identity (Azure Arc): Challenge erwartet, HTTP {}",
+                        reply.status
+                    ),
+                    None,
+                ));
+            }
+            let auth = arc_challenge(&reply.headers, dir).await?;
+            reply = send_token_request(client, build(Some(&auth))?).await?;
+        }
         // IMDS: 404 (Identität wird gerade zugewiesen) und 410 (Dienst startet) sind
         // vorübergehend.
         if matches!(reply.status.as_u16(), 404 | 410) {
@@ -377,6 +476,86 @@ impl EntraFetcher {
         }
         parse_token_reply(reply.status, &reply.body, Some(unix_now()))
     }
+}
+
+/// Liest den Challenge-Schlüssel des Azure-Arc-Agenten: Pfad aus `WWW-Authenticate: Basic
+/// realm=<Pfad>`, nur eine `.key`-Datei direkt im erlaubten Verzeichnis `dir` (nach Auflösen
+/// symbolischer Links), höchstens [`ARC_MAX_KEY_FILE`] Byte. Liefert den `Authorization`-Wert.
+/// Fehler nennen weder Inhalt noch Pfad (der Pfad steht nur im Log).
+async fn arc_challenge(
+    headers: &http::HeaderMap,
+    dir: &std::path::Path,
+) -> Result<HeaderValue, UpstreamError> {
+    let fail = |why: &'static str| {
+        token_error(
+            ErrorClass::Auth,
+            format!("Managed Identity (Azure Arc): {why}"),
+            None,
+        )
+    };
+    let realm = headers
+        .get(WWW_AUTHENTICATE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| {
+            let (scheme, rest) = v.trim().split_once(' ')?;
+            let rest = rest.trim();
+            let value = rest
+                .get(..6)
+                .filter(|p| p.eq_ignore_ascii_case("realm="))
+                .map(|_| &rest[6..])?;
+            scheme
+                .eq_ignore_ascii_case("basic")
+                .then(|| value.trim_matches('"').to_owned())
+        })
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| fail("Challenge ohne WWW-Authenticate: Basic realm=<Datei>"))?;
+    let path = PathBuf::from(realm);
+    let dir = dir.to_path_buf();
+    let read = tokio::task::spawn_blocking(move || read_arc_key(&path, &dir))
+        .await
+        .map_err(|e| token_error(ErrorClass::Internal, e.to_string(), Some(500)))?;
+    let key = read.map_err(fail)?;
+    let mut value = HeaderValue::from_str(&format!("Basic {key}"))
+        .map_err(|_| fail("Schlüsseldatei enthält unzulässige Zeichen"))?;
+    value.set_sensitive(true);
+    Ok(value)
+}
+
+/// Prüft und liest die Arc-Schlüsseldatei (blockierend).
+fn read_arc_key(path: &std::path::Path, dir: &std::path::Path) -> Result<String, &'static str> {
+    let reject = |why: &'static str| {
+        tracing::warn!(file = %path.display(), allowed = %dir.display(), "Azure Arc: {why}");
+        why
+    };
+    if !path.is_absolute() || path.extension().and_then(|e| e.to_str()) != Some("key") {
+        return Err(reject(
+            "Schlüsseldatei muss ein absoluter Pfad auf .key sein",
+        ));
+    }
+    if path.parent() != Some(dir) {
+        return Err(reject("Schlüsseldatei liegt nicht im Arc-Verzeichnis"));
+    }
+    // Symbolische Links auflösen: auch das Ziel muss direkt im (aufgelösten) Verzeichnis liegen.
+    let real = std::fs::canonicalize(path).map_err(|_| reject("Schlüsseldatei nicht lesbar"))?;
+    let real_dir =
+        std::fs::canonicalize(dir).map_err(|_| reject("Arc-Verzeichnis nicht vorhanden"))?;
+    if real.parent() != Some(real_dir.as_path()) {
+        return Err(reject("Schlüsseldatei liegt nicht im Arc-Verzeichnis"));
+    }
+    let meta = std::fs::metadata(&real).map_err(|_| reject("Schlüsseldatei nicht lesbar"))?;
+    if !meta.is_file() {
+        return Err(reject("Schlüsseldatei ist keine reguläre Datei"));
+    }
+    if meta.len() > ARC_MAX_KEY_FILE {
+        return Err(reject("Schlüsseldatei größer als 4 KiB"));
+    }
+    let content =
+        std::fs::read_to_string(&real).map_err(|_| reject("Schlüsseldatei nicht lesbar"))?;
+    let key = content.trim();
+    if key.is_empty() {
+        return Err(reject("Schlüsseldatei ist leer"));
+    }
+    Ok(key.to_owned())
 }
 
 impl TokenFetcher for EntraFetcher {
@@ -591,6 +770,18 @@ pub fn token_source_with_env(
     };
     let need = |v: Option<String>, what: &'static str| v.ok_or_else(|| s.missing(what));
 
+    if method != "clientCertificate" {
+        if s.bool("entraSendX5c")?.is_some() {
+            return Err(s.invalid(format!(
+                "settings.entraSendX5c: nur bei clientCertificate (nicht {method})"
+            )));
+        }
+        if cred("clientCertificatePassword").is_some() {
+            return Err(s.invalid(format!(
+                "Zugangsdaten clientCertificatePassword: nur bei clientCertificate (nicht {method})"
+            )));
+        }
+    }
     let (fetcher, key) = match method {
         "clientSecret" => {
             let secret = secret.ok_or_else(|| s.missing("Zugangsdaten (clientSecret)"))?;
@@ -616,7 +807,14 @@ pub fn token_source_with_env(
         }
         "clientCertificate" => {
             let pem = certificate.ok_or_else(|| s.missing("Zugangsdaten (clientCertificate)"))?;
-            let cert = ClientCertificate::from_pem(pem.expose()).map_err(|e| s.invalid(e))?;
+            let password = cred("clientCertificatePassword");
+            let send_x5c = s.bool("entraSendX5c")?.unwrap_or(false);
+            let cert = ClientCertificate::from_pem(
+                pem.expose(),
+                password.map(SecretString::expose),
+                send_x5c,
+            )
+            .map_err(|e| s.invalid(e))?;
             let tenant = need(tenant, "Zugangsdaten (tenantId)")?;
             let client_id = need(client_id, "Zugangsdaten (clientId)")?;
             let url = token_url(&tenant)?;
@@ -626,6 +824,11 @@ pub fn token_source_with_env(
                 client_id.as_bytes(),
                 scope.as_bytes(),
                 pem.expose().as_bytes(),
+                password
+                    .map(SecretString::expose)
+                    .unwrap_or_default()
+                    .as_bytes(),
+                &[u8::from(send_x5c)],
             ]);
             (
                 EntraFetcher {
@@ -670,6 +873,23 @@ pub fn token_source_with_env(
         }
         "managedIdentity" => {
             let (endpoint, header_digest) = match (&env.identity_endpoint, &env.identity_header) {
+                (Some(ep), None) if env.arc_imds_endpoint.is_some() => {
+                    // Azure Arc: nur systemzugewiesene Identität.
+                    if client_id.is_some() {
+                        return Err(s.invalid(
+                            "Managed Identity über Azure Arc: benutzerzugewiesene Identität \
+                             (clientId) wird nicht unterstützt",
+                        ));
+                    }
+                    let dir = env
+                        .arc_token_dir
+                        .clone()
+                        .unwrap_or_else(|| PathBuf::from(ARC_TOKEN_DIR));
+                    (
+                        MiEndpoint::Arc(crate::openai::parse_uri(&s, ep)?, dir),
+                        "arc".to_owned(),
+                    )
+                }
                 (Some(ep), Some(h)) => {
                     let uri = crate::openai::parse_uri(&s, ep)?;
                     let mut hv = HeaderValue::from_str(h.expose())
@@ -689,7 +909,9 @@ pub fn token_source_with_env(
                 }
             };
             let url = match &endpoint {
-                MiEndpoint::Imds(u) | MiEndpoint::AppService(u, _) => u.clone(),
+                MiEndpoint::Imds(u) | MiEndpoint::AppService(u, _) | MiEndpoint::Arc(u, _) => {
+                    u.clone()
+                }
             };
             if url.query().is_some() {
                 return Err(s.invalid("Managed-Identity-Endpunkt darf keine Abfrage enthalten"));
@@ -750,7 +972,7 @@ mod tests {
     #[test]
     fn client_assertion_is_valid_rs256_with_x5t() {
         let (pem, cert, public) = test_pem();
-        let c = ClientCertificate::from_pem(&pem).unwrap();
+        let c = ClientCertificate::from_pem(&pem, None, false).unwrap();
         let jwt = c
             .assertion(
                 "cid",
@@ -779,18 +1001,84 @@ mod tests {
 
     #[test]
     fn rejects_bad_certificates() {
-        assert!(ClientCertificate::from_pem("kein pem").is_err());
+        assert!(ClientCertificate::from_pem("kein pem", None, false).is_err());
         let (pem, _, _) = test_pem();
         let only_cert = pem.split("-----BEGIN PRIVATE KEY").next().unwrap();
-        assert!(ClientCertificate::from_pem(only_cert).is_err());
-        assert!(
-            ClientCertificate::from_pem(
-                "-----BEGIN CERTIFICATE-----\nMAMCAQc=\n-----END CERTIFICATE-----\n\
-                 -----BEGIN ENCRYPTED PRIVATE KEY-----\nAAAA\n-----END ENCRYPTED PRIVATE KEY-----"
-            )
-            .unwrap_err()
-            .contains("verschlüsselt")
+        assert!(ClientCertificate::from_pem(only_cert, None, false).is_err());
+        let enc = "-----BEGIN CERTIFICATE-----\nMAMCAQc=\n-----END CERTIFICATE-----\n\
+                   -----BEGIN ENCRYPTED PRIVATE KEY-----\nAAAA\n-----END ENCRYPTED PRIVATE KEY-----";
+        // Ohne Passwort: Hinweis auf das Feld; mit Passwort: Strukturfehler ohne Geheimnis.
+        let e = ClientCertificate::from_pem(enc, None, false).unwrap_err();
+        assert!(e.contains("clientCertificatePassword"), "{e}");
+        let e = ClientCertificate::from_pem(enc, Some("pw-geheim"), false).unwrap_err();
+        assert!(!e.contains("pw-geheim"), "{e}");
+        // Passwort zu unverschlüsseltem Schlüssel: Konfigurationsfehler.
+        let e = ClientCertificate::from_pem(&pem, Some("pw"), false).unwrap_err();
+        assert!(e.contains("nicht verschlüsselt"), "{e}");
+    }
+
+    #[test]
+    fn x5c_carries_the_chain_in_order() {
+        let (pem, cert, _) = test_pem();
+        let second = vec![0x30, 0x03, 0x02, 0x01, 0x08];
+        let chain = format!(
+            "{pem}-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n",
+            base64(&second)
         );
+        let c = ClientCertificate::from_pem(&chain, None, true).unwrap();
+        let jwt = c.assertion("cid", "https://login.example/t", 1).unwrap();
+        let header: Value =
+            serde_json::from_slice(&base64_decode(jwt.split('.').next().unwrap()).unwrap())
+                .unwrap();
+        assert_eq!(header["x5c"], json!([base64(&cert), base64(&second)]));
+        // x5t bleibt der Fingerabdruck des Blattzertifikats.
+        let thumb = digest::digest(&digest::SHA1_FOR_LEGACY_USE_ONLY, &cert);
+        assert_eq!(header["x5t"], base64url(thumb.as_ref()));
+        let without = ClientCertificate::from_pem(&chain, None, false).unwrap();
+        let jwt = without
+            .assertion("cid", "https://login.example/t", 1)
+            .unwrap();
+        assert!(
+            !String::from_utf8(base64_decode(jwt.split('.').next().unwrap()).unwrap())
+                .unwrap()
+                .contains("x5c")
+        );
+    }
+
+    #[test]
+    fn arc_key_file_rules() {
+        let base = std::env::temp_dir().join(format!("aigw-arc-unit-{}", std::process::id()));
+        let dir = base.join("tokens");
+        let outside = base.join("anderswo");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(dir.join("ok.key"), "geheim-123\n").unwrap();
+        assert_eq!(
+            read_arc_key(&dir.join("ok.key"), &dir).unwrap(),
+            "geheim-123"
+        );
+        // Falsche Endung, relativer Pfad, anderes Verzeichnis, Traversal, zu groß, leer.
+        std::fs::write(dir.join("x.txt"), "a").unwrap();
+        assert!(read_arc_key(&dir.join("x.txt"), &dir).is_err());
+        assert!(read_arc_key(std::path::Path::new("ok.key"), &dir).is_err());
+        std::fs::write(outside.join("o.key"), "a").unwrap();
+        assert!(read_arc_key(&outside.join("o.key"), &dir).is_err());
+        assert!(read_arc_key(&dir.join("..").join("anderswo").join("o.key"), &dir).is_err());
+        std::fs::write(dir.join("big.key"), "a".repeat(5000)).unwrap();
+        assert!(read_arc_key(&dir.join("big.key"), &dir).is_err());
+        std::fs::write(dir.join("empty.key"), " \n").unwrap();
+        assert!(read_arc_key(&dir.join("empty.key"), &dir).is_err());
+        std::fs::create_dir_all(dir.join("d.key")).unwrap();
+        assert!(read_arc_key(&dir.join("d.key"), &dir).is_err());
+        // Symbolischer Link im Verzeichnis, der hinaus zeigt.
+        #[cfg(unix)]
+        {
+            let link = dir.join("link.key");
+            let _ = std::fs::remove_file(&link);
+            std::os::unix::fs::symlink(outside.join("o.key"), &link).unwrap();
+            assert!(read_arc_key(&link, &dir).is_err());
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

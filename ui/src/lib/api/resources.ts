@@ -90,19 +90,19 @@ export const providerLabel = (p: string | null | undefined) => (p ? (PROVIDERS.f
 
 /** Entra-ID-Anmeldearten (AIGW-84) für Zugangsdaten von Azure OpenAI und Claude in Azure AI Foundry. */
 export const ENTRA_KINDS: { value: S['EntraCredentialKind']; label: string; hint: string }[] = [
-  { value: 'managedIdentity', label: 'Managed Identity', hint: 'Identität des Gateways (Container Apps, App Service, VM); optional Client-ID einer benutzerzugewiesenen Identität' },
+  { value: 'managedIdentity', label: 'Managed Identity', hint: 'Identität des Gateways (Container Apps, App Service, VM, Azure Arc); optional Client-ID einer benutzerzugewiesenen Identität' },
   { value: 'workloadIdentity', label: 'Workload Identity', hint: 'AKS: föderiertes Token aus AZURE_FEDERATED_TOKEN_FILE' },
   { value: 'clientSecret', label: 'Service Principal (Secret)', hint: 'Tenant-ID, Client-ID und Client-Secret' },
-  { value: 'clientCertificate', label: 'Service Principal (Zertifikat)', hint: 'Tenant-ID, Client-ID und PEM mit Zertifikat + privatem RSA-Schlüssel' },
+  { value: 'clientCertificate', label: 'Service Principal (Zertifikat)', hint: 'Tenant-ID, Client-ID und PEM mit Zertifikat + privatem RSA-Schlüssel (auch verschlüsselt mit Passwort)' },
 ];
 export const entraLabel = (k: string | null | undefined) => ENTRA_KINDS.find((e) => e.value === k)?.label ?? k ?? 'Entra ID';
 
-type CredAlt = { label: string; fields: string[]; entra?: S['EntraCredentialKind'] };
+type CredAlt = { label: string; fields: string[]; optional?: string[]; entra?: S['EntraCredentialKind'] };
 const ENTRA_ALTS: CredAlt[] = [
   { label: 'Entra ID – Managed Identity', fields: [], entra: 'managedIdentity' },
   { label: 'Entra ID – Workload Identity', fields: [], entra: 'workloadIdentity' },
   { label: 'Entra ID – Service Principal (Secret)', fields: ['clientSecret'], entra: 'clientSecret' },
-  { label: 'Entra ID – Service Principal (Zertifikat)', fields: ['clientCertificate'], entra: 'clientCertificate' },
+  { label: 'Entra ID – Service Principal (Zertifikat)', fields: ['clientCertificate'], optional: ['clientCertificatePassword'], entra: 'clientCertificate' },
 ];
 
 /**

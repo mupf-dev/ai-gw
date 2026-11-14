@@ -4,7 +4,9 @@
 //! Backend `redis` gegen einen echten Redis/Valkey-Server.
 //!
 //! Läuft nur, wenn `AIGW_TEST_REDIS_URL` gesetzt ist (`scripts/check.sh` mit
-//! `AIGW_TEST_REDIS=docker`). Jeder Test verwendet ein eigenes Schlüsselpräfix.
+//! `AIGW_TEST_REDIS=docker`). Jeder Test verwendet ein eigenes Schlüsselpräfix; Ausfälle
+//! simuliert ein eigener TCP-Proxy je Test ([`Outage`]), nicht `CLIENT PAUSE` am gemeinsamen
+//! Server.
 //! Der Rückfalltest ohne Server läuft immer.
 
 #![allow(
@@ -22,9 +24,100 @@ use aigw_counters::{
     CounterBackend, CounterError, Health, LimitCheck, RedisCounters, RedisOptions, Window,
 };
 
-/// Tests mit `CLIENT PAUSE` halten den ganzen Server an – nacheinander ausführen, damit der
-/// Verbindungsaufbau des anderen nicht in die Pause fällt.
-static PAUSE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// Ausfall-Simulation (AIGW-94): ein TCP-Proxy vor Redis, der auf Kommando alle Daten
+/// zurückhält (wie `CLIENT PAUSE ALL` – Verbindungen bleiben offen, Befehle hängen) und sie
+/// beim Freigeben in Reihenfolge zustellt. Anders als eine Pause mit fester Dauer endet der
+/// Ausfall erst, wenn der Test es sagt – das Ergebnis hängt nicht von der Last der Maschine
+/// ab, und andere Tests am selben Server bleiben unberührt.
+struct Outage {
+    url: String,
+    frozen: tokio::sync::watch::Sender<bool>,
+}
+
+impl Outage {
+    async fn start(redis_url: &str) -> Self {
+        let rest = redis_url
+            .strip_prefix("redis://")
+            .expect("AIGW_TEST_REDIS_URL: redis://host:port/db");
+        let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+        let (userinfo, target) = match authority.rsplit_once('@') {
+            Some((u, t)) => (format!("{u}@"), t.to_owned()),
+            None => (String::new(), authority.to_owned()),
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (frozen, _) = tokio::sync::watch::channel(false);
+        let tx = frozen.clone();
+        tokio::spawn(async move {
+            while let Ok((client, _)) = listener.accept().await {
+                let Ok(server) = tokio::net::TcpStream::connect(&target).await else {
+                    continue;
+                };
+                let (cr, cw) = client.into_split();
+                let (sr, sw) = server.into_split();
+                tokio::spawn(pump(cr, sw, tx.subscribe()));
+                tokio::spawn(pump(sr, cw, tx.subscribe()));
+            }
+        });
+        Self {
+            url: format!("redis://{userinfo}{addr}/{path}"),
+            frozen,
+        }
+    }
+
+    fn freeze(&self) {
+        self.frozen.send_replace(true);
+    }
+
+    fn thaw(&self) {
+        self.frozen.send_replace(false);
+    }
+}
+
+/// Leitet Bytes weiter; solange `frozen`, bleiben gelesene Daten liegen.
+async fn pump(
+    mut from: tokio::net::tcp::OwnedReadHalf,
+    mut to: tokio::net::tcp::OwnedWriteHalf,
+    mut frozen: tokio::sync::watch::Receiver<bool>,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut buf = vec![0u8; 16 * 1024];
+    loop {
+        let n = match from.read(&mut buf).await {
+            Ok(0) | Err(_) => return,
+            Ok(n) => n,
+        };
+        if frozen.wait_for(|f| !*f).await.is_err() {
+            return;
+        }
+        if to.write_all(&buf[..n]).await.is_err() {
+            return;
+        }
+    }
+}
+
+/// Optionen für die Ausfalltests: das Zeitlimit löst den Rückfall aus, solange der Proxy
+/// zurückhält; danach muss es auch auf einer stark belasteten Maschine reichen (CI, parallele
+/// Builds). Es bestimmt nur die Testdauer, nicht das Ergebnis.
+fn outage_opts() -> RedisOptions {
+    RedisOptions {
+        key_prefix: format!("aigwtest:{}:", uuid::Uuid::now_v7().simple()),
+        timeout: Duration::from_secs(2),
+        connect_timeout: Duration::from_secs(10),
+        reconnect_interval: Duration::from_millis(100),
+        ..RedisOptions::default()
+    }
+}
+
+/// Wartet (höchstens 30 s) auf `cond`.
+async fn eventually(mut cond: impl FnMut() -> bool) {
+    for _ in 0..300 {
+        if cond() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
 
 fn url() -> Option<String> {
     let url = std::env::var("AIGW_TEST_REDIS_URL").ok();
@@ -146,31 +239,14 @@ async fn many_tasks_two_instances_never_exceed_limit() {
 #[tokio::test]
 async fn falls_back_and_recovers() {
     let Some(url) = url() else { return };
-    let _serial = PAUSE.lock().await;
-    let prefix = format!("aigwtest:{}:", uuid::Uuid::now_v7().simple());
-    let c = RedisCounters::connect(
-        &url,
-        RedisOptions {
-            key_prefix: prefix,
-            timeout: Duration::from_millis(100),
-            reconnect_interval: Duration::from_millis(100),
-            ..RedisOptions::default()
-        },
-    )
-    .await
-    .unwrap();
-    assert!(!c.is_degraded());
-
-    // Alle Clients für 600 ms anhalten → Zeitüberschreitung → lokaler Rückfall.
-    let admin = redis::Client::open(url.as_str()).unwrap();
-    let mut con = admin.get_multiplexed_async_connection().await.unwrap();
-    let _: () = redis::cmd("CLIENT")
-        .arg("PAUSE")
-        .arg(600)
-        .arg("ALL")
-        .query_async(&mut con)
+    let outage = Outage::start(&url).await;
+    let c = RedisCounters::connect(&outage.url, outage_opts())
         .await
         .unwrap();
+    assert!(!c.is_degraded());
+
+    // Server hängt → Zeitüberschreitung → lokaler Rückfall.
+    outage.freeze();
     let r = c
         .reserve(&[LimitCheck::new("k", Window::Minute, 10, 3)])
         .await
@@ -178,20 +254,18 @@ async fn falls_back_and_recovers() {
     assert!(r.is_local_fallback());
     assert!(matches!(c.health(), Health::Degraded(_)));
     c.settle(r, 1).await; // lokal gebucht → lokal abgeglichen
+    // Im Rückfall direkt lokal (ohne erneutes Warten auf Redis).
     let r2 = c
         .reserve(&[LimitCheck::new("k2", Window::Minute, 10, 4)])
         .await
         .unwrap();
     assert!(r2.is_local_fallback());
     c.settle(r2, 2).await;
+    assert!(c.is_degraded(), "Ausfall dauert an: {:?}", c.health());
 
-    // Nach der Pause verbindet der Monitor wieder.
-    for _ in 0..50 {
-        if !c.is_degraded() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    // Server antwortet wieder → der Monitor verbindet wieder.
+    outage.thaw();
+    eventually(|| !c.is_degraded()).await;
     assert!(!c.is_degraded(), "{:?}", c.health());
     // F28: der lokal gebuchte Verbrauch wird nach der Rückkehr in Redis nachgetragen
     // ("k2" nur lokal; "k" lief in die Zeitüberschreitung und kann doppelt stehen).
@@ -211,41 +285,27 @@ async fn falls_back_and_recovers() {
 #[tokio::test]
 async fn deferred_settles_replayed_after_outage() {
     let Some(url) = url() else { return };
-    let _serial = PAUSE.lock().await;
-    let prefix = format!("aigwtest:{}:", uuid::Uuid::now_v7().simple());
-    let c = RedisCounters::connect(
-        &url,
-        RedisOptions {
-            key_prefix: prefix,
-            timeout: Duration::from_millis(100),
-            reconnect_interval: Duration::from_millis(100),
-            ..RedisOptions::default()
-        },
-    )
-    .await
-    .unwrap();
+    let outage = Outage::start(&url).await;
+    let c = RedisCounters::connect(&outage.url, outage_opts())
+        .await
+        .unwrap();
     let hour = |n| [LimitCheck::new("h", Window::Hour, 1_000, n)];
     // Kurzer fester Zeitraum, der während des Ausfalls endet (Delta wird verworfen).
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
-    let short = Window::period(now - 1_000, now + 300);
+    let now = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+    };
+    let short_end = now() + 3_000;
+    let short = Window::period(short_end - 4_000, short_end);
     let sec = |n| [LimitCheck::new("s", short, 1_000, n)];
     let rh = c.reserve(&hour(100)).await.unwrap();
     let rs = c.reserve(&sec(100)).await.unwrap();
-    assert!(!rh.is_local_fallback());
+    assert!(!rh.is_local_fallback() && !rs.is_local_fallback());
+    assert!(now() < short_end, "Vorbereitung zu langsam");
 
-    // Pause (kürzer als das Verbindungs-Zeitlimit paralleler Tests), länger als `short`.
-    let admin = redis::Client::open(url.as_str()).unwrap();
-    let mut con = admin.get_multiplexed_async_connection().await.unwrap();
-    let _: () = redis::cmd("CLIENT")
-        .arg("PAUSE")
-        .arg(700)
-        .arg("ALL")
-        .query_async(&mut con)
-        .await
-        .unwrap();
+    outage.freeze();
     // Auslöser des Rückfalls auf eigenem Schlüssel (das Skript kann später doch noch laufen).
     let t = c
         .reserve(&[LimitCheck::new("trigger", Window::Hour, 1_000, 1)])
@@ -260,14 +320,19 @@ async fn deferred_settles_replayed_after_outage() {
     assert_eq!(c.lost_settles(), 2);
     assert!(c.stats().pending >= 2, "{:?}", c.stats());
 
-    // Rückkehr: der Monitor verbindet neu und trägt nach.
-    for _ in 0..80 {
-        let st = c.stats();
-        if !c.is_degraded() && st.pending == 0 && st.replayed >= 2 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+    // Der Ausfall dauert, bis der kurze Zeitraum sicher vorbei ist.
+    while now() < short_end + 200 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    assert!(c.is_degraded());
+
+    // Rückkehr: der Monitor verbindet neu und trägt nach.
+    outage.thaw();
+    eventually(|| {
+        let st = c.stats();
+        !c.is_degraded() && st.pending == 0 && st.replayed >= 2
+    })
+    .await;
     let st = c.stats();
     assert!(!c.is_degraded(), "{:?}", c.health());
     assert_eq!(st.pending, 0, "{st:?}");

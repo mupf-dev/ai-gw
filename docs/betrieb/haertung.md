@@ -87,6 +87,11 @@ AIGW-58). Verweise `S-xx` beziehen sich auf die dortigen Befunde.
   Gateways angebunden werden; der Identität nur „Cognitive Services OpenAI User“ (bzw. die
   nötige Foundry-Rolle) auf den vorgesehenen Ressourcen geben – wer Deployments anlegen darf,
   kann ihre Tokens an jeden erlaubten Endpunkt schicken lassen.
+- **Entra-Client-Zertifikat** (AIGW-94): Schlüssel möglichst verschlüsselt ablegen
+  (`ENCRYPTED PRIVATE KEY`, Passwort in `clientCertificatePassword` bzw. per `valueFrom.file`
+  aus `gitops.secret_dir`, getrennt vom PEM). Unter **Azure Arc** liest ai-gw Challenge-Dateien
+  nur aus `/var/opt/azcmagent/tokens`; dem Dienstbenutzer nur die Gruppe `himds` geben, keine
+  weiteren Leserechte.
 - Einladungslinks über einen vertraulichen Kanal verschicken; sie sind Inhaber-Token (S-25).
 
 ## Datenebene
