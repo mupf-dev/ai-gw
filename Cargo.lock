@@ -87,15 +87,22 @@ name = "aigw-billing"
 version = "0.1.0"
 dependencies = [
  "aigw-core",
+ "aigw-outbound",
  "aigw-webhook",
  "async-trait",
+ "bytes",
  "dashmap",
+ "http",
  "jiff",
+ "serde",
+ "serde-saphyr",
  "serde_json",
  "thiserror",
  "time",
  "tokio",
  "tracing",
+ "url",
+ "utoipa",
 ]
 
 [[package]]

@@ -125,7 +125,11 @@ impl Catalog {
             aigw_core::validate::price(&spec)
                 .map_err(|m| format!("{}/{}: {m}", e.provider.as_str(), e.model))?;
             if e.valid_from.is_some() && e.valid_from_at().is_none() {
-                return Err(format!("{}/{}: validFrom JJJJ-MM-TT", e.provider.as_str(), e.model));
+                return Err(format!(
+                    "{}/{}: validFrom JJJJ-MM-TT",
+                    e.provider.as_str(),
+                    e.model
+                ));
             }
         }
         Ok(Self::new(f.version, f.models))
@@ -212,7 +216,11 @@ impl Catalog {
     }
 
     /// Eintrag für `model` des Anbieters `provider`.
-    pub fn lookup(&self, provider: ProviderKind, model: &str) -> Option<(&CatalogEntry, CatalogMatch)> {
+    pub fn lookup(
+        &self,
+        provider: ProviderKind,
+        model: &str,
+    ) -> Option<(&CatalogEntry, CatalogMatch)> {
         let m = model.trim().to_ascii_lowercase();
         let get = |name: &str| {
             self.index
@@ -239,7 +247,8 @@ fn strip_version(m: &str) -> Option<String> {
     }
     let b = s.as_bytes();
     let n = b.len();
-    let digits = |r: std::ops::Range<usize>| b.get(r).is_some_and(|x| x.iter().all(u8::is_ascii_digit));
+    let digits =
+        |r: std::ops::Range<usize>| b.get(r).is_some_and(|x| x.iter().all(u8::is_ascii_digit));
     if n > 11 && (b[n - 9] == b'-' || b[n - 9] == b'@') && digits(n - 8..n) {
         s.truncate(n - 9);
     } else if n > 11
@@ -266,18 +275,35 @@ mod tests {
         let (e, how) = c.lookup(ProviderKind::OpenAi, "gpt-5.4-mini").unwrap();
         assert_eq!(how, CatalogMatch::Exact);
         assert!(e.per_million_tokens.input.is_some());
-        let (_, how) = c.lookup(ProviderKind::OpenAi, "gpt-5.4-mini-2026-03-17").unwrap();
+        let (_, how) = c
+            .lookup(ProviderKind::OpenAi, "gpt-5.4-mini-2026-03-17")
+            .unwrap();
         assert!(matches!(how, CatalogMatch::Exact | CatalogMatch::Base));
-        assert!(c.lookup(ProviderKind::Anthropic, "claude-sonnet-4-5-20250929").is_some());
+        assert!(
+            c.lookup(ProviderKind::Anthropic, "claude-sonnet-4-5-20250929")
+                .is_some()
+        );
         assert!(c.lookup(ProviderKind::OpenAi, "kein-modell").is_none());
     }
 
     #[test]
     fn strips_versions() {
-        assert_eq!(strip_version("gpt-4o-2024-08-06").as_deref(), Some("gpt-4o"));
-        assert_eq!(strip_version("claude-sonnet-4-5-20250929").as_deref(), Some("claude-sonnet-4-5"));
-        assert_eq!(strip_version("claude-sonnet-4-5@20250929").as_deref(), Some("claude-sonnet-4-5"));
-        assert_eq!(strip_version("mistral-large-latest").as_deref(), Some("mistral-large"));
+        assert_eq!(
+            strip_version("gpt-4o-2024-08-06").as_deref(),
+            Some("gpt-4o")
+        );
+        assert_eq!(
+            strip_version("claude-sonnet-4-5-20250929").as_deref(),
+            Some("claude-sonnet-4-5")
+        );
+        assert_eq!(
+            strip_version("claude-sonnet-4-5@20250929").as_deref(),
+            Some("claude-sonnet-4-5")
+        );
+        assert_eq!(
+            strip_version("mistral-large-latest").as_deref(),
+            Some("mistral-large")
+        );
         assert_eq!(strip_version("gpt-4o"), None);
     }
 
@@ -296,8 +322,17 @@ mod tests {
         .unwrap();
         assert_eq!(c.len(), 2);
         let (e, _) = c.lookup(ProviderKind::OpenAi, "gpt-x").unwrap();
-        assert_eq!(e.per_million_tokens.input.map(|a| a.to_string()).as_deref(), Some("0.75"));
-        assert_eq!(e.per_million_tokens.cached_input.map(|a| a.to_string()).as_deref(), Some("0.075"));
+        assert_eq!(
+            e.per_million_tokens.input.map(|a| a.to_string()).as_deref(),
+            Some("0.75")
+        );
+        assert_eq!(
+            e.per_million_tokens
+                .cached_input
+                .map(|a| a.to_string())
+                .as_deref(),
+            Some("0.075")
+        );
         assert!(c.lookup(ProviderKind::Vertex, "gemini-y").is_some());
     }
 

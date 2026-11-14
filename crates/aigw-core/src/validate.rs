@@ -286,7 +286,8 @@ fn pricing_settings(v: Option<&Value>) -> Res {
             "region" => {
                 !s.is_empty()
                     && s.len() <= 64
-                    && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+                    && s.bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
             }
             _ => !s.trim().is_empty() && s.len() <= 256 && !s.chars().any(char::is_control),
         };
@@ -1200,8 +1201,8 @@ mod tests {
 
     #[test]
     fn pricing_settings_rules() {
-        let check = |v: serde_json::Value| {
-            let serde_json::Value::Object(o) = serde_json::json!({ "pricing": v }) else {
+        let check = |v: Value| {
+            let Value::Object(o) = serde_json::json!({ "pricing": v }) else {
                 unreachable!()
             };
             deployment_settings(&o)

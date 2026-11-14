@@ -33,7 +33,10 @@ pub fn scaled_amount(s: &str, shift: i32) -> Option<Amount> {
     let digits = format!("{int}{frac}");
     let digits = digits.trim_start_matches('0');
     let frac_len = i32::try_from(frac.len()).ok()?;
-    let e10 = exp.checked_sub(frac_len)?.checked_add(shift)?.checked_add(9)?;
+    let e10 = exp
+        .checked_sub(frac_len)?
+        .checked_add(shift)?
+        .checked_add(9)?;
     if digits.is_empty() {
         return Some(Amount::ZERO);
     }

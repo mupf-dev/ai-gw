@@ -143,14 +143,48 @@ struct RetailPage {
 
 /// Tokens, die eine nicht unterstützte Variante kennzeichnen (Meter wird übergangen).
 const EXCLUDED: &[&str] = &[
-    "batch", "pp", "ft", "trng", "training", "longco", "lc", "rt", "realtime", "aud", "audio",
-    "img", "image", "grader", "rft", "hosting", "fl", "flex", "sp", "tcrb", "transcribe", "tts",
-    "l", "provisioned", "managed", "unit", "sora", "video", "ptu", "reservation",
+    "batch",
+    "pp",
+    "ft",
+    "trng",
+    "training",
+    "longco",
+    "lc",
+    "rt",
+    "realtime",
+    "aud",
+    "audio",
+    "img",
+    "image",
+    "grader",
+    "rft",
+    "hosting",
+    "fl",
+    "flex",
+    "sp",
+    "tcrb",
+    "transcribe",
+    "tts",
+    "l",
+    "provisioned",
+    "managed",
+    "unit",
+    "sora",
+    "video",
+    "ptu",
+    "reservation",
 ];
 /// Bedeutungslose Tokens (Standardpriorität, kurzer Kontext, Einheit).
 const IGNORED: &[&str] = &["std", "shortco", "shco", "tokens", "token", "1m", "1k"];
 /// Hersteller-/Familienpräfixe, die auf beiden Seiten entfallen.
-const VENDOR: &[&str] = &["gpt", "deepseek", "mistral", "microsoft", "meta", "instruct"];
+const VENDOR: &[&str] = &[
+    "gpt",
+    "deepseek",
+    "mistral",
+    "microsoft",
+    "meta",
+    "instruct",
+];
 
 /// Zerlegt einen Namen in Tokens (klein, ohne Trenner).
 fn tokens(s: &str) -> Vec<String> {
@@ -163,7 +197,8 @@ fn tokens(s: &str) -> Vec<String> {
 
 /// Vereinheitlicht Datumsangaben zu `MMTT` (`2024-07-18`, `20240718`, `0718`).
 fn fold_dates(t: Vec<String>) -> Vec<String> {
-    let is_year = |s: &str| s.len() == 4 && s.starts_with("20") && s.bytes().all(|b| b.is_ascii_digit());
+    let is_year =
+        |s: &str| s.len() == 4 && s.starts_with("20") && s.bytes().all(|b| b.is_ascii_digit());
     let is_2 = |s: &str| s.len() == 2 && s.bytes().all(|b| b.is_ascii_digit());
     let mut out = Vec::with_capacity(t.len());
     let mut i = 0;
@@ -296,7 +331,11 @@ pub struct AzureMatch {
 ///
 /// Exakte Treffer gehen vor; sonst Meter mit zusätzlicher Versionskennung (`gpt-4o` →
 /// `gpt 4o 1120`), dabei die Version mit dem jüngsten `effectiveStartDate`.
-pub fn lookup(meters: &[Meter], model: &[String], dtype: AzureDeploymentType) -> Option<AzureMatch> {
+pub fn lookup(
+    meters: &[Meter],
+    model: &[String],
+    dtype: AzureDeploymentType,
+) -> Option<AzureMatch> {
     if model.is_empty() {
         return None;
     }
@@ -410,7 +449,10 @@ pub fn is_azure_host(endpoint: &str) -> bool {
 
 /// Gültiger Regionsname (`swedencentral`).
 pub fn valid_region(r: &str) -> bool {
-    !r.is_empty() && r.len() <= 64 && r.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    !r.is_empty()
+        && r.len() <= 64
+        && r.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
 }
 
 /// Ergebnis einer Regionsabfrage.
@@ -553,7 +595,10 @@ impl AzureRetail {
             || u.host_str() != self.base.host_str()
             || u.port_or_known_default() != self.base.port_or_known_default()
         {
-            return Err(format!("NextPageLink auf fremdem Host: {}", u.host_str().unwrap_or("")));
+            return Err(format!(
+                "NextPageLink auf fremdem Host: {}",
+                u.host_str().unwrap_or("")
+            ));
         }
         Ok(u)
     }
@@ -565,10 +610,17 @@ impl AzureRetail {
         for _ in 0..MAX_PAGES {
             let req = http::Request::get(url.as_str())
                 .header(http::header::ACCEPT, "application/json")
-                .header(http::header::USER_AGENT, concat!("aigw/", env!("CARGO_PKG_VERSION")))
+                .header(
+                    http::header::USER_AGENT,
+                    concat!("aigw/", env!("CARGO_PKG_VERSION")),
+                )
                 .body(Bytes::new())
                 .map_err(|e| e.to_string())?;
-            let reply = self.client.fetch(req, &limits).await.map_err(|e| e.to_string())?;
+            let reply = self
+                .client
+                .fetch(req, &limits)
+                .await
+                .map_err(|e| e.to_string())?;
             if !reply.status.is_success() {
                 return Err(format!("HTTP {}", reply.status.as_u16()));
             }
@@ -596,9 +648,18 @@ mod tests {
     fn parses_sku_names() {
         use AzureDeploymentType::*;
         use MeterKind::*;
-        assert_eq!(sku("5.4 mini Inp Gl"), Some(("5.4 mini".into(), Global, Input)));
-        assert_eq!(sku("5.4 mini cd Inp Dz"), Some(("5.4 mini".into(), DataZone, CachedInput)));
-        assert_eq!(sku("5.4 mini Opt Gl"), Some(("5.4 mini".into(), Global, Output)));
+        assert_eq!(
+            sku("5.4 mini Inp Gl"),
+            Some(("5.4 mini".into(), Global, Input))
+        );
+        assert_eq!(
+            sku("5.4 mini cd Inp Dz"),
+            Some(("5.4 mini".into(), DataZone, CachedInput))
+        );
+        assert_eq!(
+            sku("5.4 mini Opt Gl"),
+            Some(("5.4 mini".into(), Global, Output))
+        );
         assert_eq!(
             sku("gpt-4o-mini-0718-Outp-regnl"),
             Some(("4o mini 0718".into(), Regional, Output))
@@ -636,11 +697,17 @@ mod tests {
     #[test]
     fn model_token_normalisation() {
         assert_eq!(model_tokens("gpt-5.4-mini"), ["5.4", "mini"]);
-        assert_eq!(model_tokens("gpt-4o-mini-2024-07-18"), ["4o", "mini", "0718"]);
+        assert_eq!(
+            model_tokens("gpt-4o-mini-2024-07-18"),
+            ["4o", "mini", "0718"]
+        );
         assert_eq!(model_tokens("o4-mini"), ["o4", "mini"]);
         assert_eq!(model_tokens("DeepSeek-V3.2"), ["v3.2"]);
         assert_eq!(model_tokens("Mistral-Large-3"), ["large", "3"]);
-        assert_eq!(model_tokens("claude-sonnet-4-5-20250929"), ["claude", "sonnet", "4", "5", "0929"]);
+        assert_eq!(
+            model_tokens("claude-sonnet-4-5-20250929"),
+            ["claude", "sonnet", "4", "5", "0929"]
+        );
     }
 
     fn meter(sku: &str, price: &str, date: &str) -> Meter {
@@ -668,24 +735,63 @@ mod tests {
             meter("gpt 4o 1120 Inp glbl", "2.5", "2024-12-01T00:00:00Z"),
             meter("gpt 4o 1120 Outp glbl", "10", "2024-12-01T00:00:00Z"),
         ];
-        let m = lookup(&ms, &model_tokens("gpt-5.4-mini"), AzureDeploymentType::Global);
+        let m = lookup(
+            &ms,
+            &model_tokens("gpt-5.4-mini"),
+            AzureDeploymentType::Global,
+        );
         let m = m.as_ref();
-        assert_eq!(m.and_then(|m| m.prices.input).map(|a| a.to_string()).as_deref(), Some("0.75"));
         assert_eq!(
-            m.and_then(|m| m.prices.cached_input).map(|a| a.to_string()).as_deref(),
+            m.and_then(|m| m.prices.input)
+                .map(|a| a.to_string())
+                .as_deref(),
+            Some("0.75")
+        );
+        assert_eq!(
+            m.and_then(|m| m.prices.cached_input)
+                .map(|a| a.to_string())
+                .as_deref(),
             Some("0.075")
         );
-        assert_eq!(m.and_then(|m| m.prices.output).map(|a| a.to_string()).as_deref(), Some("4.5"));
+        assert_eq!(
+            m.and_then(|m| m.prices.output)
+                .map(|a| a.to_string())
+                .as_deref(),
+            Some("4.5")
+        );
         assert_eq!(m.map(|m| m.meters.len()), Some(3));
-        let dz = lookup(&ms, &model_tokens("gpt-5.4-mini"), AzureDeploymentType::DataZone);
-        assert_eq!(dz.and_then(|m| m.prices.input).map(|a| a.to_string()).as_deref(), Some("0.825"));
+        let dz = lookup(
+            &ms,
+            &model_tokens("gpt-5.4-mini"),
+            AzureDeploymentType::DataZone,
+        );
+        assert_eq!(
+            dz.and_then(|m| m.prices.input)
+                .map(|a| a.to_string())
+                .as_deref(),
+            Some("0.825")
+        );
         let v = lookup(&ms, &model_tokens("gpt-4o"), AzureDeploymentType::Global);
         assert_eq!(v.as_ref().and_then(|m| m.version.as_deref()), Some("1120"));
         assert_eq!(v.map(|m| m.other_versions), Some(vec!["0806".to_owned()]));
-        let pinned = lookup(&ms, &model_tokens("gpt-4o-2024-08-06"), AzureDeploymentType::Global);
-        assert_eq!(pinned.map(|m| m.meters[0].clone()).as_deref(), Some("gpt 4o 0806 Inp glbl"));
+        let pinned = lookup(
+            &ms,
+            &model_tokens("gpt-4o-2024-08-06"),
+            AzureDeploymentType::Global,
+        );
+        assert_eq!(
+            pinned.map(|m| m.meters[0].clone()).as_deref(),
+            Some("gpt 4o 0806 Inp glbl")
+        );
         assert!(lookup(&ms, &model_tokens("gpt-5.4"), AzureDeploymentType::Global).is_none());
-        assert!(lookup(&ms, &model_tokens("gpt-5.4-mini"), AzureDeploymentType::Regional).is_none());
+        assert!(
+            lookup(
+                &ms,
+                &model_tokens("gpt-5.4-mini"),
+                AzureDeploymentType::Regional
+            )
+            .is_none()
+        );
     }
 
     #[test]

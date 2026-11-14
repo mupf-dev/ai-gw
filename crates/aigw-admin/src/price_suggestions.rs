@@ -173,7 +173,9 @@ pub(crate) async fn accept_suggestions(
     if req.items.is_empty() || req.items.len() > 500 {
         return Err(Problem::invalid("items: 1–500 Deployments"));
     }
-    let now = OffsetDateTime::now_utc().replace_nanosecond(0).unwrap_or(OffsetDateTime::now_utc());
+    let now = OffsetDateTime::now_utc()
+        .replace_nanosecond(0)
+        .unwrap_or(OffsetDateTime::now_utc());
     let valid_from = req.valid_from.unwrap_or(now);
     if valid_from < now - time::Duration::minutes(1) {
         return Err(Problem::invalid(
@@ -183,8 +185,11 @@ pub(crate) async fn accept_suggestions(
     // Vorschläge vor der Schreibsperre (Abruf aus dem Netz möglich).
     let report = build_report(&st, false, now).await?;
     let _guard = st.write_lock.lock().await;
-    let by_name: BTreeMap<&str, _> =
-        report.items.iter().map(|i| (i.deployment.as_str(), i)).collect();
+    let by_name: BTreeMap<&str, _> = report
+        .items
+        .iter()
+        .map(|i| (i.deployment.as_str(), i))
+        .collect();
 
     // Erst alles prüfen, dann schreiben.
     let mut invalid = Vec::new();
@@ -255,9 +260,11 @@ pub(crate) async fn accept_suggestions(
             meta.labels.insert(LABEL_REGION.into(), r.clone());
         }
         if let Some(t) = s.deployment_type {
-            meta.labels.insert(LABEL_DEPLOYMENT_TYPE.into(), t.as_str().into());
+            meta.labels
+                .insert(LABEL_DEPLOYMENT_TYPE.into(), t.as_str().into());
         }
-        meta.labels.insert(LABEL_DEPLOYMENT.into(), item.deployment.clone());
+        meta.labels
+            .insert(LABEL_DEPLOYMENT.into(), item.deployment.clone());
         planned.insert(key, (item.deployment.clone(), spec, meta));
     }
     if !invalid.is_empty() {

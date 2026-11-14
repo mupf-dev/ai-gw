@@ -35,7 +35,7 @@ use serde_json::Value;
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 
-pub use azure::{AzureRetail, AzureDeploymentType};
+pub use azure::{AzureDeploymentType, AzureRetail};
 pub use catalog::{Catalog, CatalogMatch};
 
 /// Label einer übernommenen Preisversion: Quelle (`azure-retail` | `catalog`). Preise ohne
@@ -156,7 +156,10 @@ pub struct PriceSourceStatus {
     /// Azure-Region bzw. Herkunft des Katalogs (`builtin` oder URL).
     pub scope: String,
     /// Letzter erfolgreicher Abruf.
-    #[serde(with = "time::serde::rfc3339::option", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        with = "time::serde::rfc3339::option",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[schema(value_type = Option<String>, format = DateTime)]
     pub fetched_at: Option<OffsetDateTime>,
     /// Anzahl Meter bzw. Katalogmodelle.
@@ -260,7 +263,10 @@ impl Suggester {
     /// Aus `billing.price_suggestions`. `client` sind die SSRF-Regeln für ausgehende
     /// Verbindungen; die Hosts von `azure.api_url` und `catalog.url` stammen aus der
     /// Startkonfiguration und werden ausgenommen ([`OutboundClient::with_exempt_host`]).
-    pub fn from_config(cfg: &PriceSuggestionsConfig, client: &OutboundClient) -> Result<Self, String> {
+    pub fn from_config(
+        cfg: &PriceSuggestionsConfig,
+        client: &OutboundClient,
+    ) -> Result<Self, String> {
         let default_type = AzureDeploymentType::parse(&cfg.azure.default_deployment_type).ok_or_else(|| {
             format!(
                 "billing.price_suggestions.azure.default_deployment_type {:?}: global, data-zone oder regional",
@@ -326,7 +332,8 @@ impl Suggester {
                 })
             }
         };
-        let builtin = Catalog::builtin().map_err(|e| format!("mitgelieferter Preiskatalog: {e}"))?;
+        let builtin =
+            Catalog::builtin().map_err(|e| format!("mitgelieferter Preiskatalog: {e}"))?;
         Ok(Self {
             azure,
             default_region: cfg.azure.default_region.clone(),
@@ -348,7 +355,10 @@ impl Suggester {
     async fn catalog(&self, refresh: bool) -> Arc<Catalog> {
         if let Some(r) = &self.remote {
             let due = {
-                let st = self.catalog.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let st = self
+                    .catalog
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let stale = st.loaded.is_none_or(|t| t.elapsed() >= r.refresh);
                 let backoff = st.attempted.is_some_and(|t| t.elapsed() < CATALOG_BACKOFF)
                     && st.error.is_some();
@@ -357,7 +367,10 @@ impl Suggester {
             if due {
                 let _g = r.lock.lock().await;
                 let res = fetch_catalog(r).await;
-                let mut st = self.catalog.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut st = self
+                    .catalog
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 st.attempted = Some(Instant::now());
                 match res {
                     Ok(c) => {
@@ -374,12 +387,18 @@ impl Suggester {
                 }
             }
         }
-        let st = self.catalog.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let st = self
+            .catalog
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         Arc::clone(&st.catalog)
     }
 
     fn catalog_status(&self) -> PriceSourceStatus {
-        let st = self.catalog.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let st = self
+            .catalog
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         PriceSourceStatus {
             source: PriceSuggestionSource::Catalog,
             scope: st.origin.clone(),
@@ -473,8 +492,10 @@ impl Suggester {
             .flat_map(|p| p.differing.iter().chain(&p.missing))
             .collect();
         for i in report.items.iter().filter(|i| {
-            matches!(i.status, PriceSuggestionStatus::Differs | PriceSuggestionStatus::Missing)
-                && !before.contains(&i.deployment)
+            matches!(
+                i.status,
+                PriceSuggestionStatus::Differs | PriceSuggestionStatus::Missing
+            ) && !before.contains(&i.deployment)
         }) {
             tracing::warn!(
                 deployment = %i.deployment,
@@ -486,8 +507,10 @@ impl Suggester {
                 "Preisabgleich: Preis weicht vom Vorschlag ab bzw. fehlt"
             );
         }
-        *self.last_check.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some(summary.clone());
+        *self
+            .last_check
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(summary.clone());
         summary
     }
 
@@ -498,7 +521,8 @@ impl Suggester {
         let mut notes = Vec::new();
         let source = ps.source.unwrap_or("auto");
         let endpoint = spec.endpoint.as_deref().unwrap_or_default();
-        let azure_like = spec.provider == ProviderKind::AzureOpenAi || azure::is_azure_host(endpoint);
+        let azure_like =
+            spec.provider == ProviderKind::AzureOpenAi || azure::is_azure_host(endpoint);
         let use_azure = match source {
             "azure" => true,
             "auto" => azure_like,
@@ -611,7 +635,10 @@ impl Suggester {
                         None if rp.meters.is_empty() => out.notes.push(format!(
                             "Azure Retail Prices für {} nicht verfügbar{}",
                             az.region.as_deref().unwrap_or_default(),
-                            rp.error.as_deref().map(|e| format!(": {e}")).unwrap_or_default()
+                            rp.error
+                                .as_deref()
+                                .map(|e| format!(": {e}"))
+                                .unwrap_or_default()
                         )),
                         None => out.notes.push(format!(
                             "Kein Azure-Meter für {:?} ({}) in {} – settings.pricing.meter \
@@ -653,7 +680,8 @@ impl Suggester {
             }
         }
         if out.current.is_none() {
-            out.notes.push("Kein Preis hinterlegt – Kosten werden mit 0 gebucht".into());
+            out.notes
+                .push("Kein Preis hinterlegt – Kosten werden mit 0 gebucht".into());
         }
         match (&out.suggested, &out.current) {
             (None, _) => out.status = PriceSuggestionStatus::NoSuggestion,
@@ -689,13 +717,22 @@ struct Plan<'a> {
 
 async fn fetch_catalog(r: &RemoteCatalog) -> Result<Catalog, String> {
     let req = http::Request::get(r.url.as_str())
-        .header(http::header::ACCEPT, "application/json, application/yaml, text/plain")
-        .header(http::header::USER_AGENT, concat!("aigw/", env!("CARGO_PKG_VERSION")))
+        .header(
+            http::header::ACCEPT,
+            "application/json, application/yaml, text/plain",
+        )
+        .header(
+            http::header::USER_AGENT,
+            concat!("aigw/", env!("CARGO_PKG_VERSION")),
+        )
         .body(Bytes::new())
         .map_err(|e| e.to_string())?;
     let reply = r
         .client
-        .fetch(req, &FetchLimits::new(Duration::from_secs(60), MAX_CATALOG_BYTES))
+        .fetch(
+            req,
+            &FetchLimits::new(Duration::from_secs(60), MAX_CATALOG_BYTES),
+        )
         .await
         .map_err(|e| e.to_string())?;
     if !reply.status.is_success() {
@@ -722,11 +759,13 @@ pub fn current_price(
             .filter(|o| o.spec.provider == p && o.spec.model == model && o.spec.valid_from <= at)
             .max_by_key(|o| o.spec.valid_from)
     };
-    pick(Some(provider)).or_else(|| pick(None)).map(|o| CurrentPriceVersion {
-        name: o.metadata.name.clone(),
-        manual: !o.metadata.labels.contains_key(LABEL_SOURCE),
-        spec: o.spec.clone(),
-    })
+    pick(Some(provider))
+        .or_else(|| pick(None))
+        .map(|o| CurrentPriceVersion {
+            name: o.metadata.name.clone(),
+            manual: !o.metadata.labels.contains_key(LABEL_SOURCE),
+            spec: o.spec.clone(),
+        })
 }
 
 /// Abweichende Preisfelder (ohne `validFrom`, Anbieter, Modell).
@@ -734,17 +773,29 @@ pub fn differences(a: &PriceSpec, b: &PriceSpec) -> Vec<String> {
     let (x, y) = (&a.per_million_tokens, &b.per_million_tokens);
     let fields = [
         ("perMillionTokens.input", x.input, y.input),
-        ("perMillionTokens.cachedInput", x.cached_input, y.cached_input),
+        (
+            "perMillionTokens.cachedInput",
+            x.cached_input,
+            y.cached_input,
+        ),
         ("perMillionTokens.cacheWrite", x.cache_write, y.cache_write),
         ("perMillionTokens.output", x.output, y.output),
         ("perMillionTokens.reasoning", x.reasoning, y.reasoning),
         ("perMillionTokens.audioInput", x.audio_input, y.audio_input),
-        ("perMillionTokens.audioOutput", x.audio_output, y.audio_output),
+        (
+            "perMillionTokens.audioOutput",
+            x.audio_output,
+            y.audio_output,
+        ),
         ("perMillionTokens.imageInput", x.image_input, y.image_input),
         ("perRequest", a.per_request, b.per_request),
         ("perImage", a.per_image, b.per_image),
         ("perAudioMinute", a.per_audio_minute, b.per_audio_minute),
-        ("perMillionCharacters", a.per_million_characters, b.per_million_characters),
+        (
+            "perMillionCharacters",
+            a.per_million_characters,
+            b.per_million_characters,
+        ),
     ];
     fields
         .into_iter()
@@ -792,8 +843,15 @@ mod tests {
     use super::*;
     use aigw_core::resource::ObjectMeta;
 
-    fn dep(name: &str, provider: ProviderKind, model: &str, settings: Value) -> Object<DeploymentSpec> {
-        let Value::Object(settings) = settings else { unreachable!() };
+    fn dep(
+        name: &str,
+        provider: ProviderKind,
+        model: &str,
+        settings: Value,
+    ) -> Object<DeploymentSpec> {
+        let Value::Object(settings) = settings else {
+            unreachable!()
+        };
         Object {
             id: aigw_core::resource::Id::default(),
             metadata: ObjectMeta::named(name),
@@ -815,8 +873,11 @@ mod tests {
     fn suggester() -> Suggester {
         let mut cfg = PriceSuggestionsConfig::default();
         cfg.azure.enabled = false;
-        Suggester::from_config(&cfg, &OutboundClient::new(aigw_outbound::AddressGuard::Trusted).unwrap())
-            .unwrap()
+        Suggester::from_config(
+            &cfg,
+            &OutboundClient::new(aigw_outbound::AddressGuard::Trusted).unwrap(),
+        )
+        .unwrap()
     }
 
     #[tokio::test]
@@ -824,11 +885,31 @@ mod tests {
         let s = suggester();
         let now = OffsetDateTime::now_utc();
         let deps = vec![
-            dep("a", ProviderKind::OpenAi, "gpt-5.4-mini", serde_json::json!({})),
-            dep("b", ProviderKind::Anthropic, "claude-sonnet-5-5", serde_json::json!({})),
-            dep("c", ProviderKind::OpenAiCompatible, "x", serde_json::json!({})),
+            dep(
+                "a",
+                ProviderKind::OpenAi,
+                "gpt-5.4-mini",
+                serde_json::json!({}),
+            ),
+            dep(
+                "b",
+                ProviderKind::Anthropic,
+                "claude-sonnet-5-5",
+                serde_json::json!({}),
+            ),
+            dep(
+                "c",
+                ProviderKind::OpenAiCompatible,
+                "x",
+                serde_json::json!({}),
+            ),
             dep("d", ProviderKind::Mock, "mock", serde_json::json!({})),
-            dep("e", ProviderKind::OpenAi, "gpt-5.4-mini", serde_json::json!({"pricing": {"source": "none"}})),
+            dep(
+                "e",
+                ProviderKind::OpenAi,
+                "gpt-5.4-mini",
+                serde_json::json!({"pricing": {"source": "none"}}),
+            ),
         ];
         let manual = Object {
             id: aigw_core::resource::Id::default(),
@@ -861,8 +942,17 @@ mod tests {
         );
         assert_eq!(r.items[0].source, Some(PriceSuggestionSource::Catalog));
         assert!(r.items[1].current.as_ref().is_some_and(|c| c.manual));
-        assert!(r.items[1].differences.contains(&"perMillionTokens.input".to_owned()));
-        assert!(r.items[2].notes.iter().any(|n| n.contains("Kosten werden mit 0")));
+        assert!(
+            r.items[1]
+                .differences
+                .contains(&"perMillionTokens.input".to_owned())
+        );
+        assert!(
+            r.items[2]
+                .notes
+                .iter()
+                .any(|n| n.contains("Kosten werden mit 0"))
+        );
         assert_eq!(r.sources.len(), 1);
     }
 
@@ -870,9 +960,17 @@ mod tests {
     async fn azure_without_region_falls_back_to_openai_catalog() {
         let mut cfg = PriceSuggestionsConfig::default();
         cfg.azure.api_url = "http://127.0.0.1:9/api/retail/prices".into();
-        let s = Suggester::from_config(&cfg, &OutboundClient::new(aigw_outbound::AddressGuard::Trusted).unwrap())
-            .unwrap();
-        let deps = vec![dep("az", ProviderKind::AzureOpenAi, "gpt-5.4-mini", serde_json::json!({}))];
+        let s = Suggester::from_config(
+            &cfg,
+            &OutboundClient::new(aigw_outbound::AddressGuard::Trusted).unwrap(),
+        )
+        .unwrap();
+        let deps = vec![dep(
+            "az",
+            ProviderKind::AzureOpenAi,
+            "gpt-5.4-mini",
+            serde_json::json!({}),
+        )];
         let r = s.report(&deps, &[], OffsetDateTime::now_utc(), false).await;
         let i = &r.items[0];
         assert_eq!(i.source, Some(PriceSuggestionSource::Catalog));
@@ -913,9 +1011,15 @@ mod tests {
         };
         let mut same = vec![mk("a", "1"), mk("b", "1")];
         mark_conflicts(&mut same);
-        assert!(same.iter().all(|i| i.status == PriceSuggestionStatus::Missing));
+        assert!(
+            same.iter()
+                .all(|i| i.status == PriceSuggestionStatus::Missing)
+        );
         let mut diff = vec![mk("a", "1"), mk("b", "1.1")];
         mark_conflicts(&mut diff);
-        assert!(diff.iter().all(|i| i.status == PriceSuggestionStatus::Conflict));
+        assert!(
+            diff.iter()
+                .all(|i| i.status == PriceSuggestionStatus::Conflict)
+        );
     }
 }

@@ -122,7 +122,12 @@ async fn app(fake: &Fake) -> (Router, Store) {
     (router, store)
 }
 
-async fn call(app: &Router, method: Method, path: &str, body: Option<Value>) -> (StatusCode, Value) {
+async fn call(
+    app: &Router,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
     let mut req = Request::builder()
         .method(method)
         .uri(format!("/admin/api/v1{path}"))
@@ -152,21 +157,36 @@ async fn seed(store: &Store) {
         .await
         .unwrap();
     let deps = [
-        ("az-se", json!({"modelGroup": "g", "provider": "azure-openai",
+        (
+            "az-se",
+            json!({"modelGroup": "g", "provider": "azure-openai",
             "endpoint": "https://res.openai.azure.com", "providerModel": "gpt54mini",
-            "settings": {"pricing": {"region": "swedencentral", "model": "gpt-5.4-mini"}}})),
-        ("az-dz", json!({"modelGroup": "g", "provider": "azure-openai",
+            "settings": {"pricing": {"region": "swedencentral", "model": "gpt-5.4-mini"}}}),
+        ),
+        (
+            "az-dz",
+            json!({"modelGroup": "g", "provider": "azure-openai",
             "endpoint": "https://res2.openai.azure.com", "providerModel": "gpt54mini-dz",
             "settings": {"pricing": {"region": "swedencentral", "model": "gpt-5.4-mini",
-                                     "deploymentType": "data-zone"}}})),
-        ("az-4o", json!({"modelGroup": "g", "provider": "azure-openai",
+                                     "deploymentType": "data-zone"}}}),
+        ),
+        (
+            "az-4o",
+            json!({"modelGroup": "g", "provider": "azure-openai",
             "endpoint": "https://res.openai.azure.com", "providerModel": "gpt-4o-mini",
-            "settings": {"pricing": {"region": "swedencentral", "deploymentType": "regional"}}})),
-        ("oa", json!({"modelGroup": "g", "provider": "openai", "providerModel": "gpt-5.4-mini"})),
-        ("claude", json!({"modelGroup": "g", "provider": "anthropic",
+            "settings": {"pricing": {"region": "swedencentral", "deploymentType": "regional"}}}),
+        ),
+        (
+            "oa",
+            json!({"modelGroup": "g", "provider": "openai", "providerModel": "gpt-5.4-mini"}),
+        ),
+        (
+            "claude",
+            json!({"modelGroup": "g", "provider": "anthropic",
             "endpoint": "https://res.services.ai.azure.com/anthropic",
             "providerModel": "claude-sonnet-5-5",
-            "settings": {"pricing": {"region": "swedencentral"}}})),
+            "settings": {"pricing": {"region": "swedencentral"}}}),
+        ),
     ];
     for (name, spec) in deps {
         store
@@ -214,7 +234,11 @@ async fn suggestions_from_retail_api_and_catalog() {
     assert_eq!(fake.calls.load(Ordering::SeqCst), 2);
     let q = fake.last_query.lock().unwrap().clone();
     assert!(q.starts_with("USD|"), "{q}");
-    assert!(q.contains("serviceName eq 'Foundry Models'") && q.contains("armRegionName eq 'swedencentral'"), "{q}");
+    assert!(
+        q.contains("serviceName eq 'Foundry Models'")
+            && q.contains("armRegionName eq 'swedencentral'"),
+        "{q}"
+    );
 
     let se = by_dep(&v, "az-se");
     assert_eq!(se["status"], "missing", "{se}");
@@ -223,21 +247,32 @@ async fn suggestions_from_retail_api_and_catalog() {
     assert_eq!(se["deploymentType"], "global");
     assert_eq!(se["suggested"]["provider"], "azure-openai");
     assert_eq!(se["suggested"]["model"], "gpt54mini");
-    assert_eq!(se["suggested"]["perMillionTokens"], json!({"input": "0.75", "cachedInput": "0.075", "output": "4.5"}));
+    assert_eq!(
+        se["suggested"]["perMillionTokens"],
+        json!({"input": "0.75", "cachedInput": "0.075", "output": "4.5"})
+    );
     assert_eq!(se["suggested"]["validFrom"], "2026-03-01T00:00:00Z");
     assert!(se["notes"].to_string().contains("Kosten werden mit 0"));
     let dz = by_dep(&v, "az-dz");
     assert_eq!(dz["suggested"]["perMillionTokens"]["input"], "0.825");
     // 1K-Meter der Folgeseite, Version 0718 aus dem Meter.
     let o4 = by_dep(&v, "az-4o");
-    assert_eq!(o4["suggested"]["perMillionTokens"], json!({"input": "0.165", "output": "0.66"}), "{o4}");
+    assert_eq!(
+        o4["suggested"]["perMillionTokens"],
+        json!({"input": "0.165", "output": "0.66"}),
+        "{o4}"
+    );
     assert_eq!(o4["matched"], "gpt-4o-mini (0718)");
     // Manueller Preis weicht ab.
     let oa = by_dep(&v, "oa");
     assert_eq!(oa["status"], "differs");
     assert_eq!(oa["source"], "catalog");
     assert_eq!(oa["current"]["manual"], true);
-    assert!(oa["differences"].to_string().contains("perMillionTokens.input"));
+    assert!(
+        oa["differences"]
+            .to_string()
+            .contains("perMillionTokens.input")
+    );
     // Claude in Foundry: nicht in Retail Prices → Anthropic-Katalog.
     let cl = by_dep(&v, "claude");
     assert_eq!(cl["source"], "catalog", "{cl}");
@@ -246,7 +281,13 @@ async fn suggestions_from_retail_api_and_catalog() {
     assert!(v["sources"].to_string().contains("swedencentral"));
 
     // Filter; Zwischenspeicher (kein neuer Abruf).
-    let (_, f) = call(&app, Method::GET, "/price-suggestions?deployment=az-se", None).await;
+    let (_, f) = call(
+        &app,
+        Method::GET,
+        "/price-suggestions?deployment=az-se",
+        None,
+    )
+    .await;
     assert_eq!(f["items"].as_array().unwrap().len(), 1);
     assert_eq!(fake.calls.load(Ordering::SeqCst), 2);
     let (s, _) = call(&app, Method::GET, "/price-suggestions?bogus=1", None).await;
@@ -263,13 +304,29 @@ async fn suggestions_from_retail_api_and_catalog() {
     assert_eq!(s, StatusCode::OK, "{r}");
     let created = r["created"].as_array().unwrap();
     assert_eq!(created.len(), 2, "{r}");
-    let az = created.iter().find(|c| c["spec"]["model"] == "gpt54mini").unwrap();
-    assert_eq!(az["metadata"]["labels"]["aigw.io/price-source"], "azure-retail");
-    assert_eq!(az["metadata"]["labels"]["aigw.io/price-region"], "swedencentral");
-    assert_eq!(az["metadata"]["labels"]["aigw.io/price-deployment"], "az-se");
+    let az = created
+        .iter()
+        .find(|c| c["spec"]["model"] == "gpt54mini")
+        .unwrap();
+    assert_eq!(
+        az["metadata"]["labels"]["aigw.io/price-source"],
+        "azure-retail"
+    );
+    assert_eq!(
+        az["metadata"]["labels"]["aigw.io/price-region"],
+        "swedencentral"
+    );
+    assert_eq!(
+        az["metadata"]["labels"]["aigw.io/price-deployment"],
+        "az-se"
+    );
     let audit = store.audit_log(20).await.unwrap();
     assert!(
-        audit.iter().filter(|e| format!("{e:?}").contains("gpt54mini")).count() >= 1,
+        audit
+            .iter()
+            .filter(|e| format!("{e:?}").contains("gpt54mini"))
+            .count()
+            >= 1,
         "Audit-Eintrag fehlt"
     );
     let (_, v) = call(&app, Method::GET, "/price-suggestions", None).await;
@@ -278,27 +335,58 @@ async fn suggestions_from_retail_api_and_catalog() {
     assert_eq!(by_dep(&v, "claude")["status"], "unchanged");
 
     // Unverändert → übersprungen; manueller Preis nur mit overrideManual.
-    let (s, r) = call(&app, Method::POST, "/price-suggestions:accept",
-        Some(json!({"items": [{"deployment": "az-se"}]}))).await;
+    let (s, r) = call(
+        &app,
+        Method::POST,
+        "/price-suggestions:accept",
+        Some(json!({"items": [{"deployment": "az-se"}]})),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(r["skipped"][0]["deployment"], "az-se");
-    let (s, r) = call(&app, Method::POST, "/price-suggestions:accept",
-        Some(json!({"items": [{"deployment": "oa"}]}))).await;
+    let (s, r) = call(
+        &app,
+        Method::POST,
+        "/price-suggestions:accept",
+        Some(json!({"items": [{"deployment": "oa"}]})),
+    )
+    .await;
     assert_eq!(s, StatusCode::CONFLICT, "{r}");
     assert!(r["detail"].as_str().unwrap().contains("overrideManual"));
-    let (s, r) = call(&app, Method::POST, "/price-suggestions:accept",
-        Some(json!({"items": [{"deployment": "oa", "overrideManual": true}]}))).await;
+    let (s, r) = call(
+        &app,
+        Method::POST,
+        "/price-suggestions:accept",
+        Some(json!({"items": [{"deployment": "oa", "overrideManual": true}]})),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "{r}");
     assert_eq!(r["created"][0]["spec"]["perMillionTokens"]["input"], "0.75");
 
     // Ungültige Auswahl.
-    let (s, _) = call(&app, Method::POST, "/price-suggestions:accept",
-        Some(json!({"items": [{"deployment": "gibt-es-nicht"}]}))).await;
+    let (s, _) = call(
+        &app,
+        Method::POST,
+        "/price-suggestions:accept",
+        Some(json!({"items": [{"deployment": "gibt-es-nicht"}]})),
+    )
+    .await;
     assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
-    let (s, _) = call(&app, Method::POST, "/price-suggestions:accept",
-        Some(json!({"items": [{"deployment": "az-dz"}], "validFrom": "2020-01-01T00:00:00Z"}))).await;
+    let (s, _) = call(
+        &app,
+        Method::POST,
+        "/price-suggestions:accept",
+        Some(json!({"items": [{"deployment": "az-dz"}], "validFrom": "2020-01-01T00:00:00Z"})),
+    )
+    .await;
     assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
-    let (s, _) = call(&app, Method::POST, "/price-suggestions:accept", Some(json!({"items": []}))).await;
+    let (s, _) = call(
+        &app,
+        Method::POST,
+        "/price-suggestions:accept",
+        Some(json!({"items": []})),
+    )
+    .await;
     assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
