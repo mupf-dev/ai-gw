@@ -70,7 +70,8 @@ test('WASM-Module: hochladen, binden, Löschschutz, löschen', async ({ page, re
   await page.getByTestId('confirm-action').click();
   await expect(row).toHaveCount(0);
   expect((await api(request, 'GET', `wasm-modules/${mod}`)).status).toBe(404);
-  clean(page);
+  // Der absichtlich abgelehnte Löschversuch (409) erscheint als Konsolenfehler.
+  clean(page, { allow: [/status of 409/] });
 });
 
 test('WASM-Module: Upload nur mit passendem SHA-256 und nur für globale Admins', async ({ request }) => {
