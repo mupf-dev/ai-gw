@@ -18,7 +18,8 @@ use serde_json::Value;
 use time::OffsetDateTime;
 
 use crate::resource::{
-    Amount, ApiKeySpec, DeploymentSpec, JsonObject, ModelGroupSpec, PriceSpec, Role, UserSpec,
+    Amount, ApiKeySpec, DeploymentSpec, EntraAuth, EntraCredentialKind, JsonObject, ModelGroupSpec,
+    PriceSpec, Role, UserSpec,
 };
 use crate::types::ProviderKind;
 use crate::upstream::UpstreamPolicy;
@@ -443,43 +444,193 @@ fn azure_auth(upstreams: &UpstreamPolicy, spec: &DeploymentSpec) -> Res {
             ENTRA_CREDENTIALS.join(", ")
         ));
     }
+    entra_values(
+        upstreams,
+        method,
+        &EntraValues {
+            authority: setting_str(spec, "entraAuthority")?,
+            scope: setting_str(spec, "entraScope")?,
+            tenant_id: setting_str(spec, "entraTenantId")?,
+            client_id: setting_str(spec, "entraClientId")?,
+        },
+        |k| format!("settings.entra{}", upper_first(k)),
+    )
+}
+
+fn upper_first(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map(|f| f.to_ascii_uppercase().to_string() + c.as_str())
+        .unwrap_or_default()
+}
+
+/// Nicht geheime Entra-ID-Werte (aus `settings.entra*` bzw. `spec.entra`).
+struct EntraValues<'a> {
+    authority: Option<&'a str>,
+    scope: Option<&'a str>,
+    tenant_id: Option<&'a str>,
+    client_id: Option<&'a str>,
+}
+
+/// Gemeinsame Regeln für Authority (nur `https://host`, SSRF-Regeln, nicht bei Workload
+/// Identity), Scope (bei Workload/Managed Identity nur Cognitive Services) und IDs.
+/// `path(k)` bildet den Feldpfad für Meldungen (`k` = `authority`, `scope`, `tenantId`,
+/// `clientId`).
+fn entra_values(
+    upstreams: &UpstreamPolicy,
+    method: Option<&str>,
+    v: &EntraValues<'_>,
+    path: impl Fn(&str) -> String,
+) -> Res {
     let ambient = matches!(method, Some("workloadIdentity" | "managedIdentity"));
-    if let Some(a) = setting_str(spec, "entraAuthority")? {
+    if let Some(a) = v.authority {
+        let p = path("authority");
         if method == Some("workloadIdentity") {
-            return Err(
-                "settings.entraAuthority: bei workloadIdentity nicht erlaubt (kommt aus \
-                 AZURE_AUTHORITY_HOST)"
-                    .into(),
-            );
+            return Err(format!(
+                "{p}: bei workloadIdentity nicht erlaubt (kommt aus AZURE_AUTHORITY_HOST)"
+            ));
         }
         let rest = a.strip_prefix("https://").ok_or_else(|| {
-            "settings.entraAuthority: https://host erwartet (z. B. https://login.microsoftonline.us)"
-                .to_owned()
+            format!("{p}: https://host erwartet (z. B. https://login.microsoftonline.us)")
         })?;
         if rest.trim_end_matches('/').contains(['/', '?', '#']) {
-            return Err("settings.entraAuthority: nur Schema und Host (ohne Pfad/Abfrage)".into());
+            return Err(format!("{p}: nur Schema und Host (ohne Pfad/Abfrage)"));
         }
         upstreams
             .check_endpoint(a)
-            .map_err(|m| format!("settings.entraAuthority: {m}"))?;
+            .map_err(|m| format!("{p}: {m}"))?;
     }
-    if let Some(scope) = setting_str(spec, "entraScope")? {
+    if let Some(scope) = v.scope {
+        let p = path("scope");
         if scope.is_empty() || scope.len() > 512 || scope.chars().any(char::is_control) {
-            return Err("settings.entraScope: 1–512 Zeichen ohne Steuerzeichen".into());
+            return Err(format!("{p}: 1–512 Zeichen ohne Steuerzeichen"));
         }
         if ambient && !ENTRA_AMBIENT_SCOPES.contains(&scope) {
             return Err(format!(
-                "settings.entraScope: bei Workload/Managed Identity nur {}",
+                "{p}: bei Workload/Managed Identity nur {}",
                 ENTRA_AMBIENT_SCOPES.join(", ")
             ));
         }
     }
-    for key in ["entraTenantId", "entraClientId"] {
-        if let Some(v) = setting_str(spec, key)?
-            && !entra_id(v)
+    for (key, val) in [("tenantId", v.tenant_id), ("clientId", v.client_id)] {
+        if let Some(val) = val
+            && !entra_id(val)
         {
-            return Err(format!("settings.{key} ungültig (GUID oder Domänenname)"));
+            return Err(format!("{} ungültig (GUID oder Domänenname)", path(key)));
         }
+    }
+    Ok(())
+}
+
+/// Anbieter, deren Zugangsdaten eine Entra-ID-Anmeldung (`spec.entra`) beschreiben dürfen
+/// (AIGW-84): Azure OpenAI und Claude in Azure AI Foundry.
+pub const ENTRA_PROVIDERS: &[ProviderKind] = &[ProviderKind::AzureOpenAi, ProviderKind::Anthropic];
+/// Erlaubte Felder in `spec.data` neben `spec.entra`.
+pub const ENTRA_DATA_FIELDS: &[&str] =
+    &["tenantId", "clientId", "clientSecret", "clientCertificate"];
+
+/// Zugangsdaten (AIGW-65/84): ohne `entra` wie [`credential_fields`]. Mit `entra` (nur
+/// [`ENTRA_PROVIDERS`]): `data` enthält höchstens [`ENTRA_DATA_FIELDS`] – das Geheimnis der
+/// gewählten Art (`clientSecret` bzw. `clientCertificate`, Pflicht), bei Managed/Workload
+/// Identity kein Geheimnis; Tenant- und Client-ID entweder in `entra` oder in `data`
+/// (Service Principal: beide Pflicht); Authority/Scope wie bei `settings.entra*`.
+pub fn credential<'a>(
+    upstreams: &UpstreamPolicy,
+    provider: ProviderKind,
+    entra: Option<&EntraAuth>,
+    fields: impl IntoIterator<Item = &'a str>,
+) -> Res {
+    let Some(e) = entra else {
+        return credential_fields(provider, fields);
+    };
+    if !ENTRA_PROVIDERS.contains(&provider) {
+        return Err(format!(
+            "spec.entra: nur für Anbieter azure-openai und anthropic (nicht {:?})",
+            provider.as_str()
+        ));
+    }
+    let fields: BTreeSet<&str> = fields.into_iter().collect();
+    if let Some(bad) = fields.iter().find(|f| !ENTRA_DATA_FIELDS.contains(f)) {
+        return Err(format!(
+            "spec.data.{bad}: mit spec.entra nur {}",
+            ENTRA_DATA_FIELDS.join(", ")
+        ));
+    }
+    let secret = match e.credential {
+        EntraCredentialKind::ClientSecret => Some("clientSecret"),
+        EntraCredentialKind::ClientCertificate => Some("clientCertificate"),
+        EntraCredentialKind::ManagedIdentity | EntraCredentialKind::WorkloadIdentity => None,
+    };
+    for f in ["clientSecret", "clientCertificate"] {
+        if fields.contains(f) && secret != Some(f) {
+            return Err(format!(
+                "spec.data.{f}: passt nicht zu spec.entra.credential {:?}",
+                e.credential.as_str()
+            ));
+        }
+    }
+    if let Some(f) = secret
+        && !fields.contains(f)
+    {
+        return Err(format!(
+            "spec.data.{f}: bei spec.entra.credential {:?} Pflicht",
+            e.credential.as_str()
+        ));
+    }
+    for (key, v) in [("tenantId", &e.tenant_id), ("clientId", &e.client_id)] {
+        let in_data = fields.contains(key);
+        if v.is_some() && in_data {
+            return Err(format!(
+                "{key}: entweder in spec.entra oder in spec.data angeben, nicht in beiden"
+            ));
+        }
+        if secret.is_some() && v.is_none() && !in_data {
+            return Err(format!(
+                "spec.entra.{key}: bei spec.entra.credential {:?} Pflicht",
+                e.credential.as_str()
+            ));
+        }
+    }
+    entra_values(
+        upstreams,
+        Some(e.credential.as_str()),
+        &EntraValues {
+            authority: e.authority.as_deref(),
+            scope: e.scope.as_deref(),
+            tenant_id: e.tenant_id.as_deref(),
+            client_id: e.client_id.as_deref(),
+        },
+        |k| format!("spec.entra.{k}"),
+    )
+}
+
+/// Deployment mit Zugangsdaten (AIGW-84): Anbieter passend ([`deployment_credential`]); bei
+/// Zugangsdaten mit `entra` darf `settings.auth` nur fehlen oder `entraId` sein, und die
+/// zusammengeführten Einstellungen ([`EntraAuth::apply_to`]) müssen gültig sein (z. B.
+/// `endpoint` Pflicht für Claude in Foundry).
+pub fn deployment_credential_auth(
+    upstreams: &UpstreamPolicy,
+    spec: &DeploymentSpec,
+    credential: &str,
+    credential_provider: ProviderKind,
+    entra: Option<&EntraAuth>,
+) -> Res {
+    deployment_credential(spec, credential, credential_provider)?;
+    let Some(e) = entra else {
+        return Ok(());
+    };
+    if let Some(a) = setting_str(spec, "auth")?
+        && a != "entraId"
+    {
+        return Err(format!(
+            "settings.auth {a:?} passt nicht zu den Zugangsdaten {credential:?} mit Entra ID \
+             (weglassen oder entraId)"
+        ));
+    }
+    let mut merged = spec.clone();
+    if e.apply_to(&mut merged.settings) {
+        deployment(upstreams, &merged)
+            .map_err(|m| format!("mit Zugangsdaten {credential:?}: {m}"))?;
     }
     Ok(())
 }
@@ -888,6 +1039,113 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    fn entra(kind: EntraCredentialKind) -> EntraAuth {
+        EntraAuth {
+            credential: kind,
+            tenant_id: None,
+            client_id: None,
+            authority: None,
+            scope: None,
+        }
+    }
+
+    #[test]
+    fn credential_entra_rules() {
+        use EntraCredentialKind as K;
+        let p = UpstreamPolicy::strict();
+        let az = ProviderKind::AzureOpenAi;
+        let mi = entra(K::ManagedIdentity);
+        let check = |prov: ProviderKind, e: &EntraAuth, fields: &[&str]| {
+            credential(&p, prov, Some(e), fields.iter().copied())
+        };
+        // Managed Identity: keine Felder nötig (anders als ohne entra).
+        assert!(check(az, &mi, &[]).is_ok());
+        assert!(check(ProviderKind::Anthropic, &mi, &[]).is_ok());
+        assert!(credential(&p, az, None, []).is_err());
+        // Nur Azure OpenAI und Anthropic.
+        assert!(check(ProviderKind::OpenAi, &mi, &[]).is_err());
+        // Bei Managed Identity kein gespeichertes Geheimnis, keine fremden Felder.
+        assert!(check(az, &mi, &["clientSecret"]).is_err());
+        assert!(check(az, &mi, &["apiKey"]).is_err());
+        // Service Principal: Geheimnis Pflicht, IDs aus entra oder data (nicht beides).
+        let sp = EntraAuth {
+            tenant_id: Some("contoso.onmicrosoft.com".into()),
+            client_id: Some("11111111-2222-3333-4444-555555555555".into()),
+            ..entra(K::ClientSecret)
+        };
+        assert!(check(az, &sp, &["clientSecret"]).is_ok());
+        assert!(check(az, &sp, &[]).is_err());
+        assert!(check(az, &sp, &["clientCertificate"]).is_err());
+        assert!(check(az, &sp, &["clientSecret", "tenantId"]).is_err());
+        let bare = entra(K::ClientCertificate);
+        assert!(check(az, &bare, &["clientCertificate"]).is_err());
+        assert!(check(az, &bare, &["clientCertificate", "tenantId", "clientId"]).is_ok());
+        // Authority/Scope/IDs wie bei settings.entra*.
+        for bad in [
+            EntraAuth {
+                authority: Some("http://login.microsoftonline.us".into()),
+                ..mi.clone()
+            },
+            EntraAuth {
+                scope: Some("https://management.azure.com/.default".into()),
+                ..mi.clone()
+            },
+            EntraAuth {
+                client_id: Some("../x".into()),
+                ..mi.clone()
+            },
+            EntraAuth {
+                authority: Some("https://login.microsoftonline.us".into()),
+                ..entra(K::WorkloadIdentity)
+            },
+        ] {
+            let e = check(az, &bad, &[]);
+            assert!(
+                e.as_ref().is_err_and(|m| m.starts_with("spec.entra.")),
+                "{e:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn deployment_with_entra_credential() {
+        let p = UpstreamPolicy::strict();
+        let mi = EntraAuth {
+            client_id: Some("11111111-2222-3333-4444-555555555555".into()),
+            ..entra(EntraCredentialKind::ManagedIdentity)
+        };
+        let ep = Some("https://res.services.ai.azure.com/anthropic");
+        let check = |endpoint: Option<&str>, settings: Value, e: Option<&EntraAuth>| {
+            deployment_credential_auth(
+                &p,
+                &dep(ProviderKind::Anthropic, endpoint, settings),
+                "c",
+                ProviderKind::Anthropic,
+                e,
+            )
+        };
+        assert!(check(ep, json!({}), Some(&mi)).is_ok());
+        assert!(check(ep, json!({"auth": "entraId"}), Some(&mi)).is_ok());
+        assert!(check(ep, json!({"auth": "apiKey"}), Some(&mi)).is_err());
+        // Ohne endpoint: Entra-Token nie an api.anthropic.com.
+        let e = check(None, json!({}), Some(&mi));
+        assert!(e.as_ref().is_err_and(|m| m.contains("endpoint")), "{e:?}");
+        // Ohne entra wie bisher.
+        assert!(check(None, json!({}), None).is_ok());
+        // Zusammenführen: Deployment-Einstellungen haben Vorrang.
+        let mut s = json!({"entraClientId": "eigene"})
+            .as_object()
+            .unwrap()
+            .clone();
+        assert!(mi.apply_to(&mut s));
+        assert_eq!(s["auth"], "entraId");
+        assert_eq!(s["entraCredential"], "managedIdentity");
+        assert_eq!(s["entraClientId"], "eigene");
+        let mut s = json!({"auth": "apiKey"}).as_object().unwrap().clone();
+        assert!(!mi.apply_to(&mut s));
+        assert_eq!(s.len(), 1);
     }
 
     #[test]

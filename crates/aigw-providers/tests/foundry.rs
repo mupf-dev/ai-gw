@@ -18,7 +18,8 @@ use std::time::Duration;
 use aigw_core::config::AdminConfig;
 use aigw_core::ir::{ChatRequest, ErrorClass, Message, Role};
 use aigw_core::resource::{
-    CredentialData, Deployment, DeploymentSpec, JsonObject, ObjectMeta, SecretString, new_id,
+    CredentialData, Deployment, DeploymentSpec, EntraAuth, EntraCredentialKind, JsonObject,
+    ObjectMeta, SecretString, new_id,
 };
 use aigw_core::snapshot::DeploymentCtx;
 use aigw_core::types::ProviderKind;
@@ -27,7 +28,7 @@ use aigw_outbound::{AddressGuard, OutboundClient, StaticResolver};
 use aigw_providers::anthropic::AnthropicAdapter;
 use aigw_providers::entra::EntraEnv;
 use aigw_providers::openai::OpenAiAdapter;
-use aigw_providers::{Timeouts, Upstream, UpstreamClient};
+use aigw_providers::{Timeouts, Upstream, UpstreamClient, with_credential_auth};
 use axum::Router;
 use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -463,6 +464,84 @@ async fn container_apps_managed_identity_shared_by_gpt_and_claude() {
         .unwrap_err();
     assert_ne!(e.class, ErrorClass::Auth);
     assert_eq!(fake.calls.lock().unwrap().len(), 3);
+}
+
+/// AIGW-84: Die Anmeldung steht an den Zugangsdaten (`ProviderCredential.spec.entra`), die
+/// Deployments verweisen nur noch auf `credential` – GPT und Claude teilen sich die Token-Quelle.
+#[tokio::test]
+async fn managed_identity_from_credential_entra() {
+    let (addr, fake) = env().await;
+    let env = EntraEnv {
+        identity_endpoint: Some(format!("http://localhost:{}/msi/token", addr.port())),
+        identity_header: Some(SecretString::new("aca-hdr-geheim")),
+        ..EntraEnv::default()
+    };
+    let entra = EntraAuth {
+        credential: EntraCredentialKind::ManagedIdentity,
+        tenant_id: None,
+        client_id: Some(UAMI.into()),
+        authority: None,
+        scope: None,
+    };
+    let base = format!("http://foundry.test:{}", addr.port());
+    // Deployment mit Zugangsdaten ohne Werte (Managed Identity speichert kein Geheimnis).
+    let with_cred = |provider, endpoint: String, model: &str, settings: Value| {
+        let mut d = deployment(provider, &endpoint, model, &[], settings);
+        d.deployment.spec.credential = Some("foundry-mi".into());
+        d.credential = Some(Arc::new(CredentialData(BTreeMap::new())));
+        with_credential_auth(Some(&entra), std::borrow::Cow::Owned(d)).into_owned()
+    };
+    let gpt = with_cred(
+        ProviderKind::AzureOpenAi,
+        base.clone(),
+        "gpt-5.4-mini",
+        json!({"apiVersion": "2025-04-01-preview"}),
+    );
+    assert_eq!(gpt.deployment.spec.settings["auth"], "entraId");
+    assert_eq!(gpt.deployment.spec.settings["entraClientId"], UAMI);
+    let gpt = OpenAiAdapter::from_deployment_with_entra_env(&gpt, &env).unwrap();
+    let claude = with_cred(
+        ProviderKind::Anthropic,
+        format!("{base}/anthropic"),
+        "claude-sonnet-5-5",
+        json!({}),
+    );
+    let claude = AnthropicAdapter::from_deployment_with_entra_env(&claude, &env).unwrap();
+    assert!(Arc::ptr_eq(
+        gpt.entra_source().unwrap(),
+        claude.entra_source().unwrap()
+    ));
+    let client = guarded_client();
+    for (name, p) in [
+        ("gpt", Arc::new(gpt) as Arc<dyn aigw_providers::Provider>),
+        ("claude", Arc::new(claude)),
+    ] {
+        let r = Upstream::new(name, p, client.clone(), fast())
+            .chat(request())
+            .await
+            .unwrap();
+        assert_eq!(r.choices[0].message.content.text(), "Hallo Welt");
+    }
+    assert_eq!(fake.token_requests.load(Ordering::SeqCst), 1);
+    let q = form(&fake.mi.lock().unwrap()[0]);
+    assert_eq!(q["client_id"], UAMI);
+    for (path, h, _) in fake.calls.lock().unwrap().iter() {
+        assert_eq!(
+            header(h, "authorization"),
+            Some("Bearer aca-tok-1"),
+            "{path}"
+        );
+    }
+    // Eigene Einstellungen des Deployments haben Vorrang (hier: API-Key statt Entra).
+    let own = deployment(
+        ProviderKind::AzureOpenAi,
+        &base,
+        "gpt",
+        &[("apiKey", "k")],
+        json!({"apiVersion": "2025-04-01-preview", "auth": "apiKey"}),
+    );
+    let merged = with_credential_auth(Some(&entra), std::borrow::Cow::Borrowed(&own));
+    assert!(matches!(merged, std::borrow::Cow::Borrowed(_)));
 }
 
 #[tokio::test]

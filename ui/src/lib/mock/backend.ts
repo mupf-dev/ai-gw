@@ -330,8 +330,9 @@ function stored(kind: Kind, name: string, input: Obj, prev?: Obj): Obj {
     case 'provider-credentials': {
       const data = (spec.data ?? {}) as Record<string, unknown>;
       const fields = Object.keys(data).sort();
-      checkCredentialFields(spec.provider, fields);
-      return { ...base, spec: { provider: spec.provider, fields }, status: { hasSecret: fields.length > 0, keyId: 'a3f1c0de' } };
+      if (!spec.entra) checkCredentialFields(spec.provider, fields);
+      else if (!['azure-openai', 'anthropic'].includes(spec.provider)) throw invalid('spec.entra: nur für Anbieter azure-openai und anthropic');
+      return { ...base, spec: { provider: spec.provider, ...(spec.entra ? { entra: spec.entra } : {}), fields }, status: { hasSecret: fields.length > 0, keyId: 'a3f1c0de' } };
     }
     case 'deployments':
       return { ...base, spec: { weight: 1, priority: 0, enabled: true, capacity: {}, settings: {}, ...spec } };
@@ -612,11 +613,42 @@ function extra(method: string, parts: string[], q: URLSearchParams): Response | 
     });
   if (a === 'plugin-bindings' || a === 'secrets' || a === 'mcp-servers' || a === 'mcp-grants' || a === 'plugin-bindings:test') return method === 'GET' && !b ? json(200, { items: [] }) : json(403, { type: 'urn:aigw:problem:forbidden', title: 'Im Mock-Modus nicht verfügbar', status: 403, code: 'forbidden', detail: null });
   if (a === 'mcp-servers:status') return json(200, { gatewayEnabled: true, items: [] });
+  if (a === 'providers' && !b && method === 'GET') return json(200, providerOverviewMock());
   if (a === 'users' && b && c === 'invitation') {
     const [s, body] = invitation(method, b);
     return json(s, body);
   }
   return null;
+}
+
+// ------------------------------------------------------------------ Anbieter-Übersicht (AIGW-84)
+
+function providerOverviewMock() {
+  const creds = new Map(all('provider-credentials').map((c) => [c.metadata.name, c]));
+  const items = new Map<string, Obj>();
+  for (const d of all('deployments').sort((x, y) => (x.metadata.name < y.metadata.name ? -1 : 1))) {
+    const c = d.spec.credential ? creds.get(d.spec.credential) : undefined;
+    const s = { ...(c?.spec.entra ? { auth: 'entraId', entraCredential: c.spec.entra.credential, entraClientId: c.spec.entra.clientId } : {}), ...(d.spec.settings ?? {}) };
+    const fields: string[] = c?.spec.fields ?? [];
+    const auth =
+      s.auth === 'entraId'
+        ? { kind: 'entraId', entraCredential: s.entraCredential, ...(s.entraClientId ? { clientId: s.entraClientId } : {}) }
+        : { kind: !c ? 'none' : fields.includes('apiKey') ? 'apiKey' : fields.includes('accessKeyId') ? 'awsAccessKey' : fields.includes('serviceAccountJson') ? 'serviceAccount' : 'credential' };
+    const endpoint = d.spec.endpoint?.replace(/\/+$/, '');
+    const k = `${d.spec.provider} ${endpoint ?? ''}`;
+    const e = items.get(k) ?? { provider: d.spec.provider, ...(endpoint ? { endpoint } : {}), auth: [], modelGroups: [], deployments: [], state: 'ok' };
+    const a = { ...auth, ...(d.spec.credential ? { credential: d.spec.credential } : {}) };
+    if (!e.auth.some((x: Obj) => JSON.stringify(x) === JSON.stringify(a))) e.auth.push(a);
+    if (!e.modelGroups.includes(d.spec.modelGroup)) e.modelGroups.push(d.spec.modelGroup);
+    const enabled = d.spec.enabled !== false;
+    e.deployments.push({ name: d.metadata.name, modelGroup: d.spec.modelGroup, providerModel: d.spec.providerModel, enabled, auth: a, state: enabled ? 'ok' : 'disabled', breaker: enabled ? 'closed' : undefined, inFlight: 0, healthFailures: 0 });
+    items.set(k, e);
+  }
+  for (const e of items.values()) {
+    e.modelGroups.sort();
+    e.state = e.deployments.every((d: Obj) => d.state === 'disabled') ? 'disabled' : 'ok';
+  }
+  return { runtime: true, items: [...items.values()].sort((x, y) => (`${x.provider} ${x.endpoint ?? ''}` < `${y.provider} ${y.endpoint ?? ''}` ? -1 : 1)) };
 }
 
 // ------------------------------------------------------------------ Playground (AIGW-54)

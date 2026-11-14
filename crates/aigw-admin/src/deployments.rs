@@ -133,8 +133,14 @@ impl AdminResource for DeploymentSpec {
                 }
                 other => other,
             })?;
-            validate::deployment_credential(spec, cred, c.spec.provider)
-                .map_err(Problem::invalid)?;
+            validate::deployment_credential_auth(
+                &st.upstreams,
+                spec,
+                cred,
+                c.spec.provider,
+                c.spec.entra.as_ref(),
+            )
+            .map_err(Problem::invalid)?;
         }
         Ok(())
     }

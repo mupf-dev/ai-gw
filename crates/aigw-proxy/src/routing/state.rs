@@ -112,6 +112,11 @@ impl DeploymentState {
         self.latency.get().map(Duration::from_nanos)
     }
 
+    /// Aufeinanderfolgende fehlgeschlagene Health Checks.
+    pub fn health_failures(&self) -> u32 {
+        self.health_failures.load(Ordering::Relaxed)
+    }
+
     /// Zustand des Circuit Breakers.
     pub fn breaker_state(&self) -> BreakerState {
         self.breaker.state()

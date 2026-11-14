@@ -11,7 +11,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use aigw_core::resource::{
-    CredentialData, Id, ObjectMeta, ProviderCredential, ProviderCredentialInfo,
+    CredentialData, EntraAuth, Id, ObjectMeta, ProviderCredential, ProviderCredentialInfo,
     ProviderCredentialSpec, ResourceKind, SecretString, ValueFrom, new_id, validate_name,
 };
 use aigw_core::types::ProviderKind;
@@ -25,6 +25,13 @@ const NO_REFS: &[super::RefCol] = &[];
 
 /// `valueFrom`-Verweise je Feld (F54).
 pub(crate) type CredentialRefs = BTreeMap<String, ValueFrom>;
+
+/// Spalte `auth` (AIGW-84): nicht geheime Anmeldeangaben.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct AuthCol {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    entra: Option<EntraAuth>,
+}
 
 fn info_from_row(row: &DbRow) -> Result<(ProviderCredential, Sealed), StoreError> {
     let r = Row(row);
@@ -40,6 +47,7 @@ fn info_from_row(row: &DbRow) -> Result<(ProviderCredential, Sealed), StoreError
         spec: ProviderCredentialInfo {
             provider: ProviderKind::parse(&p)
                 .ok_or_else(|| StoreError::Corrupt(format!("unbekannter Anbieter {p:?}")))?,
+            entra: r.json::<AuthCol>("auth")?.entra,
             fields: r.json("fields")?,
             key_id: sealed.key_id.clone(),
         },
@@ -105,6 +113,7 @@ pub(crate) fn seal_data(
 
 pub(crate) fn sealed_cols(
     provider: ProviderKind,
+    entra: Option<&EntraAuth>,
     fields: &[String],
     refs: &CredentialRefs,
     sealed: Sealed,
@@ -118,6 +127,12 @@ pub(crate) fn sealed_cols(
         .collect();
     Ok(vec![
         ("provider", Val::text(provider.as_str())),
+        (
+            "auth",
+            Val::json(&AuthCol {
+                entra: entra.cloned(),
+            })?,
+        ),
         ("fields", Val::json(&fields)?),
         ("refs", Val::json(&refs)?),
         ("key_id", Val::text(sealed.key_id)),
@@ -143,7 +158,13 @@ impl Store {
             ResourceKind::ProviderCredential,
             id,
             &meta,
-            sealed_cols(spec.provider, &fields, &refs_of(&spec), sealed)?,
+            sealed_cols(
+                spec.provider,
+                spec.entra.as_ref(),
+                &fields,
+                &refs_of(&spec),
+                sealed,
+            )?,
         )
         .await?;
         let after = ProviderCredential {
@@ -151,6 +172,7 @@ impl Store {
             metadata: meta,
             spec: ProviderCredentialInfo {
                 provider: spec.provider,
+                entra: spec.entra,
                 fields,
                 key_id: keyring.primary_id().to_owned(),
             },
@@ -184,7 +206,13 @@ impl Store {
             ResourceKind::ProviderCredential,
             before.id,
             &meta,
-            sealed_cols(spec.provider, &fields, &refs_of(&spec), sealed)?,
+            sealed_cols(
+                spec.provider,
+                spec.entra.as_ref(),
+                &fields,
+                &refs_of(&spec),
+                sealed,
+            )?,
             expect,
         )
         .await?;
@@ -193,6 +221,7 @@ impl Store {
             metadata: meta,
             spec: ProviderCredentialInfo {
                 provider: spec.provider,
+                entra: spec.entra,
                 fields,
                 key_id: keyring.primary_id().to_owned(),
             },
@@ -211,8 +240,9 @@ impl Store {
     }
 
     /// Ändert Zugangsdaten teilweise (Admin-API `PATCH`): `changes` setzt (`Some`) bzw.
-    /// entfernt (`None`) einzelne Felder, nicht genannte Felder behalten ihren Wert. Labels
-    /// und Anbieter werden nur ersetzt, wenn angegeben. Die Werte werden entschlüsselt,
+    /// entfernt (`None`) einzelne Felder, nicht genannte Felder behalten ihren Wert. Labels,
+    /// Anbieter und Entra-ID-Anmeldung (`Some(None)` entfernt sie) werden nur ersetzt, wenn
+    /// angegeben. Die Werte werden entschlüsselt,
     /// zusammengeführt und mit dem aktuellen Master-Key neu verschlüsselt.
     #[allow(clippy::too_many_arguments)] // Merge-Patch-Teile + erwarteter Stand (F38)
     pub async fn patch_credential(
@@ -222,6 +252,7 @@ impl Store {
         name: &str,
         labels: Option<BTreeMap<String, String>>,
         provider: Option<ProviderKind>,
+        entra: Option<Option<EntraAuth>>,
         changes: BTreeMap<String, Option<SecretString>>,
         expect: Expect,
     ) -> Result<ProviderCredential, StoreError> {
@@ -240,7 +271,8 @@ impl Store {
                 None => values.remove(&field),
             };
         }
-        if values.is_empty() {
+        let entra = entra.unwrap_or_else(|| before.spec.entra.clone());
+        if values.is_empty() && entra.is_none() {
             return Err(StoreError::Invalid(
                 "Zugangsdaten brauchen mindestens ein Feld".into(),
             ));
@@ -258,7 +290,7 @@ impl Store {
             ResourceKind::ProviderCredential,
             before.id,
             &meta,
-            sealed_cols(provider, &fields, &refs, sealed)?,
+            sealed_cols(provider, entra.as_ref(), &fields, &refs, sealed)?,
             expect,
         )
         .await?;
@@ -267,6 +299,7 @@ impl Store {
             metadata: meta,
             spec: ProviderCredentialInfo {
                 provider,
+                entra,
                 fields,
                 key_id: keyring.primary_id().to_owned(),
             },

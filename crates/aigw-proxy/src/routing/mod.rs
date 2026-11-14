@@ -42,7 +42,7 @@ pub use breaker::BreakerState;
 pub use policy::{
     BreakerConfig, ClientBetas, GroupPolicy, HealthCheckConfig, ResponseModel, RetryPolicy,
 };
-pub use snapshot::{DeploymentStatus, RouteTable, RoutesTask, SnapshotRoutes};
+pub use snapshot::{DeploymentRuntime, DeploymentStatus, RouteTable, RoutesTask, SnapshotRoutes};
 pub use state::DeploymentState;
 
 use breaker::Admit;

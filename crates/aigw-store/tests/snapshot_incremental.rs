@@ -202,6 +202,7 @@ async fn random_change(store: &Store, keyring: &Keyring, rng: &mut Rng) {
         13 => {
             let spec = ProviderCredentialSpec {
                 provider: ProviderKind::OpenAi,
+                entra: None,
                 data: BTreeMap::from([(
                     "apiKey".to_owned(),
                     SecretRef::value(format!("sk-{}", rng.below(1000))),
@@ -810,6 +811,7 @@ async fn sample(store: &Store, keyring: &Keyring) {
             ObjectMeta::named("openai"),
             ProviderCredentialSpec {
                 provider: ProviderKind::OpenAi,
+                entra: None,
                 data: BTreeMap::from([("apiKey".to_owned(), SecretRef::value("sk-geheim"))]),
             },
         )

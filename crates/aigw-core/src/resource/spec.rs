@@ -433,8 +433,112 @@ pub struct ApiKeyStatus {
 pub struct ProviderCredentialSpec {
     /// Anbieter.
     pub provider: ProviderKind,
-    /// Felder, z. B. `apiKey`, `accessKeyId`/`secretAccessKey`, `serviceAccountJson`.
+    /// Anmeldung über Microsoft Entra ID (AIGW-84; nur `azure-openai` und `anthropic`).
+    /// Nicht geheim – Geheimnisse (`clientSecret`, `clientCertificate`) stehen in `data`.
+    /// Deployments mit `credential: <name>` übernehmen sie (siehe [`EntraAuth::apply_to`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entra: Option<EntraAuth>,
+    /// Felder, z. B. `apiKey`, `accessKeyId`/`secretAccessKey`, `serviceAccountJson`
+    /// (mit `entra` und Managed/Workload Identity auch leer).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub data: BTreeMap<String, SecretRef>,
+}
+
+/// Art der Entra-ID-Anmeldung (wie `settings.entraCredential`, AIGW-82/84).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum EntraCredentialKind {
+    /// Managed Identity des Gateways (IMDS bzw. `IDENTITY_ENDPOINT`); optional `clientId`
+    /// einer benutzerzugewiesenen Identität.
+    ManagedIdentity,
+    /// Workload Identity (AKS, föderiertes Token aus `AZURE_FEDERATED_TOKEN_FILE`).
+    WorkloadIdentity,
+    /// Service Principal mit Client-Secret (`data.clientSecret`).
+    ClientSecret,
+    /// Service Principal mit Zertifikat (`data.clientCertificate`, PEM).
+    ClientCertificate,
+}
+
+impl EntraCredentialKind {
+    /// Name wie in `settings.entraCredential`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ManagedIdentity => "managedIdentity",
+            Self::WorkloadIdentity => "workloadIdentity",
+            Self::ClientSecret => "clientSecret",
+            Self::ClientCertificate => "clientCertificate",
+        }
+    }
+
+    /// Identität des Gateways selbst (ohne gespeichertes Geheimnis)?
+    pub fn is_ambient(self) -> bool {
+        matches!(self, Self::ManagedIdentity | Self::WorkloadIdentity)
+    }
+}
+
+/// Entra-ID-Anmeldung einer [`ProviderCredentialSpec`] (AIGW-84). Enthält keine Geheimnisse.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EntraAuth {
+    /// Art der Anmeldung.
+    pub credential: EntraCredentialKind,
+    /// Tenant-ID (GUID oder Domäne; Pflicht für `clientSecret`/`clientCertificate`, falls
+    /// nicht in `data.tenantId`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
+    /// Client-ID (Service Principal bzw. benutzerzugewiesene Managed Identity).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    /// Authority (nur `https://host`, Sovereign Clouds; Standard
+    /// `https://login.microsoftonline.com`; nicht bei `workloadIdentity`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority: Option<String>,
+    /// Scope (Standard `https://cognitiveservices.azure.com/.default`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+}
+
+impl EntraAuth {
+    /// Zuordnung zu den Deployment-Einstellungen (`settings.<schlüssel>`).
+    pub fn settings(&self) -> Vec<(&'static str, &str)> {
+        let mut out = vec![
+            ("auth", "entraId"),
+            ("entraCredential", self.credential.as_str()),
+        ];
+        let opt = [
+            ("entraTenantId", &self.tenant_id),
+            ("entraClientId", &self.client_id),
+            ("entraAuthority", &self.authority),
+            ("entraScope", &self.scope),
+        ];
+        out.extend(
+            opt.into_iter()
+                .filter_map(|(k, v)| v.as_deref().map(|v| (k, v))),
+        );
+        out
+    }
+
+    /// Übernimmt die Anmeldung in Deployment-Einstellungen: fehlende Schlüssel (`auth`,
+    /// `entraCredential`, `entraTenantId`, `entraClientId`, `entraAuthority`, `entraScope`)
+    /// werden gesetzt, eigene Einstellungen des Deployments haben Vorrang. Setzt das
+    /// Deployment `auth` auf etwas anderes als `entraId`, bleibt alles unverändert.
+    /// Gibt zurück, ob sich etwas geändert hat.
+    pub fn apply_to(&self, settings: &mut JsonObject) -> bool {
+        if settings
+            .get("auth")
+            .is_some_and(|v| v.as_str() != Some("entraId"))
+        {
+            return false;
+        }
+        let mut changed = false;
+        for (k, v) in self.settings() {
+            if !settings.contains_key(k) {
+                settings.insert(k.to_owned(), serde_json::Value::String(v.to_owned()));
+                changed = true;
+            }
+        }
+        changed
+    }
 }
 
 /// Zugangsdaten eines Anbieters (gelesene Sicht, **ohne** Werte).
@@ -443,6 +547,9 @@ pub struct ProviderCredentialSpec {
 pub struct ProviderCredentialInfo {
     /// Anbieter.
     pub provider: ProviderKind,
+    /// Entra-ID-Anmeldung (AIGW-84, nicht geheim).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entra: Option<EntraAuth>,
     /// Namen der gespeicherten Felder.
     pub fields: Vec<String>,
     /// ID des Master-Keys, mit dem verschlüsselt wurde (Rotation).

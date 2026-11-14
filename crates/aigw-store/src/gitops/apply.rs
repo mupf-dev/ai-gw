@@ -292,6 +292,7 @@ async fn upsert_credential(
     // Bereits aufgelöste Werte; `seal_spec` verschlüsselt sie gebunden an die ID.
     let plain = ProviderCredentialSpec {
         provider: spec.provider,
+        entra: spec.entra.clone(),
         data: values
             .iter()
             .map(|(k, v)| (k.clone(), SecretRef::value(v.expose())))
@@ -300,7 +301,13 @@ async fn upsert_credential(
     let (fields, sealed) = seal_spec(keyring, id, &plain)?;
     let key_id = sealed.key_id.clone();
     // F54: valueFrom-Verweise des Manifests mitspeichern (originalgetreuer Export).
-    let cols = sealed_cols(plain.provider, &fields, &refs_of(&spec), sealed)?;
+    let cols = sealed_cols(
+        plain.provider,
+        plain.entra.as_ref(),
+        &fields,
+        &refs_of(&spec),
+        sealed,
+    )?;
     let action = match existing {
         Some(_) => {
             tx.update_row(kind, id, &meta, cols).await?;
@@ -317,6 +324,7 @@ async fn upsert_credential(
         metadata: meta,
         spec: ProviderCredentialInfo {
             provider: spec.provider,
+            entra: spec.entra,
             fields,
             key_id,
         },

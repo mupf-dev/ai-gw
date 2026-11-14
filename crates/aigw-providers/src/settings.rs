@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use aigw_core::resource::JsonObject;
+use aigw_core::resource::{EntraAuth, JsonObject};
 use aigw_core::snapshot::DeploymentCtx;
 use serde_json::Value;
 
@@ -48,6 +48,27 @@ pub fn with_group_defaults<'a>(
                 .insert((*k).to_owned(), v.clone());
         }
     }
+    std::borrow::Cow::Owned(d)
+}
+
+/// Deployment mit der Entra-ID-Anmeldung seiner Zugangsdaten (`ProviderCredential.spec.entra`,
+/// AIGW-84): fehlende `settings.auth`/`entra*` kommen aus den Zugangsdaten, eigene Einstellungen
+/// des Deployments haben Vorrang ([`EntraAuth::apply_to`]). Ohne `entra` unverändert.
+///
+/// Aufruf beim Aufbau der Routen nach [`with_group_defaults`].
+pub fn with_credential_auth<'a>(
+    entra: Option<&EntraAuth>,
+    dep: std::borrow::Cow<'a, DeploymentCtx>,
+) -> std::borrow::Cow<'a, DeploymentCtx> {
+    let Some(e) = entra else {
+        return dep;
+    };
+    let mut settings = dep.deployment.spec.settings.clone();
+    if !e.apply_to(&mut settings) {
+        return dep;
+    }
+    let mut d = dep.into_owned();
+    d.deployment.spec.settings = settings;
     std::borrow::Cow::Owned(d)
 }
 

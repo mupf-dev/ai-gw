@@ -18,7 +18,9 @@ use aigw_core::ir::ModelInfo;
 use aigw_core::resource::Id;
 use aigw_core::snapshot::{DeploymentCtx, ModelGroupCtx, Snapshot, SnapshotHandle};
 use aigw_core::types::ProviderKind;
-use aigw_providers::{Registry, Upstream, UpstreamClient, with_group_defaults};
+use aigw_providers::{
+    Registry, Upstream, UpstreamClient, with_credential_auth, with_group_defaults,
+};
 use arc_swap::ArcSwap;
 use time::OffsetDateTime;
 
@@ -37,6 +39,10 @@ pub struct RouteTable {
     /// Jede Gruppe einmal.
     groups: Vec<Arc<GroupRoute>>,
     models: Vec<ModelInfo>,
+    /// Aktive Deployments, deren Adapter sich nicht bauen ließ (ID → Grund, ohne Geheimnisse).
+    unusable: HashMap<Id, String>,
+    /// Geroutete Deployments (ID → Laufzeitzustand).
+    routed: HashMap<Id, Arc<DeploymentState>>,
 }
 
 impl RouteTable {
@@ -64,6 +70,21 @@ pub struct SnapshotRoutes {
     client: UpstreamClient,
     /// Deployments mit `provider: mock` aufnehmen (`admin.allow_mock`, F85).
     allow_mock: bool,
+}
+
+/// Laufzeitzustand eines Deployments dieser Instanz (AIGW-84).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeploymentRuntime {
+    /// Adapter gebaut, Deployment wird geroutet.
+    pub usable: bool,
+    /// Circuit Breaker (nur bei `usable`).
+    pub breaker: Option<BreakerState>,
+    /// Offene Anfragen dieser Instanz.
+    pub in_flight: u32,
+    /// Aufeinanderfolgende fehlgeschlagene Health Checks.
+    pub health_failures: u32,
+    /// Grund, warum das Deployment ausgelassen wurde (ohne Geheimnisse).
+    pub error: Option<String>,
 }
 
 /// Zustand eines Deployments für Kennzahlen (`aigw_deployment_breaker_state`, F86).
@@ -123,6 +144,41 @@ impl SnapshotRoutes {
                     in_flight: m.state().in_flight(),
                 });
             }
+        }
+        out
+    }
+
+    /// Laufzeitzustand aller aktiven Deployments dieser Instanz nach ID (AIGW-84, Anbieter-
+    /// Übersicht der Admin-API): nutzbar (mit Breaker und offenen Anfragen) bzw. ausgelassen
+    /// (mit Grund). Deployments, die nicht in der Tabelle stehen (deaktiviert, Gruppe fehlt),
+    /// fehlen.
+    pub fn runtime_status(&self) -> HashMap<Id, DeploymentRuntime> {
+        let table = self.table.load();
+        let mut out: HashMap<Id, DeploymentRuntime> = table
+            .unusable
+            .iter()
+            .map(|(id, e)| {
+                (
+                    *id,
+                    DeploymentRuntime {
+                        usable: false,
+                        error: Some(e.clone()),
+                        ..DeploymentRuntime::default()
+                    },
+                )
+            })
+            .collect();
+        for (id, st) in &table.routed {
+            out.insert(
+                *id,
+                DeploymentRuntime {
+                    usable: true,
+                    breaker: Some(st.breaker_state()),
+                    in_flight: st.in_flight(),
+                    health_failures: st.health_failures(),
+                    error: None,
+                },
+            );
         }
         out
     }
@@ -195,10 +251,20 @@ impl SnapshotRoutes {
             for d in g.deployments.iter().filter(|d| d.deployment.spec.enabled) {
                 // Von der Modellgruppe geerbte Einstellungen (z. B. `defaultMaxTokens`).
                 let effective = with_group_defaults(&g.group.spec.settings, d);
+                // Entra-ID-Anmeldung aus den Zugangsdaten (AIGW-84).
+                let entra = d
+                    .deployment
+                    .spec
+                    .credential
+                    .as_ref()
+                    .and_then(|c| snap.credentials.get(c))
+                    .and_then(|c| c.spec.entra.as_ref());
+                let effective = with_credential_auth(entra, effective);
                 let d = &*effective;
                 let provider = match self.build_provider(d) {
                     Ok(p) => p,
                     Err(e) => {
+                        table.unusable.insert(d.deployment.id, e.clone());
                         tracing::warn!(
                             model_group = %name,
                             deployment = %d.deployment.metadata.name,
@@ -219,6 +285,7 @@ impl SnapshotRoutes {
                     }
                 };
                 live.insert(id);
+                table.routed.insert(id, Arc::clone(&state));
                 let spec = &d.deployment.spec;
                 let cost = snap
                     .price_at(spec.provider, &spec.provider_model, now)

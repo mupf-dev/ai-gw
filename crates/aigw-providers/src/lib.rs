@@ -53,7 +53,7 @@ use bytes::Bytes;
 use http::{HeaderMap, StatusCode};
 
 pub use client::{ClientConfig, UpstreamClient};
-pub use settings::{GROUP_INHERITED_SETTINGS, with_group_defaults};
+pub use settings::{GROUP_INHERITED_SETTINGS, with_credential_auth, with_group_defaults};
 pub use upstream::{
     ByteStream, EventStream, SpeechStream, Timeouts, Upstream, UpstreamInfo, default_propagation,
 };

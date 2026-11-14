@@ -173,6 +173,7 @@ async fn broken_data_keeps_old_snapshot() {
             ObjectMeta::named("openai"),
             ProviderCredentialSpec {
                 provider: ProviderKind::OpenAi,
+                entra: None,
                 data: BTreeMap::from([("apiKey".to_owned(), SecretRef::value("sk-x"))]),
             },
         )
@@ -348,6 +349,7 @@ async fn bench_load_and_rebuild() {
             ObjectMeta::named("openai"),
             ProviderCredentialSpec {
                 provider: ProviderKind::OpenAi,
+                entra: None,
                 data: BTreeMap::from([("apiKey".to_owned(), SecretRef::value("sk-x"))]),
             },
         )

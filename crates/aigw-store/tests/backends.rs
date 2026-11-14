@@ -450,6 +450,7 @@ async fn run(store: Store) {
             meta("openai"),
             ProviderCredentialSpec {
                 provider: ProviderKind::OpenAi,
+                entra: None,
                 data: BTreeMap::from([
                     (
                         "apiKey".to_owned(),
@@ -484,6 +485,7 @@ async fn run(store: Store) {
             ACTOR,
             &ring,
             "openai",
+            None,
             None,
             None,
             BTreeMap::from([("apiKey".to_owned(), Some(SecretString::new("sk-neu")))]),

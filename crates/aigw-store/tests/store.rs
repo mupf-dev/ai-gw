@@ -176,6 +176,7 @@ async fn run(store: Store) {
             meta("openai-prod"),
             ProviderCredentialSpec {
                 provider: ProviderKind::OpenAi,
+                entra: None,
                 data: BTreeMap::from([(
                     "apiKey".to_owned(),
                     SecretRef::value("sk-upstream-geheim"),

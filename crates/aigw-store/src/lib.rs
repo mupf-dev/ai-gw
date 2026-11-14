@@ -182,6 +182,11 @@ const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
         "payload_policy",
         include_str!("../migrations/sqlite/0006_payload_policy.sql"),
     ),
+    (
+        7,
+        "credential_auth",
+        include_str!("../migrations/sqlite/0007_credential_auth.sql"),
+    ),
 ];
 
 /// Migrationssatz für Postgres (`migrations/postgres/`), gleiche Versionen wie SQLite.
@@ -215,6 +220,11 @@ const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
         6,
         "payload_policy",
         include_str!("../migrations/postgres/0006_payload_policy.sql"),
+    ),
+    (
+        7,
+        "credential_auth",
+        include_str!("../migrations/postgres/0007_credential_auth.sql"),
     ),
 ];
 

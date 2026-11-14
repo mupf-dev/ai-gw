@@ -46,6 +46,7 @@ pub mod plugin_bindings;
 pub mod plugins;
 pub mod prices;
 pub mod problem;
+pub mod providers;
 pub mod rbac;
 pub mod read_only;
 pub mod resources;

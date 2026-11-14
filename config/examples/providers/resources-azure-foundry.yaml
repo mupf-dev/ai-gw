@@ -5,15 +5,40 @@
 #
 # - Foundry-Ressource mit local_auth_enabled=false: nur Entra-ID-Tokens, keine API-Keys.
 # - Benutzerzugewiesene Managed Identity (UAMI) an der Container App; ihre Client-ID steht in
-#   entraClientId. Die UAMI braucht auf der Foundry-Ressource die Rolle
+#   spec.entra.clientId der Zugangsdaten. Die UAMI braucht auf der Foundry-Ressource die Rolle
 #   „Cognitive Services User“ (bzw. „Azure AI User“).
 # - Container Apps setzt IDENTITY_ENDPOINT/IDENTITY_HEADER (App-Service-Protokoll,
 #   api-version 2019-08-01); ai-gw nutzt sie automatisch, sonst IMDS.
-# - Keine ProviderCredential nötig: Scope https://cognitiveservices.azure.com/.default gilt für
-#   beide Endpunkte, beide Deployments teilen sich eine Token-Quelle.
+# - Die Anmeldung steht einmal an den Zugangsdaten (spec.entra, AIGW-84); die Deployments
+#   verweisen nur per credential darauf. Managed Identity speichert kein Geheimnis (data leer).
+#   Je Anbieter eine ProviderCredential (azure-openai bzw. anthropic) – beide mit derselben
+#   Identität und dem Scope https://cognitiveservices.azure.com/.default teilen sich eine
+#   Token-Quelle. Die Admin-UI zeigt sie unter „Anbieter“ als „Entra ID (Managed Identity)“.
+# - Weiterhin möglich (rückwärtskompatibel): settings.auth/entraCredential/entraClientId direkt
+#   am Deployment ohne credential; eigene Deployment-Einstellungen haben Vorrang.
 #
 #   aigw config apply -c config/examples/providers/aigw.yaml \
 #     config/examples/providers/resources-azure-foundry.yaml
+
+# --- Zugangsdaten: Entra ID per benutzerzugewiesener Managed Identity -------------------------
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata: {name: foundry-openai-mi}
+spec:
+  provider: azure-openai
+  entra:
+    credential: managedIdentity
+    clientId: 11111111-2222-3333-4444-555555555555
+---
+apiVersion: aigw/v1alpha1
+kind: ProviderCredential
+metadata: {name: foundry-anthropic-mi}
+spec:
+  provider: anthropic
+  entra:
+    credential: managedIdentity
+    clientId: 11111111-2222-3333-4444-555555555555
 
 # --- GPT über den Azure-OpenAI-Endpunkt der Foundry-Ressource ---------------------------------
 ---
@@ -31,11 +56,9 @@ spec:
   endpoint: https://acme-foundry.openai.azure.com
   # Name des Deployments in Foundry
   providerModel: gpt-5.4-mini
+  credential: foundry-openai-mi
   settings:
     apiVersion: "2025-04-01-preview"
-    auth: entraId
-    entraCredential: managedIdentity
-    entraClientId: 11111111-2222-3333-4444-555555555555
 
 # --- Claude über den Anthropic-kompatiblen Foundry-Endpunkt -----------------------------------
 # POST {endpoint}/v1/messages mit anthropic-version und Authorization: Bearer <Entra-Token>.
@@ -53,10 +76,8 @@ spec:
   provider: anthropic
   endpoint: https://acme-foundry.services.ai.azure.com/anthropic
   providerModel: claude-sonnet-5-5
+  credential: foundry-anthropic-mi
   settings:
-    auth: entraId
-    entraCredential: managedIdentity
-    entraClientId: 11111111-2222-3333-4444-555555555555
     anthropicVersion: "2023-06-01"
 ---
 apiVersion: aigw/v1alpha1
@@ -72,10 +93,8 @@ spec:
   provider: anthropic
   endpoint: https://acme-foundry.services.ai.azure.com/anthropic
   providerModel: claude-opus-5-5
+  credential: foundry-anthropic-mi
   settings:
-    auth: entraId
-    entraCredential: managedIdentity
-    entraClientId: 11111111-2222-3333-4444-555555555555
     anthropicVersion: "2023-06-01"
     # Opus 5.5: Thinking lässt sich nicht abschalten – nur output_config.effort steuern.
     reasoningMode: effort

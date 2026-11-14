@@ -12,6 +12,10 @@
 //!   auf dem eigenen Rechner auf und sendet den Wert.
 //! - `PUT` ersetzt alle Felder; `PATCH` (JSON Merge Patch) ändert einzelne Felder, nicht
 //!   genannte behalten ihren Wert, `null` entfernt ein Feld.
+//! - `spec.entra` (AIGW-84, nur `azure-openai`/`anthropic`): Anmeldung über Microsoft Entra ID
+//!   (Managed/Workload Identity, Service Principal mit Secret oder Zertifikat). Nicht geheim,
+//!   wird ausgegeben; Deployments mit `credential: <name>` übernehmen sie. Bei Managed/Workload
+//!   Identity bleibt `spec.data` leer.
 
 // `#[utoipa::path(params(…))]` erzeugt für IntoParams-Typen qualifizierte Pfade.
 #![allow(unused_qualifications)]
@@ -20,7 +24,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use aigw_core::resource::{
-    self as core, DeploymentSpec, Id, ObjectMeta, ProviderCredentialSpec, SecretRef, SecretString,
+    self as core, DeploymentSpec, EntraAuth, Id, ObjectMeta, ProviderCredentialSpec, SecretRef,
+    SecretString,
 };
 use aigw_core::types::ProviderKind;
 use aigw_core::validate;
@@ -67,6 +72,9 @@ pub struct ProviderCredential {
 pub struct ProviderCredentialSummary {
     /// Anbieter.
     pub provider: ProviderKind,
+    /// Entra-ID-Anmeldung (AIGW-84; nicht geheim).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entra: Option<EntraAuth>,
     /// Namen der gespeicherten Felder (sortiert), z. B. `["apiKey"]`.
     pub fields: Vec<String>,
 }
@@ -92,6 +100,7 @@ impl From<core::ProviderCredential> for ProviderCredential {
             },
             spec: ProviderCredentialSummary {
                 provider: c.spec.provider,
+                entra: c.spec.entra,
                 fields: c.spec.fields,
             },
         }
@@ -123,7 +132,12 @@ pub struct CredentialValue {
 pub struct ProviderCredentialInputSpec {
     /// Anbieter.
     pub provider: ProviderKind,
-    /// Felder, z. B. `{"apiKey": {"value": "sk-…"}}`.
+    /// Entra-ID-Anmeldung (AIGW-84; nur `azure-openai` und `anthropic`).
+    #[serde(default)]
+    pub entra: Option<EntraAuth>,
+    /// Felder, z. B. `{"apiKey": {"value": "sk-…"}}` (mit `entra` und Managed/Workload
+    /// Identity leer).
+    #[serde(default)]
     pub data: BTreeMap<String, CredentialValue>,
 }
 
@@ -156,10 +170,25 @@ pub struct CredentialPatchSpec {
     /// Neuer Anbieter (weglassen = unverändert).
     #[serde(default)]
     pub provider: Option<ProviderKind>,
+    /// Entra-ID-Anmeldung als Ganzes ersetzen (`null` entfernt sie, weglassen = unverändert).
+    #[serde(default, with = "double_option")]
+    #[schema(value_type = Option<EntraAuth>)]
+    pub entra: Option<Option<EntraAuth>>,
     /// Zu ändernde Felder: Wert setzt, `null` entfernt; nicht genannte Felder bleiben.
     #[serde(default)]
     #[schema(value_type = BTreeMap<String, CredentialValue>)]
     pub data: BTreeMap<String, Option<CredentialValue>>,
+}
+
+mod double_option {
+    use aigw_core::resource::EntraAuth;
+    use serde::{Deserialize, Deserializer};
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Option<Option<EntraAuth>>, D::Error> {
+        Option::<EntraAuth>::deserialize(d).map(Some)
+    }
 }
 
 /// Teiländerung (JSON Merge Patch).
@@ -220,6 +249,7 @@ fn keyring(st: &AdminState) -> Result<&Arc<Keyring>, Problem> {
 }
 
 /// Prüft die resultierende Feldmenge gegen die Vorgaben des Anbieters.
+#[cfg(test)]
 fn check_fields<'a>(
     provider: ProviderKind,
     fields: impl IntoIterator<Item = &'a str>,
@@ -227,39 +257,45 @@ fn check_fields<'a>(
     validate::credential_fields(provider, fields).map_err(Problem::invalid)
 }
 
+/// Prüft Anbieter, Entra-ID-Anmeldung und resultierende Feldmenge (AIGW-84).
+fn check_credential<'a>(
+    st: &AdminState,
+    provider: ProviderKind,
+    entra: Option<&EntraAuth>,
+    fields: impl IntoIterator<Item = &'a str>,
+) -> Result<(), Problem> {
+    validate::credential(&st.upstreams, provider, entra, fields).map_err(Problem::invalid)
+}
+
 fn check_value(field: &str, v: &CredentialValue) -> Result<(), Problem> {
     validate::credential_value(field, v.value.expose()).map_err(Problem::invalid)
 }
 
-/// Ein Anbieterwechsel darf keine Deployments mit unpassendem Anbieter zurücklassen
-/// (Kompatibilitätsliste F65).
-async fn check_provider_change(
+/// Ein Wechsel von Anbieter oder Entra-ID-Anmeldung darf keine ungültigen Deployments
+/// zurücklassen (Kompatibilitätsliste F65, zusammengeführte Einstellungen AIGW-84).
+async fn check_users(
     st: &AdminState,
     name: &str,
-    old: ProviderKind,
-    new: ProviderKind,
+    provider: ProviderKind,
+    entra: Option<&EntraAuth>,
 ) -> Result<(), Problem> {
-    if old == new {
-        return Ok(());
+    let mut problems = Vec::new();
+    for d in st.store.list::<DeploymentSpec>().await? {
+        if d.spec.credential.as_deref() != Some(name) {
+            continue;
+        }
+        if let Err(m) =
+            validate::deployment_credential_auth(&st.upstreams, &d.spec, name, provider, entra)
+        {
+            problems.push(format!("{}: {m}", d.metadata.name));
+        }
     }
-    let users: Vec<String> = st
-        .store
-        .list::<DeploymentSpec>()
-        .await?
-        .into_iter()
-        .filter(|d| {
-            d.spec.credential.as_deref() == Some(name)
-                && !validate::credential_compatible(new, d.spec.provider)
-        })
-        .map(|d| d.metadata.name)
-        .collect();
-    if users.is_empty() {
+    if problems.is_empty() {
         Ok(())
     } else {
         Err(Problem::conflict(format!(
-            "Anbieterwechsel nicht möglich: Deployments {users:?} nutzen die Zugangsdaten mit \
-             Anbieter {:?}",
-            old.as_str()
+            "Änderung nicht möglich – Deployments mit diesen Zugangsdaten würden ungültig: {}",
+            problems.join("; ")
         )))
     }
 }
@@ -267,6 +303,7 @@ async fn check_provider_change(
 fn to_store_spec(spec: ProviderCredentialInputSpec) -> ProviderCredentialSpec {
     ProviderCredentialSpec {
         provider: spec.provider,
+        entra: spec.entra,
         data: spec
             .data
             .into_iter()
@@ -283,11 +320,16 @@ fn to_store_spec(spec: ProviderCredentialInputSpec) -> ProviderCredentialSpec {
     }
 }
 
-fn validate_input(spec: &ProviderCredentialInputSpec) -> Result<(), Problem> {
+fn validate_input(st: &AdminState, spec: &ProviderCredentialInputSpec) -> Result<(), Problem> {
     for (f, v) in &spec.data {
         check_value(f, v)?;
     }
-    check_fields(spec.provider, spec.data.keys().map(String::as_str))
+    check_credential(
+        st,
+        spec.provider,
+        spec.entra.as_ref(),
+        spec.data.keys().map(String::as_str),
+    )
 }
 
 fn respond(status: StatusCode, c: core::ProviderCredential) -> axum::response::Response {
@@ -361,7 +403,7 @@ pub(crate) async fn create_credential(
 ) -> ApiResult {
     p.require_on(Permission::Write, &Target::Catalog)?;
     let Json(input) = body.map_err(redacted)?;
-    validate_input(&input.spec)?;
+    validate_input(&st, &input.spec)?;
     let keyring = keyring(&st)?;
     let _guard = st.write_lock.lock().await;
     let c = st
@@ -417,7 +459,7 @@ pub(crate) async fn get_credential(
         (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
         (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
-        (status = 409, description = "Anbieterwechsel bei verwendeten Zugangsdaten", body = Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Anbieter- oder Anmeldungswechsel würde Deployments ungültig machen", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
         (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
         (status = 422, description = "Ungültige Eingabe", body = Problem, content_type = "application/problem+json"),
@@ -434,7 +476,7 @@ pub(crate) async fn put_credential(
     p.require_on(Permission::Write, &Target::Catalog)?;
     let Json(input) = body.map_err(redacted)?;
     let meta = same_name(&name, input.metadata)?;
-    validate_input(&input.spec)?;
+    validate_input(&st, &input.spec)?;
     let keyring = keyring(&st)?;
     let _guard = st.write_lock.lock().await;
     let current = st.store.get_credential(&name).await?;
@@ -443,7 +485,7 @@ pub(crate) async fn put_credential(
         &etag_of(&ProviderCredential::from(current.clone())),
         current.metadata.updated_at,
     )?;
-    check_provider_change(&st, &name, current.spec.provider, input.spec.provider).await?;
+    check_users(&st, &name, input.spec.provider, input.spec.entra.as_ref()).await?;
     let c = st
         .store
         .update_credential(p.actor(), keyring, meta, to_store_spec(input.spec), expect)
@@ -467,7 +509,7 @@ pub(crate) async fn put_credential(
         (status = 401, description = "Nicht angemeldet", body = Problem, content_type = "application/problem+json"),
         (status = 403, description = "Keine Berechtigung", body = Problem, content_type = "application/problem+json"),
         (status = 404, description = "Nicht gefunden", body = Problem, content_type = "application/problem+json"),
-        (status = 409, description = "Anbieterwechsel bei verwendeten Zugangsdaten", body = Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Anbieter- oder Anmeldungswechsel würde Deployments ungültig machen", body = Problem, content_type = "application/problem+json"),
         (status = 412, description = "ETag passt nicht", body = Problem, content_type = "application/problem+json"),
         (status = 428, description = "If-Match fehlt (F38)", body = Problem, content_type = "application/problem+json"),
         (status = 422, description = "Ungültige Eingabe", body = Problem, content_type = "application/problem+json"),
@@ -515,8 +557,12 @@ pub(crate) async fn patch_credential(
             fields.remove(f.as_str());
         }
     }
-    check_fields(provider, fields)?;
-    check_provider_change(&st, &name, current.spec.provider, provider).await?;
+    let entra = match &spec.entra {
+        Some(e) => e.as_ref(),
+        None => current.spec.entra.as_ref(),
+    };
+    check_credential(&st, provider, entra, fields)?;
+    check_users(&st, &name, provider, entra).await?;
     let changes = spec
         .data
         .into_iter()
@@ -530,6 +576,7 @@ pub(crate) async fn patch_credential(
             &name,
             meta.labels,
             spec.provider,
+            spec.entra,
             changes,
             expect,
         )

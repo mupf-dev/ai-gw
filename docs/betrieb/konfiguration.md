@@ -86,8 +86,29 @@ anschließendem Snapshot-Aufbau. Wer ein Feld umbenennt, merkt es dort.
 
 ### Azure OpenAI mit Entra ID
 
-Statt eines API-Keys meldet sich das Gateway per Entra ID an (`settings.auth: entraId` am
-Deployment, Details in [06-streaming-und-anbieter.md](../konzept/06-streaming-und-anbieter.md)):
+Statt eines API-Keys meldet sich das Gateway per Entra ID an – empfohlen über Zugangsdaten
+mit `spec.entra` (eine Stelle für alle Deployments, AIGW-84), alternativ wie bisher mit
+`settings.auth: entraId` direkt am Deployment (Details in
+[06-streaming-und-anbieter.md](../konzept/06-streaming-und-anbieter.md)):
+
+```yaml
+kind: ProviderCredential
+metadata: {name: foundry-mi}
+spec:
+  provider: azure-openai          # bzw. anthropic (Claude in Foundry)
+  entra:
+    credential: managedIdentity   # workloadIdentity | clientSecret | clientCertificate
+    clientId: 11111111-2222-3333-4444-555555555555   # benutzerzugewiesene Identität
+  # data: {clientSecret: {valueFrom: {env: AZURE_CLIENT_SECRET}}}   # nur Service Principal
+---
+kind: Deployment
+spec: {provider: azure-openai, credential: foundry-mi, …}   # keine entra*-Einstellungen nötig
+```
+
+Die Tabelle nennt die Einstellungen der Inline-Variante; mit Zugangsdaten stehen dieselben
+Angaben in `spec.entra` (`credential`, `tenantId`, `clientId`, `authority`, `scope`). Die
+Admin-UI zeigt unter **Anbieter** je Endpunkt Anmeldeart, Deployments und Zustand – auch für
+Inline-Deployments ohne Zugangsdaten.
 
 | Variante | Deployment-Einstellungen | Zugangsdaten / Umgebung |
 |---|---|---|

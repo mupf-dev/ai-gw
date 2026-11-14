@@ -253,7 +253,7 @@ fn serve(
         .await
         .map_err(|e| format!("cache: {e}"))?;
         let state = aigw_proxy::ProxyState {
-            routes,
+            routes: routes.clone(),
             auth: std::sync::Arc::new(aigw_proxy::SnapshotAuthenticator::new(
                 runtime_state.snapshot.clone(),
             )),
@@ -346,6 +346,14 @@ fn serve(
                 store: runtime_state.store.clone(),
                 auth: std::sync::Arc::clone(&auth),
                 gateway: gateway.clone(),
+            },
+        ))
+        // Anbieter-Übersicht (AIGW-84): Deployments je Anbieter/Endpunkt mit Laufzeitzustand.
+        .merge(aigw_admin::providers::router(
+            aigw_admin::providers::ProvidersState {
+                store: runtime_state.store.clone(),
+                auth: std::sync::Arc::clone(&auth),
+                routes: Some(std::sync::Arc::clone(&routes)),
             },
         ))
         // Playground der Admin-UI (AIGW-54): Chat im Namen eines Keys über die Pipeline.

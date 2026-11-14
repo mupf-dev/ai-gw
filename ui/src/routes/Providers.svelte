@@ -1,10 +1,14 @@
 <!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts">
-  // Anbieter (AIGW-49): Anbieter-Zugangsdaten ohne Werte (nur Feldnamen, Verschlüsselungs-Key-ID), Verwendung
-  // durch Deployments; Anlegen, Werte ändern (PATCH), alle Werte ersetzen (PUT), Löschen. Schreiben: globaler Admin.
+  // Anbieter (AIGW-49, AIGW-84):
+  // - Übersicht je Anbieter + Endpunkt aus den Deployments (auch ohne Zugangsdaten, z. B. Entra ID per Managed Identity
+  //   mit Inline-Einstellungen): Anmeldeart, Deployments, Modellgruppen, Zustand dieser Instanz (GET /providers).
+  // - Anbieter-Zugangsdaten ohne Werte (nur Feldnamen, Entra-ID-Angaben, Verschlüsselungs-Key-ID), Verwendung durch
+  //   Deployments; Anlegen, Werte ändern (PATCH), alle Werte ersetzen (PUT), Löschen. Schreiben: globaler Admin.
   import { DropdownMenu } from 'bits-ui';
-  import { credentials, deployments, PROVIDERS, providerLabel, type Credential } from '../lib/api/resources';
+  import { authLabel, credentials, deployments, entraLabel, HEALTH, PROVIDERS, providerLabel, providerOverview, type Credential, type ProviderEndpoint } from '../lib/api/resources';
+  import { detailPath } from '../lib/nav';
   import AsyncState from '../lib/admin/AsyncState.svelte';
   import ConfirmDialog from '../lib/admin/ConfirmDialog.svelte';
   import { formErrorOf, Loader } from '../lib/admin/errors.svelte';
@@ -27,7 +31,9 @@
     const [c, d] = await Promise.all([credentials.list(), deployments.list()]);
     return { creds: c, deps: d };
   });
+  const overview = new Loader(providerOverview);
   let provider = $state('');
+  let epQ = $state('');
   let q = $state('');
   let formOpen = $state(false);
   let mode = $state<CredentialMode>('create');
@@ -51,16 +57,28 @@
       await credentials.remove(del, etag);
       toast('success', 'Zugangsdaten gelöscht', del);
       void data.reload();
+      void overview.reload();
       return null;
     } catch (e) {
       return formErrorOf(e, 'Zugangsdaten löschen', () => void data.reload());
     }
   }
 
+  const epRows = $derived((overview.data?.items ?? []).filter((e) => !provider || e.provider === provider));
+  const epKey = (e: ProviderEndpoint) => `${e.provider} ${e.endpoint ?? ''}`;
+  const STATE_ORDER = { down: 0, unusable: 1, degraded: 2, unknown: 3, ok: 4, disabled: 5 } as const;
+  const epColumns: Column<ProviderEndpoint>[] = [
+    { id: 'endpoint', label: 'Anbieter / Endpunkt', cell: epCell, sort: (e) => `${providerLabel(e.provider)} ${e.endpoint ?? ''}` },
+    { id: 'auth', label: 'Anmeldung', cell: epAuthCell, from: 'sm' },
+    { id: 'deployments', label: 'Deployments', cell: epDepsCell, sort: (e) => e.deployments.length, from: 'md' },
+    { id: 'groups', label: 'Modellgruppen', cell: epGroupsCell, sort: (e) => e.modelGroups.length, from: 'lg' },
+    { id: 'state', label: 'Zustand', cell: epStateCell, sort: (e) => STATE_ORDER[e.state] },
+  ];
+
   const columns: Column<Credential>[] = [
     { id: 'name', label: 'Name', cell: nameCell, sort: (c) => c.metadata.name },
     { id: 'provider', label: 'Anbieter', cell: providerCell, sort: (c) => providerLabel(c.spec.provider) },
-    { id: 'fields', label: 'Felder', cell: fieldsCell, from: 'md' },
+    { id: 'fields', label: 'Anmeldung / Felder', cell: fieldsCell, from: 'md' },
     { id: 'used', label: 'Verwendet von', cell: usedCell, sort: (c) => usedBy(c).length, from: 'lg' },
     { id: 'updated', label: 'Geändert', cell: updatedCell, sort: (c) => c.metadata.updatedAt ?? '', from: 'sm' },
     { id: 'actions', label: 'Aktionen', cell: actionsCell, srOnlyLabel: true, align: 'right', class: 'w-10' },
@@ -76,7 +94,50 @@
 {#snippet providerCell(c: Credential)}<span class="text-sm">{providerLabel(c.spec.provider)}</span>{/snippet}
 {#snippet fieldsCell(c: Credential)}
   <span class="flex flex-wrap items-center gap-1">
-    {#each c.spec.fields as f (f)}<Badge mono icon="lock">{f}</Badge>{:else}<span class="text-sm text-fg-muted">keine Werte</span>{/each}
+    {#if c.spec.entra}
+      <Badge tone="info" icon="shield">Entra ID · {entraLabel(c.spec.entra.credential)}</Badge>
+      {#if c.spec.entra.clientId}<Badge mono tone="outline" class="max-w-48 truncate">client {c.spec.entra.clientId}</Badge>{/if}
+    {/if}
+    {#each c.spec.fields as f (f)}<Badge mono icon="lock">{f}</Badge>{:else}{#if !c.spec.entra}<span class="text-sm text-fg-muted">keine Werte</span>{/if}{/each}
+  </span>
+{/snippet}
+{#snippet epCell(e: ProviderEndpoint)}
+  <span class="block text-sm font-medium text-fg">{providerLabel(e.provider)}</span>
+  {#if e.endpoint}<span class="block max-w-xs truncate font-mono text-xs text-fg-muted" title={e.endpoint}>{e.endpoint}</span>
+  {:else}<span class="block text-xs text-fg-subtle">Standard-Endpunkt</span>{/if}
+{/snippet}
+{#snippet epAuthCell(e: ProviderEndpoint)}
+  <span class="flex flex-col gap-1">
+    {#each e.auth as a, i (i)}
+      <span class="flex flex-wrap items-center gap-1">
+        <Badge tone={a.kind === 'entraId' ? 'info' : a.kind === 'none' ? 'outline' : 'neutral'} icon={a.kind === 'entraId' ? 'shield' : a.kind === 'none' ? undefined : 'key'}>{authLabel(a)}</Badge>
+        {#if a.credential}<Badge mono tone="outline">{a.credential}</Badge>{:else if a.kind !== 'none'}<span class="text-xs text-fg-subtle" title="Anmeldung in den Deployment-Einstellungen">inline</span>{/if}
+        {#if a.clientId}<span class="max-w-40 truncate font-mono text-xs text-fg-muted" title="Client-ID {a.clientId}">{a.clientId}</span>{/if}
+      </span>
+    {/each}
+  </span>
+{/snippet}
+{#snippet epDepsCell(e: ProviderEndpoint)}
+  <span class="flex flex-wrap gap-1">
+    {#each e.deployments.slice(0, 4) as d (d.name)}
+      <a href={href(detailPath('deployment', d.name))} class="rounded-sm" title="{d.modelGroup} · {d.providerModel} · {HEALTH[d.state].label}{d.error ? ` – ${d.error}` : ''}">
+        <Badge mono dot tone={HEALTH[d.state].tone}>{d.name}</Badge>
+      </a>
+    {/each}
+    {#if e.deployments.length > 4}<Badge tone="outline">+{e.deployments.length - 4}</Badge>{/if}
+  </span>
+{/snippet}
+{#snippet epGroupsCell(e: ProviderEndpoint)}
+  <span class="flex flex-wrap gap-1">
+    {#each e.modelGroups.slice(0, 3) as g (g)}<a href={href(detailPath('model-group', g))} class="rounded-sm"><Badge mono tone="outline">{g}</Badge></a>{/each}
+    {#if e.modelGroups.length > 3}<Badge tone="outline">+{e.modelGroups.length - 3}</Badge>{/if}
+  </span>
+{/snippet}
+{#snippet epStateCell(e: ProviderEndpoint)}
+  {@const problems = e.deployments.filter((d) => d.state !== 'ok' && d.state !== 'disabled').length}
+  <span class="flex flex-col items-start gap-0.5">
+    <Badge dot tone={HEALTH[e.state].tone}>{HEALTH[e.state].label}</Badge>
+    {#if problems && e.state !== 'unknown'}<span class="text-xs text-fg-muted">{problems} von {e.deployments.length} betroffen</span>{/if}
   </span>
 {/snippet}
 {#snippet usedCell(c: Credential)}
@@ -112,13 +173,40 @@
   {/if}
 {/snippet}
 
-<PageHeader title="Anbieter" description="Zugangsdaten der Upstream-Anbieter. Werte sind nur schreibbar: Sie werden beim Speichern mit dem Master-Key verschlüsselt und nie wieder ausgegeben.">
+<PageHeader title="Anbieter" description="Upstream-Anbieter je Endpunkt mit Anmeldeart und Zustand, darunter die Zugangsdaten. Geheimwerte sind nur schreibbar: Sie werden beim Speichern mit dem Master-Key verschlüsselt und nie wieder ausgegeben.">
   {#snippet actions()}
     {#if writable}<Button variant="primary" icon="plus" onclick={() => open('create', null)} data-testid="create-credential">Zugangsdaten anlegen</Button>{/if}
   {/snippet}
 </PageHeader>
 
-  <Card flush testid="credentials-card">
+<div class="flex flex-col gap-6">
+  <Card flush testid="provider-overview" title="Endpunkte" description="Aus den Deployments abgeleitet – auch Anbieter ohne Zugangsdaten (z. B. Entra ID per Managed Identity). Zustand dieser Gateway-Instanz.">
+    <AsyncState loader={overview}>
+      {#snippet children()}
+        {#if overview.data && !overview.data.runtime}<p class="border-b border-line px-4 py-2 text-sm text-fg-muted">Kein Laufzeitzustand verfügbar – nur Konfiguration.</p>{/if}
+        <DataTable
+          rows={epRows}
+          columns={epColumns}
+          bind:q={epQ}
+          key={epKey}
+          caption="Anbieter-Endpunkte"
+          search={(e) => `${e.provider} ${providerLabel(e.provider)} ${e.endpoint ?? ''} ${e.auth.map((a) => `${authLabel(a)} ${a.credential ?? ''}`).join(' ')} ${e.deployments.map((d) => d.name).join(' ')} ${e.modelGroups.join(' ')}`}
+          searchPlaceholder="Anbieter, Endpunkt, Deployment …"
+          sortId="state"
+          testid="provider-endpoints"
+          resetFilters={() => (provider = '')}
+        >
+          {#snippet empty()}
+            <EmptyState icon="server" title="Noch keine Deployments" text="Die Übersicht entsteht aus den Deployments unter „Modelle & Routen“ (oder per GitOps).">
+              <a class={btn('secondary')} href={href('/models')}>Zu Modelle & Routen</a>
+            </EmptyState>
+          {/snippet}
+        </DataTable>
+      {/snippet}
+    </AsyncState>
+  </Card>
+
+  <Card flush testid="credentials-card" title="Zugangsdaten">
     <AsyncState loader={data}>
       {#snippet children()}
         <DataTable
@@ -127,7 +215,7 @@
           bind:q
           key={(c) => c.metadata.name}
           caption="Anbieter-Zugangsdaten"
-          search={(c) => `${c.metadata.name} ${c.spec.provider} ${c.spec.fields.join(' ')}`}
+          search={(c) => `${c.metadata.name} ${c.spec.provider} ${c.spec.fields.join(' ')} ${c.spec.entra ? `entra ${c.spec.entra.credential} ${c.spec.entra.clientId ?? ''}` : ''}`}
           searchPlaceholder="Name, Anbieter oder Feld …"
           sortId="name"
           testid="credentials-table"
@@ -147,6 +235,7 @@
       {/snippet}
     </AsyncState>
   </Card>
+</div>
 
 <CredentialFormDialog
   bind:open={formOpen}
@@ -155,6 +244,7 @@
   onsaved={(n) => {
     toast('success', 'Zugangsdaten gespeichert', n);
     void data.reload();
+    void overview.reload();
   }}
 />
 <ConfirmDialog bind:open={delOpen} title="Zugangsdaten löschen?" confirmLabel="Löschen" onconfirm={runDelete}>

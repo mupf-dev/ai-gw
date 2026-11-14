@@ -8,9 +8,11 @@
   // Anbieter-Zugangsdaten (Admin-API §2.4). Werte sind nur schreibbar – das Formular zeigt nie gespeicherte Werte.
   // - Anlegen/Ersetzen (POST/PUT): Anbieter, Pflichtfelder der gewählten Alternative, optionale/weitere Felder.
   // - Werte ändern (PATCH, JSON Merge Patch): einzelne Felder neu setzen oder entfernen, der Rest bleibt erhalten.
+  // - Entra ID (AIGW-84, Azure OpenAI/Anthropic): Art (Managed/Workload Identity, Service Principal) und nicht geheime
+  //   IDs als `spec.entra`; nur Secret/Zertifikat sind Werte. Deployments mit `credential` übernehmen die Anmeldung.
   import { Checkbox, RadioGroup } from 'bits-ui';
   import { untrack } from 'svelte';
-  import { credentials, CREDENTIAL_FIELDS, FIELD_NAME, LONG_FIELDS, NAME_HINT, NAME_RE, PROVIDERS, type Credential, type S } from '../../lib/api/resources';
+  import { credentials, CREDENTIAL_FIELDS, ENTRA_KINDS, FIELD_NAME, LONG_FIELDS, NAME_HINT, NAME_RE, PROVIDERS, type Credential, type S } from '../../lib/api/resources';
   import { handleError } from '../../lib/admin/errors.svelte';
   import FormError from '../../lib/admin/FormError.svelte';
   import Button from '../../lib/ui/Button.svelte';
@@ -30,6 +32,8 @@
 
   let form = $state({ name: '', provider: 'openai' as S['ProviderKind'], alt: '0' });
   let values = $state<Record<string, string>>({});
+  const NO_ENTRA = { tenantId: '', clientId: '', authority: '', scope: '' };
+  let entra = $state({ ...NO_ENTRA });
   let extra = $state<{ key: string; value: string }[]>([]);
   let remove = $state<Record<string, boolean>>({});
   let loaded = $state<Credential | null>(null);
@@ -49,6 +53,7 @@
       values = {};
       extra = [];
       remove = {};
+      entra = { ...NO_ENTRA };
       if (m !== 'create' && n) void load(n);
       else {
         loaded = null;
@@ -65,8 +70,15 @@
       loaded = r.data;
       etag = r.etag;
       const req = CREDENTIAL_FIELDS[r.data.spec.provider];
-      const alt = Math.max(0, req.alternatives.findIndex((a) => a.fields.every((f) => r.data.spec.fields.includes(f))));
-      form = { name: n, provider: r.data.spec.provider, alt: String(alt) };
+      const e = r.data.spec.entra;
+      const has = (f: string) => r.data.spec.fields.includes(f);
+      let alt = e
+        ? req.alternatives.findIndex((a) => a.entra === e.credential)
+        : req.alternatives.findIndex((a) => !a.entra && a.fields.length > 0 && a.fields.every(has));
+      // Ältere Form (IDs als Geheimwerte ohne spec.entra): Service-Principal-Variante vorschlagen.
+      if (alt < 0 && !e) alt = req.alternatives.findIndex((a) => a.entra && a.fields.length > 0 && a.fields.every(has));
+      entra = { tenantId: e?.tenantId ?? '', clientId: e?.clientId ?? '', authority: e?.authority ?? '', scope: e?.scope ?? '' };
+      form = { name: n, provider: r.data.spec.provider, alt: String(Math.max(0, alt)) };
     } catch (e) {
       handleError(e, { action: 'Zugangsdaten laden' });
       open = false;
@@ -77,6 +89,30 @@
 
   const req = $derived(CREDENTIAL_FIELDS[form.provider]);
   const required = $derived(req.alternatives[Number(form.alt)]?.fields ?? []);
+  const entraKind = $derived(mode === 'patch' ? loaded?.spec.entra?.credential : req.alternatives[Number(form.alt)]?.entra);
+  const servicePrincipal = $derived(entraKind === 'clientSecret' || entraKind === 'clientCertificate');
+  const GUID_OR_DOMAIN = /^[A-Za-z0-9._-]{1,256}$/;
+
+  /** `spec.entra` aus dem Formular (leere Felder weggelassen); `null` bei Fehlern (in `e` eingetragen). */
+  function entraBody(e: Record<string, string>): S['EntraAuth'] | null {
+    if (!entraKind) return null;
+    const t = entra.tenantId.trim();
+    const c = entra.clientId.trim();
+    const a = entra.authority.trim();
+    const sc = entra.scope.trim();
+    if (servicePrincipal && !t) e.tenantId = 'Pflichtfeld für Service Principals.';
+    if (servicePrincipal && !c) e.clientId = 'Pflichtfeld für Service Principals.';
+    if (t && !GUID_OR_DOMAIN.test(t)) e.tenantId = 'GUID oder Domänenname.';
+    if (c && !GUID_OR_DOMAIN.test(c)) e.clientId = 'GUID oder Domänenname.';
+    if (a && !/^https:\/\/[^/?#]+\/?$/.test(a)) e.authority = 'Nur https://host, z. B. https://login.microsoftonline.us.';
+    return {
+      credential: entraKind,
+      ...(t ? { tenantId: t } : {}),
+      ...(c ? { clientId: c } : {}),
+      ...(a && entraKind !== 'workloadIdentity' ? { authority: a } : {}),
+      ...(sc ? { scope: sc } : {}),
+    };
+  }
   const optional = $derived(req.optional.filter((f) => !required.includes(f)));
   const fieldLabel = (f: string) => f.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
 
@@ -122,18 +158,26 @@
           else if (!x.value) e[`extra-${i}`] = 'Wert fehlt.';
           else data[x.key] = { value: x.value };
         });
+        const en = entraBody(e);
         errors = e;
         if (Object.keys(e).length) return;
-        if (!Object.keys(data).length) {
+        const entraChanged = !!en && JSON.stringify(en) !== JSON.stringify(loaded?.spec.entra ?? null);
+        if (!Object.keys(data).length && !entraChanged) {
           formError = 'Keine Änderung angegeben.';
           return;
         }
         // Merge Patch: null entfernt ein Feld (das generierte Schema kennt null als Wert nicht).
-        await credentials.patch(n, { spec: { data: data as Record<string, S['CredentialValue']> } }, etag);
+        await credentials.patch(n, { spec: { data: data as Record<string, S['CredentialValue']>, ...(entraChanged && en ? { entra: en } : {}) } }, etag);
       } else {
         const data = collect();
-        if (!data) return;
-        const body: S['ProviderCredentialInput'] = { metadata: { name: n, labels: loaded?.metadata.labels ?? {} }, spec: { provider: form.provider, data } };
+        const e: Record<string, string> = { ...errors };
+        const en = entraBody(e);
+        errors = e;
+        if (!data || Object.keys(e).length) return;
+        const body: S['ProviderCredentialInput'] = {
+          metadata: { name: n, labels: loaded?.metadata.labels ?? {} },
+          spec: { provider: form.provider, data, ...(en ? { entra: en } : {}) },
+        };
         if (mode === 'replace') await credentials.update(n, body, etag);
         else await credentials.create(body);
       }
@@ -156,6 +200,27 @@
   {:else}
     <Input {id} type="password" bind:value={values[f]} aria-describedby={describedby} aria-invalid={invalid || undefined} autocomplete="new-password" spellcheck={false} />
   {/if}
+{/snippet}
+
+{#snippet entraInputs()}
+  <fieldset class="grid gap-4 rounded-lg border border-line p-3 sm:grid-cols-2" data-testid="credential-entra">
+    <legend class="px-1 text-sm font-medium text-fg">Entra ID · {ENTRA_KINDS.find((k) => k.value === entraKind)?.label}</legend>
+    <p class="text-sm text-fg-muted sm:col-span-2">{ENTRA_KINDS.find((k) => k.value === entraKind)?.hint}. Diese Angaben sind nicht geheim und werden angezeigt.</p>
+    <Field label="Client-ID" required={servicePrincipal} optional={!servicePrincipal} hint={entraKind === 'managedIdentity' ? 'benutzerzugewiesene Identität (leer = systemzugewiesen)' : 'Anwendungs-ID (GUID)'} error={errors.clientId}>
+      {#snippet children({ id, describedby, invalid })}<Input {id} bind:value={entra.clientId} aria-describedby={describedby} aria-invalid={invalid || undefined} placeholder="11111111-2222-3333-4444-555555555555" autocomplete="off" spellcheck={false} />{/snippet}
+    </Field>
+    <Field label="Tenant-ID" required={servicePrincipal} optional={!servicePrincipal} hint="GUID oder Domäne" error={errors.tenantId}>
+      {#snippet children({ id, describedby, invalid })}<Input {id} bind:value={entra.tenantId} aria-describedby={describedby} aria-invalid={invalid || undefined} placeholder="contoso.onmicrosoft.com" autocomplete="off" spellcheck={false} />{/snippet}
+    </Field>
+    {#if entraKind !== 'workloadIdentity'}
+      <Field label="Authority" optional hint="nur Sovereign Clouds" error={errors.authority}>
+        {#snippet children({ id, describedby, invalid })}<Input {id} bind:value={entra.authority} aria-describedby={describedby} aria-invalid={invalid || undefined} placeholder="https://login.microsoftonline.com" autocomplete="off" spellcheck={false} />{/snippet}
+      </Field>
+    {/if}
+    <Field label="Scope" optional hint="Standard: Cognitive Services" error={errors.scope}>
+      {#snippet children({ id, describedby, invalid })}<Input {id} bind:value={entra.scope} aria-describedby={describedby} aria-invalid={invalid || undefined} placeholder="https://cognitiveservices.azure.com/.default" autocomplete="off" spellcheck={false} />{/snippet}
+    </Field>
+  </fieldset>
 {/snippet}
 
 <Dialog
@@ -208,7 +273,7 @@
                     </span>
                     <span>
                       <span class="block text-base font-medium text-fg">{a.label}</span>
-                      <span class="block font-mono text-xs text-fg-muted">{a.fields.join(' + ')}</span>
+                      <span class="block font-mono text-xs text-fg-muted">{a.fields.length ? a.fields.join(' + ') : 'ohne gespeichertes Geheimnis'}</span>
                     </span>
                   {/snippet}
                 </RadioGroup.Item>
@@ -218,6 +283,7 @@
         {:else if req.alternatives.length === 0}
           <p class="text-sm text-fg-muted">Für diesen Anbieter sind beliebige Felder erlaubt (z. B. <code class="font-mono">apiKey</code> für einen geschützten Endpunkt).</p>
         {/if}
+        {#if entraKind}{@render entraInputs()}{/if}
         <div class="grid gap-4 sm:grid-cols-2" data-testid="credential-fields">
           {#each required as f (f)}
             <Field label={fieldLabel(f)} required hint={f} error={errors[f]} class={LONG_FIELDS.has(f) ? 'sm:col-span-2' : ''}>
@@ -231,6 +297,7 @@
           {/each}
         </div>
       {:else if loaded}
+        {#if entraKind}{@render entraInputs()}{/if}
         <div class="flex flex-col gap-2" data-testid="credential-fields">
           <p class="text-sm text-fg-muted">Leere Felder bleiben unverändert. Gespeicherte Werte werden nie angezeigt.</p>
           {#each loaded.spec.fields as f (f)}

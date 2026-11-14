@@ -230,6 +230,26 @@ Fehler: Token-Abruf wie Azure OpenAI (502 `upstream_authentication_error`), fehl
 (401/403 von Foundry) → Klasse `auth`, Meldung verborgen. Beispiel:
 [`config/examples/providers/resources-azure-foundry.yaml`](../../config/examples/providers/resources-azure-foundry.yaml).
 
+### Entra ID an den Zugangsdaten (AIGW-84)
+
+Statt die Anmeldung an jedem Deployment zu wiederholen, beschreibt eine `ProviderCredential`
+sie einmal (`spec.entra`: `credential` = `managedIdentity` | `workloadIdentity` |
+`clientSecret` | `clientCertificate`, dazu `tenantId`, `clientId`, `authority`, `scope`;
+geheim sind nur `data.clientSecret` bzw. `data.clientCertificate`). Beim Aufbau der Routen
+(`SnapshotRoutes::rebuild`) ergänzt `aigw_providers::with_credential_auth` – nach
+`with_group_defaults` – die fehlenden Einstellungen `auth: entraId`, `entraCredential`,
+`entraTenantId`, `entraClientId`, `entraAuthority`, `entraScope` aus den Zugangsdaten
+(`EntraAuth::apply_to`); eigene Einstellungen des Deployments haben Vorrang, `auth: apiKey` am
+Deployment lässt die Zugangsdaten-Anmeldung außen vor (Validierung lehnt diese Kombination
+ab). Der Adapter sieht danach dieselben Einstellungen wie bei der Inline-Variante, die
+Token-Quelle wird wie bisher über den Fingerabdruck der Identität geteilt – je Credential
+genau eine. Ändert sich `spec.entra`, ändert sich der Fingerabdruck des Deployments
+(Einstellungen) und es bekommt einen frischen Laufzeitzustand.
+
+Ließ sich ein Deployment nicht bauen, merkt sich die Routing-Tabelle den Grund
+(`SnapshotRoutes::runtime_status`), die Admin-API zeigt ihn in der Anbieter-Übersicht
+(`GET /admin/api/v1/providers`, 08 §2.4a).
+
 ## 3b. Ollama und vLLM (`ollama`, `vllm`, AIGW-17)
 
 Profile des Adapters der OpenAI-Familie (gleicher Code, gleiches Wire-Format, gleicher

@@ -32,7 +32,8 @@ Instanz nach ca. 100 ms (Debounce), bei Postgres auf allen Instanzen per `NOTIFY
 | `/api-keys/{name}/rotate` | POST | neuer Key, alter läuft ab |
 | `/model-groups`, `/model-groups/{name}` | GET, POST · GET, PUT, DELETE | Modellgruppen (Aliasse, Routing-Strategie, Fallbacks, Limits) |
 | `/deployments`, `/deployments/{name}` | GET, POST · GET, PUT, DELETE | Deployments (Anbieter, Endpunkt, Anbieter-Modell, Zugangsdaten, Gewicht, Priorität, Kapazität, aktiv) |
-| `/provider-credentials`, `/provider-credentials/{name}` | GET, POST · GET, PUT, PATCH, DELETE | Anbieter-Zugangsdaten (Werte nur schreibbar) |
+| `/provider-credentials`, `/provider-credentials/{name}` | GET, POST · GET, PUT, PATCH, DELETE | Anbieter-Zugangsdaten (Werte nur schreibbar; Entra-ID-Anmeldung `spec.entra`) |
+| `/providers` | GET | Anbieter-Übersicht je Anbieter + Endpunkt: Anmeldeart, Deployments, Modellgruppen, Laufzeitzustand (AIGW-84, §2.4a) |
 | `/prices`, `/prices/{name}` | GET, POST · GET, PUT, DELETE | Preisversionen je Anbieter-Modell |
 | `/plugin-bindings`, `/plugin-bindings/{name}` | GET, POST · GET, PUT, DELETE | Plugin-Bindungen; Prüfung mit der Plugin-Registry (422), gelesen mit wirksamem `failMode` (`effective`), siehe [12-plugins.md](12-plugins.md) §3–4 |
 | `/plugins` | GET | Registrierte Plugins mit Standard-`failMode`/-Zeitlimit und `testable` (AIGW-52) |
@@ -141,7 +142,7 @@ POST /admin/api/v1/deployments
 | Prüfung | Regel |
 |---|---|
 | Verweise | `modelGroup` und `credential` müssen existieren (`422`) |
-| Zugangsdaten | Anbieter der Zugangsdaten passt zum Deployment (`422`): gleicher Anbieter oder laut **Kompatibilitätsliste** (F65, `aigw_core::validate::CREDENTIAL_COMPAT`): `openai` auch für `openai-compatible`, `vllm`, `ollama`. Zugangsdaten mit Deployments lassen sich nicht löschen (`409`) und nur auf einen Anbieter umstellen, zu dem alle ihre Deployments passen (`409`). GitOps prüft dieselbe Liste |
+| Zugangsdaten | Anbieter der Zugangsdaten passt zum Deployment (`422`): gleicher Anbieter oder laut **Kompatibilitätsliste** (F65, `aigw_core::validate::CREDENTIAL_COMPAT`): `openai` auch für `openai-compatible`, `vllm`, `ollama`. Zugangsdaten mit Deployments lassen sich nicht löschen (`409`) und nur auf einen Anbieter bzw. eine Entra-ID-Anmeldung umstellen, mit der alle ihre Deployments gültig bleiben (`409`). Bei Zugangsdaten mit `spec.entra` darf `settings.auth` nur fehlen oder `entraId` sein, und die zusammengeführten Einstellungen müssen gültig sein (z. B. `endpoint` Pflicht für Claude in Foundry). GitOps prüft dieselben Regeln |
 | Endpunkt | Pflicht bei `azure-openai`, `vllm`, `openai-compatible`; `ollama` ohne Endpunkt nutzt `http://localhost:11434/v1` und unterliegt ebenfalls den SSRF-Regeln (Freischaltung nötig); siehe §2.6 |
 | Azure OpenAI | `providerModel` = Azure-Deployment-Name (Buchstaben, Ziffern, `-_.`); `settings.apiVersion` Pflicht bei `settings.apiStyle` `deployment` (Standard), optional bei `v1` |
 | AWS Bedrock | `settings.region` Pflicht |
@@ -172,10 +173,10 @@ POST /admin/api/v1/provider-credentials
   würde seine eigene Umgebung bzw. sein Dateisystem lesen (z. B. `AIGW_MASTER_KEY`) und den
   Wert an einen frei wählbaren Endpunkt senden. GitOps löst `valueFrom` auf dem Rechner auf,
   der `aigw config apply` ausführt, und sendet den Wert.
-- Pflichtfelder je Anbieter (eine Alternative vollständig): `openai`, `anthropic`, `mistral`:
-  `apiKey`; `azure-openai`: `apiKey`, `tenantId` + `clientId` + `clientSecret` oder
-  `tenantId` + `clientId` + `clientCertificate` (Managed/Workload Identity ohne Zugangsdaten,
-  siehe 06 §Entra ID); `bedrock`:
+- Pflichtfelder je Anbieter (eine Alternative vollständig): `openai`, `mistral`:
+  `apiKey`; `azure-openai`, `anthropic`: `apiKey`, `tenantId` + `clientId` + `clientSecret`
+  oder `tenantId` + `clientId` + `clientCertificate` – oder `spec.entra` (siehe unten; dann
+  gelten dessen Regeln, Managed/Workload Identity ohne Werte); `bedrock`:
   `accessKeyId` + `secretAccessKey` (optional `sessionToken`) oder `apiKey`; `vertex`:
   `serviceAccountJson`, `clientEmail` + `privateKey`, `accessToken` oder `apiKey`; `ollama`,
   `vllm`, `openai-compatible`, `mock`: beliebig. Feldnamen: Buchstabe, dann
@@ -194,6 +195,65 @@ POST /admin/api/v1/provider-credentials
   Ergebnis geprüft.
 - `ETag`/`If-Match` wie überall; der ETag ändert sich auch, wenn nur ein Wert ersetzt wurde
   (`updatedAt`).
+- **Entra ID (`spec.entra`, AIGW-84)** – nur `azure-openai` und `anthropic` (Claude in Azure AI
+  Foundry). Beschreibt die Anmeldung an der Ressource statt an jedem Deployment; nicht geheim,
+  wird in Antworten, Audit und GitOps-Export ausgegeben:
+  ```json
+  POST /admin/api/v1/provider-credentials
+  {"metadata": {"name": "foundry-mi"},
+   "spec": {"provider": "anthropic",
+            "entra": {"credential": "managedIdentity",
+                      "clientId": "11111111-2222-3333-4444-555555555555"}}}
+  → 201 {…, "spec": {"provider": "anthropic", "entra": {…}, "fields": []},
+         "status": {"hasSecret": false, …}}
+  ```
+  `credential`: `managedIdentity` | `workloadIdentity` (kein gespeichertes Geheimnis, `data`
+  leer bzw. weggelassen) | `clientSecret` (`data.clientSecret` Pflicht) | `clientCertificate`
+  (`data.clientCertificate` Pflicht). Weitere Felder: `tenantId`, `clientId` (bei Service
+  Principals Pflicht – entweder hier oder als Wert in `data`, nicht beides), `authority`
+  (nur `https://host`, SSRF-Regeln, nicht bei `workloadIdentity`), `scope` (bei
+  Workload/Managed Identity nur die Cognitive-Services-Scopes). In `data` sind daneben nur
+  `tenantId`, `clientId`, `clientSecret`, `clientCertificate` erlaubt.
+  Deployments mit `credential: <name>` übernehmen die Anmeldung als Vorgabe für
+  `settings.auth: entraId`, `entraCredential`, `entraTenantId`, `entraClientId`,
+  `entraAuthority`, `entraScope`; eigene Einstellungen des Deployments haben Vorrang.
+  Inline-Einstellungen ohne Zugangsdaten bleiben gültig. Deployments mit derselben Identität
+  (gleiche Client-ID, Authority, Scope bzw. gleiches Geheimnis) teilen sich eine Token-Quelle.
+  `PATCH` mit `"entra": {…}` ersetzt die Anmeldung als Ganzes, `"entra": null` entfernt sie,
+  weglassen lässt sie unverändert.
+
+### 2.4a Anbieter-Übersicht (AIGW-84)
+
+`GET /admin/api/v1/providers` (Leserecht auf den Katalog) fasst **alle** Deployments je
+Anbieter und Endpunkt (ohne abschließendes `/`; fehlt = Standard-Endpunkt) zusammen – auch
+solche ohne Zugangsdaten:
+
+```json
+{"runtime": true,
+ "items": [{"provider": "anthropic",
+            "endpoint": "https://acme.services.ai.azure.com/anthropic",
+            "auth": [{"kind": "entraId", "entraCredential": "managedIdentity",
+                      "clientId": "1111…", "credential": "foundry-mi"}],
+            "state": "ok", "modelGroups": ["claude-sonnet-5-5"],
+            "deployments": [{"name": "claude-sonnet-5-5-foundry", "modelGroup": "…",
+                             "providerModel": "…", "enabled": true, "auth": {…},
+                             "state": "ok", "breaker": "closed", "inFlight": 0,
+                             "healthFailures": 0}]}]}
+```
+
+- `auth.kind`: `apiKey`, `entraId`, `awsAccessKey`, `serviceAccount`, `accessToken`,
+  `credential` (sonstige Felder), `none`; abgeleitet aus den wirksamen Einstellungen
+  (Deployment vor `spec.entra`) bzw. den **Feldnamen** der Zugangsdaten. `clientId` stammt nur
+  aus Einstellungen/`spec.entra`, nie aus verschlüsselten Werten. Ohne `credential` =
+  Inline-Einstellungen.
+- Zustand je Deployment **dieser Instanz** (Routing-Tabelle): `ok`, `degraded` (Breaker
+  halboffen oder fehlgeschlagene Health Checks), `down` (Breaker offen), `unusable` (Adapter
+  ließ sich nicht bauen, Grund in `error`, ohne Geheimnisse), `disabled`, `unknown` (nicht in
+  der Routing-Tabelle, z. B. Modellgruppe fehlt). Je Endpunkt: `down`, wenn alle aktiven
+  Deployments `down`/`unusable` sind, `degraded`, wenn einzelne gestört sind, sonst `ok` bzw.
+  `unknown`/`disabled`. `runtime: false` = kein Routing angebunden (nur Konfiguration).
+- Die Admin-UI („Anbieter“) zeigt die Übersicht über den Zugangsdaten; Deployments und
+  Modellgruppen verlinken auf ihre Detailseiten.
 
 ### 2.5 Preise (AIGW-65)
 

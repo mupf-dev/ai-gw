@@ -188,6 +188,7 @@ async fn load_once(store: &Store, keyring: Option<&Keyring>) -> Result<State, St
                                 metadata: plain_meta(&c.metadata),
                                 spec: ResourceSpec::ProviderCredential(ProviderCredentialSpec {
                                     provider: c.spec.provider,
+                                    entra: c.spec.entra.clone(),
                                     data,
                                 }),
                             },

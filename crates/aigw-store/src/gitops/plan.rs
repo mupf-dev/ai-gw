@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use aigw_core::resource::{
-    ApiKeySpec, LimitSpec, Manifest, ModelGroupSpec, OrganizationSpec, ResourceKind, ResourceSpec,
-    Scope, ScopeLevel, SecretString, TeamSpec,
+    ApiKeySpec, EntraAuth, LimitSpec, Manifest, ModelGroupSpec, OrganizationSpec, ResourceKind,
+    ResourceSpec, Scope, ScopeLevel, SecretString, TeamSpec,
 };
 use aigw_core::types::ProviderKind;
 use aigw_core::validate;
@@ -789,12 +789,15 @@ fn check_rules(
             _ => None,
         })
         .collect();
-    let creds: BTreeMap<&str, ProviderKind> = of(ResourceKind::ProviderCredential)
-        .filter_map(|(n, (_, m))| match &m.spec {
-            ResourceSpec::ProviderCredential(c) => Some((n.as_str(), c.provider)),
-            _ => None,
-        })
-        .collect();
+    let creds: BTreeMap<&str, (ProviderKind, Option<&EntraAuth>)> =
+        of(ResourceKind::ProviderCredential)
+            .filter_map(|(n, (_, m))| match &m.spec {
+                ResourceSpec::ProviderCredential(c) => {
+                    Some((n.as_str(), (c.provider, c.entra.as_ref())))
+                }
+                _ => None,
+            })
+            .collect();
     let team_orgs: BTreeMap<&str, &str> = of(ResourceKind::Team)
         .filter_map(|(n, (_, m))| match &m.spec {
             ResourceSpec::Team(t) => Some((n.as_str(), t.organization.as_str())),
@@ -821,20 +824,29 @@ fn check_rules(
                             .as_deref()
                             .and_then(|c| Some((c, creds.get(c)?)))
                         {
-                            Some((c, p)) => validate::deployment_credential(d, c, *p),
+                            Some((c, (p, entra))) => validate::deployment_credential_auth(
+                                &opts.upstreams,
+                                d,
+                                c,
+                                *p,
+                                *entra,
+                            ),
                             None => Ok(()),
                         }
                     })
                 }
-                ResourceSpec::ProviderCredential(c) => {
-                    validate::credential_fields(c.provider, c.data.keys().map(String::as_str))
-                        .and_then(|()| match resolved.get(&(*kind, name.clone())) {
-                            Some(Resolved::Credential(v)) => v
-                                .iter()
-                                .try_for_each(|(f, v)| validate::credential_value(f, v.expose())),
-                            _ => Ok(()),
-                        })
-                }
+                ResourceSpec::ProviderCredential(c) => validate::credential(
+                    &opts.upstreams,
+                    c.provider,
+                    c.entra.as_ref(),
+                    c.data.keys().map(String::as_str),
+                )
+                .and_then(|()| match resolved.get(&(*kind, name.clone())) {
+                    Some(Resolved::Credential(v)) => v
+                        .iter()
+                        .try_for_each(|(f, v)| validate::credential_value(f, v.expose())),
+                    _ => Ok(()),
+                }),
                 ResourceSpec::Secret(s) => crate::repo::secret::validate_secret(
                     s.description.as_deref(),
                     s.data.keys().map(String::as_str),

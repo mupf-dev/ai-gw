@@ -22,6 +22,18 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   Plugin-Bindungen; Payload-Logging-Obergrenze an Organisation/Team. UI: Reiter „Profile“ auf
   `/guardrails`, Hinweis ohne aktive Guardrails in Übersicht und Guardrails-Seite.
 - Antwort-Header `x-aigw-cache-reason` (`temperature` | `client`) bei `x-aigw-cache: bypass`.
+- **Entra ID an den Zugangsdaten (AIGW-84):** `ProviderCredential.spec.entra`
+  (`managedIdentity`, `workloadIdentity`, `clientSecret`, `clientCertificate` mit `tenantId`,
+  `clientId`, `authority`, `scope`; nur Secret/Zertifikat verschlüsselt in `data`) für
+  `azure-openai` und `anthropic`. Deployments mit `credential` übernehmen die Anmeldung,
+  eigene Einstellungen haben Vorrang, Inline-Einstellungen bleiben gültig; gemeinsame
+  Validierung Admin-API/GitOps, Migration `0007_credential_auth` (beide Dialekte).
+  Beispiel `resources-azure-foundry.yaml` nutzt jetzt diese Variante.
+- **Anbieter-Übersicht (AIGW-84):** `GET /admin/api/v1/providers` und Admin-UI „Anbieter“:
+  je Anbieter + Endpunkt Anmeldeart (API-Key, Entra ID mit Art, …), Deployments,
+  Modellgruppen und Zustand dieser Instanz (Circuit Breaker, Health Checks, nicht nutzbare
+  Deployments mit Grund) – auch ohne Zugangsdaten. Formular „Zugangsdaten“ mit Anmeldeart
+  „Entra ID“.
 - Doku und Tests: Managed Identity in Azure Container Apps (`IDENTITY_ENDPOINT`/
   `IDENTITY_HEADER`, benutzerzugewiesen), Postgres mit TLS (`sslmode=require`/`verify-full`,
   eingebettete Wurzeln für Azure Database for PostgreSQL).

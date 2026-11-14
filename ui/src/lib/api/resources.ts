@@ -88,29 +88,32 @@ export const PROVIDERS: { value: ProviderKind; label: string; endpoint: 'require
 ];
 export const providerLabel = (p: string | null | undefined) => (p ? (PROVIDERS.find((x) => x.value === p)?.label ?? p) : 'alle Anbieter');
 
+/** Entra-ID-Anmeldearten (AIGW-84) für Zugangsdaten von Azure OpenAI und Claude in Azure AI Foundry. */
+export const ENTRA_KINDS: { value: S['EntraCredentialKind']; label: string; hint: string }[] = [
+  { value: 'managedIdentity', label: 'Managed Identity', hint: 'Identität des Gateways (Container Apps, App Service, VM); optional Client-ID einer benutzerzugewiesenen Identität' },
+  { value: 'workloadIdentity', label: 'Workload Identity', hint: 'AKS: föderiertes Token aus AZURE_FEDERATED_TOKEN_FILE' },
+  { value: 'clientSecret', label: 'Service Principal (Secret)', hint: 'Tenant-ID, Client-ID und Client-Secret' },
+  { value: 'clientCertificate', label: 'Service Principal (Zertifikat)', hint: 'Tenant-ID, Client-ID und PEM mit Zertifikat + privatem RSA-Schlüssel' },
+];
+export const entraLabel = (k: string | null | undefined) => ENTRA_KINDS.find((e) => e.value === k)?.label ?? k ?? 'Entra ID';
+
+type CredAlt = { label: string; fields: string[]; entra?: S['EntraCredentialKind'] };
+const ENTRA_ALTS: CredAlt[] = [
+  { label: 'Entra ID – Managed Identity', fields: [], entra: 'managedIdentity' },
+  { label: 'Entra ID – Workload Identity', fields: [], entra: 'workloadIdentity' },
+  { label: 'Entra ID – Service Principal (Secret)', fields: ['clientSecret'], entra: 'clientSecret' },
+  { label: 'Entra ID – Service Principal (Zertifikat)', fields: ['clientCertificate'], entra: 'clientCertificate' },
+];
+
 /**
  * Pflichtfelder der Zugangsdaten je Anbieter (08-admin-api.md §2.4): eine Alternative muss vollständig sein.
- * Leere Liste = beliebige Felder. `secretLong` = mehrzeiliger Wert (z. B. Service-Account-JSON).
+ * Leere Liste = beliebige Felder. `entra` = Anmeldung über Entra ID (`spec.entra`, nicht geheime IDs als Klartext).
  */
-export const CREDENTIAL_FIELDS: Record<ProviderKind, { alternatives: { label: string; fields: string[] }[]; optional: string[] }> = {
+export const CREDENTIAL_FIELDS: Record<ProviderKind, { alternatives: CredAlt[]; optional: string[] }> = {
   openai: { alternatives: [{ label: 'API-Key', fields: ['apiKey'] }], optional: ['organization', 'project'] },
-  anthropic: {
-    alternatives: [
-      { label: 'API-Key', fields: ['apiKey'] },
-      { label: 'Entra ID (Service Principal, Azure AI Foundry)', fields: ['tenantId', 'clientId', 'clientSecret'] },
-      { label: 'Entra ID (Zertifikat, Azure AI Foundry)', fields: ['tenantId', 'clientId', 'clientCertificate'] },
-    ],
-    optional: [],
-  },
+  anthropic: { alternatives: [{ label: 'API-Key', fields: ['apiKey'] }, ...ENTRA_ALTS], optional: [] },
   mistral: { alternatives: [{ label: 'API-Key', fields: ['apiKey'] }], optional: [] },
-  'azure-openai': {
-    alternatives: [
-      { label: 'API-Key', fields: ['apiKey'] },
-      { label: 'Entra ID (Service Principal)', fields: ['tenantId', 'clientId', 'clientSecret'] },
-      { label: 'Entra ID (Zertifikat)', fields: ['tenantId', 'clientId', 'clientCertificate'] },
-    ],
-    optional: [],
-  },
+  'azure-openai': { alternatives: [{ label: 'API-Key', fields: ['apiKey'] }, ...ENTRA_ALTS], optional: [] },
   bedrock: {
     alternatives: [
       { label: 'IAM-Zugangsschlüssel', fields: ['accessKeyId', 'secretAccessKey'] },
@@ -165,6 +168,31 @@ export const secrets = {
 };
 export type McpServer = S['McpServer'];
 export const mcpServers = resource<McpServer, S['McpServerInput'], { q?: string; transport?: string; enabled?: boolean }>('mcp-servers');
+/** Anbieter-Übersicht je Anbieter und Endpunkt mit Anmeldeart und Laufzeitzustand (GET /providers, AIGW-84). */
+export const providerOverview = () => unwrap<S['ProviderOverview']>(api.GET('/admin/api/v1/providers'));
+export type ProviderEndpoint = S['ProviderEndpoint'];
+export type AuthUse = S['AuthUse'];
+const AUTH_LABEL: Record<S['AuthKind'], string> = {
+  apiKey: 'API-Key',
+  entraId: 'Entra ID',
+  awsAccessKey: 'AWS-Zugangsschlüssel',
+  serviceAccount: 'Service-Account',
+  accessToken: 'Access-Token',
+  credential: 'Zugangsdaten',
+  none: 'ohne Anmeldung',
+};
+/** Anmeldeart als Text, z. B. „Entra ID · Managed Identity“. */
+export const authLabel = (a: Pick<AuthUse, 'kind' | 'entraCredential'>) =>
+  a.kind === 'entraId' && a.entraCredential ? `${AUTH_LABEL.entraId} · ${entraLabel(a.entraCredential)}` : AUTH_LABEL[a.kind];
+export const HEALTH: Record<S['HealthState'], { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' | 'outline' }> = {
+  ok: { label: 'in Ordnung', tone: 'success' },
+  degraded: { label: 'gestört', tone: 'warning' },
+  down: { label: 'ausgefallen', tone: 'danger' },
+  unusable: { label: 'nicht nutzbar', tone: 'danger' },
+  disabled: { label: 'abgeschaltet', tone: 'outline' },
+  unknown: { label: 'unbekannt', tone: 'neutral' },
+};
+
 /** Verbindungszustand der MCP-Upstreams (GET /mcp-servers:status). */
 export const mcpStatus = () => unwrap<S['McpStatusList']>(api.GET('/admin/api/v1/mcp-servers:status'));
 export type PluginBinding = S['PluginBinding'];
