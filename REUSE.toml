@@ -26,6 +26,8 @@ path = [
     "ui/openapi.json",
     "ui/src/lib/api/schema.d.ts",
     "crates/*/tests/fixtures/**",
+    "crates/aigw-wasm/tests/data/**",
+    "plugins/*/Cargo.lock",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 ai-gw contributors"

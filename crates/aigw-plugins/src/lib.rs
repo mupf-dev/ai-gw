@@ -16,7 +16,8 @@
 //! - [`Registry`]/[`PluginFactory`]: Plugin-Name → validierte Instanz; eingebaut sind
 //!   [`builtin::header`], [`builtin::request_transform`] sowie die Guardrails
 //!   [`builtin::pii`], [`builtin::prompt_filter`] und [`builtin::content_safety`]
-//!   (AIGW-37/38, `docs/konzept/13-guardrails.md`); externe Dienste über [`PluginHost`].
+//!   (AIGW-37/38, `docs/konzept/13-guardrails.md`); externe Dienste über [`PluginHost`];
+//!   [`builtin::wasm`] prüft die Konfiguration von WASM-Plugins (Laufzeit: Crate `aigw-wasm`).
 
 pub mod binding;
 pub mod builtin;
@@ -38,7 +39,7 @@ pub use plugin::{
     BoxFuture, CallInfo, ChunkCtx, ChunkFlow, Flow, Hook, INTERNAL_META_PREFIX, Meta, MetaExt,
     Phases, Plugin, PluginError, ReqCtx, RespCtx, ResponseHeaders,
 };
-pub use registry::{DEFAULT_TIMEOUT, EffectiveControl, PluginFactory, Registry};
+pub use registry::{BuildCtx, DEFAULT_TIMEOUT, EffectiveControl, PluginFactory, Registry};
 pub use stream::{PluginStream, TextWindow, response_events};
 
 /// Antwort-Header: Antwort wurde wegen Ausgabe-Plugins gepuffert (Wert `plugins`).

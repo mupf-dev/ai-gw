@@ -26,6 +26,7 @@ use crate::resource::{
 
 use super::{DeploymentCtx, KeyCtx, KeyHash, McpServerCtx, ModelGroupCtx, Snapshot};
 use crate::tools::{ToolPolicy, ToolPolicyIndex};
+use crate::wasm::WasmModule;
 
 /// Rohdaten einer Konfigurationsversion.
 ///
@@ -59,6 +60,8 @@ pub struct SnapshotParts {
     pub mcp_grants: Vec<McpGrant>,
     /// Tool-Richtlinien (AIGW-87).
     pub tool_policies: Vec<ToolPolicy>,
+    /// WASM-Module (AIGW-63).
+    pub wasm_modules: Vec<WasmModule>,
 }
 
 /// Änderung eines Objekts: neuer Stand (wie in der Datenbank, auch inaktiv/deaktiviert) oder
@@ -107,6 +110,8 @@ pub struct SnapshotPatch {
     pub tool_policies: Vec<Change<ToolPolicy>>,
     /// Alle Tool-Richtlinien neu (wie `replace_plugin_bindings`).
     pub replace_tool_policies: Option<Vec<ToolPolicy>>,
+    /// WASM-Module (AIGW-63).
+    pub wasm_modules: Vec<Change<WasmModule>>,
 }
 
 impl SnapshotPatch {
@@ -124,6 +129,7 @@ impl SnapshotPatch {
             + self.mcp_servers.len()
             + self.mcp_grants.len()
             + self.tool_policies.len()
+            + self.wasm_modules.len()
     }
 
     /// Keine Änderungen?
@@ -349,6 +355,9 @@ impl Snapshot {
             .map(Arc::new)
             .collect();
         set_tool_policies(&mut snap, tools);
+        for m in parts.wasm_modules {
+            snap.wasm_modules.insert(m.name.clone(), Arc::new(m));
+        }
         snap
     }
 
@@ -408,6 +417,7 @@ impl Snapshot {
             }),
             mcp_grants: sorted(self.mcp_grants.iter().map(|g| (**g).clone()), |g| g.id),
             tool_policies: sorted(self.tool_policies.iter().map(|p| (**p).clone()), |p| p.id),
+            wasm_modules: sorted(self.wasm_modules.values().map(|m| (**m).clone()), |m| m.id),
         }
     }
 
@@ -733,6 +743,18 @@ impl Snapshot {
                 |p| p.spec.enabled,
             );
             set_tool_policies(&mut s, list);
+        }
+
+        // WASM-Module (AIGW-63): Inhalt bleibt geteilt (`Arc`/`Bytes`).
+        s.wasm_modules = self.wasm_modules.clone();
+        for c in patch.wasm_modules {
+            match c {
+                Change::Upsert(m) => {
+                    s.wasm_modules.retain(|_, old| old.id != m.id);
+                    s.wasm_modules.insert(m.name.clone(), Arc::new(m));
+                }
+                Change::Remove(id) => s.wasm_modules.retain(|_, old| old.id != id),
+            }
         }
         s
     }

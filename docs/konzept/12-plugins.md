@@ -440,8 +440,10 @@ Plugins im Sub-µs-Bereich.
   Vererbung der Bindungen. Begründung und Details: [14-cache.md](14-cache.md).
 - **Webhook (AIGW-61):** umgesetzt (§5 `webhook`): `Hook::Pending` mit Zeitlimit/Fehlermodus
   der Bindung; nicht im Chunk-Pfad (keine `chunk`-Phase), für Ausgaben `needs_buffered_output`.
-- **WASM (nach MVP):** Die Schnittstelle ist auf WIT abbildbar: `Meta` und IR sind JSON-fähig,
-  `on_chunk` ist synchron, Zustand je Stream liegt beim Host (`ChunkCtx::state`).
+- **WASM (AIGW-63):** umgesetzt als Plugin-Art `wasm` (Crate `aigw-wasm`, wasmtime + Component
+  Model, WIT-Welt `aigw:plugin/plugin`), siehe [17-wasm-plugins.md](17-wasm-plugins.md). Die
+  Fabrik nutzt `PluginFactory::build_in` (Snapshot + wirksames Zeitlimit) und
+  `PluginFactory::fingerprint` (SHA-256 des Moduls → Neubau bei neuem Modul).
 - Neue Plugins registrieren eine `PluginFactory` in der `Registry`
   (`PluginChains::new(registry, opts)`) und legen mit `default_fail_mode`/`default_timeout`
   ihre Standardwerte fest (§3). `Registry::validate` prüft Bindungen ohne sie zu verwenden;

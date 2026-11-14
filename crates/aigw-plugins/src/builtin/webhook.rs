@@ -68,7 +68,7 @@ pub const MAX_BYTES: usize = 16 * 1024 * 1024;
 pub const PAYLOAD_VERSION: u32 = 1;
 
 /// Client-Header, die nie in den Payload dürfen (Gateway-Keys, Sitzungen).
-const SECRET_HEADERS: &[&str] = &[
+pub(crate) const SECRET_HEADERS: &[&str] = &[
     "authorization",
     "proxy-authorization",
     "api-key",

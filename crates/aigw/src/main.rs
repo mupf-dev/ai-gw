@@ -171,6 +171,8 @@ fn serve(
     // AIGW-90: Entra Workload/Managed Identity (Identität des Prozesses) nur mit Freigabe; vor
     // dem ersten Aufbau einer Token-Quelle.
     aigw_proxy::set_entra_ambient_identity(config.upstream.entra.ambient_identity);
+    // AIGW-63: Grenzen der WASM-Plugins und Module aus Dateien vor dem Start prüfen.
+    config.wasm.validate()?;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -242,6 +244,17 @@ fn serve(
                 Some(std::sync::Arc::new(runtime_state.snapshot.clone())),
             ),
         ));
+        // WASM-Plugins (AIGW-63): eine wasmtime-Laufzeit je Prozess (Feature `wasm`).
+        #[cfg(feature = "wasm")]
+        let wasm_rt = if config.wasm.enabled {
+            Some(aigw_wasm::WasmRuntime::new(&config.wasm).map_err(|e| format!("wasm: {e}"))?)
+        } else {
+            None
+        };
+        #[cfg(feature = "wasm")]
+        registry.register(std::sync::Arc::new(aigw_wasm::Factory::new(
+            wasm_rt.clone(),
+        )));
         let plugins = std::sync::Arc::new(aigw_proxy::PluginChains::new(
             registry,
             aigw_plugins::IndexOptions::default(),
@@ -353,6 +366,7 @@ fn serve(
                 .with_price_suggester(price_suggester)
                 .with_keyring(std::sync::Arc::clone(&runtime_state.keyring))
                 .with_upstream_policy(upstreams.clone())
+                .with_wasm_max_module_bytes(config.wasm.max_module_bytes)
                 .with_read_only(config.gitops.read_only_admin)
                 .with_ui_mock(config.admin.ui.mock)
                 .with_trace_url(config.admin.ui.trace_url.clone()),
@@ -412,6 +426,8 @@ fn serve(
             plugins: Some(plugin_metrics),
             server: Some(listeners.metrics()),
             tools: Some(tool_metrics),
+            #[cfg(feature = "wasm")]
+            wasm: wasm_rt.as_ref().map(|r| std::sync::Arc::clone(r.metrics())),
             ..runtime_state.metrics_sources()
         }));
         let control = aigw_admin::read_only::apply(control, config.gitops.read_only_admin);

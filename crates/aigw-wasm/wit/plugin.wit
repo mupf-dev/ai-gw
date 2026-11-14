@@ -1,0 +1,116 @@
+// SPDX-FileCopyrightText: 2026 ai-gw contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Schnittstelle der WASM-Plugins von ai-gw (AIGW-63, docs/konzept/17-wasm-plugins.md).
+//
+// Ein Plugin ist eine Komponente der Welt `plugin`. Das Gateway legt je Aufruf eine frische
+// Instanz an (kein Zustand zwischen Aufrufen; Zustand je Anfrage/Stream über `meta`).
+// Nutzdaten sind JSON-IR des Gateways (ChatRequest, ChatResponse bzw. StreamEvent, siehe
+// docs/konzept/03-ir-und-formate.md).
+package aigw:plugin@0.1.0;
+
+interface types {
+    /// Phase eines Aufrufs.
+    enum phase {
+        /// Anfrage vor dem Routing (payload = ChatRequest).
+        request,
+        /// Vollständige Antwort (payload = ChatResponse).
+        response,
+        /// Ein Stream-Ereignis (payload = StreamEvent).
+        chunk,
+    }
+
+    /// Phasen, an denen das Plugin teilnimmt.
+    flags phases {
+        request,
+        response,
+        chunk,
+    }
+
+    /// HTTP-Header (Name klein geschrieben).
+    record header {
+        name: string,
+        value: string,
+    }
+
+    /// Angaben zur Anfrage (nur lesen).
+    record call-info {
+        request-id: string,
+        /// Eingangsformat: `openai` oder `anthropic`.
+        ingress: string,
+        model-group: option<string>,
+        %stream: bool,
+        /// Name des API-Keys, Teams und der Organisation (falls vorhanden).
+        key: option<string>,
+        team: option<string>,
+        organization: option<string>,
+    }
+
+    /// Eingabe eines Aufrufs.
+    record input {
+        phase: phase,
+        info: call-info,
+        /// `config` der Bindung als JSON-Text.
+        config: string,
+        /// JSON-IR der Phase.
+        payload: string,
+        /// Metadaten der Anfrage als JSON-Objekt (ohne interne `aigw.*`-Schlüssel).
+        meta: string,
+        /// Anfrage-Phase: die in `includeHeaders` freigegebenen Client-Header.
+        headers: list<header>,
+    }
+
+    /// Ablehnung.
+    record rejection {
+        /// HTTP-Status 400–499 (andere Werte werden zu 400).
+        status: u16,
+        code: option<string>,
+        message: string,
+    }
+
+    /// Ergebnis: weiter, ändern, blockieren oder ablehnen.
+    variant action {
+        /// Unverändert weiter.
+        pass,
+        /// Nutzdaten ersetzen (JSON-IR derselben Art; `model`/`stream` bleiben unverändert).
+        modify(string),
+        /// Guardrail-Ablehnung des Inhalts (Header `x-aigw-guardrail: wasm`).
+        block(rejection),
+        /// Anfrage mit Fehler ablehnen.
+        reject(rejection),
+        /// Nur Anfrage-Phase: direkt mit dieser ChatResponse (JSON-IR) antworten.
+        respond(string),
+        /// Nur Stream-Phase: Ereignis verwerfen.
+        drop,
+    }
+
+    /// Ausgabe eines Aufrufs.
+    record output {
+        action: action,
+        /// Neue Metadaten (JSON-Objekt) oder unverändert.
+        meta: option<string>,
+        /// Anfrage-Phase: zusätzliche Header an den Upstream (Auth-/Hop-Header gesperrt).
+        upstream-headers: list<header>,
+        /// Header der Antwort an den Client (Anfrage- und Antwort-Phase).
+        response-headers: list<header>,
+    }
+}
+
+/// Dienste des Gateways.
+interface host {
+    /// Protokolliert eine Meldung (0 = debug, 1 = info, 2 = warn, 3 = error); gekürzt und je
+    /// Aufruf begrenzt.
+    log: func(level: u8, message: string);
+}
+
+world plugin {
+    use types.{phases, input, output};
+    import host;
+
+    /// Prüft die Konfiguration (JSON-Text) und meldet die Phasen. Läuft beim Aufbau der
+    /// Plugin-Kette (Snapshot), nicht je Anfrage.
+    export describe: func(config: string) -> result<phases, string>;
+
+    /// Ein Aufruf.
+    export handle: func(input: input) -> result<output, string>;
+}

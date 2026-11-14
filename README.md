@@ -55,6 +55,7 @@ Kubernetes: [deploy/kubernetes/](deploy/kubernetes/), Details:
 | `crates/aigw-counters` | Zähler-Backends `local`, `postgres-sync`, `redis` |
 | `crates/aigw-billing` | Kosten und Budgets |
 | `crates/aigw-plugins`, `aigw-pii` | Plugin-Kette, eingebaute Plugins, PII-Erkennung |
+| `crates/aigw-wasm`, `plugins/` | WASM-Plugins (wasmtime, WIT-Welt), Beispiel- und Test-Plugins |
 | `crates/aigw-cache` | Antwort-Cache (exakt, semantisch) |
 | `crates/aigw-mcp` | MCP-Gateway |
 | `crates/aigw-observe` | Request-Log, Prometheus, OpenTelemetry |

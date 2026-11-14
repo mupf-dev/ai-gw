@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# WASM-Plugin für ai-gw (AIGW-63). Bauen: cargo build --release --target wasm32-wasip2
+# (siehe plugins/README.md); eigener Workspace, nicht Teil des Gateway-Workspaces.
+[package]
+name = "aigw-plugin-testkit"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde_json = "1.0.145"
+wit-bindgen = "0.63.0"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[workspace]

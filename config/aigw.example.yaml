@@ -284,3 +284,21 @@ cache:
     persist: true               # memory: Warmstart aus der Datenbank (verschlüsselt)
     # pgvector_url: postgres://…  # Standard: store.url, falls Postgres
     # redis_url: redis://…        # Standard: cache.redis_url
+
+# WASM-Plugins (docs/konzept/17-wasm-plugins.md, AIGW-63): Grenzen je Aufruf und Module aus
+# Dateien. Module lädt sonst ein globaler admin über /admin/api/v1/wasm-modules hoch.
+wasm:
+  enabled: true
+  max_module_bytes: 16777216    # 16 MiB je Modul
+  default_fuel: 100000000       # CPU-Grenze je Aufruf (Bindung: fuel)
+  max_fuel: 10000000000
+  default_memory_mb: 32         # Speichergrenze je Instanz (Bindung: maxMemoryMb)
+  max_memory_mb: 256
+  pooling: true                 # Pooling-Allocator (Rückfall auf Instanzen bei Bedarf)
+  pool_instances: 256           # gleichzeitige Instanzen
+  epoch_tick_ms: 2              # Takt der Zeitgrenze (timeoutMs der Bindung)
+  compiled_cache_entries: 64
+  modules: []
+  #  - name: keyword-guard
+  #    path: /etc/aigw/plugins/keyword-guard.wasm
+  #    sha256: <64 Hex-Zeichen>

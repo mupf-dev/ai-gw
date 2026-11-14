@@ -90,7 +90,27 @@ async fn random_change(store: &Store, keyring: &Keyring, rng: &mut Rng) {
     let group = rng.name("g", 4);
     let models =
         |rng: &mut Rng| -> Vec<String> { (0..rng.below(3)).map(|_| rng.name("g", 4)).collect() };
-    match rng.below(30) {
+    match rng.below(32) {
+        // WASM-Module (AIGW-63): anlegen/ersetzen bzw. löschen (Journal-Art `wasm-module`).
+        30 => {
+            let mut content = b"\0asm\x0d\0\x01\0".to_vec();
+            content.extend(rng.next().to_le_bytes());
+            drop(
+                store
+                    .put_wasm_module(
+                        ACTOR,
+                        aigw_store::wasm::NewWasmModule {
+                            name: rng.name("w", 3),
+                            description: None,
+                            content,
+                            sha256: None,
+                        },
+                        1024,
+                    )
+                    .await,
+            );
+        }
+        31 => drop(store.delete_wasm_module(ACTOR, &rng.name("w", 3)).await),
         0 => drop(
             store
                 .create(ACTOR, ObjectMeta::named(&org), OrganizationSpec::default())
@@ -781,6 +801,19 @@ async fn reloader_builds_incrementally_and_verify_repairs() {
 /// Daten für Cache-Tests: Organisation, Team, Key, Zugangsdaten, Gruppe mit Deployment.
 async fn sample(store: &Store, keyring: &Keyring) {
     org(store, "acme").await;
+    store
+        .put_wasm_module(
+            ACTOR,
+            aigw_store::wasm::NewWasmModule {
+                name: "guard".into(),
+                description: Some("Test".into()),
+                content: b"\0asm\x0d\0\x01\0inhalt".to_vec(),
+                sha256: None,
+            },
+            1024,
+        )
+        .await
+        .unwrap();
     store
         .create(
             ACTOR,

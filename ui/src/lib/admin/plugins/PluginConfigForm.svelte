@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts" module>
   /** Plugins mit strukturiertem Formular (F214: Felder nach dem Konfigurationsschema der Plugins, 12/13-*.md). */
-  export const STRUCTURED = new Set(['pii', 'prompt-filter', 'content-safety', 'webhook']);
+  export const STRUCTURED = new Set(['pii', 'prompt-filter', 'content-safety', 'webhook', 'wasm']);
 </script>
 
 <script lang="ts">
@@ -24,6 +24,7 @@
     secrets = [],
     credentials = [],
     modelGroups = [],
+    wasmModules = [],
     secretRefs = true,
   }: {
     plugin: string;
@@ -31,6 +32,8 @@
     secrets?: string[];
     credentials?: string[];
     modelGroups?: string[];
+    /** AIGW-63: Namen der hochgeladenen WASM-Module (Auswahl für die Plugin-Art `wasm`). */
+    wasmModules?: string[];
     /** AIGW-58: Verweise auf (globale) Secrets/Zugangsdaten darf nur ein globaler Admin setzen (sonst 403). */
     secretRefs?: boolean;
   } = $props();
@@ -156,6 +159,25 @@
     if (k) config.secret = { [k]: k === 'secret' ? (secrets[0] ?? '') : k === 'credential' ? (credentials[0] ?? '') : '' };
     else set(['secret'], undefined);
   }
+  // ------------------------------------------------------------ wasm (AIGW-63)
+  const wasmItems = $derived<SelectItem[]>([{ value: '', label: 'Modul wählen' }, ...wasmModules.map((m) => ({ value: m, label: m }))]);
+  /** `config.config` (Konfiguration für das Modul) als JSON-Text; ungültiges JSON bleibt bis zur Korrektur stehen. */
+  let wasmCfgText = $state('');
+  let wasmCfgError = $state<string | null>(null);
+  $effect(() => {
+    if (plugin === 'wasm' && wasmCfgError === null) wasmCfgText = JSON.stringify(get(['config']) ?? {}, null, 2);
+  });
+  function setWasmCfg(v: string) {
+    wasmCfgText = v;
+    try {
+      const o = JSON.parse(v || '{}');
+      wasmCfgError = null;
+      set(['config'], o && typeof o === 'object' && !Array.isArray(o) && Object.keys(o).length === 0 ? undefined : o);
+    } catch {
+      wasmCfgError = 'Kein gültiges JSON.';
+    }
+  }
+
   // Thresholds „kategorie=wert“ je Zeile.
   const thresholds = $derived(
     Object.entries(obj(['thresholds']) ?? {})
@@ -389,5 +411,38 @@
     {@render list('Client-Header im Payload', ['includeHeaders'], 'Allowlist, ein Header je Zeile; Auth-Header sind gesperrt', 'x-client-app')}
     {@render text('Max. Payload (Bytes)', ['maxPayloadBytes'], { numeric: true, hint: 'Standard 1 MiB' })}
     {@render text('Max. Antwort (Bytes)', ['maxResponseBytes'], { numeric: true, hint: 'Standard 1 MiB' })}
+  {:else if plugin === 'wasm'}
+    <Field label="Modul" required hint="hochgeladene WASM-Komponente (Reiter „WASM-Module“)">
+      {#snippet children({ id })}<Select {id} value={str(['module'])} onchange={(v) => set(['module'], v || undefined)} items={wasmItems} />{/snippet}
+    </Field>
+    {@render text('SHA-256 (optional)', ['sha256'], { hint: 'nur genau diese Modulversion zulassen', placeholder: '64 Hex-Zeichen' })}
+    <fieldset class="flex flex-col gap-1.5 sm:col-span-2">
+      <legend class="text-sm font-medium">Phasen</legend>
+      <div class="flex flex-wrap gap-3 pt-1.5">
+        {#each [['request', 'Anfrage'], ['response', 'Antwort'], ['chunk', 'Stream']] as [ph, label] (ph)}
+          {@const sel = get(['phases']) as string[] | undefined}
+          <label class="flex items-center gap-1.5 text-sm"
+            ><input
+              type="checkbox"
+              class="accent-accent"
+              checked={!sel || sel.includes(ph)}
+              onchange={(e) => {
+                const cur = sel ?? ['request', 'response', 'chunk'];
+                const next = e.currentTarget.checked ? [...new Set([...cur, ph])] : cur.filter((x) => x !== ph);
+                set(['phases'], next.length === 3 ? undefined : next);
+              }}
+            />
+            {label}</label
+          >
+        {/each}
+      </div>
+      <span class="text-xs text-fg-muted">Schnittmenge mit den Phasen, die das Modul meldet (alle angehakt = wie das Modul).</span>
+    </fieldset>
+    <Field label="Konfiguration für das Modul (JSON)" error={wasmCfgError ?? undefined} hint="geht als Text an describe/handle des Moduls" class="sm:col-span-2">
+      {#snippet children({ id, describedby })}<textarea {id} class={[textarea, 'min-h-24 font-mono']} aria-describedby={describedby} value={wasmCfgText} oninput={(e) => setWasmCfg(e.currentTarget.value)} spellcheck="false" data-testid="wasm-config"></textarea>{/snippet}
+    </Field>
+    {@render text('Fuel je Aufruf', ['fuel'], { numeric: true, hint: 'CPU-Grenze; Standard wasm.default_fuel' })}
+    {@render text('Speicher (MiB)', ['maxMemoryMb'], { numeric: true, hint: 'Standard wasm.default_memory_mb' })}
+    {@render list('Client-Header für das Modul', ['includeHeaders'], 'Allowlist, ein Header je Zeile; Auth-Header sind gesperrt', 'x-client-app')}
   {/if}
 </div>

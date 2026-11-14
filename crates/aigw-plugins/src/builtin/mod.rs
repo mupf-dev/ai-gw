@@ -10,6 +10,7 @@ pub mod header;
 pub mod pii;
 pub mod prompt_filter;
 pub mod request_transform;
+pub mod wasm;
 pub mod webhook;
 
 use std::sync::Arc;

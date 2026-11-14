@@ -9,6 +9,25 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Hinzugefügt
 
+- **WASM-Plugins (AIGW-63):** Plugin-Art `wasm` führt hochgeladene WebAssembly-Komponenten
+  (Component Model, WIT-Welt `aigw:plugin/plugin` in `crates/aigw-wasm/wit/plugin.wit`) in der
+  Plugin-Kette aus – Anfrage, Antwort und Stream, Ergebnis weiter/ändern/blockieren/ablehnen,
+  JSON-IR und Meta. Neues Crate `aigw-wasm` (wasmtime 50: Cranelift, Pooling-Allocator, Cache
+  kompilierter Module nach SHA-256, Instanz je Aufruf). Sandbox: WASI 0.2 ohne Dateisystem,
+  Netz und Umgebung; Fuel (CPU), Epoch-Interrupt (Zeit) und Speichergrenze je Aufruf, Fehler →
+  `failMode` (Standard `closed`). Module in der Tabelle `wasm_module` (Migration 0009, SQLite +
+  Postgres), Teil des Snapshots (inkrementell, Platten-Cache, Hot Reload); Admin-API
+  `/admin/api/v1/wasm-modules` (Hochladen mit Pflicht-SHA-256 und `If-Match`, Liste,
+  Download, Löschen mit Schutz bei verwendeten Modulen; Schreiben nur globaler `admin`),
+  Startkonfiguration `wasm.*` inkl. `wasm.modules` (Dateien), GitOps-Verweis per Name +
+  optional SHA-256. Metriken `aigw_wasm_*`. Admin-UI: Reiter „WASM-Module“ unter Guardrails &
+  Plugins, Plugin-Art `wasm` im Bindungsformular. Beispiel-Plugin `plugins/keyword-guard`
+  (Stichwort-Blocker, Header-Setzer), Test-Plugin `plugins/testkit`,
+  `scripts/build-wasm-plugins.sh`. Cargo-Feature `wasm` (Standard an). Konzept:
+  `docs/konzept/17-wasm-plugins.md`.
+- **Plugin-Fabriken mit Snapshot (AIGW-63):** `PluginFactory::build_in` (Snapshot + wirksames
+  Zeitlimit) und `PluginFactory::fingerprint` (Neubau einer Bindung, wenn sich ein
+  referenziertes Snapshot-Objekt ändert).
 - **tiktoken-Rangtabellen optional (AIGW-95):** Cargo-Feature `embedded-tokenizers`
   (Crates `aigw`, `aigw-tokenizer`; Standard an – Standard-Builds und Images unverändert).
   Ohne das Feature enthält das Binary die Tabellen `o200k_base`/`cl100k_base` nicht; neuer

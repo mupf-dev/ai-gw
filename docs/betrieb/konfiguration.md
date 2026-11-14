@@ -263,6 +263,29 @@ Lese-Timeouts nicht ab. `idle_timeout_secs` größer wählen als das Leerlauf-Ti
 vorgeschalteten Load Balancers. Limits **je Client-IP** und TLS bleiben Aufgabe des Reverse
 Proxys. Wirkung, Metriken (`aigw_server_*`) und Hinweise: [haertung.md](haertung.md).
 
+### WASM-Plugins
+
+Plugins der Art `wasm` (AIGW-63, [Konzept](../konzept/17-wasm-plugins.md)) laufen in einer
+Sandbox mit Grenzen je Aufruf. Module lädt ein globaler `admin` über die Admin-API hoch
+(`PUT /admin/api/v1/wasm-modules/{name}?sha256=…`, UI: Guardrails & Plugins → WASM-Module) oder
+sie kommen aus Dateien der Startkonfiguration (Weg für den Modus „nur YAML“):
+
+```yaml
+wasm:
+  default_fuel: 100000000     # CPU-Grenze je Aufruf; Bindung: fuel (≤ max_fuel)
+  default_memory_mb: 32       # Bindung: maxMemoryMb (≤ max_memory_mb)
+  pool_instances: 256         # gleichzeitige Instanzen (Pooling-Allocator)
+  modules:
+    - name: keyword-guard
+      path: /etc/aigw/plugins/keyword-guard.wasm
+      sha256: 9c1e…           # Abweichung bricht den Start ab
+```
+
+`wasm.enabled: false` (bzw. ein Build ohne Feature `wasm`) lässt Bindungen der Art `wasm`
+prüfbar, Aufrufe schlagen aber fehl (→ `failMode`). Kann das System den Adressraum des
+Pooling-Allocators nicht reservieren, fällt die Laufzeit mit Warnung auf Instanzen bei Bedarf
+zurück (`wasm.pooling: false` erzwingt das).
+
 ## 2. Master-Key
 
 Zugangsdaten der Anbieter und `Secret`-Ressourcen liegen AES-256-GCM-verschlüsselt in der

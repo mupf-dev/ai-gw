@@ -17,6 +17,8 @@
 //!   `/admin/api/v1/plugin-bindings:test` – Katalog und Testlauf für die Editoren ([`plugins`], AIGW-52)
 //! - `/admin/api/v1/guardrail-profiles` – Standard-Guardrail-Profile anwenden
 //!   ([`guardrail_profiles`], AIGW-86)
+//! - `/admin/api/v1/wasm-modules` – WASM-Module für Plugins der Art `wasm`
+//!   ([`wasm_modules`], AIGW-63)
 //! - `/admin/api/v1/admin-api-keys` – Admin-API-Keys ([`admin_keys`]),
 //!   `/admin/api/v1/session` – angemeldeter Principal
 //! - `/admin/api/v1/audit-log` – Audit-Log lesen und exportieren ([`audit`])
@@ -56,6 +58,7 @@ pub mod session;
 pub mod tools;
 pub mod ui;
 pub mod usage;
+pub mod wasm_modules;
 pub use aigw_core::upstream;
 
 use std::fmt;
@@ -103,6 +106,8 @@ pub struct AdminState {
     pub(crate) trace_url: Option<String>,
     /// Preisvorschläge (AIGW-85; ohne: `404` auf `/price-suggestions`).
     pub(crate) price_suggester: Option<Arc<aigw_billing::suggest::Suggester>>,
+    /// Höchstgröße hochgeladener WASM-Module (`wasm.max_module_bytes`, AIGW-63).
+    pub(crate) wasm_max_bytes: u64,
 }
 
 /// Einstellungen der Anmeldung (aus `admin.auth`).
@@ -144,6 +149,7 @@ impl AdminState {
             ui_mock: true,
             trace_url: None,
             price_suggester: None,
+            wasm_max_bytes: aigw_core::config::WasmConfig::default().max_module_bytes,
         }
     }
 
@@ -177,6 +183,13 @@ impl AdminState {
         suggester: Option<Arc<aigw_billing::suggest::Suggester>>,
     ) -> Self {
         self.price_suggester = suggester;
+        self
+    }
+
+    /// Höchstgröße hochgeladener WASM-Module (`wasm.max_module_bytes`, AIGW-63).
+    #[must_use]
+    pub fn with_wasm_max_module_bytes(mut self, bytes: u64) -> Self {
+        self.wasm_max_bytes = bytes;
         self
     }
 
@@ -247,6 +260,7 @@ impl AdminState {
             ui_mock: true,
             trace_url: None,
             price_suggester: None,
+            wasm_max_bytes: aigw_core::config::WasmConfig::default().max_module_bytes,
         })
     }
 
@@ -311,6 +325,7 @@ pub fn router_with(state: AdminState) -> Router {
         .merge(tools::router())
         .merge(plugins::router())
         .merge(guardrail_profiles::router())
+        .merge(wasm_modules::router(state.wasm_max_bytes))
         .merge(admin_keys::router())
         .merge(audit::router())
         .merge(session::protected_router())

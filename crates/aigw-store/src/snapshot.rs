@@ -110,6 +110,7 @@ async fn read_all(
         mcp_servers: store.list::<McpServerSpec>().await?,
         mcp_grants: store.list::<McpGrantSpec>().await?,
         tool_policies: store.list::<ToolPolicySpec>().await?,
+        wasm_modules: store.all_wasm_modules().await?,
     })
 }
 
@@ -161,6 +162,8 @@ pub enum Incremental {
 #[derive(Debug, Default)]
 struct Changed {
     ids: HashMap<ResourceKind, HashSet<Id>>,
+    /// WASM-Module (AIGW-63, keine Ressourcenart).
+    wasm: HashSet<Id>,
 }
 
 impl Changed {
@@ -238,6 +241,13 @@ async fn read_journal(
     for row in &rows {
         versions.insert(row.i64("config_version")?);
         let kind = row.text("kind")?;
+        if kind == crate::wasm::AUDIT_KIND {
+            let Some(id) = row.opt_uuid("object_id")? else {
+                return Ok(Err(Fallback::MissingId));
+            };
+            changed.wasm.insert(id);
+            continue;
+        }
         let Some(kind) = snapshot_kind(&kind) else {
             continue;
         };
@@ -425,6 +435,22 @@ async fn fetch_patch(
             .filter(|id| !found.contains(id))
             .map(Change::Remove),
     );
+
+    // WASM-Module (AIGW-63): geänderte neu laden, fehlende sind gelöscht.
+    if !changed.wasm.is_empty() {
+        let mut ids: Vec<Id> = changed.wasm.iter().copied().collect();
+        ids.sort();
+        let found = store.wasm_modules_by_id(&ids).await?;
+        let present: HashSet<Id> = found.iter().map(|m| m.id).collect();
+        patch
+            .wasm_modules
+            .extend(found.into_iter().map(Change::Upsert));
+        patch.wasm_modules.extend(
+            ids.into_iter()
+                .filter(|id| !present.contains(id))
+                .map(Change::Remove),
+        );
+    }
 
     // Gelöschte Ziele löschen Bindungen/Freigaben ohne eigenen Audit-Eintrag mit.
     let target_deleted = patch

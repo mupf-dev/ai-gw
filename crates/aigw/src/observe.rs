@@ -94,6 +94,9 @@ pub(crate) struct MetricsSources {
     pub(crate) server: Option<ServerMetricsSource>,
     /// Tool-Richtlinien und Tool-Inventar (AIGW-87).
     pub(crate) tools: Option<Arc<aigw_proxy::tools::ToolMetrics>>,
+    /// WASM-Plugins: `aigw_wasm_*` (AIGW-63).
+    #[cfg(feature = "wasm")]
+    pub(crate) wasm: Option<Arc<aigw_wasm::WasmMetrics>>,
 }
 
 /// Verbindungsmetriken der Listener für `/metrics`.
@@ -127,6 +130,10 @@ impl MetricsSources {
         }
         if let Some(t) = &self.tools {
             t.render_prometheus(&mut out);
+        }
+        #[cfg(feature = "wasm")]
+        if let Some(w) = &self.wasm {
+            w.render_prometheus(&mut out);
         }
         out
     }

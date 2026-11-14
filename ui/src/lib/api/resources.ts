@@ -226,6 +226,39 @@ export const pluginCatalog = async () => (await unwrap<S['PluginCatalog']>(api.G
 /** Testlauf einer ungespeicherten Plugin-Konfiguration (nur lokale Plugins, schreibt nichts). */
 export const testPlugin = (body: S['PluginTestRequest']) => unwrap<S['PluginTestResult']>(api.POST('/admin/api/v1/plugin-bindings:test', { body }));
 
+// ------------------------------------------------------------------ AIGW-63: WASM-Module
+
+export type WasmModule = S['WasmModule'];
+const WASM_ITEM = '/admin/api/v1/wasm-modules/{name}';
+/** SHA-256 (hex) im Browser (Web Crypto; nur in sicheren Kontexten – sonst den Wert von Hand angeben). */
+export async function sha256Hex(data: ArrayBuffer): Promise<string> {
+  if (!globalThis.crypto?.subtle) throw new Error('Web Crypto nicht verfügbar (kein HTTPS) – SHA-256 bitte angeben.');
+  const d = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+/** WASM-Module (Komponenten für die Plugin-Art `wasm`): Schreiben nur globaler Admin. */
+export const wasmModules = {
+  list: async () => (await unwrap<S['WasmModuleList']>(api.GET('/admin/api/v1/wasm-modules'))).items,
+  /** Hochladen bzw. Ersetzen (`exists`: If-Match mit dem aktuellen ETag). */
+  upload: async (name: string, content: ArrayBuffer, opts: { sha256?: string; description?: string; exists?: boolean }) => {
+    const sha256 = opts.sha256?.trim() || (await sha256Hex(content));
+    const headers: Record<string, string> = { 'Content-Type': 'application/wasm' };
+    if (opts.exists) headers['If-Match'] = await etagFor(WASM_ITEM, name);
+    return unwrap<WasmModule>(
+      api.PUT(WASM_ITEM, {
+        params: { path: { name }, query: { sha256, description: opts.description?.trim() || undefined } },
+        body: content as unknown as string,
+        bodySerializer: (b: unknown) => b as BodyInit,
+        headers,
+      }),
+    );
+  },
+  remove: async (name: string) => {
+    const tag = await etagFor(WASM_ITEM, name);
+    return unwrap<void>(api.DELETE(WASM_ITEM, { params: { path: { name } }, headers: { 'If-Match': tag } }));
+  },
+};
+
 // ------------------------------------------------------------------ AIGW-86: Standard-Guardrail-Profile
 
 export type GuardrailProfile = S['GuardrailProfile'];

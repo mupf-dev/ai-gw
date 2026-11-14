@@ -22,8 +22,11 @@ members = [
     "crates/aigw-proxy",
     "crates/aigw-store",
     "crates/aigw-tokenizer",
+    "crates/aigw-wasm",
     "crates/aigw-webhook",
 ]
+# Beispiel-/Test-Plugins werden für wasm32-wasip2 gebaut (eigene Workspaces).
+exclude = ["plugins"]
 
 [workspace.package]
 version = "0.1.0"
@@ -50,6 +53,7 @@ aigw-proxy = { path = "crates/aigw-proxy" }
 aigw-store = { path = "crates/aigw-store" }
 # Ohne Standard-Features: Einbetten der Rangtabellen steuert das Binary (Feature embedded-tokenizers).
 aigw-tokenizer = { path = "crates/aigw-tokenizer", default-features = false }
+aigw-wasm = { path = "crates/aigw-wasm" }
 aigw-webhook = { path = "crates/aigw-webhook" }
 
 # HTTP-Stack (E2): axum 0.8 auf hyper 1, tower, tokio.
@@ -90,6 +94,10 @@ url = "2.5.8"
 tower-service = "0.3.3"
 # Mikro-Benchmarks (nur dev).
 divan = "0.1.21"
+# WASM-Plugins (AIGW-63): wasmtime mit Component Model, Cranelift und Pooling-Allocator;
+# WASI nur Preview 2 (ohne Netz/Dateisystem-Freigaben, siehe aigw-wasm).
+wasmtime = { version = "50.0.1", default-features = false, features = ["std", "runtime", "cranelift", "component-model", "pooling-allocator", "parallel-compilation"] }
+wasmtime-wasi = { version = "50.0.1", default-features = false, features = ["p2"] }
 
 # Exakter Antwort-Cache (AIGW-39): Schlüssel = BLAKE3 über normalisierte Anfrage (schnell,
 # kryptografisch, CC0/Apache-2.0); ohne Rayon/Mmap.

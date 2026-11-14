@@ -604,14 +604,14 @@ function extra(method: string, parts: string[], q: URLSearchParams): Response | 
   if (a === 'usage' && b === 'limit-warnings') return json(200, { counterBackend: 'local', warnings: [] });
   if (a === 'plugins' && !b && method === 'GET')
     return json(200, {
-      items: ['cache', 'content-safety', 'header', 'pii', 'prompt-filter', 'request-transform', 'webhook'].map((name) => ({
+      items: ['cache', 'content-safety', 'header', 'pii', 'prompt-filter', 'request-transform', 'wasm', 'webhook'].map((name) => ({
         name,
         defaultFailMode: name === 'webhook' ? 'open' : 'closed',
-        defaultTimeoutMs: name === 'webhook' ? 200 : name === 'content-safety' ? 3000 : 1000,
+        defaultTimeoutMs: name === 'webhook' ? 200 : name === 'content-safety' ? 3000 : name === 'wasm' ? 100 : 1000,
         testable: name === 'pii' || name === 'prompt-filter',
       })),
     });
-  if (a === 'plugin-bindings' || a === 'tool-policies' || a === 'tools' || a === 'secrets' || a === 'mcp-servers' || a === 'mcp-grants' || a === 'plugin-bindings:test') return method === 'GET' && !b ? json(200, { items: [] }) : json(403, { type: 'urn:aigw:problem:forbidden', title: 'Im Mock-Modus nicht verfügbar', status: 403, code: 'forbidden', detail: null });
+  if (a === 'plugin-bindings' || a === 'wasm-modules' || a === 'tool-policies' || a === 'tools' || a === 'secrets' || a === 'mcp-servers' || a === 'mcp-grants' || a === 'plugin-bindings:test') return method === 'GET' && !b ? json(200, { items: [] }) : json(403, { type: 'urn:aigw:problem:forbidden', title: 'Im Mock-Modus nicht verfügbar', status: 403, code: 'forbidden', detail: null });
   if (a === 'mcp-servers:status') return json(200, { gatewayEnabled: true, items: [] });
   if (a === 'providers' && !b && method === 'GET') return json(200, providerOverviewMock());
   if (a === 'users' && b && c === 'invitation') {

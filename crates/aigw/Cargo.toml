@@ -27,6 +27,7 @@ aigw-plugins.workspace = true
 aigw-proxy.workspace = true
 aigw-store.workspace = true
 aigw-tokenizer.workspace = true
+aigw-wasm = { workspace = true, optional = true }
 aigw-webhook.workspace = true
 axum.workspace = true
 base64.workspace = true
@@ -49,13 +50,16 @@ tracing-subscriber.workspace = true
 [features]
 # mimalloc als globaler Allokator (AIGW-57, docs/betrieb/leistung.md); ohne dieses Feature
 # (`--no-default-features`) gilt der System-Allokator.
-default = ["mimalloc", "embedded-tokenizers"]
+default = ["mimalloc", "embedded-tokenizers", "wasm"]
 mimalloc = ["dep:mimalloc"]
 # Rangtabellen o200k_base/cl100k_base von OpenAI in das Binary einbetten (AIGW-95). Ohne dieses
 # Feature lädt das Gateway sie zur Laufzeit aus `tokenizer.ranks_dir` (optional einmaliger
 # Download mit `tokenizer.download_ranks`), sonst gilt die Heuristik. Build ohne Tabellen:
 # `cargo build -p aigw --no-default-features --features mimalloc`.
 embedded-tokenizers = ["aigw-tokenizer/embedded-tokenizers"]
+# WASM-Plugins (AIGW-63, wasmtime): ohne dieses Feature sind Bindungen der Art `wasm` nur
+# prüfbar, Aufrufe schlagen fehl (→ failMode).
+wasm = ["dep:aigw-wasm"]
 
 [dev-dependencies]
 http-body-util.workspace = true

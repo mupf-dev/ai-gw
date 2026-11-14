@@ -204,6 +204,8 @@ impl Runtime {
             plugins: None,
             server: None,
             tools: None,
+            #[cfg(feature = "wasm")]
+            wasm: None,
         }
     }
 
@@ -237,8 +239,42 @@ async fn connect_and_load(
 ) -> Result<(Store, Reloader), StoreError> {
     let store = Store::connect_with(&config.store).await?;
     store.migrate().await?;
+    import_wasm_modules(&store, &config.wasm).await?;
     let reloader = Reloader::bootstrap(store.clone(), Arc::clone(keyring), opts).await?;
     Ok((store, reloader))
+}
+
+/// Übernimmt die WASM-Module aus `wasm.modules` in die Datenbank (AIGW-63; unverändert =
+/// kein Schreibvorgang). Der SHA-256 der Datei muss zur Konfiguration passen.
+async fn import_wasm_modules(
+    store: &Store,
+    cfg: &aigw_core::config::WasmConfig,
+) -> Result<(), StoreError> {
+    for m in &cfg.modules {
+        let content = tokio::fs::read(&m.path).await.map_err(|e| {
+            StoreError::Invalid(format!("wasm.modules[{}]: {}: {e}", m.name, m.path))
+        })?;
+        let out = store
+            .put_wasm_module(
+                aigw_store::wasm::STARTUP_ACTOR,
+                aigw_store::wasm::NewWasmModule {
+                    name: m.name.clone(),
+                    description: m.description.clone(),
+                    content,
+                    sha256: Some(m.sha256.clone()),
+                },
+                cfg.max_module_bytes,
+            )
+            .await
+            .map_err(|e| StoreError::Invalid(format!("wasm.modules[{}]: {e}", m.name)))?;
+        let what = match out {
+            aigw_store::wasm::PutOutcome::Created(_) => "angelegt",
+            aigw_store::wasm::PutOutcome::Replaced(_) => "ersetzt",
+            aigw_store::wasm::PutOutcome::Unchanged(_) => "unverändert",
+        };
+        tracing::info!(wasm_module = %m.name, sha256 = %out.info().sha256, "WASM-Modul aus der Startkonfiguration {what}");
+    }
+    Ok(())
 }
 
 /// Kaltstart ohne Datenbank aus dem verschlüsselten Snapshot-Cache (F14). Ohne brauchbaren

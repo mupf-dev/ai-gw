@@ -9,10 +9,11 @@
   // Testlauf mit Vorschau (POST /plugin-bindings:test), Kettenvorschau je Kontext (Zwiebelprinzip),
   // Standard-Fehlermodus je Plugin-Art aus GET /plugins, Backend-Fehler am betroffenen Feld.
   // AIGW-86: Reiter „Profile“ (Standard-Guardrail-Profile anwenden), Hinweis ohne aktive Guardrails.
+  // AIGW-63: Reiter „WASM-Module“ (hochladen/löschen), Plugin-Art wasm mit Modulauswahl im Formular.
   import { DropdownMenu, Tabs } from 'bits-ui';
   import { untrack } from 'svelte';
   import { ApiError, listPage } from '../lib/api/client';
-  import { credentials, GUARDRAIL_PLUGINS, modelGroups, NAME_HINT, NAME_RE, pluginBindingsRes, pluginCatalog, secrets, type PluginBinding, type S } from '../lib/api/resources';
+  import { credentials, GUARDRAIL_PLUGINS, modelGroups, NAME_HINT, NAME_RE, pluginBindingsRes, pluginCatalog, secrets, wasmModules, type PluginBinding, type S } from '../lib/api/resources';
   import AsyncState from '../lib/admin/AsyncState.svelte';
   import ConfirmDialog from '../lib/admin/ConfirmDialog.svelte';
   import { formErrorOf, handleError, Loader } from '../lib/admin/errors.svelte';
@@ -20,6 +21,7 @@
   import GuardrailProfiles from '../lib/admin/plugins/GuardrailProfiles.svelte';
   import PluginConfigForm, { STRUCTURED } from '../lib/admin/plugins/PluginConfigForm.svelte';
   import PluginTest from '../lib/admin/plugins/PluginTest.svelte';
+  import WasmModules from '../lib/admin/plugins/WasmModules.svelte';
   import FormDialog from '../lib/admin/FormDialog.svelte';
   import { Paged } from '../lib/admin/paged.svelte';
   import { catalog, orgOfTeam } from '../lib/context.svelte';
@@ -61,13 +63,15 @@
   ];
   // Plugin-Katalog (Standard-Fehlermodus je Plugin-Art, F148); ohne Antwort die bekannten eingebauten Plugins.
   const plugins = new Loader(() => pluginCatalog());
-  const FALLBACK = ['cache', 'content-safety', 'header', 'pii', 'prompt-filter', 'request-transform', 'webhook'];
+  const FALLBACK = ['cache', 'content-safety', 'header', 'pii', 'prompt-filter', 'request-transform', 'wasm', 'webhook'];
   const PLUGINS = $derived(plugins.data?.map((p) => p.name) ?? FALLBACK);
   const infoOf = (name: string) => plugins.data?.find((p) => p.name === name);
   const testable = (name: string) => infoOf(name)?.testable ?? (name === 'pii' || name === 'prompt-filter');
 
   // Alle sichtbaren Bindungen für die Kettenvorschau.
-  let tab = $state(new URLSearchParams(route.search).get('tab') === 'profiles' ? 'profiles' : 'bindings');
+  const TABS = ['bindings', 'chain', 'profiles', 'wasm'];
+  const initialTab = new URLSearchParams(route.search).get('tab') ?? '';
+  let tab = $state(TABS.includes(initialTab) ? initialTab : 'bindings');
   // Hinweis, wenn keine Guardrail-Bindung (pii, prompt-filter, content-safety) aktiv ist.
   const guarded = new Loader(async () => (await pluginBindingsRes.list()).some((b) => b.spec.enabled !== false && GUARDRAIL_PLUGINS.includes(b.spec.plugin)));
   const all = new Loader(() => (tab === 'chain' ? pluginBindingsRes.list() : Promise.resolve([] as PluginBinding[])));
@@ -75,14 +79,19 @@
     if (tab === 'chain') untrack(() => void all.reload());
   });
   // Verweise für die Formulare (nur Namen – Werte sind nie lesbar).
-  let refs = $state<{ secrets: string[]; credentials: string[]; groups: string[] }>({ secrets: [], credentials: [], groups: [] });
+  let refs = $state<{ secrets: string[]; credentials: string[]; groups: string[]; wasm: string[] }>({ secrets: [], credentials: [], groups: [], wasm: [] });
   let refsLoaded = false;
   async function loadRefs() {
-    if (refsLoaded) return;
+    // WASM-Module ändern sich im Reiter nebenan – immer frisch laden.
+    const wasm = (await wasmModules.list().catch(() => [])).map((m) => m.name);
+    if (refsLoaded) {
+      refs = { ...refs, wasm };
+      return;
+    }
     refsLoaded = true;
     const names = async (p: Promise<{ metadata: { name: string } }[]>) => (await p.catch(() => [])).map((x) => x.metadata.name);
     const [s, c, g] = await Promise.all([names(secrets.list()), names(credentials.list()), names(modelGroups.list())]);
-    refs = { secrets: s, credentials: c, groups: g };
+    refs = { secrets: s, credentials: c, groups: g, wasm };
   }
 
   // Schreiben je Ebene (F183): global/Modellgruppe globaler Admin, Organisation/Team im jeweiligen Bereich.
@@ -346,7 +355,11 @@
     <Tabs.Trigger value="bindings" class={tabsTrigger} data-testid="tab-bindings">Bindungen</Tabs.Trigger>
     <Tabs.Trigger value="chain" class={tabsTrigger} data-testid="tab-chain">Kette</Tabs.Trigger>
     <Tabs.Trigger value="profiles" class={tabsTrigger} data-testid="tab-profiles">Profile</Tabs.Trigger>
+    <Tabs.Trigger value="wasm" class={tabsTrigger} data-testid="tab-wasm">WASM-Module</Tabs.Trigger>
   </Tabs.List>
+  <Tabs.Content value="wasm">
+    <WasmModules />
+  </Tabs.Content>
   <Tabs.Content value="profiles">
     <GuardrailProfiles
       onapplied={() => {
@@ -455,7 +468,7 @@
       {#snippet children({ id, describedby, invalid })}<textarea {id} class={[textarea, 'min-h-32 font-mono']} bind:value={cfgText} aria-describedby={describedby} aria-invalid={invalid || undefined} spellcheck="false" data-testid="config-json"></textarea>{/snippet}
     </Field>
   {:else}
-    <PluginConfigForm plugin={f.plugin} bind:config={cfg} secrets={refs.secrets} credentials={refs.credentials} modelGroups={refs.groups} secretRefs={canWrite({ kind: 'catalog' })} />
+    <PluginConfigForm plugin={f.plugin} bind:config={cfg} secrets={refs.secrets} credentials={refs.credentials} modelGroups={refs.groups} wasmModules={refs.wasm} secretRefs={canWrite({ kind: 'catalog' })} />
     {#if errors.config}<p class="text-sm text-danger-fg sm:col-span-2" role="alert" data-testid="config-error">{errors.config}</p>{/if}
   {/if}
   {#if testable(f.plugin)}

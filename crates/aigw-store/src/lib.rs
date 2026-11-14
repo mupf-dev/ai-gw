@@ -27,6 +27,7 @@ pub mod repo;
 mod snapshot;
 pub mod snapshot_cache;
 pub mod tools;
+pub mod wasm;
 
 use std::str::FromStr as _;
 use std::sync::Arc;
@@ -193,6 +194,11 @@ const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
         "tools",
         include_str!("../migrations/sqlite/0008_tools.sql"),
     ),
+    (
+        9,
+        "wasm_modules",
+        include_str!("../migrations/sqlite/0009_wasm_modules.sql"),
+    ),
 ];
 
 /// Migrationssatz für Postgres (`migrations/postgres/`), gleiche Versionen wie SQLite.
@@ -236,6 +242,11 @@ const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
         8,
         "tools",
         include_str!("../migrations/postgres/0008_tools.sql"),
+    ),
+    (
+        9,
+        "wasm_modules",
+        include_str!("../migrations/postgres/0009_wasm_modules.sql"),
     ),
 ];
 

@@ -204,7 +204,8 @@ impl AdminResource for PluginBindingSpec {
         spec: &Self,
         _current: Option<&Object<Self>>,
     ) -> Result<(), Problem> {
-        check(&st.upstreams, spec).map_err(Problem::invalid)
+        check(&st.upstreams, spec).map_err(Problem::invalid)?;
+        crate::wasm_modules::check_binding(st, spec).await
     }
 }
 

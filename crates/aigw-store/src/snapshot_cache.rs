@@ -144,6 +144,26 @@ struct Body {
     /// Tool-Richtlinien (AIGW-87; ältere Caches ohne Feld lesbar).
     #[serde(default)]
     tool_policies: Vec<aigw_core::tools::ToolPolicy>,
+    /// WASM-Module (AIGW-63; Inhalt Base64; ältere Caches ohne Feld lesbar).
+    #[serde(default)]
+    wasm_modules: Vec<CachedWasm>,
+}
+
+/// WASM-Modul im Cache (Inhalt Base64).
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CachedWasm {
+    id: aigw_core::resource::Id,
+    name: String,
+    sha256: String,
+    #[serde(default)]
+    description: Option<String>,
+    created_by: String,
+    #[serde(with = "time::serde::rfc3339")]
+    created_at: time::OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    updated_at: time::OffsetDateTime,
+    content: String,
 }
 
 impl Body {
@@ -190,6 +210,23 @@ impl Body {
             mcp_servers: p.mcp_servers,
             mcp_grants: p.mcp_grants,
             tool_policies: p.tool_policies,
+            wasm_modules: p
+                .wasm_modules
+                .into_iter()
+                .map(|m| CachedWasm {
+                    id: m.id,
+                    name: m.name,
+                    sha256: m.sha256,
+                    description: m.description,
+                    created_by: m.created_by,
+                    created_at: m.created_at,
+                    updated_at: m.updated_at,
+                    content: base64::Engine::encode(
+                        &base64::engine::general_purpose::STANDARD,
+                        &m.content,
+                    ),
+                })
+                .collect(),
         }
     }
 
@@ -233,6 +270,27 @@ impl Body {
             mcp_servers: self.mcp_servers,
             mcp_grants: self.mcp_grants,
             tool_policies: self.tool_policies,
+            wasm_modules: self
+                .wasm_modules
+                .into_iter()
+                .map(|m| {
+                    let content = base64::Engine::decode(
+                        &base64::engine::general_purpose::STANDARD,
+                        m.content.as_bytes(),
+                    )
+                    .map_err(|_| CacheError::Format("WASM-Modul: ungültiges Base64".into()))?;
+                    Ok(aigw_core::wasm::WasmModule {
+                        id: m.id,
+                        name: m.name,
+                        sha256: m.sha256,
+                        description: m.description,
+                        created_by: m.created_by,
+                        created_at: m.created_at,
+                        updated_at: m.updated_at,
+                        content: bytes::Bytes::from(content),
+                    })
+                })
+                .collect::<Result<Vec<_>, CacheError>>()?,
         })
     }
 }

@@ -19,6 +19,7 @@ pub mod tools;
 pub mod types;
 pub mod upstream;
 pub mod validate;
+pub mod wasm;
 pub mod wire;
 
 pub use config::Config;

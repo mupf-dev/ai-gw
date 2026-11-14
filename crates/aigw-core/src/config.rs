@@ -67,6 +67,105 @@ pub struct Config {
     pub audit: AuditConfig,
     /// Tool-Inventar und Tool-Richtlinien (AIGW-87).
     pub tools: ToolsConfig,
+    /// WASM-Plugins: Laufzeit-Grenzen und Module aus Dateien (AIGW-63).
+    pub wasm: WasmConfig,
+}
+
+/// WASM-Plugins (AIGW-63, `docs/konzept/17-wasm-plugins.md`): Standardgrenzen je Aufruf,
+/// Instanz-Pool und Module aus Dateien. Die Grenzen einer Bindung (`fuel`, `maxMemoryMb`,
+/// `timeoutMs`) dürfen die Obergrenzen hier nicht überschreiten.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WasmConfig {
+    /// WASM-Plugins ausführen (`false`: Bindungen der Art `wasm` schlagen fehl → `failMode`).
+    pub enabled: bool,
+    /// Höchstgröße eines Moduls in Byte (Upload und Datei).
+    pub max_module_bytes: u64,
+    /// Standard-Fuel je Aufruf (CPU-Grenze in Wasm-Instruktionen, ungefähr).
+    pub default_fuel: u64,
+    /// Obergrenze für `fuel` einer Bindung.
+    pub max_fuel: u64,
+    /// Standard-Speichergrenze je Instanz (MiB, je linearem Speicher).
+    pub default_memory_mb: u32,
+    /// Obergrenze für `maxMemoryMb` einer Bindung (zugleich Größe der Pool-Slots).
+    pub max_memory_mb: u32,
+    /// Pooling-Allocator (vorab reservierte Instanz-Slots; schneller). `false`: Instanzen
+    /// werden bei Bedarf angelegt.
+    pub pooling: bool,
+    /// Gleichzeitige Instanzen im Pool (darüber schlagen Aufrufe fehl → `failMode`).
+    pub pool_instances: u32,
+    /// Takt der Zeitgrenze (Epoch-Interrupt) in Millisekunden.
+    pub epoch_tick_ms: u64,
+    /// Kompilierte Module im Speicher behalten (Anzahl, nach SHA-256).
+    pub compiled_cache_entries: usize,
+    /// Module aus Dateien, beim Start in die Datenbank übernommen (Akteur `startup-config`).
+    pub modules: Vec<WasmModuleFile>,
+}
+
+impl Default for WasmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_module_bytes: 16 * 1024 * 1024,
+            default_fuel: 100_000_000,
+            max_fuel: 10_000_000_000,
+            default_memory_mb: 32,
+            max_memory_mb: 256,
+            pooling: true,
+            pool_instances: 256,
+            epoch_tick_ms: 2,
+            compiled_cache_entries: 64,
+            modules: Vec::new(),
+        }
+    }
+}
+
+/// Modul aus einer Datei der Startkonfiguration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WasmModuleFile {
+    /// Name des Moduls (wie bei Ressourcen).
+    pub name: String,
+    /// Pfad zur Komponente (`.wasm`).
+    pub path: String,
+    /// Erwarteter SHA-256 (hex); Abweichung = Startfehler.
+    pub sha256: String,
+    /// Beschreibung.
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+impl WasmConfig {
+    /// Prüft die Grenzen.
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        if self.max_module_bytes == 0 || self.max_module_bytes > crate::wasm::MAX_MODULE_BYTES {
+            return Err(format!(
+                "wasm.max_module_bytes: 1–{} Byte",
+                crate::wasm::MAX_MODULE_BYTES
+            ));
+        }
+        if self.default_fuel == 0 || self.default_fuel > self.max_fuel {
+            return Err("wasm.default_fuel: 1 bis max_fuel".into());
+        }
+        if self.default_memory_mb == 0
+            || self.default_memory_mb > self.max_memory_mb
+            || self.max_memory_mb > 4096
+        {
+            return Err(
+                "wasm.default_memory_mb/max_memory_mb: 1 ≤ Standard ≤ Obergrenze ≤ 4096".into(),
+            );
+        }
+        if self.pool_instances == 0 || !(1..=1000).contains(&self.epoch_tick_ms) {
+            return Err("wasm.pool_instances ≥ 1, wasm.epoch_tick_ms 1–1000".into());
+        }
+        for m in &self.modules {
+            crate::resource::validate_name(&m.name)
+                .map_err(|e| format!("wasm.modules[{}]: {e}", m.name))?;
+            crate::wasm::normalize_sha256(&m.sha256)
+                .map_err(|e| format!("wasm.modules[{}]: {e}", m.name))?;
+        }
+        Ok(())
+    }
 }
 
 /// Tool-Inventar (AIGW-87, `docs/konzept/16-tools.md`). Die Richtlinien selbst sind Ressourcen

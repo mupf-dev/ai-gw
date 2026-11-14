@@ -32,6 +32,22 @@ pub trait PluginFactory: Send + Sync + 'static {
     /// (`deny_unknown_fields`).
     fn build(&self, config: &Value) -> Result<Arc<dyn Plugin>, String>;
 
+    /// Baut eine Instanz für den Snapshot `snap` (beim Aufbau der Ketten). Standard:
+    /// [`PluginFactory::build`]. Plugins, die Objekte des Snapshots brauchen (z. B. WASM-Module,
+    /// AIGW-63), überschreiben das.
+    fn build_in(&self, ctx: &BuildCtx<'_>, config: &Value) -> Result<Arc<dyn Plugin>, String> {
+        let _ = ctx;
+        self.build(config)
+    }
+
+    /// Fingerabdruck der Snapshot-Objekte, von denen eine Instanz abhängt (z. B. SHA-256 des
+    /// WASM-Moduls). Ändert er sich bei gleicher Konfiguration, baut der Reload die Bindung
+    /// neu. Standard: leer (nur die Konfiguration zählt).
+    fn fingerprint(&self, snap: &aigw_core::snapshot::Snapshot, config: &Value) -> String {
+        let _ = (snap, config);
+        String::new()
+    }
+
     /// Standard-Fehlermodus (F148: `closed`; Ausnahme `webhook`: `open`). Je Bindung über
     /// `failMode` überschreibbar.
     fn default_fail_mode(&self) -> FailMode {
@@ -42,6 +58,15 @@ pub trait PluginFactory: Send + Sync + 'static {
     fn default_timeout(&self) -> Duration {
         DEFAULT_TIMEOUT
     }
+}
+
+/// Umgebung von [`PluginFactory::build_in`] beim Aufbau der Ketten.
+#[derive(Debug, Clone, Copy)]
+pub struct BuildCtx<'a> {
+    /// Snapshot, aus dem die Ketten gebaut werden.
+    pub snapshot: &'a aigw_core::snapshot::Snapshot,
+    /// Wirksames Zeitlimit der Bindung (`timeoutMs` bzw. Standard der Plugin-Art).
+    pub timeout: Duration,
 }
 
 /// Wirksame Kettensteuerung einer Bindung (für Admin-API/UI, F148).
@@ -95,6 +120,8 @@ impl Registry {
         r.register(Arc::new(builtin::pii::Factory));
         r.register(Arc::new(builtin::prompt_filter::Factory));
         r.register(Arc::new(builtin::content_safety::Factory::new(host)));
+        // Nur Konfigurationsprüfung; die Laufzeit (`aigw-wasm`) ersetzt die Fabrik im Server.
+        r.register(Arc::new(builtin::wasm::Factory));
         r
     }
 

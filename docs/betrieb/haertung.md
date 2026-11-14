@@ -122,6 +122,17 @@ AIGW-58). Verweise `S-xx` beziehen sich auf die dortigen Befunde.
   `payloadModeLocked: true` sperren (S-09, AIGW-79) – sonst kann ein `team-admin` den Modus für
   eigene Keys innerhalb des Maximums ändern (auch abschalten).
 
+## WASM-Plugins
+
+- Module (WebAssembly-Komponenten) laufen im Gateway-Prozess und sehen die Anfragen der
+  Bindungen, an die sie gebunden sind. Hochladen darf nur ein globaler `admin`; der SHA-256 ist
+  beim Upload Pflicht, Bindungen können eine Version per `sha256` festschreiben.
+- Sandbox (AIGW-63): WASI 0.2 ohne Dateisystem, Netz und Umgebung; Fuel, Zeit- und
+  Speichergrenze je Aufruf (`wasm.*`, Bindung `fuel`/`maxMemoryMb`/`timeoutMs`), frische
+  Instanz je Aufruf. Fehler und Grenzüberschreitungen greifen über `failMode` (Standard
+  `closed`). Überwachen: `aigw_wasm_errors_total`, `aigw_wasm_call_duration_seconds`.
+- Wer keine WASM-Plugins braucht: `wasm.enabled: false` oder ein Build ohne Feature `wasm`.
+
 ## Audit
 
 - `GET /admin/api/v1/audit-log/verify` regelmäßig (z. B. täglich) ausführen und

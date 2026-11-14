@@ -228,6 +228,9 @@ pub struct Snapshot {
     /// Vorberechneter Index der Tool-Richtlinien (Hot Path). Gepflegt von
     /// [`Snapshot::from_parts`] und [`Snapshot::apply_patch`].
     pub tool_index: Arc<crate::tools::ToolPolicyIndex>,
+    /// WASM-Module (AIGW-63) nach Name – Inhalt geteilt (`Bytes`), kompiliert wird in
+    /// `aigw-wasm` (Cache nach SHA-256).
+    pub wasm_modules: HashMap<String, Arc<crate::wasm::WasmModule>>,
 }
 
 impl Snapshot {

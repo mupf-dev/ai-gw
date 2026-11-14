@@ -31,7 +31,7 @@ use crate::binding::{self, FailMode, Inherit};
 use crate::builtin::Broken;
 use crate::chain::{Chain, Entry};
 use crate::plugin::Plugin;
-use crate::registry::Registry;
+use crate::registry::{BuildCtx, Registry};
 
 /// Optionen des Index-Aufbaus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +73,11 @@ struct Built {
 
 /// Wiederverwendbare Plugin-Instanzen (Bindungsname → Konfiguration + Instanz), damit ein
 /// Reload unveränderte Bindungen nicht neu baut (Regex, Verbindungspools …).
-type Reuse = HashMap<String, (String, Map<String, Value>, Arc<dyn Plugin>)>;
+///
+/// Der dritte Wert ist der Fingerabdruck der Fabrik ([`crate::PluginFactory::fingerprint`],
+/// z. B. SHA-256 eines WASM-Moduls): ändert er sich, wird trotz gleicher Konfiguration neu
+/// gebaut.
+type Reuse = HashMap<String, (String, Map<String, Value>, String, Arc<dyn Plugin>)>;
 
 /// Präfix-Signatur: Org/Team/Key-Namen, soweit sie eigene Bindungen haben.
 type Sig = (Option<String>, Option<String>, Option<String>);
@@ -167,7 +171,7 @@ impl PluginIndex {
             if !b.spec.enabled {
                 continue;
             }
-            let Some(built) = build_binding(b, registry, opts, prev, &mut reuse) else {
+            let Some(built) = build_binding(snap, b, registry, opts, prev, &mut reuse) else {
                 continue;
             };
             count += usize::from(built.entry.is_some());
@@ -256,6 +260,7 @@ impl PluginIndex {
 }
 
 fn build_binding(
+    snap: &Snapshot,
     b: &PluginBinding,
     registry: &Registry,
     opts: IndexOptions,
@@ -313,16 +318,34 @@ fn build_binding(
     if control.inherit == Inherit::Disable {
         return Some(built);
     }
+    let timeout = control
+        .timeout
+        .unwrap_or_else(|| factory.default_timeout())
+        .min(Duration::from_secs(60));
+    let fingerprint = factory.fingerprint(snap, &split.plugin_config);
     let instance = match prev.get(name) {
-        Some((p, c, inst)) if p == plugin && *c == b.spec.config => Arc::clone(inst),
-        _ => match factory.build(&split.plugin_config) {
+        Some((p, c, f, inst)) if p == plugin && *c == b.spec.config && *f == fingerprint => {
+            Arc::clone(inst)
+        }
+        _ => match factory.build_in(
+            &BuildCtx {
+                snapshot: snap,
+                timeout,
+            },
+            &split.plugin_config,
+        ) {
             Ok(inst) => inst,
             Err(e) => return invalid(format!("Konfiguration: {e}"), control.fail_mode),
         },
     };
     reuse.insert(
         name.clone(),
-        (plugin.clone(), b.spec.config.clone(), Arc::clone(&instance)),
+        (
+            plugin.clone(),
+            b.spec.config.clone(),
+            fingerprint,
+            Arc::clone(&instance),
+        ),
     );
     built.entry = Some(Arc::new(Entry {
         plugin: instance,
@@ -332,10 +355,7 @@ fn build_binding(
         fail_mode: control
             .fail_mode
             .unwrap_or_else(|| factory.default_fail_mode()),
-        timeout: control
-            .timeout
-            .unwrap_or_else(|| factory.default_timeout())
-            .min(Duration::from_secs(60)),
+        timeout,
         output_reject: control.output_reject,
         metrics: Arc::clone(registry.metrics()),
     }));
