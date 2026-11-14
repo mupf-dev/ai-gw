@@ -46,7 +46,7 @@ Eigenschaften des Images:
 | Healthcheck | `aigw healthcheck` → `GET /readyz` der Steuerebene (Adresse aus der Konfiguration), Intervall 15 s |
 | Root-FS | schreibgeschützt möglich (`--read-only`); geschrieben wird nur unter `/data` |
 | Labels | OCI (`org.opencontainers.image.*`), Lizenz `AGPL-3.0-or-later`, Version/Revision per Build-Arg |
-| Größe | ≈ 26 MB komprimiert (Registry/Download), ≈ 65 MB entpackt (linux/amd64, Stand 0.1.0): Binary `aigw` 39 MB (UI, Tokenizer-Tabellen, Migrationen eingebettet) + distroless/cc ≈ 25 MB. `docker images` zeigt mit containerd-Image-Store ≈ 93 MB, weil dort komprimierte und entpackte Schichten zusammen zählen |
+| Größe | ≈ 26 MB komprimiert (Registry/Download), ≈ 65 MB entpackt (linux/amd64, Stand 0.1.0; arm64 siehe unten): Binary `aigw` 39 MB (UI, Tokenizer-Tabellen, Migrationen eingebettet) + distroless/cc ≈ 25 MB. `docker images` zeigt mit containerd-Image-Store ≈ 93 MB, weil dort komprimierte und entpackte Schichten zusammen zählen |
 
 ### Mehrere Architekturen (amd64 + arm64)
 
@@ -90,7 +90,15 @@ docker run -d --name aigw -p 4001:4001 -e AIGW_MASTER_KEY=$(docker run --rm ai-g
 curl -fsS http://127.0.0.1:4001/readyz
 ```
 
-Größen (Stand AIGW-91): siehe Tabelle oben; arm64 GROESSE_ARM64.
+Größen (Stand AIGW-91, gemessen mit `scripts/build-images.sh`):
+
+| Plattform | Binary `aigw` | Image komprimiert (`docker save \| gzip`) | Bau (8 vCPU, Registry im Cache) |
+|---|---|---|---|
+| linux/amd64 | ≈ 39 MiB | ≈ 25 MiB | vergleichbar |
+| linux/arm64 (quer kompiliert) | ≈ 33 MiB | ≈ 24 MiB | ≈ 3,5 min |
+
+Auf einem kleinen arm64-Host (2 vCPU) belegt ein frisch gestarteter Container mit SQLite
+≈ 22 MiB RAM.
 
 ### Starten (SQLite, Einzelinstanz)
 
