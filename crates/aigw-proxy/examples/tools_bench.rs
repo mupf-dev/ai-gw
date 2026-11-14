@@ -139,19 +139,59 @@ async fn main() {
     let mut none = none;
     let mut req = req;
     let base = measure("ohne Tools", n, 0.0, || {
-        let _ = black_box(apply_request(&off, &plain, "m", &headers, &mut none, PayloadMode::Off));
+        let _ = black_box(apply_request(
+            &off,
+            &plain,
+            "m",
+            &headers,
+            &mut none,
+            PayloadMode::Off,
+        ));
     });
     let base = measure("30 Tools, ohne Inventar, ohne Richtlinien", n, base, || {
-        let _ = black_box(apply_request(&off, &plain, "m", &headers, &mut req, PayloadMode::Off));
+        let _ = black_box(apply_request(
+            &off,
+            &plain,
+            "m",
+            &headers,
+            &mut req,
+            PayloadMode::Off,
+        ));
     });
     measure("30 Tools, ohne Inventar, 6 Richtlinien", n, base, || {
-        let _ = black_box(apply_request(&off, &with_policies, "m", &headers, &mut req, PayloadMode::Off));
+        let _ = black_box(apply_request(
+            &off,
+            &with_policies,
+            "m",
+            &headers,
+            &mut req,
+            PayloadMode::Off,
+        ));
     });
-    measure("30 Tools, Inventar (bekannte Hashes), ohne Richtlinien", n, base, || {
-        let _ = black_box(apply_request(&inv, &plain, "m", &headers, &mut req, PayloadMode::Off));
-    });
+    measure(
+        "30 Tools, Inventar (bekannte Hashes), ohne Richtlinien",
+        n,
+        base,
+        || {
+            let _ = black_box(apply_request(
+                &inv,
+                &plain,
+                "m",
+                &headers,
+                &mut req,
+                PayloadMode::Off,
+            ));
+        },
+    );
     measure("30 Tools, Inventar + 6 Richtlinien", n, base, || {
-        let _ = black_box(apply_request(&inv, &with_policies, "m", &headers, &mut req, PayloadMode::Off));
+        let _ = black_box(apply_request(
+            &inv,
+            &with_policies,
+            "m",
+            &headers,
+            &mut req,
+            PayloadMode::Off,
+        ));
     });
     assert_eq!(req.tools.len(), 30);
     inv.flush().await;

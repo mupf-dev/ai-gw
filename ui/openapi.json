@@ -9393,6 +9393,1095 @@
         ]
       }
     },
+    "/admin/api/v1/tool-policies": {
+      "get": {
+        "tags": [
+          "tool-policies"
+        ],
+        "operationId": "list_tool_policies",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Seitengröße (1–500, Standard 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Fortsetzung (`nextCursor` der vorigen Seite).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Teilstring im Namen.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "description": "Label-Selektor `k=v,k2`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "description": "Nur diese Ebene (`global`, `organization`, `team`, `api-key`, `model-group`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "description": "Nur dieses Ziel der Ebene (Name).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "description": "Nur diese Aktion (`allow`, `block-strip`, `block-reject`, `observe`,\n`require-approval`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolPolicyList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "tool-policies"
+        ],
+        "operationId": "create_tool_policy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolPolicyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Angelegt",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version"
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Pfad"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name bereits vergeben",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe oder Verweis",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/tool-policies/{name}": {
+      "get": {
+        "tags": [
+          "tool-policies"
+        ],
+        "operationId": "get_tool_policy",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gefunden",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Version für If-Match"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolPolicy"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "tool-policies"
+        ],
+        "operationId": "put_tool_policy",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolPolicyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Geändert",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Neue Version"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt (z. B. bestehende Objekte über neuen Grenzen)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Eingabe oder Verweis",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "tool-policies"
+        ],
+        "operationId": "delete_tool_policy",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Gelöscht"
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Wird noch verwendet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/tools": {
+      "get": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "Listet das Tool-Inventar.",
+        "operationId": "list_tools",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Seitengröße (1–500, Standard 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Fortsetzung (`nextCursor` der vorigen Seite).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Teilstring im Tool-Namen.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "origin",
+            "in": "query",
+            "description": "Herkunft (`client` oder MCP-Server).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "client",
+            "in": "query",
+            "description": "Teilstring im Client.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Art (`function`, `builtin`, `server-tool`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "description": "Organisation (Name).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "query",
+            "description": "Team (Name).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "apiKey",
+            "in": "query",
+            "description": "API-Key (Name).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Status: `new`, `approved`, `blocked`, `pending`, `changed`, `suspicious`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Parameter",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unbekannte Organisation, Team oder Key",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/tools/{id}": {
+      "get": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "Liest ein Tool mit Verlauf der Hashes und passenden Richtlinien.",
+        "operationId": "get_tool",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ID des Inventar-Eintrags",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gefunden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "Entfernt einen Eintrag samt Verlauf aus dem Inventar (taucht bei erneuter Nutzung wieder\nals neu auf).",
+        "operationId": "delete_tool",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ID des Inventar-Eintrags",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Entfernt"
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/tools/{id}/acknowledge": {
+      "post": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "Bestätigt eine geänderte Beschreibung bzw. ein geändertes Schema (setzt `changed` zurück).",
+        "operationId": "acknowledge_tool",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ID des Inventar-Eintrags",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bestätigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolItem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/tools/{id}/approve": {
+      "post": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "Gibt ein Tool frei (Richtlinie `tools-allow-<ebene>[-<ziel>]`) und bestätigt eine\nÄnderung.",
+        "operationId": "approve_tool",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ID des Inventar-Eintrags",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolDecisionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Freigegeben",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolDecision"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Ebene",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/tools/{id}/block": {
+      "post": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "Sperrt ein Tool (Richtlinie `tools-block-<ebene>[-<ziel>]`, Standard `block-strip`).",
+        "operationId": "block_tool",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ID des Inventar-Eintrags",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolDecisionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Gesperrt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolDecision"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Ungültige Ebene oder Aktion",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/usage/budgets": {
       "get": {
         "tags": [
@@ -12460,6 +13549,29 @@
           }
         }
       },
+      "MatchingPolicy": {
+        "type": "object",
+        "description": "Passende Richtlinie.",
+        "required": [
+          "name",
+          "scope",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ToolAction",
+            "description": "Aktion."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/Scope",
+            "description": "Ebene und Ziel."
+          }
+        }
+      },
       "McpConnectionState": {
         "type": "string",
         "description": "Verbindungszustand eines Servers.",
@@ -14850,7 +15962,8 @@
           "Price",
           "PluginBinding",
           "McpServer",
-          "McpGrant"
+          "McpGrant",
+          "ToolPolicy"
         ]
       },
       "Role": {
@@ -15717,6 +16830,452 @@
         },
         "additionalProperties": false
       },
+      "ToolAction": {
+        "type": "string",
+        "description": "Aktion einer Tool-Richtlinie.",
+        "enum": [
+          "allow",
+          "block-strip",
+          "block-reject",
+          "observe",
+          "require-approval"
+        ]
+      },
+      "ToolDecision": {
+        "type": "object",
+        "description": "Ergebnis einer Entscheidung.",
+        "required": [
+          "policy",
+          "tool"
+        ],
+        "properties": {
+          "policy": {
+            "type": "string",
+            "description": "Geschriebene Richtlinie."
+          },
+          "tool": {
+            "$ref": "#/components/schemas/ToolItem",
+            "description": "Tool nach der Entscheidung."
+          }
+        }
+      },
+      "ToolDecisionInput": {
+        "type": "object",
+        "description": "Freigeben bzw. Sperren eines Tools.",
+        "properties": {
+          "action": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ToolAction",
+                "description": "Nur Sperren: `block-strip` (Standard) oder `block-reject`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Scope",
+                "description": "Ebene (Standard `global`). Mit `api-key`/`team`/`organization` ohne Ziel gilt das\nZiel des Inventar-Eintrags."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ToolDetail": {
+        "type": "object",
+        "description": "Detail eines Tools.",
+        "required": [
+          "tool",
+          "history",
+          "policies"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Beschreibung (falls gespeichert)."
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolHistoryItem"
+            },
+            "description": "Verlauf (neueste zuerst, höchstens 50)."
+          },
+          "parameters": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "JSON-Schema der Parameter (falls gespeichert)."
+          },
+          "policies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MatchingPolicy"
+            },
+            "description": "Richtlinien, deren Muster auf das Tool passen (Name, Ebene, Aktion)."
+          },
+          "tool": {
+            "$ref": "#/components/schemas/ToolItem",
+            "description": "Tool."
+          }
+        }
+      },
+      "ToolHistoryItem": {
+        "type": "object",
+        "description": "Eintrag im Verlauf.",
+        "required": [
+          "seenAt",
+          "event",
+          "descriptionHash",
+          "schemaHash"
+        ],
+        "properties": {
+          "client": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Client."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Beschreibung (falls gespeichert)."
+          },
+          "descriptionHash": {
+            "type": "string",
+            "description": "Hash der Beschreibung."
+          },
+          "event": {
+            "type": "string",
+            "description": "`discovered` oder `changed`."
+          },
+          "schemaHash": {
+            "type": "string",
+            "description": "Hash des Schemas."
+          },
+          "seenAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Zeitpunkt."
+          }
+        }
+      },
+      "ToolItem": {
+        "type": "object",
+        "description": "Ein Tool im Inventar.",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "origin",
+          "gatewayMcp",
+          "firstSeen",
+          "lastSeen",
+          "requests",
+          "calls",
+          "blocked",
+          "descriptionHash",
+          "schemaHash",
+          "hasDescription",
+          "changed",
+          "suspicious",
+          "status"
+        ],
+        "properties": {
+          "apiKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "API-Key (Name)."
+          },
+          "blocked": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Blockiert (entfernt, abgelehnt oder Aufruf unterbunden)."
+          },
+          "calls": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tool-Aufrufe des Modells."
+          },
+          "changed": {
+            "type": "boolean",
+            "description": "Beschreibung/Schema seit der letzten Bestätigung geändert."
+          },
+          "changedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Zeitpunkt der letzten Änderung."
+          },
+          "client": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Letzter Client (User-Agent bzw. Anwendungs-Header, gekürzt)."
+          },
+          "descriptionHash": {
+            "type": "string",
+            "description": "Hash der Beschreibung (BLAKE3, 128 Bit, hex)."
+          },
+          "firstSeen": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Erste Sichtung."
+          },
+          "gatewayMcp": {
+            "type": "boolean",
+            "description": "Herkunft ist ein MCP-Server des Gateways (`/mcp`, Ressource `McpServer`)."
+          },
+          "hasDescription": {
+            "type": "boolean",
+            "description": "Beschreibung gespeichert (nur bei `payloadMode` `masked`/`full`)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Art: `function`, `builtin`, `server-tool`."
+          },
+          "lastSeen": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Letzte Sichtung."
+          },
+          "name": {
+            "type": "string",
+            "description": "Tool-Name (wie vom Client geschickt)."
+          },
+          "observedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Passende `observe`-Richtlinie."
+          },
+          "organization": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Organisation (Name)."
+          },
+          "origin": {
+            "type": "string",
+            "description": "Herkunft: MCP-Server (aus `mcp__<server>__<tool>` bzw. `<server>__<tool>`) oder\n`client`."
+          },
+          "policy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Entscheidende Richtlinie."
+          },
+          "requests": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Anfragen mit diesem Tool."
+          },
+          "schemaHash": {
+            "type": "string",
+            "description": "Hash des Schemas (BLAKE3, 128 Bit, hex)."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ToolStatus",
+            "description": "Wirksamer Status."
+          },
+          "suspicious": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Treffer des Prompt-Injection-Erkenners in der Beschreibung (leer = keine)."
+          },
+          "team": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Team (Name)."
+          }
+        }
+      },
+      "ToolList": {
+        "type": "object",
+        "description": "Seite des Inventars.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolItem"
+            },
+            "description": "Einträge (nach Name sortiert)."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor der nächsten Seite."
+          }
+        }
+      },
+      "ToolPolicy": {
+        "type": "object",
+        "required": [
+          "id",
+          "metadata",
+          "spec"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID (UUIDv7)."
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/ToolPolicySpec",
+            "description": "Spezifikation."
+          }
+        }
+      },
+      "ToolPolicyInput": {
+        "type": "object",
+        "required": [
+          "metadata",
+          "spec"
+        ],
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/ObjectMeta",
+            "description": "Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert)."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/ToolPolicySpec",
+            "description": "Spezifikation."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ToolPolicyList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolPolicy"
+            },
+            "description": "Einträge (nach Name sortiert)."
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite."
+          }
+        }
+      },
+      "ToolPolicySpec": {
+        "type": "object",
+        "description": "Richtlinie für Tools, die Anwendungen in Anfragen mitschicken (Ressource `ToolPolicy`).",
+        "required": [
+          "scope",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ToolAction",
+            "description": "Aktion."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Beschreibung (Anzeige)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Aktiv?"
+          },
+          "locked": {
+            "type": "boolean",
+            "description": "Gesperrt: eine passende Sperre (`block-*`) gilt auch gegen spezifischere `allow`."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/Scope",
+            "description": "Ebene und Ziel (`global` ohne Ziel)."
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob-Muster auf die Herkunft (MCP-Server-Name; vom Client definierte Tools heißen\n`client`). Leer = jede Herkunft."
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob-Muster auf den Tool-Namen (`*`, `?`; `!muster` = Ausschluss). Ein Muster passt auf\nden vollen Namen (`mcp__github__create_issue`) oder den Namen ohne Server-Präfix\n(`create_issue`). Leer = alle Tools."
+          },
+          "unapproved": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UnapprovedAction",
+                "description": "Nur `require-approval`: nicht freigegebene Tools entfernen (`strip`, Standard) oder die\nAnfrage ablehnen (`reject`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ToolStatus": {
+        "type": "string",
+        "description": "Wirksamer Status eines Tools im Bereich seines Keys (Richtlinien auf Modellgruppen-Ebene\nbleiben unberücksichtigt).",
+        "enum": [
+          "new",
+          "approved",
+          "blocked",
+          "pending"
+        ]
+      },
       "TopItem": {
         "type": "object",
         "description": "Eintrag einer Rangliste.",
@@ -15815,6 +17374,14 @@
             "description": "Einheit."
           }
         }
+      },
+      "UnapprovedAction": {
+        "type": "string",
+        "description": "Behandlung nicht freigegebener Tools im Modus `require-approval`.",
+        "enum": [
+          "strip",
+          "reject"
+        ]
       },
       "Unit": {
         "type": "string",
@@ -16077,6 +17644,14 @@
     {
       "name": "guardrail-profiles",
       "description": "Standard-Guardrail-Profile (Basis, Streng, Offen) als Vorschläge: Inhalt ansehen, Diff berechnen, auf einen Scope anwenden"
+    },
+    {
+      "name": "tool-policies",
+      "description": "Tool-Richtlinien: Freigeben, Sperren, Beobachten von Tools, die Anwendungen mitschicken (AIGW-87)"
+    },
+    {
+      "name": "tools",
+      "description": "Tool-Inventar: von Anwendungen mitgeschickte Tools mit Herkunft, Nutzung, Hash-Verlauf und Status"
     },
     {
       "name": "gitops",
