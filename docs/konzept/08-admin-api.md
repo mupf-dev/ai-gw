@@ -944,6 +944,18 @@ Key, Geltungsbereich Organisation/Team des Keys, `after = {requestId, model, str
 Inhalte). Schlägt das Schreiben fehl, wird die Anfrage nicht ausgeführt. Der Eintrag erhöht
 keine Konfigurationsversion und gehört nicht zum Snapshot-Journal.
 
+### 5.14 Tool-Inventar und Tool-Richtlinien (AIGW-87)
+
+| Route | Inhalt |
+|---|---|
+| `GET/POST /admin/api/v1/tool-policies`, `GET/PUT/DELETE …/{name}` | Ressource `ToolPolicy` (CRUD mit `If-Match`, Filter `level`, `target`, `action`) |
+| `GET /admin/api/v1/tools` | Inventar mit Filtern (`q`, `origin`, `client`, `kind`, `organization`, `team`, `apiKey`, `status`) und wirksamem Status |
+| `GET /admin/api/v1/tools/{id}` | Detail: Beschreibung/Schema (nur bei `payloadMode` `masked`/`full` gespeichert), Hash-Verlauf, passende Richtlinien |
+| `POST …/{id}/approve`, `…/block`, `…/acknowledge`, `DELETE …/{id}` | Freigeben/Sperren je Ebene (schreibt `tools-allow-…`/`tools-block-…`), Änderung bestätigen, Eintrag entfernen |
+
+Rechte wie Plugin-Bindungen (F183); das Inventar sieht eine eingeschränkte Rolle nur in ihrem
+Bereich. Einzelheiten: [16-tools.md](16-tools.md).
+
 ## 6. Datenebene: Schlüsselprüfung und Modellfreigaben
 
 `aigw_proxy::SnapshotAuthenticator` (Architektur §3, Schritte 2–3):

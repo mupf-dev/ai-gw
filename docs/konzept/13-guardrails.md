@@ -21,6 +21,13 @@ auf dem bereits maskierten Text).
 
 Die Log-Maskierung (`observe.payload: masked`) nutzt **dieselbe Engine** (§6.3).
 
+**Tool-Richtlinien (AIGW-87)** laufen vor der Plugin-Kette (nach der Modellfreigabe): Guardrails
+sehen nur noch erlaubte Tools. Aufrufe nicht erlaubter Tools in der Antwort filtert das Gateway
+als innerste Antwortschicht – vor den Ausgabe-Guardrails – mit derselben Ablehnungsform wie F160
+(`content_filter`/`refusal`, Header `x-aigw-guardrail: tool-policy`). Tool-Beschreibungen prüft
+das Inventar mit den eingebauten Injection-Signalen des `prompt-filter`
+(`prompt_filter::injection_signals`). Siehe [16-tools.md](16-tools.md).
+
 ## 2. PII-Engine `aigw-pii`
 
 ### 2.1 Eigene Crate statt Modul

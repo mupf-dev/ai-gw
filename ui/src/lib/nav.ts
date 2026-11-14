@@ -18,6 +18,7 @@ export type PageId =
   | 'teams'
   | 'limits'
   | 'guardrails'
+  | 'tools'
   | 'cache'
   | 'mcp'
   | 'logs'
@@ -66,6 +67,7 @@ export const PAGES: Record<PageId, Page> = {
   'admin-keys': { ...p('admin-keys', '/admin-keys', 'Admin-API-Keys', 'lock', 'Zugänge für Automatisierung (GitOps, CI, Monitoring) zur Admin-API mit Rollen und Ablauf; nur globale Admins.', true, 'admin token automation ci'), adminOnly: true, needsAuth: true },
   limits: { ...p('limits', '/limits', 'Limits & Budgets', 'gauge', 'Budgets je Organisation, Team und Key mit Verbrauch im laufenden Zeitraum (Tag/Woche/Monat/gesamt) und Warnschwellen.', true, 'rate budget quota kosten verbrauch'), needsAuth: true },
   guardrails: { ...p('guardrails', '/guardrails', 'Guardrails & Plugins', 'shield', 'Plugin-Bindungen je Ebene (PII, Prompt-Filter, content-safety, Webhooks) mit Reihenfolge, Vererbung, Sperre und Fehlermodus.', true, 'pii moderation wasm webhook plugin bindung failmode'), needsAuth: true },
+  tools: { ...p('tools', '/tools', 'Tools', 'puzzle', 'Inventar der Tools, die Anwendungen mitschicken (Herkunft, MCP-Server, Client, Nutzung, geänderte oder verdächtige Beschreibungen) mit Freigeben/Sperren je Ebene und Tool-Richtlinien.', true, 'tool function mcp freigabe sperre inventar richtlinie'), needsAuth: true },
   cache: p('cache', '/cache', 'Cache', 'database', 'Exakter und semantischer Cache: Trefferquote, Ersparnis, TTL-Regeln, Vektorindex und gezieltes Leeren.', false, 'semantic vector ttl'),
   mcp: { ...p('mcp', '/mcp', 'MCP-Server', 'network', 'Angebundene MCP-Server mit Verbindungszustand (verbunden, gestört, unbenutzt, deaktiviert), Fehlern und Fehlversuchen.', true, 'tools model context protocol status'), needsAuth: true },
   logs: { ...p('logs', '/logs', 'Logs', 'list', 'Request-Explorer: Filter nach Status, Modell, Key, Team und Zeitraum; Detailansicht mit Request, Response, Fallback-Versuchen und Zeitleiste.', true, 'requests traces explorer'), needsAuth: true },
@@ -77,7 +79,7 @@ export const PAGES: Record<PageId, Page> = {
 
 export const NAV: NavGroup[] = [
   { items: [PAGES.overview, PAGES.playground] },
-  { label: 'Gateway', items: [PAGES.models, PAGES.providers, PAGES.secrets, PAGES.prices, PAGES.guardrails, PAGES.cache, PAGES.mcp] },
+  { label: 'Gateway', items: [PAGES.models, PAGES.providers, PAGES.secrets, PAGES.prices, PAGES.guardrails, PAGES.tools, PAGES.cache, PAGES.mcp] },
   { label: 'Zugriff', items: [PAGES.keys, PAGES.teams, PAGES.limits, PAGES['admin-keys']] },
   { label: 'Beobachten', items: [PAGES.logs, PAGES.audit] },
 ];

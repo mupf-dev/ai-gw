@@ -50,6 +50,11 @@ use crate::{admin_keys as ak, session as s};
         m::delete_mcp_grant,
         pb::list_plugin_bindings, pb::create_plugin_binding, pb::get_plugin_binding,
         pb::put_plugin_binding, pb::delete_plugin_binding,
+        crate::tools::list_tool_policies, crate::tools::create_tool_policy,
+        crate::tools::get_tool_policy, crate::tools::put_tool_policy,
+        crate::tools::delete_tool_policy,
+        crate::tools::list_tools, crate::tools::get_tool, crate::tools::approve_tool,
+        crate::tools::block_tool, crate::tools::acknowledge_tool, crate::tools::delete_tool,
         crate::plugins::plugin_catalog, crate::plugins::test_plugin,
         crate::guardrail_profiles::list_guardrail_profiles,
         crate::guardrail_profiles::apply_guardrail_profile,
@@ -86,6 +91,8 @@ use crate::{admin_keys as ak, session as s};
         (name = "mcp-grants", description = "Freigaben von MCP-Servern und -Tools für Teams und API-Keys"),
         (name = "plugin-bindings", description = "Plugin-Kette: Bindungen je Ebene (Guardrails, Webhooks, Header …) mit wirksamem Fehlermodus"),
         (name = "guardrail-profiles", description = "Standard-Guardrail-Profile (Basis, Streng, Offen) als Vorschläge: Inhalt ansehen, Diff berechnen, auf einen Scope anwenden"),
+        (name = "tool-policies", description = "Tool-Richtlinien: Freigeben, Sperren, Beobachten von Tools, die Anwendungen mitschicken (AIGW-87)"),
+        (name = "tools", description = "Tool-Inventar: von Anwendungen mitgeschickte Tools mit Herkunft, Nutzung, Hash-Verlauf und Status"),
         (name = "gitops", description = "YAML-Export und -Apply aller Ressourcen (aigw/v1alpha1)"),
         (name = "auth", description = "Anmeldung: OIDC-Login, Session, Abmeldung"),
         (name = "admin-api-keys", description = "Admin-API-Keys für Automatisierung"),
@@ -273,6 +280,9 @@ mod tests {
             "/admin/api/v1/playground/models",
             "/admin/api/v1/guardrail-profiles",
             "/admin/api/v1/guardrail-profiles/{name}:apply",
+            "/admin/api/v1/tool-policies/{name}",
+            "/admin/api/v1/tools",
+            "/admin/api/v1/tools/{id}/approve",
         ] {
             assert!(json["paths"][p].is_object(), "Pfad {p} fehlt");
         }
@@ -299,6 +309,8 @@ mod tests {
             "EffectivePluginControl",
             "GuardrailProfileList",
             "GuardrailProfileApplyResult",
+            "ToolPolicyList",
+            "ToolDetail",
         ] {
             assert!(
                 json["components"]["schemas"][s].is_object(),

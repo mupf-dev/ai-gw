@@ -204,6 +204,22 @@ export const pluginBindingsRes = resource<PluginBinding, S['PluginBindingInput']
 
 export type McpGrant = S['McpGrant'];
 export const mcpGrants = resource<McpGrant, S['McpGrantInput'], { q?: string; server?: string; team?: string; apiKey?: string }>('mcp-grants');
+
+// ------------------------------------------------------------------ Tools (AIGW-87)
+
+export type ToolItem = S['ToolItem'];
+export type ToolPolicy = S['ToolPolicy'];
+export const toolPolicies = resource<ToolPolicy, S['ToolPolicyInput'], { q?: string; level?: string; target?: string; action?: string }>('tool-policies');
+const toolPath = { params: { path: { id: '' } } };
+const at = (id: string) => ({ params: { path: { id } } }) as typeof toolPath;
+export const tools = {
+  path: '/admin/api/v1/tools',
+  get: (id: string) => unwrap<S['ToolDetail']>(api.GET('/admin/api/v1/tools/{id}', at(id))),
+  approve: (id: string, body: S['ToolDecisionInput']) => unwrap<S['ToolDecision']>(api.POST('/admin/api/v1/tools/{id}/approve', { ...at(id), body })),
+  block: (id: string, body: S['ToolDecisionInput']) => unwrap<S['ToolDecision']>(api.POST('/admin/api/v1/tools/{id}/block', { ...at(id), body })),
+  acknowledge: (id: string) => unwrap<ToolItem>(api.POST('/admin/api/v1/tools/{id}/acknowledge', at(id))),
+  remove: (id: string) => unwrap<void>(api.DELETE('/admin/api/v1/tools/{id}', at(id))),
+};
 export type PluginInfo = S['PluginInfo'];
 /** Registrierte Plugins mit Standard-Fehlermodus/-Zeitlimit (GET /plugins). */
 export const pluginCatalog = async () => (await unwrap<S['PluginCatalog']>(api.GET('/admin/api/v1/plugins'))).items;

@@ -416,6 +416,7 @@ eingebunden). uPlot bleibt für einfache Zeitreihen.
 | Admin-API-Keys | `/admin-keys` | Zugänge für Automatisierung mit Rollen und Ablauf | **echt** |
 | Limits & Budgets | `/limits` | Budgetverbrauch je Org/Team/Key, Hinweise zu ungenauen Limits; Prognose folgt | **echt** (Budgets) |
 | Guardrails & Plugins | `/guardrails` | Plugin-Bindungen je Ebene mit Steuerfeldern, wirksamem Fehlermodus, Formularen je Plugin, Testlauf und Kettenvorschau; Standard-Profile mit Diff und Anwenden | **echt** (AIGW-52, AIGW-86) |
+| Tools | `/tools` | Tool-Inventar (Name, Art, Herkunft/MCP-Server, Gateway-MCP, Client, Team/Key, Anfragen/Aufrufe/blockiert, zuletzt gesehen) mit Filtern (Status inkl. geändert/verdächtig, Herkunft, Client, Team), Badges „geändert“/„verdächtig“, Aktionen Freigeben/Sperren je Ebene (global, Organisation, Team, Key; entfernen oder ablehnen), Änderung bestätigen; Detail-Sheet mit Beschreibung, Schema, Hash-Verlauf, passenden Richtlinien; Reiter „Richtlinien“ (CRUD `ToolPolicy`) | **echt** (AIGW-87) |
 | Cache | `/cache` | Exakt/semantisch, Trefferquote, Ersparnis, TTL-Regeln, Vektorindex, gezieltes Leeren | geplant |
 | MCP-Server | `/mcp` | MCP-Server registrieren/bearbeiten (Anmeldung per Secret-Verweis), Verbindungszustand, Freigaben je Team/Key mit Tool-Mustern | **echt** (AIGW-52) |
 | Logs | `/logs` | Request-Explorer mit Filtern, Detail-Sheet (Versuche, Guardrails, Trace-Link, Payload) | **echt** (AIGW-77) |

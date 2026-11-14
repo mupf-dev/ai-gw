@@ -385,6 +385,7 @@ fn is_catalog(kind: aigw_core::resource::ResourceKind) -> bool {
             | K::McpServer
             | K::ProviderCredential
             | K::PluginBinding
+            | K::ToolPolicy
     )
 }
 

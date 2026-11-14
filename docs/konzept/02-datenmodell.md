@@ -80,6 +80,7 @@ wieder Namen. Namen sind je Art global eindeutig (`a-z0-9-._`, max. 128 Zeichen)
 | `PluginBinding` | scope (level `global`/`organization`/`team`/`api-key`/`model-group` + target), plugin, order, enabled, config (JSON) |
 | `McpServer` | url, transport (`streamable-http`/`sse`/`stdio`), credential?, enabled, settings |
 | `McpGrant` | server, subject (level `team`/`api-key` + target), tools (leer = alle) |
+| `ToolPolicy` | scope (Ebene + Ziel), tools/servers (Glob, `!`), action (`allow`, `block-strip`, `block-reject`, `observe`, `require-approval`), unapproved, locked, enabled ([16-tools.md](16-tools.md)) |
 
 Bausteine: `LimitSpec` (metric `requests`/`tokens`/`input-tokens`/`output-tokens`/`concurrency`,
 limit, window `second`/`minute`/`hour`/`day`, optional modelGroup), `Budget` (amount, period
@@ -249,6 +250,8 @@ erDiagram
 | `price` | eindeutig je (`provider`, `model`, `valid_from`); `provider = ''` = alle Anbieter; Token-Preise als JSON |
 | `plugin_binding` | polymorpher Verweis (`level`, `target_id`) ohne FK; Löschen des Ziels löscht Bindungen in derselben Transaktion |
 | `mcp_server`, `mcp_grant` | Freigabe je Team/Key (polymorph wie oben), `tools` als JSON-Liste |
+| `tool_policy` | Ressource `ToolPolicy` (Ebene polymorph wie `plugin_binding`); wird mit dem Ziel gelöscht (Migration 0007) |
+| `tool_inventory`, `tool_inventory_history` | Tool-Inventar je (Organisation, Team, Key, Name): Zähler, Hashes, Inhalte nur bei passendem `payloadMode`; Verlauf neu/geändert – keine Konfiguration, nicht im Snapshot |
 | `counter_state` | nur Postgres (`postgres-sync`): (Schlüssel, Fensterbeginn, Instanz) → Wert |
 | `budget_usage` | (Ebene, Ziel, Zeitraum, Beginn) → Betrag (Nano) |
 | `request_log` | ein Eintrag je Anfrage (ID = `x-aigw-request-id`), Tokens, Kosten, Latenz/TTFT, Cache, Abbruch; Indizes nach Zeit, Key, Team (Details [07-beobachtung.md](07-beobachtung.md)) |

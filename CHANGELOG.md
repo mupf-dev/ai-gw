@@ -21,6 +21,19 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   (`region`, `deploymentType`, `model`, `meter`, `source`), optionaler periodischer Abgleich
   mit Warnung (`check_interval_secs`, Standard aus); Pflegehilfe `scripts/price-catalog-check.py`.
 
+- **Tool-Inventar und Tool-Richtlinien (AIGW-87):** Inventar der Tools, die Anwendungen in
+  Anfragen mitschicken (OpenAI Chat/Responses, Anthropic Messages): Name, Art, Herkunft
+  (`mcp__<server>__<tool>`, `<server>__<tool>`), Client, Organisation/Team/Key, Nutzung und
+  Aufrufe durch das Modell, BLAKE3-Hashes von Beschreibung und Schema (Inhalte nur bei
+  `payloadMode` `masked`/`full`), gepuffert geschrieben (`tools:`-Konfiguration, Migration
+  0007). Änderungen bekannter Tools → Audit, Ereignis `tool.changed`, optional automatische
+  Sperre (`tools.on_change: block`); Prompt-Injection-Prüfung der Beschreibungen
+  (`tool.suspicious`). Neue Ressource `ToolPolicy` (GitOps, Audit, Snapshot): `allow`,
+  `block-strip`, `block-reject`, `observe`, `require-approval` je Ebene, `locked`; Aufrufe
+  gesperrter Tools in Antworten werden wie Ausgabe-Ablehnungen gefiltert (JSON und Stream).
+  Admin-API `/tool-policies`, `/tools` (Freigeben/Sperren/Bestätigen), UI-Seite „Tools“,
+  Metriken `aigw_tool_policy_actions_total`, `aigw_tool_inventory_events_total`. Doku
+  `docs/konzept/16-tools.md`.
 - **Claude in Azure AI Foundry:** Anthropic-Anbieter mit `settings.auth: entraId`
   (`Authorization: Bearer` statt `x-api-key`, alle Entra-ID-Arten inkl. Managed Identity,
   gemeinsame Token-Quelle mit Azure OpenAI), Zugangsdaten-Alternativen

@@ -875,6 +875,130 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/tool-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_tool_policies"];
+        put?: never;
+        post: operations["create_tool_policy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/tool-policies/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_tool_policy"];
+        put: operations["put_tool_policy"];
+        post?: never;
+        delete: operations["delete_tool_policy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listet das Tool-Inventar. */
+        get: operations["list_tools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/tools/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Liest ein Tool mit Verlauf der Hashes und passenden Richtlinien. */
+        get: operations["get_tool"];
+        put?: never;
+        post?: never;
+        /**
+         * Entfernt einen Eintrag samt Verlauf aus dem Inventar (taucht bei erneuter Nutzung wieder
+         *     als neu auf).
+         */
+        delete: operations["delete_tool"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/tools/{id}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bestätigt eine geänderte Beschreibung bzw. ein geändertes Schema (setzt `changed` zurück). */
+        post: operations["acknowledge_tool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/tools/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Gibt ein Tool frei (Richtlinie `tools-allow-<ebene>[-<ziel>]`) und bestätigt eine
+         *     Änderung.
+         */
+        post: operations["approve_tool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/tools/{id}/block": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sperrt ein Tool (Richtlinie `tools-block-<ebene>[-<ziel>]`, Standard `block-strip`). */
+        post: operations["block_tool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/usage/budgets": {
         parameters: {
             query?: never;
@@ -1928,6 +2052,15 @@ export interface components {
             /** @description Hierhin navigieren (Logout beim IdP oder die Admin-UI). */
             redirectUrl: string;
         };
+        /** @description Passende Richtlinie. */
+        MatchingPolicy: {
+            /** @description Aktion. */
+            action: components["schemas"]["ToolAction"];
+            /** @description Name. */
+            name: string;
+            /** @description Ebene und Ziel. */
+            scope: components["schemas"]["Scope"];
+        };
         /**
          * @description Verbindungszustand eines Servers.
          * @enum {string}
@@ -2825,7 +2958,7 @@ export interface components {
          * @description Art einer Ressource (`kind` in YAML).
          * @enum {string}
          */
-        ResourceKind: "Organization" | "Team" | "User" | "ApiKey" | "ProviderCredential" | "Secret" | "ModelGroup" | "Deployment" | "Price" | "PluginBinding" | "McpServer" | "McpGrant";
+        ResourceKind: "Organization" | "Team" | "User" | "ApiKey" | "ProviderCredential" | "Secret" | "ModelGroup" | "Deployment" | "Price" | "PluginBinding" | "McpServer" | "McpGrant" | "ToolPolicy";
         /**
          * @description Rolle eines Nutzers (§15).
          * @enum {string}
@@ -3134,6 +3267,188 @@ export interface components {
             output?: components["schemas"]["Amount"] | null;
             reasoning?: components["schemas"]["Amount"] | null;
         };
+        /**
+         * @description Aktion einer Tool-Richtlinie.
+         * @enum {string}
+         */
+        ToolAction: "allow" | "block-strip" | "block-reject" | "observe" | "require-approval";
+        /** @description Ergebnis einer Entscheidung. */
+        ToolDecision: {
+            /** @description Geschriebene Richtlinie. */
+            policy: string;
+            /** @description Tool nach der Entscheidung. */
+            tool: components["schemas"]["ToolItem"];
+        };
+        /** @description Freigeben bzw. Sperren eines Tools. */
+        ToolDecisionInput: {
+            action?: components["schemas"]["ToolAction"] | null;
+            scope?: components["schemas"]["Scope"] | null;
+        };
+        /** @description Detail eines Tools. */
+        ToolDetail: {
+            /** @description Beschreibung (falls gespeichert). */
+            description?: string | null;
+            /** @description Verlauf (neueste zuerst, höchstens 50). */
+            history: components["schemas"]["ToolHistoryItem"][];
+            /** @description JSON-Schema der Parameter (falls gespeichert). */
+            parameters?: Record<string, never> | null;
+            /** @description Richtlinien, deren Muster auf das Tool passen (Name, Ebene, Aktion). */
+            policies: components["schemas"]["MatchingPolicy"][];
+            /** @description Tool. */
+            tool: components["schemas"]["ToolItem"];
+        };
+        /** @description Eintrag im Verlauf. */
+        ToolHistoryItem: {
+            /** @description Client. */
+            client?: string | null;
+            /** @description Beschreibung (falls gespeichert). */
+            description?: string | null;
+            /** @description Hash der Beschreibung. */
+            descriptionHash: string;
+            /** @description `discovered` oder `changed`. */
+            event: string;
+            /** @description Hash des Schemas. */
+            schemaHash: string;
+            /**
+             * Format: date-time
+             * @description Zeitpunkt.
+             */
+            seenAt: string;
+        };
+        /** @description Ein Tool im Inventar. */
+        ToolItem: {
+            /** @description API-Key (Name). */
+            apiKey?: string | null;
+            /**
+             * Format: int64
+             * @description Blockiert (entfernt, abgelehnt oder Aufruf unterbunden).
+             */
+            blocked: number;
+            /**
+             * Format: int64
+             * @description Tool-Aufrufe des Modells.
+             */
+            calls: number;
+            /** @description Beschreibung/Schema seit der letzten Bestätigung geändert. */
+            changed: boolean;
+            /**
+             * Format: date-time
+             * @description Zeitpunkt der letzten Änderung.
+             */
+            changedAt?: string | null;
+            /** @description Letzter Client (User-Agent bzw. Anwendungs-Header, gekürzt). */
+            client?: string | null;
+            /** @description Hash der Beschreibung (BLAKE3, 128 Bit, hex). */
+            descriptionHash: string;
+            /**
+             * Format: date-time
+             * @description Erste Sichtung.
+             */
+            firstSeen: string;
+            /** @description Herkunft ist ein MCP-Server des Gateways (`/mcp`, Ressource `McpServer`). */
+            gatewayMcp: boolean;
+            /** @description Beschreibung gespeichert (nur bei `payloadMode` `masked`/`full`). */
+            hasDescription: boolean;
+            /**
+             * Format: uuid
+             * @description ID.
+             */
+            id: string;
+            /** @description Art: `function`, `builtin`, `server-tool`. */
+            kind: string;
+            /**
+             * Format: date-time
+             * @description Letzte Sichtung.
+             */
+            lastSeen: string;
+            /** @description Tool-Name (wie vom Client geschickt). */
+            name: string;
+            /** @description Passende `observe`-Richtlinie. */
+            observedBy?: string | null;
+            /** @description Organisation (Name). */
+            organization?: string | null;
+            /**
+             * @description Herkunft: MCP-Server (aus `mcp__<server>__<tool>` bzw. `<server>__<tool>`) oder
+             *     `client`.
+             */
+            origin: string;
+            /** @description Entscheidende Richtlinie. */
+            policy?: string | null;
+            /**
+             * Format: int64
+             * @description Anfragen mit diesem Tool.
+             */
+            requests: number;
+            /** @description Hash des Schemas (BLAKE3, 128 Bit, hex). */
+            schemaHash: string;
+            /** @description Wirksamer Status. */
+            status: components["schemas"]["ToolStatus"];
+            /** @description Treffer des Prompt-Injection-Erkenners in der Beschreibung (leer = keine). */
+            suspicious: string[];
+            /** @description Team (Name). */
+            team?: string | null;
+        };
+        /** @description Seite des Inventars. */
+        ToolList: {
+            /** @description Einträge (nach Name sortiert). */
+            items: components["schemas"]["ToolItem"][];
+            /** @description Cursor der nächsten Seite. */
+            nextCursor?: string | null;
+        };
+        ToolPolicy: {
+            /**
+             * Format: uuid
+             * @description ID (UUIDv7).
+             */
+            id: string;
+            /** @description Metadaten. */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Spezifikation. */
+            spec: components["schemas"]["ToolPolicySpec"];
+        };
+        ToolPolicyInput: {
+            /** @description Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert). */
+            metadata: components["schemas"]["ObjectMeta"];
+            /** @description Spezifikation. */
+            spec: components["schemas"]["ToolPolicySpec"];
+        };
+        ToolPolicyList: {
+            /** @description Einträge (nach Name sortiert). */
+            items: components["schemas"]["ToolPolicy"][];
+            /** @description Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite. */
+            nextCursor?: string | null;
+        };
+        /** @description Richtlinie für Tools, die Anwendungen in Anfragen mitschicken (Ressource `ToolPolicy`). */
+        ToolPolicySpec: {
+            /** @description Aktion. */
+            action: components["schemas"]["ToolAction"];
+            /** @description Beschreibung (Anzeige). */
+            description?: string | null;
+            /** @description Aktiv? */
+            enabled?: boolean;
+            /** @description Gesperrt: eine passende Sperre (`block-*`) gilt auch gegen spezifischere `allow`. */
+            locked?: boolean;
+            /** @description Ebene und Ziel (`global` ohne Ziel). */
+            scope: components["schemas"]["Scope"];
+            /**
+             * @description Glob-Muster auf die Herkunft (MCP-Server-Name; vom Client definierte Tools heißen
+             *     `client`). Leer = jede Herkunft.
+             */
+            servers?: string[];
+            /**
+             * @description Glob-Muster auf den Tool-Namen (`*`, `?`; `!muster` = Ausschluss). Ein Muster passt auf
+             *     den vollen Namen (`mcp__github__create_issue`) oder den Namen ohne Server-Präfix
+             *     (`create_issue`). Leer = alle Tools.
+             */
+            tools?: string[];
+            unapproved?: components["schemas"]["UnapprovedAction"] | null;
+        };
+        /**
+         * @description Wirksamer Status eines Tools im Bereich seines Keys (Richtlinien auf Modellgruppen-Ebene
+         *     bleiben unberücksichtigt).
+         * @enum {string}
+         */
+        ToolStatus: "new" | "approved" | "blocked" | "pending";
         /** @description Eintrag einer Rangliste. */
         TopItem: {
             amount?: components["schemas"]["Amount"] | null;
@@ -3174,6 +3489,11 @@ export interface components {
             /** @description Einheit. */
             unit: components["schemas"]["Unit"];
         };
+        /**
+         * @description Behandlung nicht freigegebener Tools im Modus `require-approval`.
+         * @enum {string}
+         */
+        UnapprovedAction: "strip" | "reject";
         /**
          * @description Einheit einer Kennzahl.
          * @enum {string}
@@ -9423,6 +9743,729 @@ export interface operations {
             };
             /** @description If-Match fehlt (F38) */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_tool_policies: {
+        parameters: {
+            query?: {
+                /** @description Seitengröße (1–500, Standard 50). */
+                limit?: number;
+                /** @description Fortsetzung (`nextCursor` der vorigen Seite). */
+                cursor?: string;
+                /** @description Teilstring im Namen. */
+                q?: string;
+                /** @description Label-Selektor `k=v,k2`. */
+                label?: string;
+                /** @description Nur diese Ebene (`global`, `organization`, `team`, `api-key`, `model-group`). */
+                level?: string;
+                /** @description Nur dieses Ziel der Ebene (Name). */
+                target?: string;
+                /**
+                 * @description Nur diese Aktion (`allow`, `block-strip`, `block-reject`, `observe`,
+                 *     `require-approval`).
+                 */
+                action?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Seite */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPolicyList"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_tool_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolPolicyInput"];
+            };
+        };
+        responses: {
+            /** @description Angelegt */
+            201: {
+                headers: {
+                    /** @description Version */
+                    ETag?: string;
+                    /** @description Pfad */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPolicy"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Name bereits vergeben */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe oder Verweis */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_tool_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gefunden */
+            200: {
+                headers: {
+                    /** @description Version für If-Match */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPolicy"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    put_tool_policy: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolPolicyInput"];
+            };
+        };
+        responses: {
+            /** @description Geändert */
+            200: {
+                headers: {
+                    /** @description Neue Version */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPolicy"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Konflikt (z. B. bestehende Objekte über neuen Grenzen) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Eingabe oder Verweis */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_tool_policy: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag aus dem letzten Lesen oder `*` (Pflicht, F38; fehlt er: 428) */
+                "If-Match": string;
+            };
+            path: {
+                /** @description Name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gelöscht */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Wird noch verwendet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt (F38) */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_tools: {
+        parameters: {
+            query?: {
+                /** @description Seitengröße (1–500, Standard 50). */
+                limit?: number;
+                /** @description Fortsetzung (`nextCursor` der vorigen Seite). */
+                cursor?: string;
+                /** @description Teilstring im Tool-Namen. */
+                q?: string;
+                /** @description Herkunft (`client` oder MCP-Server). */
+                origin?: string;
+                /** @description Teilstring im Client. */
+                client?: string;
+                /** @description Art (`function`, `builtin`, `server-tool`). */
+                kind?: string;
+                /** @description Organisation (Name). */
+                organization?: string;
+                /** @description Team (Name). */
+                team?: string;
+                /** @description API-Key (Name). */
+                apiKey?: string;
+                /** @description Status: `new`, `approved`, `blocked`, `pending`, `changed`, `suspicious`. */
+                status?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Seite */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolList"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unbekannte Organisation, Team oder Key */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_tool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ID des Inventar-Eintrags */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gefunden */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolDetail"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_tool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ID des Inventar-Eintrags */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Entfernt */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    acknowledge_tool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ID des Inventar-Eintrags */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bestätigt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolItem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    approve_tool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ID des Inventar-Eintrags */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolDecisionInput"];
+            };
+        };
+        responses: {
+            /** @description Freigegeben */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolDecision"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Ebene */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    block_tool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ID des Inventar-Eintrags */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolDecisionInput"];
+            };
+        };
+        responses: {
+            /** @description Gesperrt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolDecision"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht gefunden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ungültige Ebene oder Aktion */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

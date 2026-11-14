@@ -31,6 +31,7 @@
     secrets: () => import('./routes/Secrets.svelte'),
     guardrails: () => import('./routes/Guardrails.svelte'),
     mcp: () => import('./routes/Mcp.svelte'),
+    tools: () => import('./routes/Tools.svelte'),
     prices: () => import('./routes/Prices.svelte'),
     teams: () => import('./routes/Teams.svelte'),
     'admin-keys': () => import('./routes/AdminKeys.svelte'),

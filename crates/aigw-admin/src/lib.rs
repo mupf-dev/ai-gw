@@ -53,6 +53,7 @@ pub mod read_only;
 pub mod resources;
 pub mod secrets;
 pub mod session;
+pub mod tools;
 pub mod ui;
 pub mod usage;
 pub use aigw_core::upstream;
@@ -307,6 +308,7 @@ pub fn router_with(state: AdminState) -> Router {
         .merge(price_suggestions::router())
         .merge(mcp::router())
         .merge(plugin_bindings::router())
+        .merge(tools::router())
         .merge(plugins::router())
         .merge(guardrail_profiles::router())
         .merge(admin_keys::router())

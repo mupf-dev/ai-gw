@@ -127,7 +127,11 @@ impl ToolPolicySpec {
         if self.unapproved.is_some() && self.action != ToolAction::RequireApproval {
             return Err("unapproved gibt es nur mit action: require-approval".into());
         }
-        if self.locked && !matches!(self.action, ToolAction::BlockStrip | ToolAction::BlockReject)
+        if self.locked
+            && !matches!(
+                self.action,
+                ToolAction::BlockStrip | ToolAction::BlockReject
+            )
         {
             return Err("locked gibt es nur mit action: block-strip oder block-reject".into());
         }
@@ -651,7 +655,13 @@ mod tests {
     use super::*;
     use crate::resource::ObjectMeta;
 
-    fn pol(name: &str, level: ScopeLevel, target: Option<&str>, tools: &[&str], action: ToolAction) -> ToolPolicy {
+    fn pol(
+        name: &str,
+        level: ScopeLevel,
+        target: Option<&str>,
+        tools: &[&str],
+        action: ToolAction,
+    ) -> ToolPolicy {
         Object {
             id: crate::resource::new_id(),
             metadata: ObjectMeta::named(name),
@@ -706,11 +716,41 @@ mod tests {
     #[test]
     fn precedence() {
         let ps = [
-            pol("g-block", ScopeLevel::Global, None, &["delete_*"], ToolAction::BlockStrip),
-            pol("k-allow", ScopeLevel::ApiKey, Some("k1"), &["delete_tmp"], ToolAction::Allow),
-            pol("t-reject", ScopeLevel::Team, Some("web"), &["shell"], ToolAction::BlockReject),
-            pol("t-allow", ScopeLevel::Team, Some("web"), &["shell"], ToolAction::Allow),
-            pol("other", ScopeLevel::Team, Some("ops"), &["*"], ToolAction::BlockReject),
+            pol(
+                "g-block",
+                ScopeLevel::Global,
+                None,
+                &["delete_*"],
+                ToolAction::BlockStrip,
+            ),
+            pol(
+                "k-allow",
+                ScopeLevel::ApiKey,
+                Some("k1"),
+                &["delete_tmp"],
+                ToolAction::Allow,
+            ),
+            pol(
+                "t-reject",
+                ScopeLevel::Team,
+                Some("web"),
+                &["shell"],
+                ToolAction::BlockReject,
+            ),
+            pol(
+                "t-allow",
+                ScopeLevel::Team,
+                Some("web"),
+                &["shell"],
+                ToolAction::Allow,
+            ),
+            pol(
+                "other",
+                ScopeLevel::Team,
+                Some("ops"),
+                &["*"],
+                ToolAction::BlockReject,
+            ),
         ];
         let idx = ToolPolicyIndex::new(ps.iter());
         let d = idx.decide(&CTX, "delete_repo");
@@ -727,15 +767,39 @@ mod tests {
 
     #[test]
     fn locked_and_approval_and_observe() {
-        let mut lock = pol("g-lock", ScopeLevel::Global, None, &["rm_*"], ToolAction::BlockReject);
+        let mut lock = pol(
+            "g-lock",
+            ScopeLevel::Global,
+            None,
+            &["rm_*"],
+            ToolAction::BlockReject,
+        );
         lock.spec.locked = true;
-        let mut appr = pol("o-appr", ScopeLevel::Organization, Some("acme"), &[], ToolAction::RequireApproval);
+        let mut appr = pol(
+            "o-appr",
+            ScopeLevel::Organization,
+            Some("acme"),
+            &[],
+            ToolAction::RequireApproval,
+        );
         appr.spec.unapproved = Some(UnapprovedAction::Reject);
         let ps = [
             lock,
-            pol("k-allow", ScopeLevel::ApiKey, Some("k1"), &["rm_*", "ok_*"], ToolAction::Allow),
+            pol(
+                "k-allow",
+                ScopeLevel::ApiKey,
+                Some("k1"),
+                &["rm_*", "ok_*"],
+                ToolAction::Allow,
+            ),
             appr,
-            pol("obs", ScopeLevel::Global, None, &["mcp__*", "!*secret*"], ToolAction::Observe),
+            pol(
+                "obs",
+                ScopeLevel::Global,
+                None,
+                &["mcp__*", "!*secret*"],
+                ToolAction::Observe,
+            ),
         ];
         let idx = ToolPolicyIndex::new(ps.iter());
         let d = idx.decide(&CTX, "rm_rf");
@@ -751,14 +815,26 @@ mod tests {
 
     #[test]
     fn servers_and_short_names() {
-        let mut p = pol("gh", ScopeLevel::Global, None, &["create_*"], ToolAction::BlockStrip);
+        let mut p = pol(
+            "gh",
+            ScopeLevel::Global,
+            None,
+            &["create_*"],
+            ToolAction::BlockStrip,
+        );
         p.spec.servers = vec!["github".into()];
         let mut c = pol("cl", ScopeLevel::Global, None, &[], ToolAction::Observe);
         c.spec.servers = vec![CLIENT_ORIGIN.into()];
         let idx = ToolPolicyIndex::new([&p, &c]);
-        assert_eq!(idx.decide(&CTX, "mcp__github__create_issue").effect, Effect::Strip);
+        assert_eq!(
+            idx.decide(&CTX, "mcp__github__create_issue").effect,
+            Effect::Strip
+        );
         assert_eq!(idx.decide(&CTX, "github__create_pr").effect, Effect::Strip);
-        assert_eq!(idx.decide(&CTX, "mcp__gitlab__create_issue").effect, Effect::Allow);
+        assert_eq!(
+            idx.decide(&CTX, "mcp__gitlab__create_issue").effect,
+            Effect::Allow
+        );
         assert_eq!(idx.decide(&CTX, "create_x").effect, Effect::Allow);
         assert!(idx.decide(&CTX, "create_x").observed.is_some());
     }

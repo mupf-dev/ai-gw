@@ -22,9 +22,7 @@
 use std::collections::{HashMap, HashSet};
 
 use aigw_core::resource::{Id, Object, ObjectMeta, OrganizationSpec, Scope, ScopeLevel, TeamSpec};
-use aigw_core::tools::{
-    Effect, Reason, ToolAction, ToolCtx, ToolPolicyIndex, ToolPolicySpec,
-};
+use aigw_core::tools::{Effect, Reason, ToolAction, ToolCtx, ToolPolicyIndex, ToolPolicySpec};
 use aigw_store::ListFilter;
 use aigw_store::tools::{ToolHistoryRow, ToolQuery, ToolRow, ToolVisibility};
 use axum::Json;
@@ -442,7 +440,9 @@ impl Directory {
             teams: self
                 .teams
                 .iter()
-                .filter(|(_, (t, o))| p.can(Permission::Read, &Target::in_team(o.clone(), t.clone())))
+                .filter(|(_, (t, o))| {
+                    p.can(Permission::Read, &Target::in_team(o.clone(), t.clone()))
+                })
                 .map(|(id, _)| *id)
                 .collect(),
             teamless_orgs: self
@@ -454,7 +454,11 @@ impl Directory {
         })
     }
 
-    fn id_by<'a>(map: impl Iterator<Item = (&'a Id, &'a str)>, name: &str, what: &str) -> Result<Id, Problem> {
+    fn id_by<'a>(
+        map: impl Iterator<Item = (&'a Id, &'a str)>,
+        name: &str,
+        what: &str,
+    ) -> Result<Id, Problem> {
         let mut map = map;
         map.find(|(_, n)| *n == name)
             .map(|(id, _)| *id)
@@ -463,7 +467,10 @@ impl Directory {
 
     fn item(&self, r: &ToolRow) -> ToolItem {
         let organization = r.organization_id.and_then(|i| self.orgs.get(&i)).cloned();
-        let team = r.team_id.and_then(|i| self.teams.get(&i)).map(|(t, _)| t.clone());
+        let team = r
+            .team_id
+            .and_then(|i| self.teams.get(&i))
+            .map(|(t, _)| t.clone());
         let api_key = r.api_key_id.and_then(|i| self.keys.get(&i)).cloned();
         let ctx = ToolCtx {
             organization: organization.as_deref(),
@@ -479,7 +486,10 @@ impl Directory {
             _ => ToolStatus::Blocked,
         };
         let gateway_mcp = self.mcp_servers.contains(&r.origin)
-            || self.mcp_servers.iter().any(|s| r.name.contains(&format!("__{s}__")));
+            || self
+                .mcp_servers
+                .iter()
+                .any(|s| r.name.contains(&format!("__{s}__")));
         ToolItem {
             id: r.id,
             name: r.name.clone(),
@@ -511,16 +521,11 @@ impl Directory {
         self.policies
             .iter()
             .filter(|p| {
-                let one = ToolPolicyIndex::new([*p].into_iter().map(|p| {
-                    // Nur Muster prüfen: Ebene neutralisieren.
-                    p
-                }));
+                // Nur die Muster prüfen: Ebene neutralisieren.
                 let mut probe = (*p).clone();
                 probe.spec.scope = Scope::global();
                 probe.spec.enabled = true;
-                drop(one);
-                let idx = ToolPolicyIndex::new([&probe]);
-                let v = idx.decide(&ToolCtx::default(), &item.name);
+                let v = ToolPolicyIndex::new([&probe]).decide(&ToolCtx::default(), &item.name);
                 v.policy.is_some() || v.observed.is_some()
             })
             .map(|p| MatchingPolicy {
@@ -764,7 +769,11 @@ async fn decide(
     } else {
         match input.action.unwrap_or(ToolAction::BlockStrip) {
             a @ (ToolAction::BlockStrip | ToolAction::BlockReject) => a,
-            _ => return Err(Problem::invalid("action: `block-strip` oder `block-reject`")),
+            _ => {
+                return Err(Problem::invalid(
+                    "action: `block-strip` oder `block-reject`",
+                ));
+            }
         }
     };
     let policy = {
@@ -902,10 +911,16 @@ pub(crate) fn router() -> axum::Router<AdminState> {
                 .delete(delete_tool_policy),
         )
         .route("/admin/api/v1/tools", get(list_tools))
-        .route("/admin/api/v1/tools/{id}", get(get_tool).delete(delete_tool))
+        .route(
+            "/admin/api/v1/tools/{id}",
+            get(get_tool).delete(delete_tool),
+        )
         .route("/admin/api/v1/tools/{id}/approve", post(approve_tool))
         .route("/admin/api/v1/tools/{id}/block", post(block_tool))
-        .route("/admin/api/v1/tools/{id}/acknowledge", post(acknowledge_tool))
+        .route(
+            "/admin/api/v1/tools/{id}/acknowledge",
+            post(acknowledge_tool),
+        )
 }
 
 #[cfg(test)]

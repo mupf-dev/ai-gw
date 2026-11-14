@@ -31,7 +31,6 @@ use aigw_core::ir::{
     ToolChoice, ToolKind,
 };
 use aigw_core::observe::PayloadMode;
-use aigw_core::resource::Id;
 use aigw_core::snapshot::Snapshot;
 use aigw_core::tools::{
     CLIENT_ORIGIN, Effect, Reason, ToolBatch, ToolCtx, ToolDefinition, ToolEvent,
@@ -369,7 +368,7 @@ impl ToolInventory {
         &self,
         key: ToolKey,
         tv: &ToolView<'_>,
-        client: Option<&Box<str>>,
+        client: Option<&str>,
         now: i64,
         blocked: bool,
         mode: PayloadMode,
@@ -393,10 +392,10 @@ impl ToolInventory {
             a.requests += 1;
             a.blocked += u64::from(blocked);
             a.last = now;
-            if let Some(c) = client {
-                if a.client.as_deref() != Some(&**c) {
-                    a.client = Some(c.clone());
-                }
+            if let Some(c) = client
+                && a.client.as_deref() != Some(c)
+            {
+                a.client = Some(c.into());
             }
             if (a.dh, a.sh) != (dh, sh) {
                 a.dh = dh;
@@ -418,7 +417,7 @@ impl ToolInventory {
             Agg {
                 kind: tv.kind,
                 origin,
-                client: client.cloned(),
+                client: client.map(Into::into),
                 first: now,
                 last: now,
                 requests: 1,
@@ -646,6 +645,8 @@ pub(crate) fn begin(
     let mut rejected: Vec<(String, Option<Arc<str>>)> = Vec::new();
     let mut strip: Vec<bool> = Vec::with_capacity(req.tools.len());
     let now = now_ms();
+    let mut allowed: HashSet<Box<str>> = HashSet::new();
+    let mut denied: HashSet<Box<str>> = HashSet::new();
     let client = g.inventory.as_ref().and_then(|i| i.client(headers));
     for t in &req.tools {
         let tv = view(t);
@@ -674,9 +675,9 @@ pub(crate) fn begin(
             None => Effect::Allow,
         };
         if effect == Effect::Allow {
-            g.allowed.insert(tv.name.as_ref().into());
+            allowed.insert(tv.name.as_ref().into());
         } else {
-            g.denied.insert(tv.name.as_ref().into());
+            denied.insert(tv.name.as_ref().into());
         }
         strip.push(effect == Effect::Strip);
         if let Some(inv) = &g.inventory {
@@ -684,9 +685,18 @@ pub(crate) fn begin(
                 name: tv.name.as_ref().into(),
                 ..g.base.clone()
             };
-            inv.observe(key, &tv, client.as_ref(), now, effect != Effect::Allow, mode);
+            inv.observe(
+                key,
+                &tv,
+                client.as_deref(),
+                now,
+                effect != Effect::Allow,
+                mode,
+            );
         }
     }
+    g.allowed = allowed;
+    g.denied = denied;
     if !rejected.is_empty() {
         g.metrics.rejected.fetch_add(1, Ordering::Relaxed);
         let names: Vec<&str> = rejected.iter().map(|(n, _)| n.as_str()).collect();
@@ -709,14 +719,25 @@ pub(crate) fn begin(
     }
     if strip.iter().any(|s| *s) {
         let n = strip.iter().filter(|s| **s).count();
-        g.metrics
-            .stripped
-            .fetch_add(n as u64, Ordering::Relaxed);
+        g.metrics.stripped.fetch_add(n as u64, Ordering::Relaxed);
         let mut it = strip.iter();
         req.tools.retain(|_| !it.next().copied().unwrap_or(false));
         adjust_tool_choice(req, &g.denied);
     }
     Ok(Some(g))
+}
+
+/// Wie der Pipeline-Schritt (Richtlinien und Inventar auf die Tools der Anfrage), ohne
+/// Antwortprüfung – für Benchmarks und Tests. `true`, wenn die Anfrage Tools hatte.
+pub fn apply_request(
+    inventory: &Arc<ToolInventory>,
+    auth: &AuthContext,
+    model_group: &str,
+    headers: &HeaderMap,
+    req: &mut ChatRequest,
+    mode: PayloadMode,
+) -> Result<bool, ApiError> {
+    begin(inventory, auth, model_group, headers, req, mode, "").map(|g| g.is_some())
 }
 
 /// `tool_choice` nach dem Entfernen von Tools: ohne Tools entfallen `tool_choice` und
@@ -867,7 +888,9 @@ mod tests {
             kind: ToolKind::Function(FunctionTool {
                 name: name.into(),
                 description: Some(desc.into()),
-                parameters: Some(json!({"type": "object", "properties": {"q": {"type": "string"}}})),
+                parameters: Some(
+                    json!({"type": "object", "properties": {"q": {"type": "string"}}}),
+                ),
                 strict: None,
                 extra: Default::default(),
             }),
@@ -881,8 +904,14 @@ mod tests {
         let a = json!({"b": 1, "a": [true, null, "x"]});
         let b = json!({"a": [true, null, "x"], "b": 1});
         assert_eq!(hash_json(Some(&a)), hash_json(Some(&b)));
-        assert_ne!(hash_json(Some(&a)), hash_json(Some(&json!({"b": 2, "a": [true, null, "x"]}))));
-        assert_ne!(hash_json(Some(&json!("ab"))), hash_json(Some(&json!(["a", "b"]))));
+        assert_ne!(
+            hash_json(Some(&a)),
+            hash_json(Some(&json!({"b": 2, "a": [true, null, "x"]})))
+        );
+        assert_ne!(
+            hash_json(Some(&json!("ab"))),
+            hash_json(Some(&json!(["a", "b"])))
+        );
         assert_eq!(hex(&hash_str("x")).len(), 32);
         assert_eq!(parse_hex(&hex(&hash_str("x"))), Some(hash_str("x")));
     }
@@ -898,7 +927,10 @@ mod tests {
             extra: Default::default(),
         };
         let v = view(&t);
-        assert_eq!((v.name.as_ref(), v.kind), ("web_search", ToolKindName::ServerTool));
+        assert_eq!(
+            (v.name.as_ref(), v.kind),
+            ("web_search", ToolKindName::ServerTool)
+        );
         let t = Tool {
             kind: ToolKind::Opaque {
                 format: aigw_core::wire::WireFormat::OpenAiResponses,
@@ -908,7 +940,10 @@ mod tests {
             extra: Default::default(),
         };
         let v = view(&t);
-        assert_eq!((v.name.as_ref(), v.kind), ("code_interpreter", ToolKindName::Builtin));
+        assert_eq!(
+            (v.name.as_ref(), v.kind),
+            ("code_interpreter", ToolKindName::Builtin)
+        );
     }
 
     #[test]
@@ -940,7 +975,12 @@ mod tests {
             let known = batch
                 .items
                 .iter()
-                .map(|i| (i.key.clone(), (i.description_hash.clone(), i.schema_hash.clone())))
+                .map(|i| {
+                    (
+                        i.key.clone(),
+                        (i.description_hash.clone(), i.schema_hash.clone()),
+                    )
+                })
                 .collect();
             self.0.lock().unwrap().push(batch);
             Box::pin(async move {
@@ -974,11 +1014,13 @@ mod tests {
                 choices: vec![aigw_core::ir::Choice {
                     index: 0,
                     message: aigw_core::ir::Message {
-                        content: Content::Parts(vec![aigw_core::ir::Part::new(PartKind::ToolCall {
-                            id: "1".into(),
-                            name: "calc".into(),
-                            arguments: "{}".into(),
-                        })]),
+                        content: Content::Parts(vec![aigw_core::ir::Part::new(
+                            PartKind::ToolCall {
+                                id: "1".into(),
+                                name: "calc".into(),
+                                arguments: "{}".into(),
+                            },
+                        )]),
                         ..aigw_core::ir::Message::text(aigw_core::ir::Role::Assistant, "")
                     },
                     stop_reason: None,
@@ -995,14 +1037,20 @@ mod tests {
             assert_eq!(batches.len(), 1);
             let items = &batches[0].items;
             assert_eq!(items.len(), 2);
-            let gh = items.iter().find(|i| &*i.key.name == "mcp__gh__search").unwrap();
+            let gh = items
+                .iter()
+                .find(|i| &*i.key.name == "mcp__gh__search")
+                .unwrap();
             assert_eq!((gh.requests, gh.calls), (3, 0));
             assert_eq!(gh.origin, "gh");
             assert_eq!(gh.client.as_deref(), Some("claude-cli/1.0"));
             // payloadMode off: Beschreibung nicht speichern, aber geprüft.
             assert_eq!(gh.definition.as_ref().unwrap().description, None);
             let calc = items.iter().find(|i| &*i.key.name == "calc").unwrap();
-            assert_eq!((calc.requests, calc.calls, calc.origin.as_str()), (3, 3, "client"));
+            assert_eq!(
+                (calc.requests, calc.calls, calc.origin.as_str()),
+                (3, 3, "client")
+            );
         }
         // Zweiter Durchlauf: Hashes bekannt → keine Definition mehr.
         let mut req = ChatRequest {

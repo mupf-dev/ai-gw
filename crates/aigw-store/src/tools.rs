@@ -16,8 +16,8 @@ use std::collections::HashMap;
 
 use aigw_core::resource::{Id, ObjectMeta, Scope, ScopeLevel, new_id};
 use aigw_core::tools::{
-    BoxFuture, ToolAction, ToolBatch, ToolChangeAction, ToolEvent, ToolEventKind,
-    ToolFlushResult, ToolInventorySink, ToolKey, ToolObservation, ToolPolicySpec,
+    BoxFuture, ToolAction, ToolBatch, ToolChangeAction, ToolEvent, ToolEventKind, ToolFlushResult,
+    ToolInventorySink, ToolKey, ToolObservation, ToolPolicySpec,
 };
 
 use crate::db::{DbRow, Q, Val};
@@ -243,8 +243,16 @@ impl Store {
             match existing {
                 None => {
                     let id = new_id();
-                    insert(&mut tx, id, &sk, &item, desc.clone(), params.clone(), suspicious)
-                        .await?;
+                    insert(
+                        &mut tx,
+                        id,
+                        &sk,
+                        &item,
+                        desc.clone(),
+                        params.clone(),
+                        suspicious,
+                    )
+                    .await?;
                     history(&mut tx, id, now, "discovered", &item, desc, params).await?;
                     push_events(&mut out, ToolEventKind::Discovered, id, &item, &signals);
                 }
@@ -372,14 +380,18 @@ impl Store {
         &self,
         k: &ToolKey,
     ) -> Result<(Option<String>, Option<String>, Option<String>), StoreError> {
-        async fn name(store: &Store, table: &str, id: Option<Id>) -> Result<Option<String>, StoreError> {
+        async fn name(
+            store: &Store,
+            table: &str,
+            id: Option<Id>,
+        ) -> Result<Option<String>, StoreError> {
             let Some(id) = id else { return Ok(None) };
-            Ok(Q::new(format!("SELECT name FROM {table} WHERE id = $1"))
+            Q::new(format!("SELECT name FROM {table} WHERE id = $1"))
                 .bind(Val::uuid(id))
                 .fetch_optional(&store.pool)
                 .await?
                 .map(|r| r.text("name"))
-                .transpose()?)
+                .transpose()
         }
         Ok((
             name(self, "organization", k.organization).await?,
@@ -438,7 +450,10 @@ impl Store {
         }
         if let Some(c) = &f.client {
             let p = q.arg(Val::text(c.clone()));
-            conds.push(format!("t.client IS NOT NULL AND {}", contains(backend, "t.client", &p)));
+            conds.push(format!(
+                "t.client IS NOT NULL AND {}",
+                contains(backend, "t.client", &p)
+            ));
         }
         if let Some(k) = &f.kind {
             conds.push(format!("t.kind = {}", q.arg(Val::text(k.clone()))));
@@ -470,7 +485,9 @@ impl Store {
             }
             if !v.teamless_orgs.is_empty() {
                 let l = q.list(v.teamless_orgs.iter().map(|i| Val::uuid(*i)));
-                ors.push(format!("(t.team_id IS NULL AND t.organization_id IN ({l}))"));
+                ors.push(format!(
+                    "(t.team_id IS NULL AND t.organization_id IN ({l}))"
+                ));
             }
             conds.push(if ors.is_empty() {
                 "1 = 0".to_owned()
@@ -484,7 +501,8 @@ impl Store {
         } else {
             format!("WHERE {}", conds.join(" AND "))
         };
-        q.sql = format!("SELECT t.* FROM tool_inventory t {filter} ORDER BY t.name, t.id LIMIT {lim}");
+        q.sql =
+            format!("SELECT t.* FROM tool_inventory t {filter} ORDER BY t.name, t.id LIMIT {lim}");
         q.fetch_all(&self.pool)
             .await?
             .iter()
@@ -504,7 +522,11 @@ impl Store {
     }
 
     /// Verlauf eines Eintrags (neueste zuerst).
-    pub async fn tool_history(&self, id: Id, limit: u32) -> Result<Vec<ToolHistoryRow>, StoreError> {
+    pub async fn tool_history(
+        &self,
+        id: Id,
+        limit: u32,
+    ) -> Result<Vec<ToolHistoryRow>, StoreError> {
         Q::new(
             "SELECT * FROM tool_inventory_history WHERE tool_id = $1 \
              ORDER BY seen_at DESC, id DESC LIMIT $2",
@@ -588,8 +610,12 @@ impl Store {
             Ok(mut p) if p.spec.tools.iter().any(|t| t == tool) => {
                 p.spec.tools.retain(|t| t != tool);
                 if p.spec.tools.is_empty() {
-                    self.delete(actor, aigw_core::resource::ResourceKind::ToolPolicy, &drop_name)
-                        .await?;
+                    self.delete(
+                        actor,
+                        aigw_core::resource::ResourceKind::ToolPolicy,
+                        &drop_name,
+                    )
+                    .await?;
                 } else {
                     self.update(actor, p.metadata, p.spec).await?;
                 }
