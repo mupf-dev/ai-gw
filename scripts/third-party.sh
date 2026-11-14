@@ -61,8 +61,12 @@ print("## Eingebettete Daten\n")
 print("| Datei | Herkunft | Lizenz |")
 print("|---|---|---|")
 print("| `crates/aigw-tokenizer/data/cl100k_base.bin`, `o200k_base.bin` | BPE-Rangtabellen aus den "
-      "von OpenAI veröffentlichten `*.tiktoken`-Dateien (Projekt tiktoken), umkodiert | MIT "
-      "(`LICENSES/MIT.txt`; **vor einem öffentlichen Release rechtlich bestätigen**) |")
+      "von OpenAI veröffentlichten `*.tiktoken`-Dateien (openaipublic.blob.core.windows.net/encodings, "
+      "referenziert vom Projekt tiktoken), umkodiert. **Nur im Binary bei Cargo-Feature "
+      "`embedded-tokenizers`** (Standard, Dockerfile/offizielle Images); ohne das Feature lädt der "
+      "Betreiber die Dateien selbst (`tokenizer.ranks_dir`, AIGW-95) | MIT laut Repo tiktoken "
+      "(`LICENSES/MIT.txt`); die Dateien selbst tragen keine Lizenzangabe – **vor einem öffentlichen "
+      "Release rechtlich bestätigen** (docs/konzept/99-offene-fragen.md) |")
 print("| `crates/aigw-billing/catalog/prices.yaml` | Eigene, gepflegte Datei (AIGW-85): Listenpreise "
       "(Fakten) aus den öffentlichen Preisseiten von OpenAI, Anthropic, Mistral und Google (Gemini API); "
       "Werte abgeglichen mit LiteLLM `model_prices_and_context_window.json` (BerriAI, MIT) – keine "

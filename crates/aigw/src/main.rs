@@ -25,6 +25,7 @@ mod observe;
 mod runtime;
 mod serve;
 mod server;
+mod tokenizer;
 
 use std::io::{IsTerminal as _, Write as _};
 use std::path::PathBuf;
@@ -175,6 +176,8 @@ fn serve(
         .enable_all()
         .build()?;
     runtime.block_on(async move {
+        // Rangtabellen o200k/cl100k (Build ohne embedded-tokenizers, AIGW-95).
+        tokenizer::init(&config).await?;
         let runtime_state = runtime::Runtime::start(&config, traces).await?;
         let listeners = server::Listeners::bind(&config.server).await?;
         let (data, control) = listeners.local_addrs()?;

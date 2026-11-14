@@ -41,6 +41,8 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# Tests rechnen mit exakter o200k/cl100k-Zählung (eingebettete Tabellen, AIGW-95).
+aigw-tokenizer = { workspace = true, features = ["embedded-tokenizers"] }
 # Tests gegen postgres-sync (Migration der Wegwerf-Datenbank).
 aigw-store.workspace = true
 aigw-webhook.workspace = true

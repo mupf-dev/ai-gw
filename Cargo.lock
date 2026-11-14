@@ -31,11 +31,13 @@ dependencies = [
  "aigw-plugins",
  "aigw-proxy",
  "aigw-store",
+ "aigw-tokenizer",
  "aigw-webhook",
  "axum",
  "base64 0.22.1",
  "bytes",
  "clap",
+ "http",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -345,6 +347,8 @@ dependencies = [
 name = "aigw-tokenizer"
 version = "0.1.0"
 dependencies = [
+ "aws-lc-rs",
+ "base64 0.22.1",
  "divan",
  "regex",
  "regex-syntax",

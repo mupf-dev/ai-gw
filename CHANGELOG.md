@@ -9,6 +9,16 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Hinzugefügt
 
+- **tiktoken-Rangtabellen optional (AIGW-95):** Cargo-Feature `embedded-tokenizers`
+  (Crates `aigw`, `aigw-tokenizer`; Standard an – Standard-Builds und Images unverändert).
+  Ohne das Feature enthält das Binary die Tabellen `o200k_base`/`cl100k_base` nicht; neuer
+  Konfig-Abschnitt `tokenizer` mit `ranks_dir` (Originaldateien `*.tiktoken`, SHA-256-Prüfung
+  gegen eingebaute Summen) und `download_ranks` (einmaliger Download von
+  `openaipublic.blob.core.windows.net` über den gemeinsamen Client mit SSRF-Regeln, Standard
+  aus). Fehlen die Tabellen, gilt die Heuristik mit Startwarnung. `scripts/check.sh` baut und
+  testet auch die Variante ohne Feature. Lizenzfrage der Tabellen weiter offen
+  (docs/konzept/99-offene-fragen.md, THIRD-PARTY.md).
+
 - **content-safety mit Entra ID (AIGW-89):** `provider: azure` mit `auth: entraId` und
   `credential` = ProviderCredential mit `spec.entra` (Managed Identity, Workload Identity,
   Client Credentials mit Secret/Zertifikat) – `Authorization: Bearer` statt

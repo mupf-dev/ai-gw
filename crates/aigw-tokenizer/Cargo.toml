@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 [package]
 name = "aigw-tokenizer"
-description = "Token-Zählung von ai-gw: eigene BPE für o200k_base/cl100k_base (eingebettete Tabellen), HF-tokenizer.json (BPE/Unigram) und Heuristik mit Sprachfaktor"
+description = "Token-Zählung von ai-gw: eigene BPE für o200k_base/cl100k_base (Tabellen eingebettet oder zur Laufzeit geladen), HF-tokenizer.json (BPE/Unigram) und Heuristik mit Sprachfaktor"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,10 +10,21 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 publish.workspace = true
-# Rangtabellen von OpenAI (MIT, siehe data/*.license) liegen im Crate.
+# Rangtabellen von OpenAI (siehe data/*.license und THIRD-PARTY.md) liegen im Crate; in das
+# Binary gehen sie nur mit dem Feature `embedded-tokenizers` ein.
 include = ["src/**", "data/**", "Cargo.toml"]
 
+[features]
+default = ["embedded-tokenizers"]
+# Rangtabellen o200k_base/cl100k_base in das Binary einbetten (AIGW-95). Ohne dieses Feature
+# lädt der Betreiber die `*.tiktoken`-Dateien zur Laufzeit (`tokenizer.ranks_dir`), sonst gilt
+# die Heuristik.
+embedded-tokenizers = []
+
 [dependencies]
+# SHA-256 der zur Laufzeit geladenen `*.tiktoken` (gleiche Krypto-Bibliothek wie TLS/Keyring).
+aws-lc-rs.workspace = true
+base64.workspace = true
 # Generischer Split-Pre-Tokenizer aus tokenizer.json (Llama 3, Tekken …) braucht die
 # Unicode-Kategorien (\p{L}, \p{Lu} …); regex-syntax liefert dieselben Tabellen für die
 # handgeschriebenen o200k/cl100k-Pre-Tokenizer (gleiche Unicode-Version wie tiktoken/fancy-regex).
@@ -28,6 +39,7 @@ divan.workspace = true
 [[bench]]
 name = "count"
 harness = false
+required-features = ["embedded-tokenizers"]
 
 [lints]
 workspace = true

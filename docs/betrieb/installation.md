@@ -31,7 +31,9 @@ Stufen ([Dockerfile](../../Dockerfile)):
 2. **build** – `rust:1-slim-bookworm`, Toolchain aus `rust-toolchain.toml`,
    `cargo build --release --locked -p aigw` mit `AIGW_UI_DIST` (UI eingebettet). Build-Cache
    für Registry und `target/` je Zielplattform. `--build-arg CARGO_FEATURES=--no-default-features`
-   baut ohne mimalloc (System-Allokator).
+   baut ohne mimalloc (System-Allokator) **und ohne eingebettete tiktoken-Rangtabellen**;
+   nur ohne Tabellen: `--build-arg CARGO_FEATURES="--no-default-features --features mimalloc"`
+   (dann `tokenizer.ranks_dir`, siehe [konfiguration.md](konfiguration.md), AIGW-95).
 3. **Laufzeit** – `gcr.io/distroless/cc-debian12:nonroot`: glibc, libgcc, CA-Zertifikate,
    **keine Shell, kein Paketmanager**, Benutzer `65532:65532`.
 
@@ -46,7 +48,7 @@ Eigenschaften des Images:
 | Healthcheck | `aigw healthcheck` → `GET /readyz` der Steuerebene (Adresse aus der Konfiguration), Intervall 15 s |
 | Root-FS | schreibgeschützt möglich (`--read-only`); geschrieben wird nur unter `/data` |
 | Labels | OCI (`org.opencontainers.image.*`), Lizenz `AGPL-3.0-or-later`, Version/Revision per Build-Arg |
-| Größe | ≈ 26 MB komprimiert (Registry/Download), ≈ 65 MB entpackt (linux/amd64, Stand 0.1.0; arm64 siehe unten): Binary `aigw` 39 MB (UI, Tokenizer-Tabellen, Migrationen eingebettet) + distroless/cc ≈ 25 MB. `docker images` zeigt mit containerd-Image-Store ≈ 93 MB, weil dort komprimierte und entpackte Schichten zusammen zählen |
+| Größe | ≈ 26 MB komprimiert (Registry/Download), ≈ 65 MB entpackt (linux/amd64, Stand 0.1.0; arm64 siehe unten): Binary `aigw` 39 MB (UI, Tokenizer-Tabellen [Feature `embedded-tokenizers`, Standard], Migrationen eingebettet) + distroless/cc ≈ 25 MB. `docker images` zeigt mit containerd-Image-Store ≈ 93 MB, weil dort komprimierte und entpackte Schichten zusammen zählen |
 
 ### Mehrere Architekturen (amd64 + arm64)
 

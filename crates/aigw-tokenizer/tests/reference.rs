@@ -18,6 +18,8 @@
     missing_docs
 )]
 
+mod common;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -48,6 +50,7 @@ fn ids(v: &Value) -> Vec<u32> {
 
 #[test]
 fn tiktoken_reference_ids() {
+    common::ensure_tables();
     let rows = rows("tiktoken.jsonl");
     assert!(rows.len() > 400);
     for enc in Encoding::ALL {
@@ -63,6 +66,7 @@ fn tiktoken_reference_ids() {
 
 #[test]
 fn long_pieces_use_heap_path_correctly() {
+    common::ensure_tables();
     // Lange Stücke ohne Leerzeichen (CJK, Wiederholungen) laufen über den Heap-Pfad; die
     // Zählung muss mit der Summe kürzerer Referenzen konsistent und plausibel sein.
     let bpe = Encoding::O200kBase.load().unwrap();
@@ -131,6 +135,7 @@ fn hf_real_tokenizers() {
 
 #[test]
 fn heuristic_close_to_bpe_for_prose_and_code() {
+    common::ensure_tables();
     // Die Heuristik `generic` liegt für Prosa (EN/DE) und Code nahe an o200k_base.
     let samples = [
         "The quick brown fox jumps over the lazy dog. It was a sunny day and everyone was \

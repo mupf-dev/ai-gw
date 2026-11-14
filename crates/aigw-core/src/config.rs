@@ -51,6 +51,8 @@ pub struct Config {
     pub admin: AdminConfig,
     /// Limits je Key/Team/Organisation/Modellgruppe (AIGW-30).
     pub limits: LimitsConfig,
+    /// BPE-Rangtabellen von OpenAI zur Laufzeit (Build ohne `embedded-tokenizers`, AIGW-95).
+    pub tokenizer: TokenizerConfig,
     /// Kosten und Budgets (AIGW-31).
     pub billing: BillingConfig,
     /// Ereignis-Webhooks (Budget-Warnungen usw., AIGW-61).
@@ -559,6 +561,35 @@ impl Default for LimitsConfig {
             response_headers: true,
             tokenizer_dir: None,
         }
+    }
+}
+
+/// Rangtabellen der OpenAI-Kodierungen `o200k_base`/`cl100k_base` (AIGW-95,
+/// `docs/konzept/11-limits-und-budgets.md` §9).
+///
+/// Nur wirksam in einem Build **ohne** Cargo-Feature `embedded-tokenizers` (Standard-Builds
+/// enthalten die Tabellen). Fehlen die Tabellen, schätzt das Gateway Tokens mit der Heuristik
+/// (Warnung beim Start).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TokenizerConfig {
+    /// Verzeichnis mit `cl100k_base.tiktoken` und `o200k_base.tiktoken` (Dateinamen und
+    /// Inhalt wie von tiktoken geladen; SHA-256 wird gegen eingebaute Prüfsummen geprüft).
+    pub ranks_dir: Option<String>,
+    /// Fehlende Dateien einmalig von der offiziellen Quelle
+    /// (`https://openaipublic.blob.core.windows.net/encodings/`) laden und in `ranks_dir`
+    /// ablegen. Ausgehend über den gemeinsamen Client mit den SSRF-Regeln aus
+    /// `admin.allow_*_upstreams`. Standard `false` (kein Download).
+    pub download_ranks: bool,
+}
+
+impl TokenizerConfig {
+    /// Prüft die Kombination der Felder.
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        if self.download_ranks && self.ranks_dir.as_deref().is_none_or(str::is_empty) {
+            return Err("tokenizer.download_ranks braucht tokenizer.ranks_dir".into());
+        }
+        Ok(())
     }
 }
 
@@ -1744,6 +1775,26 @@ counters:
         assert!(!cfg.observe.rollups);
         let r = &cfg.observe.jsonl.rotate;
         assert!(r.daily && r.gzip && r.keep == 7 && r.max_size_mb == 64 && r.enabled());
+    }
+
+    #[test]
+    fn tokenizer_section() {
+        let cfg = Config::from_yaml_with_env(
+            "tokenizer:\n  download_ranks: true\n",
+            env(&[("AIGW_TOKENIZER__RANKS_DIR", "/var/lib/aigw/tiktoken")]),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.tokenizer.ranks_dir.as_deref(),
+            Some("/var/lib/aigw/tiktoken")
+        );
+        assert!(cfg.tokenizer.download_ranks);
+        cfg.tokenizer.validate().unwrap();
+        let only_download = TokenizerConfig {
+            ranks_dir: None,
+            download_ranks: true,
+        };
+        assert!(only_download.validate().is_err());
     }
 
     #[test]

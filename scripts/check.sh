@@ -139,6 +139,13 @@ fi
 step "cargo test${AIGW_TEST_POSTGRES_URL:+ (inkl. Postgres)}${AIGW_TEST_PGVECTOR_URL:+ (inkl. pgvector)}${AIGW_TEST_REDIS_URL:+ (inkl. Redis)}${AIGW_TEST_REDIS_STACK_URL:+ (inkl. Redis Stack)}${AIGW_TEST_OTELCOL_URL:+ (inkl. OTel-Collector)}"
 cargo test --workspace "${LOCKED[@]}"
 
+# Build ohne eingebettete tiktoken-Rangtabellen (AIGW-95): Laden zur Laufzeit bzw. Heuristik.
+step "Variante ohne embedded-tokenizers: clippy + Tests (aigw-tokenizer, aigw)"
+cargo clippy -p aigw-tokenizer -p aigw --no-default-features --features aigw/mimalloc \
+  --all-targets "${LOCKED[@]}" -- -D warnings
+cargo test -p aigw-tokenizer --no-default-features "${LOCKED[@]}"
+cargo test -p aigw --no-default-features --features mimalloc "${LOCKED[@]}" -- tokenizer::
+
 step "cargo deny check"
 if cargo deny --version >/dev/null 2>&1; then
   # Doppelte Versionen sind nur Warnungen; deren Abhängigkeitsbäume blähen die Ausgabe auf.
