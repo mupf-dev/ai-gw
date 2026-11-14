@@ -1862,7 +1862,8 @@ export interface components {
         GuardrailProfileApply: {
             /**
              * @description Angaben für `content-safety` (Profil „Streng“): `provider`, `endpoint`, `secret` bzw.
-             *     `credential`, `modelGroup`, `apiVersion`, `model`, `thresholds`, `categories`,
+             *     `credential`, `auth` (`entraId` mit `credential` = ProviderCredential mit `spec.entra`,
+             *     AIGW-89), `maxChecks`, `modelGroup`, `apiVersion`, `model`, `thresholds`, `categories`,
              *     `promptTemplate`. Ohne Angabe wird die Bindung ausgelassen.
              */
             contentSafety?: Record<string, never> | null;

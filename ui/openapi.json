@@ -13102,7 +13102,7 @@
               "object",
               "null"
             ],
-            "description": "Angaben für `content-safety` (Profil „Streng“): `provider`, `endpoint`, `secret` bzw.\n`credential`, `modelGroup`, `apiVersion`, `model`, `thresholds`, `categories`,\n`promptTemplate`. Ohne Angabe wird die Bindung ausgelassen."
+            "description": "Angaben für `content-safety` (Profil „Streng“): `provider`, `endpoint`, `secret` bzw.\n`credential`, `auth` (`entraId` mit `credential` = ProviderCredential mit `spec.entra`,\nAIGW-89), `maxChecks`, `modelGroup`, `apiVersion`, `model`, `thresholds`, `categories`,\n`promptTemplate`. Ohne Angabe wird die Bindung ausgelassen."
           },
           "dryRun": {
             "type": "boolean",
