@@ -83,7 +83,7 @@ gespeichert in `localStorage`). Am `<html>` steht immer das wirksame Schema (`da
 | Gruppe | Einträge |
 |---|---|
 | – | Übersicht, Playground |
-| Gateway | Modelle & Routen, Anbieter, Secrets, Preise, Guardrails & Plugins, Cache, MCP-Server |
+| Gateway | Modelle & Routen, Anbieter, Secrets, Preise, Guardrails & Plugins, Tools, Cache, MCP-Server |
 | Zugriff | Keys, Teams & Nutzer, Limits & Budgets, Admin-API-Keys (nur globale Admins) |
 | Beobachten | Logs, Audit |
 | (unten) | Einstellungen |

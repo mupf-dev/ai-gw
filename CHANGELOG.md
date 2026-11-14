@@ -26,7 +26,7 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   (`mcp__<server>__<tool>`, `<server>__<tool>`), Client, Organisation/Team/Key, Nutzung und
   Aufrufe durch das Modell, BLAKE3-Hashes von Beschreibung und Schema (Inhalte nur bei
   `payloadMode` `masked`/`full`), gepuffert geschrieben (`tools:`-Konfiguration, Migration
-  0007). Änderungen bekannter Tools → Audit, Ereignis `tool.changed`, optional automatische
+  0009). Änderungen bekannter Tools → Audit, Ereignis `tool.changed`, optional automatische
   Sperre (`tools.on_change: block`); Prompt-Injection-Prüfung der Beschreibungen
   (`tool.suspicious`). Neue Ressource `ToolPolicy` (GitOps, Audit, Snapshot): `allow`,
   `block-strip`, `block-reject`, `observe`, `require-approval` je Ebene, `locked`; Aufrufe

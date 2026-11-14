@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 ai-gw contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Tool-Inventar (AIGW-87, Migration 0007): Schreiben der aggregierten Beobachtungen
+//! Tool-Inventar (AIGW-87, Migration 0009): Schreiben der aggregierten Beobachtungen
 //! ([`StoreToolSink`]), Abfragen für die Admin-API und Freigeben/Sperren über
 //! `ToolPolicy`-Ressourcen ([`Store::set_tool_decision`]).
 //!
