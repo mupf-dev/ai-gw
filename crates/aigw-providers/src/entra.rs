@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 ai-gw contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Microsoft Entra ID als [`TokenSource`](crate::auth::TokenSource) für Azure OpenAI
+//! Microsoft Entra ID als [`TokenSource`](crate::auth::TokenSource) für Azure OpenAI und Claude in
+//! Azure AI Foundry (`provider: anthropic`)
 //! (`settings.auth: entraId`, AIGW-82).
 //!
 //! | `settings.entraCredential` | Ablauf | Herkunft |

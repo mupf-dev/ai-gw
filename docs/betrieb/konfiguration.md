@@ -105,6 +105,42 @@ Deployment, Details in [06-streaming-und-anbieter.md](../konzept/06-streaming-un
 - Fehler beim Token-Abruf: 502 `upstream_authentication_error`; die Ursache (z. B.
   `AADSTS7000215` = falsches Secret) steht als Warnung im Log.
 - Beispiel: [`config/examples/providers/resources.yaml`](../../config/examples/providers/resources.yaml).
+- **Claude in Azure AI Foundry** nutzt dieselben Einstellungen mit `provider: anthropic` und
+  `endpoint: https://<ressource>.services.ai.azure.com/anthropic` (Rolle „Cognitive Services
+  User“), Beispiel mit GPT und Claude über eine benutzerzugewiesene Managed Identity:
+  [`config/examples/providers/resources-azure-foundry.yaml`](../../config/examples/providers/resources-azure-foundry.yaml).
+- **Azure Container Apps:** Die App setzt `IDENTITY_ENDPOINT` (`http://localhost:<port>/msi/token`)
+  und `IDENTITY_HEADER`; ai-gw nutzt dann das App-Service-Protokoll (api-version 2019-08-01,
+  Header `X-IDENTITY-HEADER`, bei benutzerzugewiesener Identität `client_id` =
+  `entraClientId`). `localhost` wird dafür gezielt von den SSRF-Regeln ausgenommen – nichts in
+  `admin.allow_private_upstreams` eintragen.
+
+### Postgres mit TLS (z. B. Azure Database for PostgreSQL)
+
+`store.url` nimmt die libpq-Parameter `sslmode` und `sslrootcert` an (TLS über rustls):
+
+| `sslmode` | Verhalten |
+|---|---|
+| `disable` | ohne TLS (Azure Flexible Server lehnt das mit `require_secure_transport=on` ab) |
+| `prefer` (Standard) | TLS, wenn der Server es anbietet, Zertifikat ungeprüft |
+| `require` | nur TLS, Zertifikat **ungeprüft** (Schutz nur gegen passives Mitlesen) |
+| `verify-ca` | TLS, Kette geprüft |
+| `verify-full` | TLS, Kette **und** Hostname geprüft – empfohlen |
+
+- Geprüft wird gegen die **eingebetteten** Wurzeln (webpki-roots, Mozilla-Liste), nicht gegen
+  den Zertifikatsspeicher des Images – im distroless-Image funktioniert `verify-full` daher
+  ohne weitere Dateien. Die Wurzeln der aktuellen Kette von Azure Database for PostgreSQL
+  (DigiCert Global Root G2, Microsoft RSA/ECC Root Certificate Authority 2017) sind enthalten
+  (Test `azure_postgres_roots_are_embedded`). Die alte **DigiCert Global Root CA** (G1) hat
+  Mozilla entfernt: Läuft ein Server noch mit dieser Kette, deren PEM als `sslrootcert`
+  einhängen (oder auf `sslmode=require` ausweichen).
+- Eigene CA (z. B. selbst betriebener Postgres): `sslrootcert=/pfad/ca.pem` – ergänzt die
+  eingebetteten Wurzeln.
+- Beispiel Azure:
+  `AIGW_STORE__URL=postgres://aigw:<passwort>@meinserver.postgres.database.azure.com:5432/aigw?sslmode=verify-full`
+  (Flexible Server: Benutzer ohne `@server`-Suffix; Passwort URL-kodiert, z. B. aus einem
+  Container-Apps-Secret per Umgebungsvariable). Entra-ID-Anmeldung an Postgres wird noch nicht
+  unterstützt.
 
 ### Verbindungsgrenzen
 

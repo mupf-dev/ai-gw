@@ -94,7 +94,14 @@ export const providerLabel = (p: string | null | undefined) => (p ? (PROVIDERS.f
  */
 export const CREDENTIAL_FIELDS: Record<ProviderKind, { alternatives: { label: string; fields: string[] }[]; optional: string[] }> = {
   openai: { alternatives: [{ label: 'API-Key', fields: ['apiKey'] }], optional: ['organization', 'project'] },
-  anthropic: { alternatives: [{ label: 'API-Key', fields: ['apiKey'] }], optional: [] },
+  anthropic: {
+    alternatives: [
+      { label: 'API-Key', fields: ['apiKey'] },
+      { label: 'Entra ID (Service Principal, Azure AI Foundry)', fields: ['tenantId', 'clientId', 'clientSecret'] },
+      { label: 'Entra ID (Zertifikat, Azure AI Foundry)', fields: ['tenantId', 'clientId', 'clientCertificate'] },
+    ],
+    optional: [],
+  },
   mistral: { alternatives: [{ label: 'API-Key', fields: ['apiKey'] }], optional: [] },
   'azure-openai': {
     alternatives: [

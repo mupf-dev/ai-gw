@@ -1,0 +1,81 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Azure AI Foundry mit Managed Identity (GPT + Claude), z. B. ai-gw in Azure Container Apps.
+#
+# - Foundry-Ressource mit local_auth_enabled=false: nur Entra-ID-Tokens, keine API-Keys.
+# - Benutzerzugewiesene Managed Identity (UAMI) an der Container App; ihre Client-ID steht in
+#   entraClientId. Die UAMI braucht auf der Foundry-Ressource die Rolle
+#   „Cognitive Services User“ (bzw. „Azure AI User“).
+# - Container Apps setzt IDENTITY_ENDPOINT/IDENTITY_HEADER (App-Service-Protokoll,
+#   api-version 2019-08-01); ai-gw nutzt sie automatisch, sonst IMDS.
+# - Keine ProviderCredential nötig: Scope https://cognitiveservices.azure.com/.default gilt für
+#   beide Endpunkte, beide Deployments teilen sich eine Token-Quelle.
+#
+#   aigw config apply -c config/examples/providers/aigw.yaml \
+#     config/examples/providers/resources-azure-foundry.yaml
+
+# --- GPT über den Azure-OpenAI-Endpunkt der Foundry-Ressource ---------------------------------
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: gpt-5.4-mini}
+spec: {}
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: gpt-5.4-mini-foundry}
+spec:
+  modelGroup: gpt-5.4-mini
+  provider: azure-openai
+  endpoint: https://acme-foundry.openai.azure.com
+  # Name des Deployments in Foundry
+  providerModel: gpt-5.4-mini
+  settings:
+    apiVersion: "2025-04-01-preview"
+    auth: entraId
+    entraCredential: managedIdentity
+    entraClientId: 11111111-2222-3333-4444-555555555555
+
+# --- Claude über den Anthropic-kompatiblen Foundry-Endpunkt -----------------------------------
+# POST {endpoint}/v1/messages mit anthropic-version und Authorization: Bearer <Entra-Token>.
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: claude-sonnet-5-5}
+spec: {}
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: claude-sonnet-5-5-foundry}
+spec:
+  modelGroup: claude-sonnet-5-5
+  provider: anthropic
+  endpoint: https://acme-foundry.services.ai.azure.com/anthropic
+  providerModel: claude-sonnet-5-5
+  settings:
+    auth: entraId
+    entraCredential: managedIdentity
+    entraClientId: 11111111-2222-3333-4444-555555555555
+    anthropicVersion: "2023-06-01"
+---
+apiVersion: aigw/v1alpha1
+kind: ModelGroup
+metadata: {name: claude-opus-5-5}
+spec: {}
+---
+apiVersion: aigw/v1alpha1
+kind: Deployment
+metadata: {name: claude-opus-5-5-foundry}
+spec:
+  modelGroup: claude-opus-5-5
+  provider: anthropic
+  endpoint: https://acme-foundry.services.ai.azure.com/anthropic
+  providerModel: claude-opus-5-5
+  settings:
+    auth: entraId
+    entraCredential: managedIdentity
+    entraClientId: 11111111-2222-3333-4444-555555555555
+    anthropicVersion: "2023-06-01"
+    # Opus 5.5: Thinking lässt sich nicht abschalten – nur output_config.effort steuern.
+    reasoningMode: effort

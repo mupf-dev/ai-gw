@@ -7,6 +7,18 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ## [Unreleased]
 
+### Hinzugefügt
+
+- **Claude in Azure AI Foundry:** Anthropic-Anbieter mit `settings.auth: entraId`
+  (`Authorization: Bearer` statt `x-api-key`, alle Entra-ID-Arten inkl. Managed Identity,
+  gemeinsame Token-Quelle mit Azure OpenAI), Zugangsdaten-Alternativen
+  `tenantId`+`clientId`+`clientSecret`/`clientCertificate` für `anthropic`; Beispiel
+  `config/examples/providers/resources-azure-foundry.yaml` (GPT + Claude, benutzerzugewiesene
+  Managed Identity in Azure Container Apps).
+- Doku und Tests: Managed Identity in Azure Container Apps (`IDENTITY_ENDPOINT`/
+  `IDENTITY_HEADER`, benutzerzugewiesen), Postgres mit TLS (`sslmode=require`/`verify-full`,
+  eingebettete Wurzeln für Azure Database for PostgreSQL).
+
 ## [0.1.0] – MVP – Datum offen
 
 Erste Version: AI-Gateway, Admin-API und Admin-UI in einem Binary.

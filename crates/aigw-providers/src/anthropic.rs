@@ -5,7 +5,13 @@
 //!
 //! - URL `{endpoint}/v1/messages` (Standard `https://api.anthropic.com`; endet `endpoint` auf
 //!   `/v1`, wird nur `/messages` angehängt).
-//! - Header `x-api-key` (Zugangsdaten `apiKey`, Pflicht), `anthropic-version`
+//! - Anmeldung (`settings.auth`): `apiKey` (Standard) → Header `x-api-key` (Zugangsdaten
+//!   `apiKey`, Pflicht); `entraId` → `Authorization: Bearer <Entra-ID-Token>` für Claude in
+//!   Azure AI Foundry (`https://<ressource>.services.ai.azure.com/anthropic`), gleiche
+//!   Token-Quellen wie Azure OpenAI ([`crate::entra`]: `entraCredential` clientSecret,
+//!   clientCertificate, workloadIdentity, managedIdentity; Scope `entraScope`, Standard
+//!   `https://cognitiveservices.azure.com/.default`).
+//! - Header `anthropic-version`
 //!   (`settings.anthropicVersion`, Standard [`DEFAULT_ANTHROPIC_VERSION`]), `anthropic-beta`
 //!   (`settings.anthropicBeta` plus – wenn `settings.forwardClientBeta` nicht `false` ist – die
 //!   Beta-Kennungen aus dem `anthropic-beta`-Header von Anthropic-Clients).
@@ -32,12 +38,13 @@ use aigw_core::wire::anthropic::{self, MessagesRequest};
 use aigw_core::wire::sse::{SseEvent, SseParser};
 use aigw_core::wire::{Losses, WireFormat};
 use bytes::Bytes;
-use http::header::{ACCEPT, CONTENT_TYPE, USER_AGENT};
+use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
 use serde_json::Value;
 
+use crate::auth::TokenSource as _;
 use crate::openai::{
-    USER_AGENT_VALUE, internal, join, parse_uri, retry_after, sensitive, truncate,
+    USER_AGENT_VALUE, bearer, internal, join, parse_uri, retry_after, sensitive, truncate,
 };
 use crate::settings::Settings;
 use crate::{Capabilities, ConfigError, MaxTokensField, Provider, StreamDecoder, UpstreamRequest};
@@ -266,12 +273,22 @@ fn clear_sampling(s: &mut Sampling) -> bool {
     removed.contains(&true)
 }
 
+/// Anmeldung gegenüber der Messages API.
+#[derive(Debug, Clone)]
+enum Auth {
+    /// `x-api-key` (Wert als sensibel markiert).
+    ApiKey(HeaderValue),
+    /// Entra ID (Azure AI Foundry): Bearer-Token aus einer Token-Quelle mit Cache, vor der
+    /// Anfrage per [`Provider::prepare`] gefüllt.
+    Entra(Arc<crate::entra::EntraTokenSource>),
+}
+
 /// Adapter für die Anthropic Messages API.
 #[derive(Debug, Clone)]
 pub struct AnthropicAdapter {
     uri: Uri,
     provider_model: String,
-    api_key: HeaderValue,
+    auth: Auth,
     version: HeaderValue,
     betas: Vec<String>,
     forward_client_beta: bool,
@@ -293,17 +310,55 @@ impl AnthropicAdapter {
 
     /// Baut den Adapter aus einem Deployment (`provider: anthropic`).
     pub fn from_deployment(dep: &DeploymentCtx) -> Result<Self, ConfigError> {
+        Self::build(dep, None)
+    }
+
+    /// Wie [`Self::from_deployment`], Entra ID (`settings.auth: entraId`) aber mit
+    /// vorgegebenen Umgebungswerten (Tests).
+    pub fn from_deployment_with_entra_env(
+        dep: &DeploymentCtx,
+        env: &crate::entra::EntraEnv,
+    ) -> Result<Self, ConfigError> {
+        Self::build(dep, Some(env))
+    }
+
+    fn build(
+        dep: &DeploymentCtx,
+        entra_env: Option<&crate::entra::EntraEnv>,
+    ) -> Result<Self, ConfigError> {
         let s = Settings::of(dep);
         let spec = &dep.deployment.spec;
-        let key = dep
-            .credential
-            .as_ref()
-            .and_then(|c| c.get("apiKey").or_else(|| c.get("api_key")))
-            .map(SecretString::expose)
-            .ok_or_else(|| s.missing("Zugangsdaten (apiKey)"))?;
-        let api_key = sensitive(key)
-            .ok_or_else(|| s.invalid("Zugangsdaten enthalten unzulässige Zeichen"))?;
+        let auth = match s.str("auth")?.unwrap_or("apiKey") {
+            "apiKey" => {
+                let key = dep
+                    .credential
+                    .as_ref()
+                    .and_then(|c| c.get("apiKey").or_else(|| c.get("api_key")))
+                    .map(SecretString::expose)
+                    .ok_or_else(|| s.missing("Zugangsdaten (apiKey)"))?;
+                Auth::ApiKey(
+                    sensitive(key)
+                        .ok_or_else(|| s.invalid("Zugangsdaten enthalten unzulässige Zeichen"))?,
+                )
+            }
+            "entraId" => Auth::Entra(match entra_env {
+                Some(env) => crate::entra::token_source_with_env(dep, env)?,
+                None => crate::entra::token_source(dep)?,
+            }),
+            other => {
+                return Err(s.invalid(format!(
+                    "settings.auth = {other:?} unbekannt (erlaubt: apiKey, entraId)"
+                )));
+            }
+        };
 
+        if matches!(auth, Auth::Entra(_)) && spec.endpoint.is_none() {
+            // Ein Entra-ID-Token gehört nie an den Standard-Endpunkt api.anthropic.com.
+            return Err(s.missing(
+                "endpoint (bei settings.auth entraId, z. B. \
+                 https://<ressource>.services.ai.azure.com/anthropic)",
+            ));
+        }
         let base = spec
             .endpoint
             .as_deref()
@@ -344,7 +399,7 @@ impl AnthropicAdapter {
         Ok(Self {
             uri: parse_uri(&s, &url)?,
             provider_model: spec.provider_model.clone(),
-            api_key,
+            auth,
             version: HeaderValue::from_str(version)
                 .map_err(|_| s.invalid("settings.anthropicVersion ungültig"))?,
             betas,
@@ -393,6 +448,14 @@ impl AnthropicAdapter {
         &self.options
     }
 
+    /// Entra-ID-Token-Quelle (bei `settings.auth: entraId`; Diagnose, Tests).
+    pub fn entra_source(&self) -> Option<&Arc<crate::entra::EntraTokenSource>> {
+        match &self.auth {
+            Auth::Entra(src) => Some(src),
+            Auth::ApiKey(_) => None,
+        }
+    }
+
     /// `anthropic-beta`: konfigurierte Kennungen, dann die des Clients (ohne Duplikate).
     fn beta_header(&self, client: &[String]) -> Option<HeaderValue> {
         let mut all: Vec<&str> = self.betas.iter().map(String::as_str).collect();
@@ -427,6 +490,16 @@ impl Provider for AnthropicAdapter {
         &self.provider_model
     }
 
+    fn prepare(&self, client: &crate::UpstreamClient) -> Option<crate::PrepareFuture<'_>> {
+        match &self.auth {
+            Auth::Entra(src) => {
+                src.use_client(client);
+                Some(Box::pin(src.ensure()))
+            }
+            Auth::ApiKey(_) => None,
+        }
+    }
+
     fn build_request(
         &self,
         mut req: ChatRequest,
@@ -451,8 +524,16 @@ impl Provider for AnthropicAdapter {
                 }),
             )
             .header(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE))
-            .header(X_API_KEY, self.api_key.clone())
             .header(ANTHROPIC_VERSION, self.version.clone());
+        builder = match &self.auth {
+            Auth::ApiKey(key) => builder.header(X_API_KEY, key.clone()),
+            Auth::Entra(src) => {
+                let token = src.bearer_token()?;
+                let value = bearer(token.expose())
+                    .ok_or_else(|| internal("Entra-ID-Token enthält unzulässige Zeichen"))?;
+                builder.header(AUTHORIZATION, value)
+            }
+        };
         if let Some(b) = beta {
             builder = builder.header(ANTHROPIC_BETA, b);
         }

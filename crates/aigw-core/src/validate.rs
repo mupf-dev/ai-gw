@@ -318,6 +318,17 @@ pub fn deployment(upstreams: &UpstreamPolicy, spec: &DeploymentSpec) -> Res {
         azure(spec)?;
         azure_auth(upstreams, spec)?;
     }
+    if spec.provider == ProviderKind::Anthropic {
+        azure_auth(upstreams, spec)?;
+        if setting_str(spec, "auth")? == Some("entraId") && spec.endpoint.is_none() {
+            // Ein Entra-ID-Token gehört nie an den Standard-Endpunkt api.anthropic.com.
+            return Err(
+                "endpoint: bei settings.auth entraId Pflicht (Azure AI Foundry, z. B. \
+                 https://<ressource>.services.ai.azure.com/anthropic)"
+                    .into(),
+            );
+        }
+    }
     if spec.provider == ProviderKind::Bedrock
         && setting_str(spec, "region")?.is_none_or(str::is_empty)
     {
@@ -409,7 +420,8 @@ fn entra_id(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.' || b == b'_')
 }
 
-/// Azure OpenAI: `settings.auth` (`apiKey`/`entraId`) und die Entra-ID-Einstellungen
+/// Azure OpenAI und Anthropic (Claude in Azure AI Foundry): `settings.auth`
+/// (`apiKey`/`entraId`) und die Entra-ID-Einstellungen
 /// (`entraCredential`, `entraAuthority` – nur `https://host`, SSRF-Regeln –, `entraScope`,
 /// `entraTenantId`, `entraClientId`).
 fn azure_auth(upstreams: &UpstreamPolicy, spec: &DeploymentSpec) -> Res {
@@ -521,8 +533,9 @@ pub fn deployment_credential(
 /// (leer = keine Vorgabe).
 pub fn required_credential_fields(p: ProviderKind) -> &'static [&'static [&'static str]] {
     match p {
-        ProviderKind::OpenAi | ProviderKind::Anthropic | ProviderKind::Mistral => &[&["apiKey"]],
-        ProviderKind::AzureOpenAi => &[
+        ProviderKind::OpenAi | ProviderKind::Mistral => &[&["apiKey"]],
+        // Anthropic: API-Key oder Entra ID (Claude in Azure AI Foundry).
+        ProviderKind::AzureOpenAi | ProviderKind::Anthropic => &[
             &["apiKey"],
             &["tenantId", "clientId", "clientSecret"],
             &["tenantId", "clientId", "clientCertificate"],
@@ -875,6 +888,48 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn anthropic_foundry_rules() {
+        let p = UpstreamPolicy::strict();
+        let ep = Some("https://res.services.ai.azure.com/anthropic");
+        let check = |endpoint: Option<&str>, settings: Value| {
+            deployment(&p, &dep(ProviderKind::Anthropic, endpoint, settings))
+        };
+        assert!(check(None, json!({})).is_ok());
+        assert!(check(ep, json!({"auth": "apiKey"})).is_ok());
+        assert!(
+            check(
+                ep,
+                json!({"auth": "entraId", "entraCredential": "managedIdentity",
+                       "entraClientId": "11111111-2222-3333-4444-555555555555"})
+            )
+            .is_ok()
+        );
+        // Kein Entra-Token an api.anthropic.com.
+        let e = check(
+            None,
+            json!({"auth": "entraId", "entraCredential": "managedIdentity"}),
+        );
+        assert!(e.as_ref().is_err_and(|m| m.contains("endpoint")), "{e:?}");
+        assert!(check(ep, json!({"auth": "magie"})).is_err());
+        assert!(
+            check(
+                ep,
+                json!({"auth": "entraId", "entraCredential": "managedIdentity",
+                       "entraScope": "https://management.azure.com/.default"})
+            )
+            .is_err()
+        );
+        assert!(
+            credential_fields(
+                ProviderKind::Anthropic,
+                ["tenantId", "clientId", "clientSecret"]
+            )
+            .is_ok()
+        );
+        assert!(credential_fields(ProviderKind::Anthropic, ["apiKey"]).is_ok());
     }
 
     #[test]

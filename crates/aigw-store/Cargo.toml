@@ -34,6 +34,7 @@ axum.workspace = true
 bytes.workspace = true
 time = { workspace = true, features = ["macros"] }
 tokio.workspace = true
+webpki-roots.workspace = true
 
 [lints]
 workspace = true

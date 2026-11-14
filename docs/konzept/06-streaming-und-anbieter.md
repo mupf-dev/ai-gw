@@ -109,7 +109,7 @@ entfernt (OpenAI lehnt es sonst ab). Azure-Deployment-Namen werden auf `[A-Za-z0
 | `clientSecret` (Standard, wenn die Zugangsdaten `clientSecret` enthalten) | OAuth 2.0 Client Credentials | Zugangsdaten `tenantId`, `clientId`, `clientSecret` |
 | `clientCertificate` (Standard bei `clientCertificate`) | Client Credentials mit JWT-Assertion (RS256, Header `x5t` = SHA-1-Fingerabdruck) | Zugangsdaten `tenantId`, `clientId`, `clientCertificate` (PEM: `CERTIFICATE` + `PRIVATE KEY`/`RSA PRIVATE KEY`, unverschlüsselt) |
 | `workloadIdentity` | Client Credentials mit föderiertem Token als `client_assertion` (bei jedem Abruf neu gelesen) | `AZURE_FEDERATED_TOKEN_FILE`; Tenant/Client: Zugangsdaten → `settings.entraTenantId`/`entraClientId` → `AZURE_TENANT_ID`/`AZURE_CLIENT_ID` |
-| `managedIdentity` | IMDS (`http://169.254.169.254/metadata/identity/oauth2/token`, `Metadata: true`) bzw. App Service/Container Apps (`IDENTITY_ENDPOINT` + `IDENTITY_HEADER`) | optional `clientId` (Zugangsdaten oder `settings.entraClientId`) für benutzerzugewiesene Identitäten |
+| `managedIdentity` | IMDS (`http://169.254.169.254/metadata/identity/oauth2/token`, `Metadata: true`, api-version 2018-02-01) bzw. App Service/Container Apps (`GET $IDENTITY_ENDPOINT?api-version=2019-08-01&resource=…&client_id=…` mit Header `X-IDENTITY-HEADER: $IDENTITY_HEADER`, Antwort mit `expires_on`; Container Apps: `http://localhost:<port>/msi/token`) | optional `clientId` (Zugangsdaten oder `settings.entraClientId`) für benutzerzugewiesene Identitäten |
 
 - **Scope** `settings.entraScope`, Standard `https://cognitiveservices.azure.com/.default`
   (Managed Identity: als `resource` ohne `/.default`). Bei Workload/Managed Identity – der
@@ -166,7 +166,7 @@ der Adapter ergänzt Pflichtfelder, Header und die Abbildung von OpenAI-Reasonin
 | | |
 |---|---|
 | URL | `{endpoint}/v1/messages`, Standard `https://api.anthropic.com`; endet `endpoint` auf `/v1`, wird nur `/messages` angehängt |
-| Auth | `x-api-key` aus Zugangsdaten `apiKey` (Pflicht, als *sensitive* markiert) |
+| Auth | `settings.auth: apiKey` (Standard): `x-api-key` aus Zugangsdaten `apiKey` (Pflicht, als *sensitive* markiert); `settings.auth: entraId`: `Authorization: Bearer <Entra-ID-Token>` (Claude in Azure AI Foundry, siehe unten) |
 | `anthropic-version` | `settings.anthropicVersion`, Standard `2023-06-01` |
 | `anthropic-beta` | `settings.anthropicBeta` (String mit Kommas oder Liste) + Betas aus dem `anthropic-beta`-Header von Anthropic-Clients (`settings.forwardClientBeta`, Standard `true`), ohne Duplikate; nur Zeichen `[A-Za-z0-9._-]`. Welche Client-Betas überhaupt ankommen, regelt die Modellgruppe: `settings.clientBetas` `allow-all` (Standard) \| `allowlist` (nur `settings.betaAllowlist`) \| `deny`; verworfene Kennungen nur im Debug-Log (F60) |
 | `max_tokens` (Pflicht) | aus der Anfrage, sonst `settings.defaultMaxTokens` des Deployments, sonst der Modellgruppe (geerbt über `aigw_providers::with_group_defaults`), sonst 4096 |
@@ -204,6 +204,31 @@ Standardwerte). Ab `anthropicVersion` ≥ `2026-10-21` werden diese drei Felder 
 
 `RequestOptions::to_wire` ist öffentlich, damit Anthropic-Modelle auf Bedrock/Vertex dieselbe
 Vorbereitung nutzen können.
+
+### Claude in Azure AI Foundry
+
+Foundry stellt Claude über einen Anthropic-kompatiblen Endpunkt bereit; der Anthropic-Adapter
+spricht ihn ohne eigene Anbieterart an (`provider: anthropic`):
+
+| | Foundry |
+|---|---|
+| `endpoint` | `https://<ressource>.services.ai.azure.com/anthropic` (mit oder ohne `/v1`) → `POST …/anthropic/v1/messages` – derselbe Pfad wie bei Anthropic, kein `api-version`-Parameter |
+| `providerModel` | Name des Foundry-Deployments (z. B. `claude-sonnet-5-5`); er steht im Feld `model` |
+| Header | `anthropic-version` (Pflicht, `2023-06-01`), `anthropic-beta` wie bei Anthropic |
+| Auth | Ressource mit `local_auth_enabled=false` (`disableLocalAuth`): nur Entra ID → `settings.auth: entraId`, `Authorization: Bearer <token>`, Scope `https://cognitiveservices.azure.com/.default`. Mit Schlüssel ginge `x-api-key` (Zugangsdaten `apiKey`) |
+| Rolle | Identität braucht auf der Foundry-Ressource „Cognitive Services User“ (bzw. „Azure AI User“) |
+| Fast Mode | eigenes Foundry-Deployment `…-fast` (eigenes ai-gw-Deployment, kein `speed`-Feld) |
+
+Die Entra-ID-Logik ist dieselbe wie bei Azure OpenAI (`aigw_providers::entra`, alle
+`entraCredential`-Arten, Einstellungen `entraScope`, `entraAuthority`, `entraTenantId`,
+`entraClientId`, gleiche Validierung). Zugangsdaten für `provider: anthropic` dürfen daher
+auch `tenantId`+`clientId`+`clientSecret` bzw. `…+clientCertificate` enthalten. Ein
+GPT-Deployment (`azure-openai`, `https://<ressource>.openai.azure.com`) und Claude-Deployments
+derselben Identität teilen sich eine Token-Quelle (gleicher Scope). Bei `auth: entraId` ist
+`endpoint` Pflicht – ein Entra-Token geht nie an den Standard-Endpunkt `api.anthropic.com`.
+Fehler: Token-Abruf wie Azure OpenAI (502 `upstream_authentication_error`), fehlende Rolle
+(401/403 von Foundry) → Klasse `auth`, Meldung verborgen. Beispiel:
+[`config/examples/providers/resources-azure-foundry.yaml`](../../config/examples/providers/resources-azure-foundry.yaml).
 
 ## 3b. Ollama und vLLM (`ollama`, `vllm`, AIGW-17)
 

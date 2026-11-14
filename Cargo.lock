@@ -327,6 +327,7 @@ dependencies = [
  "tracing",
  "utoipa",
  "uuid",
+ "webpki-roots",
 ]
 
 [[package]]
