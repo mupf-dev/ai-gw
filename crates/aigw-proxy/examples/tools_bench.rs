@@ -4,7 +4,8 @@
 //! Mikro-Benchmark des Tool-Schritts (AIGW-87): Kosten je Anfrage ohne Tools, mit 30 Tools
 //! (Claude-Code-ähnlich: Beschreibungen ~600 Zeichen, Schemas mit 8 Feldern) ohne Inventar und
 //! Richtlinien, mit 6 Richtlinien und mit Inventar. Keine Richtlinie entfernt ein Tool, die
-//! Anfrage bleibt also unverändert und wird ohne Klonen wiederverwendet.
+//! Anfrage bleibt also unverändert und wird ohne Klonen wiederverwendet. Bezugszeile: „ohne
+//! Tools“ für die erste Zeile mit Tools, danach „30 Tools, ohne Inventar, ohne Richtlinien“.
 //!
 //! `cargo run --release -p aigw-proxy --example tools_bench`
 
@@ -114,7 +115,7 @@ fn measure(label: &str, iters: u32, base: f64, mut f: impl FnMut()) -> f64 {
     }
     let us = t.elapsed().as_secs_f64() * 1e6 / f64::from(iters);
     println!(
-        "{label:<52} {:>8.2} µs/Anfrage (netto {:>7.2} µs)",
+        "{label:<56} {:>8.2} µs/Anfrage (Δ zur Bezugszeile {:>+7.2} µs)",
         us,
         us - base
     );

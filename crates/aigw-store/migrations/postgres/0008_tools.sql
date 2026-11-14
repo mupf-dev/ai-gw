@@ -2,7 +2,7 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 --
 -- AIGW-87 Tool-Inventar und Tool-Richtlinien (Postgres; Gegenstück in
--- migrations/sqlite/0009_tools.sql):
+-- migrations/sqlite/0008_tools.sql):
 --   * tool_policy: Ressource `ToolPolicy` (Snapshot, GitOps, Audit je Objekt).
 --   * tool_inventory: von Anwendungen mitgeschickte Tools je (Organisation, Team, Key, Name),
 --     gepuffert und aggregiert geschrieben; Hashes von Beschreibung und Schema, Inhalte nur bei

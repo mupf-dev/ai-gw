@@ -189,9 +189,9 @@ const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
         include_str!("../migrations/sqlite/0007_credential_auth.sql"),
     ),
     (
-        9,
+        8,
         "tools",
-        include_str!("../migrations/sqlite/0009_tools.sql"),
+        include_str!("../migrations/sqlite/0008_tools.sql"),
     ),
 ];
 
@@ -233,9 +233,9 @@ const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
         include_str!("../migrations/postgres/0007_credential_auth.sql"),
     ),
     (
-        9,
+        8,
         "tools",
-        include_str!("../migrations/postgres/0009_tools.sql"),
+        include_str!("../migrations/postgres/0008_tools.sql"),
     ),
 ];
 

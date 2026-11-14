@@ -250,7 +250,7 @@ erDiagram
 | `price` | eindeutig je (`provider`, `model`, `valid_from`); `provider = ''` = alle Anbieter; Token-Preise als JSON |
 | `plugin_binding` | polymorpher Verweis (`level`, `target_id`) ohne FK; Löschen des Ziels löscht Bindungen in derselben Transaktion |
 | `mcp_server`, `mcp_grant` | Freigabe je Team/Key (polymorph wie oben), `tools` als JSON-Liste |
-| `tool_policy` | Ressource `ToolPolicy` (Ebene polymorph wie `plugin_binding`); wird mit dem Ziel gelöscht (Migration 0009) |
+| `tool_policy` | Ressource `ToolPolicy` (Ebene polymorph wie `plugin_binding`); wird mit dem Ziel gelöscht (Migration 0008) |
 | `tool_inventory`, `tool_inventory_history` | Tool-Inventar je (Organisation, Team, Key, Name): Zähler, Hashes, Inhalte nur bei passendem `payloadMode`; Verlauf neu/geändert – keine Konfiguration, nicht im Snapshot |
 | `counter_state` | nur Postgres (`postgres-sync`): (Schlüssel, Fensterbeginn, Instanz) → Wert |
 | `budget_usage` | (Ebene, Ziel, Zeitraum, Beginn) → Betrag (Nano) |
