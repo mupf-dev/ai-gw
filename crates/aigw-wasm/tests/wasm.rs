@@ -66,6 +66,9 @@ fn one(
     timeout_ms: Option<u64>,
 ) -> (Arc<Chain>, Arc<aigw_wasm::WasmRuntime>) {
     let (reg, rt) = registry(&WasmConfig::default());
+    // Großzügiges Zeitlimit (Standard 100 ms): unter Last (parallele Testläufe) sonst Timeouts
+    // statt der erwarteten Ergebnisse. Die Zeitgrenze selbst prüft `time_limit`.
+    let timeout_ms = timeout_ms.or(Some(5_000));
     let snap = snapshot(modules(), vec![binding("b", config, fail_mode, timeout_ms)]);
     let (c, n) = chain(&snap, &reg);
     assert_eq!(n, 1, "Bindung nicht gebaut");

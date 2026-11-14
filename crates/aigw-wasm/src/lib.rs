@@ -126,7 +126,17 @@ impl PluginFactory for Factory {
         let limits = self.limits(rt, &p.cfg, ctx.timeout)?;
         let compiled = rt.compile(m)?;
         let module: Arc<str> = Arc::from(m.name.as_str());
-        let declared = plugin::describe(rt, &compiled, &module, &p.config_json, limits)?;
+        let declared = plugin::describe(
+            rt,
+            &compiled,
+            &module,
+            &p.config_json,
+            // `describe` läuft beim Aufbau der Kette, nicht je Anfrage: großzügigere Zeitgrenze.
+            CallLimits {
+                timeout: limits.timeout.max(Duration::from_secs(2)),
+                ..limits
+            },
+        )?;
         let phases = match p.phases {
             Some(want) => Phases {
                 request: want.request && declared.request,

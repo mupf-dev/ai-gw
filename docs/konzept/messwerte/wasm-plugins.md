@@ -17,5 +17,21 @@ spürbar – dann `phases: [request]` bzw. Antwort gepuffert prüfen).
 Modulgrößen (Release, `opt-level = "s"`, LTO, strip): `keyword-guard.wasm` 127 814 Byte,
 `testkit.wasm` 73 314 Byte. Kompilieren einer Komponente: einmal je SHA-256 (Cache).
 
-Binärgröße und Bauzeit mit/ohne Feature `wasm`: Messung ausstehend (Lauf wurde wegen
-Kontingent-Pause abgebrochen) – siehe Bericht AIGW-63.
+## Binärgröße und Bauzeit (Feature `wasm`)
+
+Release-Profil (thin-LTO, `codegen-units = 1`, `strip`), Buildbox x86_64 mit 8 Kernen, 2026-11-14:
+
+| Build | Binary `aigw` |
+|---|---|
+| Standard (`mimalloc`, `embedded-tokenizers`, `wasm`) | 54,8 MB (54 789 312 Byte) |
+| ohne `wasm` (`--no-default-features --features mimalloc,embedded-tokenizers`) | 41,1 MB (41 071 208 Byte) |
+
+- Mehrgröße durch `wasm`: **+13,7 MB (+33 %)**.
+- Zusätzliche Bauzeit: 58 Crates werden nur für `aigw-wasm` gebraucht (wasmtime, Cranelift,
+  wasmtime-wasi, wasmparser …). Neubau nur dieser Crates plus Neulinken: 367 s Wandzeit, ≈ 554 s
+  CPU-Zeit (`cargo build --release --timings`). Der Build ohne `wasm` brauchte nach dem
+  Featurewechsel 437 s (thin-LTO linkt und optimiert das Binary vollständig neu).
+- Bewertung: deutlicher, aber vertretbarer Aufwand – das Feature bleibt standardmäßig an.
+  Für schlanke Images: Build ohne `wasm`.
+- MSRV: wasmtime 50 braucht Rust ≥ 1.97 (`aigw-wasm` setzt `rust-version = "1.97"`); der
+  Workspace-MSRV 1.95 gilt für den Build ohne Feature `wasm`.

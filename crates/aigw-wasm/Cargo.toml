@@ -5,7 +5,8 @@ name = "aigw-wasm"
 description = "WASM-Plugins von ai-gw (wasmtime, Component Model, WIT-Welt aigw:plugin)"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+# wasmtime 50 braucht Rust ≥ 1.97 (Workspace-MSRV 1.95 gilt für den Build ohne Feature `wasm`).
+rust-version = "1.97"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true

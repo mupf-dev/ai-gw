@@ -16,6 +16,9 @@
 //! Inhalte erscheinen nie im Audit-Log (nur Name, SHA-256, Größe). Modus „nur YAML“: Schreiben
 //! gesperrt – Module kommen dann aus `wasm.modules` der Startkonfiguration.
 
+// `#[utoipa::path(params(…))]` erzeugt für IntoParams-Typen qualifizierte Pfade.
+#![allow(unused_qualifications)]
+
 use aigw_store::wasm::{NewWasmModule, PutOutcome, WasmModuleInfo};
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
