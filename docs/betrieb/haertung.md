@@ -91,10 +91,19 @@ AIGW-58). Verweise `S-xx` beziehen sich auf die dortigen Befunde.
 - Guardrails:
   - `content-safety` prüft den ganzen Text in bis zu 16 Fenstern zu `maxChars`; längere
     Eingaben scheitern nach `failMode` (Standard `closed`). `maxChars` passend zum Dienst wählen.
-  - Für Tool-Calls im Stream (S-10) bei Bedarf `outputMode: buffered`.
+  - Im Satzmodus prüft `content-safety` auch Tool-Call-Argumente (eigener Puffer je
+    Tool-Block, Freigabe erst nach bestandener Prüfung am Blockende; S-10, AIGW-89).
   - Das `pii`-Plugin mit Ausgabeprüfung verwirft lesbares Reasoning (S-11).
-  - Prüfmodell-Aufrufe (`provider: model`) zählen nicht gegen Limits des Keys (S-13) –
-    eigene Kostenstelle/Modellgruppe mit Kapazitätsgrenzen verwenden.
+  - Prüfmodell-Aufrufe (`provider: model`) werden dem Key/Team zugerechnet (Kosten, Budget,
+    Token-Limits; S-13, AIGW-89). `maxChecks` (Standard 100) begrenzt die Prüfungen je
+    Anfrage; bei langen Stream-Antworten im Satzmodus passend wählen und `sentenceOnError:
+    block` lassen, sonst geht der Rest nach Erreichen der Grenze ungeprüft hinaus. Die
+    Modellgruppe des Prüfmodells zusätzlich mit Kapazitätsgrenzen versehen (die Zulassung
+    vorab kennt die Prüfkosten nicht).
+  - Azure AI Content Safety bevorzugt mit Entra ID statt API-Key (`auth: entraId`,
+    ProviderCredential mit `spec.entra`, z. B. Managed Identity; Rolle *Cognitive Services
+    User* auf der Ressource). Das Token geht nur an Azure-Hosts (`*.cognitiveservices.azure.*`,
+    `*.services.ai.azure.com`); den Credential-Verweis darf nur der globale `admin` setzen.
 - Policy-Webhooks auf `failMode: closed` setzen und mit Secret signieren lassen.
 - Payload-Logging: `full` nur, wo nötig. Lesen dürfen nur `admin`/`auditor`. Bei
   Compliance-Pflichten an der Organisation `payloadModeMax` setzen und den Modus mit

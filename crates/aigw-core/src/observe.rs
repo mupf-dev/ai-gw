@@ -246,6 +246,83 @@ impl GuardrailHits {
     }
 }
 
+/// Modellaufruf eines Plugins im Auftrag einer Anfrage (z. B. Prüfmodell von
+/// `content-safety`, AIGW-89/S-13). Wird dem Key/Team der Anfrage zugerechnet.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PluginCall {
+    /// Angefragte Modellgruppe.
+    pub model_group: String,
+    /// Anbieter des Deployments, das geantwortet hat (Preisfindung).
+    pub provider: Option<ProviderKind>,
+    /// Modell beim Anbieter (Preisfindung).
+    pub provider_model: Option<String>,
+    /// Verbrauch laut Antwort.
+    pub usage: Usage,
+}
+
+#[derive(Debug, Default)]
+struct PluginCallsInner {
+    calls: Vec<PluginCall>,
+    /// Bisherige Prüfungen je Plugin-Instanz (Obergrenze je Anfrage).
+    checks: Vec<(usize, u32)>,
+}
+
+/// Sammelstelle für Plugin-Modellaufrufe einer Anfrage und Zähler für die Obergrenze der
+/// Prüfungen je Anfrage (AIGW-89/S-13). Plugins, Gateway-Host und Recorder teilen sich einen
+/// Klon; der Recorder rechnet die Aufrufe am Ende dem Key/Team zu (Kosten, Budget,
+/// Token-Limits).
+#[derive(Debug, Clone, Default)]
+pub struct PluginCalls(Arc<Mutex<PluginCallsInner>>);
+
+impl PluginCalls {
+    fn lock(&self) -> std::sync::MutexGuard<'_, PluginCallsInner> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Bucht einen Modellaufruf.
+    pub fn record(&self, call: PluginCall) {
+        self.lock().calls.push(call);
+    }
+
+    /// Reserviert `n` Prüfungen für die Plugin-Instanz `owner` (z. B. Adresse ihrer
+    /// Konfiguration); `false`, wenn damit mehr als `max` Prüfungen in dieser Anfrage liefen
+    /// (dann wird nichts gebucht).
+    pub fn try_reserve(&self, owner: usize, n: u32, max: u32) -> bool {
+        let mut g = self.lock();
+        let i = match g.checks.iter().position(|(o, _)| *o == owner) {
+            Some(i) => i,
+            None => {
+                g.checks.push((owner, 0));
+                g.checks.len() - 1
+            }
+        };
+        let used = &mut g.checks[i].1;
+        match used.checked_add(n) {
+            Some(total) if total <= max => {
+                *used = total;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Bisher reservierte Prüfungen der Instanz `owner`.
+    pub fn checks(&self, owner: usize) -> u32 {
+        self.lock()
+            .checks
+            .iter()
+            .find(|(o, _)| *o == owner)
+            .map_or(0, |(_, n)| *n)
+    }
+
+    /// Entnimmt alle gebuchten Aufrufe.
+    pub fn take(&self) -> Vec<PluginCall> {
+        std::mem::take(&mut self.lock().calls)
+    }
+}
+
 /// Kennzahlen einer abgeschlossenen Anfrage (ein Eintrag im Request-Log).
 ///
 /// Feldnamen abgestimmt mit dem Proxy-Hook (AIGW-14/15). Optionale Felder sind `None`, wenn
@@ -318,6 +395,12 @@ pub struct RequestRecord {
     pub guardrails: Vec<GuardrailHit>,
     /// MCP-Tool-Aufruf (nur bei `ingress` = [`WireFormat::Mcp`], AIGW-41).
     pub mcp: Option<Box<McpCall>>,
+    /// Verbrauch der Modellaufrufe von Plugins (z. B. Prüfmodell von `content-safety`,
+    /// AIGW-89/S-13): **nicht** in `usage` enthalten, aber auf die Token-Limits des Keys
+    /// gebucht; deren Kosten sind in `cost` enthalten (siehe `plugin_cost`).
+    pub plugin_usage: Usage,
+    /// Anteil der Plugin-Modellaufrufe an `cost` (nur mit Preis).
+    pub plugin_cost: Option<Amount>,
 }
 
 /// Ergebnis eines MCP-Tool-Aufrufs (Label `status` von `aigw_mcp_calls_total`).
@@ -403,6 +486,8 @@ impl RequestRecord {
             attempts: Vec::new(),
             guardrails: Vec::new(),
             mcp: None,
+            plugin_usage: Usage::default(),
+            plugin_cost: None,
         }
     }
 

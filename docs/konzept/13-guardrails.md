@@ -216,6 +216,8 @@ config:
   provider: azure                   # azure | openai | model
   endpoint: https://acme.cognitiveservices.azure.com
   credential: azure-content-safety  # Name einer ProviderCredential (Feld apiKey bzw. api_key)
+  # auth: entraId                   # azure: Entra ID statt API-Key (AIGW-89, §5.2);
+  #                                 # credential = ProviderCredential mit spec.entra
   apiVersion: "2024-09-01"          # azure
   thresholds: {hate: 2, violence: 4}
   categories: [hate, violence, sexual, self_harm]   # nur diese blockieren (Standard: alle)
@@ -226,13 +228,14 @@ config:
   maxChars: 10000
   sentenceTimeoutMs: 2000
   sentenceOnError: block            # block | allow
+  maxChecks: 100                    # Obergrenze Prüfungen je Anfrage (AIGW-89/S-13, 1–10000)
   failMode: closed                  # Kettensteuerung: Fehler/Zeitlimit der Anfrage-/Antwortprüfung
   timeoutMs: 1500                   # Kettensteuerung (Standard dieses Plugins: 3000)
 ```
 
 | Anbieter | Aufruf | Auswertung |
 |---|---|---|
-| `azure` | `POST {endpoint}/contentsafety/text:analyze?api-version=…`, Header `Ocp-Apim-Subscription-Key`, `outputType: FourSeverityLevels` | `categoriesAnalysis[].severity ≥ thresholds[kategorie]` (Standard 4 = mittel); Kategorien `hate`, `self_harm`, `sexual`, `violence` |
+| `azure` | `POST {endpoint}/contentsafety/text:analyze?api-version=…`, Header `Ocp-Apim-Subscription-Key` bzw. mit `auth: entraId` `Authorization: Bearer <Entra-Token>`, `outputType: FourSeverityLevels` | `categoriesAnalysis[].severity ≥ thresholds[kategorie]` (Standard 4 = mittel); Kategorien `hate`, `self_harm`, `sexual`, `violence` |
 | `openai` | `POST {endpoint ?? https://api.openai.com}/v1/moderations`, Bearer, `model` (Standard `omni-moderation-latest`) | mit Schwelle: `category_scores ≥ Schwelle`, sonst `categories[k] == true`; Namen normalisiert (`self-harm/intent` → `self_harm_intent`) |
 | `model` | Chat über die Modellgruppe `modelGroup` **des Gateways** (Routing, Retries, Fallbacks; ohne Plugin-Kette, ohne Limits des Clients), `max_tokens` 64, Temperatur 0 | erste Zeile `safe` / `unsafe`, Kategorien in derselben (`unsafe: S1`) oder nächsten Zeile (`S1,S10`), klein geschrieben; sonst Plugin-Fehler |
 
@@ -266,12 +269,37 @@ config:
     Fehler/Zeitlimit einer Satzprüfung: `sentenceOnError` (`block` = Stream endet mit
     `plugin_error`, `allow` = Satz wird freigegeben) – der `failMode` der Bindung lässt sich
     im synchronen Chunk-Pfad nicht sauber anwenden (zurückgehaltene Ereignisse).
+  - **Tool-Aufrufe im Stream (AIGW-89, S-10):** Im Satzmodus bekommt jeder Tool-Block
+    (Variante + Blockindex) einen eigenen Puffer für die Argument-Fragmente. Geprüft wird am
+    **Blockende** – nächster Tool-Block, Text, Variantenwechsel (`n > 1`), `Stop`/Usage oder
+    Stream-Ende – und bei langen Argumenten zusätzlich in Fenstern zu `maxChars` (10 %
+    Überlappung). `ToolCallStart` und alle Fragmente des Blocks bleiben zurückgehalten, bis
+    alle Prüfungen bis zum Blockende bestanden sind; Text vor dem Tool-Aufruf wird vorher mit
+    eigener Prüfung abgeschlossen. Bei `unsafe` geht vom Block nichts hinaus (auch kein
+    Fragment), der Stream endet wie bei Text. Ohne Stream bzw. mit `buffered` prüft
+    `on_response` die Argumente schon immer mit.
 - **Antwort:** `reject` auf der Eingabe → `400`, Code `content_filtered`, Meldung mit
   Kategorien (`hate, violence`); auf der Ausgabe je `outputRejectMode` `200` mit
   `content_filter`/`refusal` (Standard) oder `400` (F160, [12-plugins.md](12-plugins.md) §3a);
   Header `x-aigw-guardrail: content-safety`. `flag` → nur Zähler und Log-Zeile.
+- **Obergrenze je Anfrage (AIGW-89, S-13):** `maxChecks` (Standard 100, 1–10000) zählt alle
+  Prüfungen einer Bindung in einer Anfrage – Fenster der Eingabe/Ausgabe, Sätze und
+  Tool-Blöcke im Stream, alle Anbieter. Wer darüber käme, bekommt einen Plugin-Fehler:
+  in Anfrage/Antwort greift `failMode` (`closed`: `500 plugin_error`, `open`: weiter ohne
+  Prüfung); im Stream wie jeder Fehler einer Satzprüfung `sentenceOnError` (`block` beendet
+  den Stream mit `plugin_error`, `allow` gibt den Rest ungeprüft frei, ohne weitere
+  Prüfungen). Der Zähler liegt in `CallInfo::plugin_calls` (je Plugin-Instanz).
+- **Kosten des Prüfmodells (AIGW-89, S-13):** Aufrufe mit `provider: model` bucht der
+  Gateway-Host mit Anbieter, Modell und Usage des antwortenden Deployments in
+  `CallInfo::plugin_calls`. Am Ende der Anfrage rechnet der Recorder sie dem Key/Team/der
+  Organisation der Anfrage zu: Kosten (Preis des Prüfmodells) in `RequestRecord.cost`
+  (Anteil in `plugin_cost`, Tokens in `plugin_usage` – beide nicht im Request-Log
+  gespeichert), Abbuchung von den Budgets und Abgleich der Token-Limits (Usage der Anfrage +
+  Prüfungen). Die Zulassung vorab rechnet die Prüfungen nicht ein (sie sind unbekannt);
+  `maxChecks` begrenzt den Überhang. Externe Dienste (`azure`, `openai`) haben keinen
+  Gateway-Preis und zählen nur gegen `maxChecks`.
 - **Fehler** (Dienst nicht erreichbar, HTTP ≠ 2xx, Antwort nicht auswertbar, Zugangsdaten
-  fehlen, Zeitlimit): Plugin-Fehler → `failMode` der Bindung (`closed`: `500 plugin_error`,
+  fehlen, Entra-Token nicht abrufbar, Zeitlimit, `maxChecks` erreicht): Plugin-Fehler → `failMode` der Bindung (`closed`: `500 plugin_error`,
   `open`: Warnung, Anfrage läuft weiter). Standard ist `closed` (F148); jedes Greifen zählt
   `aigw_plugin_failmode_triggered_total{plugin="content-safety",mode}`.
 
@@ -286,7 +314,11 @@ pub trait PluginHost: Send + Sync + Debug + 'static {
     fn credential(&self, name: &str) -> Option<Arc<CredentialData>>;   // aktueller Snapshot
     fn check_endpoint(&self, url: &str) -> Result<(), String>;          // SSRF beim Bau
     fn post_json(&self, call: HttpCall) -> BoxFuture<'static, Result<HttpReply, PluginError>>;
-    fn chat(&self, model_group: &str, req: ChatRequest) -> BoxFuture<'static, Result<ChatResponse, PluginError>>;
+    // Verbrauch landet in `calls` (CallInfo::plugin_calls) → Kosten/Budget/Limits (S-13)
+    fn chat(&self, model_group: &str, req: ChatRequest, calls: &PluginCalls)
+        -> BoxFuture<'static, Result<ChatResponse, PluginError>>;
+    // AIGW-89: Bearer-Token aus einer ProviderCredential mit spec.entra
+    fn entra_token(&self, credential: &str) -> BoxFuture<'static, Result<SecretString, PluginError>>;
 }
 ```
 
@@ -294,6 +326,45 @@ pub trait PluginHost: Send + Sync + Debug + 'static {
 ≤ 256 KiB, Routing über `exec::execute` mit Deployment-Kapazität). `Registry::with_builtin()`
 nutzt `NoHost` (Konfiguration prüfbar mit strengen SSRF-Regeln, Aufrufe schlagen fehl).
 Das Webhook-Plugin (AIGW-61) kann denselben Host nutzen.
+
+### 5.2 Entra ID für Azure AI Content Safety (AIGW-89)
+
+```yaml
+# ProviderCredential (nur global admin; Geheimnisse nur bei clientSecret/clientCertificate)
+kind: ProviderCredential
+metadata: {name: cs-entra}
+spec:
+  provider: azure-openai
+  entra: {credential: managedIdentity}        # oder workloadIdentity, clientSecret, clientCertificate
+---
+# Bindung
+plugin: content-safety
+config:
+  provider: azure
+  auth: entraId
+  credential: cs-entra
+  endpoint: https://acme.cognitiveservices.azure.com
+```
+
+- **Token-Quelle:** `GatewayHost::entra_token` baut aus `spec.entra` (+ `data`) dieselben
+  Einstellungen wie ein Deployment mit `credential: cs-entra` (`EntraAuth::apply_to`) und nutzt
+  `aigw_providers::entra::token_source` – also denselben Cache je Credential (Deployments mit
+  gleichen Merkmalen teilen sich das Token), Erneuerung im Hintergrund, gebündelten Abruf,
+  Managed Identity (IMDS/`IDENTITY_ENDPOINT` mit gezielter SSRF-Ausnahme), Workload Identity
+  und Client Credentials (Secret/Zertifikat). Scope: `spec.entra.scope`, Standard
+  `https://cognitiveservices.azure.com/.default`. Je Credential-Name und Snapshot-Version
+  wird die Quelle einmal aufgelöst.
+- **Header:** `Authorization: Bearer <token>` statt `Ocp-Apim-Subscription-Key`.
+- **Schutz des Tokens:** `auth: entraId` nur mit `provider: azure` und `credential` (ein
+  Verweis auf Zugangsdaten – nur der globale `admin` darf ihn setzen, F149); `secret` ist
+  dann nicht erlaubt. Der Endpunkt muss auf `.cognitiveservices.azure.com|us|cn` oder
+  `.services.ai.azure.com` enden, damit das Token der Gateway-Identität nie an fremde Hosts
+  geht (zusätzlich zu den SSRF-Regeln).
+- **Rechte:** Die Identität braucht auf der Content-Safety-Ressource die Rolle
+  *Cognitive Services User*; die Ressource braucht eine eigene Subdomain (Custom Domain),
+  sonst nimmt Azure keine Entra-Tokens an.
+- **Fehler** (Credential fehlt/ohne `spec.entra`, Token-Endpunkt nicht erreichbar oder
+  abgelehnt): Plugin-Fehler → `failMode`; Gründe nur im Log, Geheimnisse nie.
 
 ## 6. Beobachtung
 
@@ -357,7 +428,14 @@ betroffenen Texte.
   `content-safety` gegen lokale Fake-Dienste (Azure mit Schwellen, OpenAI mit/ohne
   Score-Schwelle, Prüfmodell über eine Modellgruppe, gepufferte Ausgabe, Satzmodus im
   Live-Stream, Zeitlimit mit fail-open/closed, fehlende Zugangsdaten, SSRF auch nach
-  Namensauflösung).
+  Namensauflösung); AIGW-89: Tool-Argumente im Live-Stream (OpenAI und Anthropic, harmlos
+  vollständig, schädlich ohne ein Fragment), `maxChecks` im Stream (`sentenceOnError`) und in
+  Anfrage/Antwort (`failMode`), Entra ID gegen Fake-Token-Endpunkt (Client Credentials, ein
+  Abruf für mehrere Anfragen) und Fake-IMDS (Managed Identity), Credential ohne
+  `spec.entra`, Konfigurationsregeln (nur Azure-Hosts, `credential` Pflicht).
+- `aigw-proxy/tests/limits.rs`: Prüfmodell-Aufrufe zählen für Kosten (`cost`,
+  `plugin_cost`, `plugin_usage`), Budget (harte Grenze greift durch die Prüfkosten) und
+  Token-Limit des Keys.
 - `aigw-observe`: Masker-Einheiten, JSON-Lines-Export mit mehreren Kategorien, Metrik.
 
 ## 9. Offene Fragen
@@ -397,7 +475,8 @@ optionale Payload-Logging-Obergrenze. Inhaltliche Änderungen erhöhen `version`
     (`422`), Verweis auf Secret/Zugangsdaten in `contentSafety` nur globaler `admin` (AIGW-58,
     `403`), `locked` von oben. Audit-Eintrag je geschriebenem Objekt. Unter der Schreibsperre wird
     vor dem Schreiben neu geplant.
-  - `contentSafety`: erlaubt `provider`, `endpoint`, `secret`, `credential`, `model`,
+  - `contentSafety`: erlaubt `provider`, `endpoint`, `secret`, `credential`, `auth`,
+    `maxChecks`, `model`,
     `apiVersion`, `modelGroup`, `thresholds`, `categories`, `promptTemplate`; ohne Angabe
     wird die Bindung ausgelassen (Hinweis).
   - **Logging:** Organisation/Team bekommen `payloadModeMax` = Minimum aus bisher und Profil
@@ -407,13 +486,13 @@ optionale Payload-Logging-Obergrenze. Inhaltliche Änderungen erhöhen `version`
     Logging wird vor den Bindungen geschrieben – schlägt es fehl, ist nichts geändert.
   - Im Modus „nur YAML“ wie alle Schreibwege gesperrt (auch Dry-Run, da `POST`).
 
-**Azure AI Content Safety mit Entra ID / Managed Identity:** `content-safety` mit
-`provider: azure` kann das **noch nicht** – es authentifiziert nur per
-`Ocp-Apim-Subscription-Key` aus einem Secret. **Folgepunkt:** `PluginHost` um ein Entra-Token
-(Scope `https://cognitiveservices.azure.com/.default`, Token-Quelle aus AIGW-82) erweitern und
-`auth: entraId` in `content-safety` erlauben. Bis dahin ohne API-Key: `provider: model` mit einer
-Modellgruppe, deren Deployment über Foundry per Managed Identity läuft (z. B. ein Llama-Guard-
-oder anderes Prüfmodell) – Routing, Retries und Entra-Auth übernimmt dann das Gateway.
+**Azure AI Content Safety mit Entra ID / Managed Identity:** umgesetzt (AIGW-89, §5.2):
+`content-safety` mit `provider: azure`, `auth: entraId` und `credential` = ProviderCredential
+mit `spec.entra` (z. B. `managedIdentity`). Beim Anwenden des Profils „Streng“ wählt die UI
+unter „Zugang“ zwischen *Secret (API-Key)* und *Entra ID (Anbieter-Zugangsdaten)*; die API
+nimmt dafür `auth` und `credential` in `contentSafety` an. Alternativ weiterhin
+`provider: model` mit einer Modellgruppe, deren Deployment über Foundry per Managed Identity
+läuft – Routing, Retries und Entra-Auth übernimmt dann das Gateway.
 
 **Befunde aus dem Live-Test (AIGW-86):**
 

@@ -1319,3 +1319,128 @@ async fn redis_budgets_reserve_and_adjust() {
         SharedReserve::Reserved
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// AIGW-89 (S-13): Aufrufe des Prüfmodells (`content-safety`, `provider: model`) zählen für
+// Kosten, Budget und Token-Limits des Keys
+// ---------------------------------------------------------------------------------------------
+
+/// Prüfmodell: `safe` mit Usage 7 + 3 (OpenAI „gpt-test“, gleicher Preis wie das Hauptmodell).
+struct GuardProvider;
+
+impl ChatProvider for GuardProvider {
+    fn describe(&self) -> Describe<'_> {
+        Describe {
+            deployment: "guard",
+            deployment_id: None,
+            model_group: Some("guard"),
+            provider: Some(ProviderKind::OpenAi),
+            provider_model: "gpt-test",
+        }
+    }
+
+    fn chat(self: Arc<Self>, _req: ChatRequest) -> BoxFuture<Result<ChatResponse, UpstreamError>> {
+        Box::pin(async {
+            Ok(ChatResponse {
+                id: "g1".into(),
+                model: "guard".into(),
+                created: None,
+                choices: vec![Choice {
+                    index: 0,
+                    message: Message {
+                        role: Role::Assistant,
+                        content: Content::Text("safe".into()),
+                        name: None,
+                        extra: Default::default(),
+                    },
+                    stop_reason: Some(StopReason::EndTurn),
+                    stop_sequence: None,
+                    extra: Default::default(),
+                }],
+                usage: Some(usage()),
+                extra: Default::default(),
+                source: None,
+            })
+        })
+    }
+
+    fn chat_stream(
+        self: Arc<Self>,
+        _req: ChatRequest,
+    ) -> BoxFuture<Result<EventStream, UpstreamError>> {
+        Box::pin(async { panic!("Prüfmodell wird nicht gestreamt") })
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn guard_model_calls_are_charged_to_the_key() {
+    let now = time::OffsetDateTime::now_utc();
+    let (snap, ids) = Fixture {
+        key: ApiKeySpec {
+            limits: vec![lim(LimitMetric::Tokens, 1000)],
+            // Ohne Prüfmodell reichte das Budget für zwei Anfragen (je 0,01).
+            budget: Some(Budget {
+                amount: amount("0.025"),
+                period: BudgetPeriod::Month,
+                warn_at_percent: vec![],
+                hard_limit: true,
+                enforcement: aigw_core::resource::BudgetEnforcement::Soft,
+            }),
+            ..ApiKeySpec::default()
+        },
+        prices: vec![price(now - time::Duration::hours(1), "1000")],
+        ..Fixture::default()
+    }
+    .build();
+    let counters = Arc::new(LocalCounters::new());
+    let mut routes = StaticRoutes::new();
+    routes.insert_route(
+        "m",
+        Arc::new(GroupRoute::single("m", TestProvider::new("d"))),
+    );
+    routes.insert_route(
+        "guard",
+        Arc::new(GroupRoute::single("guard", Arc::new(GuardProvider))),
+    );
+    let routes = Arc::new(routes);
+    let host = aigw_proxy::GatewayHost::with_defaults(
+        routes.clone(),
+        counters.clone(),
+        Some(snap.clone()),
+        aigw_core::upstream::UpstreamPolicy::strict(),
+    )
+    .unwrap();
+    let plugin = aigw_plugins::PluginFactory::build(
+        &aigw_plugins::builtin::content_safety::Factory::new(Arc::new(host)),
+        &json!({"provider": "model", "modelGroup": "guard", "direction": "both"}),
+    )
+    .unwrap();
+    let capture = Arc::new(Capture::default());
+    let state = ProxyState {
+        auth: Arc::new(SnapshotAuthenticator::new(snap.clone())),
+        observer: capture.clone(),
+        limits: Arc::new(Limiter::new(
+            counters.clone(),
+            Some(Arc::new(Budgets::new(Calendar::utc(), None))),
+            &LimitsConfig::default(),
+        )),
+        plugins: Arc::new(aigw_proxy::PluginChains::fixed(aigw_plugins::Chain::new(
+            vec![Arc::new(aigw_plugins::Entry::new("cs", plugin))],
+        ))),
+        ..ProxyState::with_routes(routes)
+    };
+    let addr = serve(state).await;
+
+    assert_eq!(chat(addr).await.status, StatusCode::OK);
+    let rec = capture.wait(1).await.remove(0);
+    // Anfrage 10 Tokens + zwei Prüfungen (Eingabe, Ausgabe) zu je 10 Tokens.
+    assert_eq!(rec.usage.total_tokens(), 10);
+    assert_eq!(rec.plugin_usage.total_tokens(), 20);
+    assert_eq!(rec.plugin_cost, Some(amount("0.02")));
+    assert_eq!(rec.cost, Some(amount("0.03")));
+    wait_counter(&counters, &format!("key:{}:tokens", ids.key), 30).await;
+    // Budget (0,025) ist durch die Prüfungen schon erschöpft.
+    let r = chat(addr).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(r.json()["error"]["code"], "budget_exceeded");
+}

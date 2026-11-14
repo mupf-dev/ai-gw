@@ -43,7 +43,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use aigw_billing::{BudgetExceeded, BudgetHold, BudgetLevel, BudgetTarget, Budgets, ExceededKind};
 use aigw_core::config::LimitsConfig;
 use aigw_core::ir::{ApiError, ChatRequest, ErrorClass, ErrorKind, UpstreamError, Usage};
-use aigw_core::observe::RequestRecord;
+use aigw_core::observe::{PluginCall, RequestRecord};
 use aigw_core::resource::Amount;
 use aigw_core::snapshot::{KeyCtx, ModelGroupCtx, Snapshot};
 use aigw_counters::{CounterBackend, LimitCheck, LocalCounters, Rejection, Reservation};
@@ -434,8 +434,18 @@ impl Admission {
     /// Schließt die Anfrage ab (synchron, ohne I/O im Aufrufer): Kosten aus der Preistabelle
     /// zum Anfragezeitpunkt in `record.cost`, Kosten auf die Budgets buchen, Reservierungen
     /// mit der tatsächlichen Usage abgleichen (bei entfernten Backends im Hintergrund).
-    pub(crate) fn complete(mut self, record: &mut RequestRecord) {
-        let cost = self.price(record);
+    ///
+    /// Modellaufrufe von Plugins (`plugin_calls`, z. B. Prüfmodell von `content-safety`;
+    /// AIGW-89/S-13) zählen mit: ihre Kosten (Preis des antwortenden Deployments) landen in
+    /// `record.cost` (Anteil in `record.plugin_cost`) und auf den Budgets, ihre Tokens auf den
+    /// Token-Limits des Keys/Teams.
+    pub(crate) fn complete(mut self, record: &mut RequestRecord, plugin_calls: &[PluginCall]) {
+        let mut cost = self.price(record);
+        let plugin_cost = self.plugin_price(record, plugin_calls);
+        if let Some(p) = plugin_cost {
+            record.plugin_cost = Some(p);
+            cost = Some(cost.unwrap_or(Amount::ZERO).saturating_add(p));
+        }
         if let Some(c) = cost {
             record.cost = Some(c);
         }
@@ -449,7 +459,29 @@ impl Admission {
                 None => budgets.charge(&targets, c, at),
             }
         }
-        settle(self.counters, self.parts, &record.usage);
+        let mut usage = record.usage.clone();
+        for c in plugin_calls {
+            usage.add(&c.usage);
+        }
+        settle(self.counters, self.parts, &usage);
+    }
+
+    /// Summe der Kosten der Plugin-Modellaufrufe (`None` ohne Preis für alle).
+    fn plugin_price(&self, r: &RequestRecord, calls: &[PluginCall]) -> Option<Amount> {
+        let snap = self.snapshot.as_ref()?;
+        let at = OffsetDateTime::from(r.started_at);
+        calls
+            .iter()
+            .filter_map(|c| {
+                aigw_billing::cost_at(
+                    snap,
+                    c.provider?,
+                    c.provider_model.as_deref()?,
+                    at,
+                    &c.usage,
+                )
+            })
+            .reduce(Amount::saturating_add)
     }
 
     fn price(&self, r: &RequestRecord) -> Option<Amount> {

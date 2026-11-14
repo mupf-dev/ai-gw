@@ -62,10 +62,10 @@ Schweregrade: **hoch** – ausnutzbar mit geringen Rechten, deutlicher Schaden;
 | S-07 | **Snapshot-Cache ohne Altersgrenze:** Beim Kaltstart ohne DB galt jeder entschlüsselbare Cache – inzwischen gesperrte/widerrufene Keys wurden wieder gültig. | **behoben:** `snapshot.cache_max_age_secs` (Standard 86 400, `0` = unbegrenzt); Test `cache_max_age`. Rest: Einspielen einer älteren gültigen Datei innerhalb der Frist (Dateirechte, haertung.md). |
 | S-08 | **Audit-Kette: unverkettete Einträge** (`seq IS NULL`) wurden nur gezählt; per DB eingeschobene Einträge ohne Kettenfelder ließen `ok` auf `true`. | **teilweise behoben:** unverkettete Einträge mit `at` ab Kettenbeginn sind ein Befund (Test in `restpunkte.rs`). Mit rückdatiertem `at` bleibt es bei der Zählung (`unchained`); Abgleich des Kettenkopfs mit externer Kopie empfohlen. |
 | S-09 | **payloadMode durch `team-admin` steuerbar:** spezifischstes Feld gewinnt (F203) – ein Team-Admin kann Protokollierung für eigene Keys abschalten oder `full` erzwingen. | **behoben (AIGW-79):** `payloadModeMax` (off < metadata < masked < full) und `payloadModeLocked` an Organisation/Team; Prüfung beim Schreiben (Admin-API, GitOps: `422`/`409`/`cascade=clamp`, Team-Richtlinie nur `admin`/`org-admin`) und Begrenzung zur Laufzeit (`KeyCtx::payload_mode`). Tests `payload_policy_sqlite`, `payload_policy`, `payload_mode_clamped_by_max_and_lock`, e2e `aigw79.spec.js`. Ein globales Maximum gibt es nicht (global setzt nur der Betreiber den Standard `observe.payload`). |
-| S-10 | **content-safety im Stream prüft keine Tool-Call-Argumente** (ohne Stream schon). | **offen** (eigener Puffer je Tool-Block nötig). Bis dahin für Tool-lastige Gruppen `outputMode: buffered`. |
+| S-10 | **content-safety im Stream prüft keine Tool-Call-Argumente** (ohne Stream schon). | **behoben (AIGW-89):** Im Satzmodus eigener Puffer je Tool-Block (Variante + Index); Prüfung am Blockende bzw. in Fenstern zu `maxChars`, Start und Fragmente bleiben bis dahin zurückgehalten. Tests `content_safety_checks_tool_call_arguments_in_stream` (OpenAI und Anthropic). |
 | S-11 | **PII im Reasoning:** Reasoning wird nicht geschwärzt (Signaturen) und ging bei `exposeReasoning` ungeprüft an den Client. | **behoben:** Bei aktiver PII-Ausgabeprüfung wird lesbares Reasoning verworfen (Stream) bzw. entfernt (Antwort); verschlüsseltes Reasoning bleibt. Test `reasoning_is_removed_when_output_is_checked`. |
 | S-12 | **Limit `concurrency` wird still ignoriert** (UI bietet es an). | **teilweise:** Hinweis `concurrency-not-enforced` in `GET /usage/limit-warnings` und Start-Log; Durchsetzung **offen**. |
-| S-13 | **Aufrufe des Prüfmodells** (`content-safety` mit `provider: model`, Satzmodus) laufen an Limits/Budget des Keys vorbei. | **offen** (Kostenzurechnung über Recorder, Obergrenze Prüfungen je Anfrage). |
+| S-13 | **Aufrufe des Prüfmodells** (`content-safety` mit `provider: model`, Satzmodus) laufen an Limits/Budget des Keys vorbei. | **behoben (AIGW-89):** Der Gateway-Host bucht Anbieter/Modell/Usage in `CallInfo::plugin_calls`, der Recorder rechnet sie dem Key/Team zu (Kosten in `cost`/`plugin_cost`, Budgets, Token-Limits). Obergrenze `maxChecks` je Anfrage (Standard 100; darüber `failMode` bzw. im Stream `sentenceOnError`). Tests `guard_model_calls_are_charged_to_the_key`, `content_safety_max_checks_in_stream_and_request`. |
 | S-14 | **SSE-Parser ohne Obergrenze**, quadratische Suche bei langen Zeilen – ein bösartiger Upstream konnte Speicher/CPU binden. | **behoben:** `SseParser::pending_bytes`, Abbruch über 16 MiB je Ereignis (`upstream_stream_too_large`), lineare Suche. Test `pending_bytes_counts_line_and_open_event`. |
 
 ### Niedrig
@@ -144,6 +144,7 @@ Schweregrade: **hoch** – ausnutzbar mit geringen Rechten, deutlicher Schaden;
 
 1. ~~S-09 `payloadModeMax`/`locked` an Org/global (F203-Folgepunkt)~~ – behoben (AIGW-79).
 2. ~~S-32 Verbindungs-/Nebenläufigkeitsgrenzen und Lese-Timeouts im Server~~ – behoben (AIGW-80).
-3. S-10/S-13 content-safety: Tool-Calls im Stream, Kosten des Prüfmodells zurechnen.
+3. ~~S-10/S-13 content-safety: Tool-Calls im Stream, Kosten des Prüfmodells zurechnen~~ –
+   behoben (AIGW-89).
 4. S-12 `concurrency` durchsetzen.
 5. S-28 MCP-Grenzen je Key; S-27 Cache-AAD mit Partition; S-23 `__Host-`-Cookies.

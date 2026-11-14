@@ -9,6 +9,20 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Hinzugefügt
 
+- **content-safety mit Entra ID (AIGW-89):** `provider: azure` mit `auth: entraId` und
+  `credential` = ProviderCredential mit `spec.entra` (Managed Identity, Workload Identity,
+  Client Credentials mit Secret/Zertifikat) – `Authorization: Bearer` statt
+  `Ocp-Apim-Subscription-Key`, gleiche Token-Quelle (Cache, Erneuerung) wie Deployments mit
+  `auth: entraId`; Endpunkt nur auf Azure-Hosts. `PluginHost::entra_token`. Admin-UI: Zugang
+  „Entra ID“ im Plugin-Formular und beim Anwenden des Guardrail-Profils „Streng“
+  (`contentSafety.auth`).
+- **content-safety prüft Tool-Call-Argumente im Stream (AIGW-89, S-10):** Satzmodus mit
+  eigenem Puffer je Tool-Block, Prüfung am Blockende.
+- **Kosten und Obergrenze des Prüfmodells (AIGW-89, S-13):** Aufrufe von `content-safety`
+  mit `provider: model` zählen für Kosten, Budgets und Token-Limits des Keys
+  (`RequestRecord.plugin_usage`/`plugin_cost`, Anteil in `cost`); neue Einstellung
+  `maxChecks` (Standard 100 Prüfungen je Anfrage).
+
 - **Preisvorschläge (AIGW-85):** `GET /admin/api/v1/price-suggestions` vergleicht je Deployment
   den aktuellen Preis mit einem Vorschlag aus der Azure Retail Prices API (Azure OpenAI/Foundry,
   je Region und Bereitstellungsart, USD, Zwischenspeicher, fehlertolerant) bzw. dem
@@ -75,6 +89,9 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   Job „Container-Images (amd64 + arm64)“ bei Tags `v*` und manuell (Tarballs als Artefakt).
 
 ### Geändert
+
+- `PluginHost::chat` bekommt die Sammelstelle `&PluginCalls` (aus `CallInfo::plugin_calls`)
+  für die Kostenzurechnung; `CallInfo` hat das neue Feld `plugin_calls` (AIGW-89).
 
 - OpenAI-Antworten ohne Text, Ablehnung und Tool-Aufrufe (z. B. Claude hat `max_tokens`
   komplett für Thinking verbraucht, `finish_reason: length`) haben `content: ""` statt `null`

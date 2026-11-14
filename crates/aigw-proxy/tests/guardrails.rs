@@ -5,7 +5,8 @@
 //! Pseudonymisierung über Chunk-Grenzen im Stream, Zähler im Request-Record, `prompt-filter`,
 //! `content-safety` gegen lokale Fake-Dienste (Azure, OpenAI, Prüfmodell über das Gateway),
 //! Zeitlimit mit fail-open/closed, SSRF; Ausgabe-Ablehnung mit `content_filter`/`refusal`
-//! bzw. als Fehler (F160).
+//! bzw. als Fehler (F160). AIGW-89: Entra ID für Azure Content Safety (Fake-Token-Endpunkt,
+//! Managed Identity), Tool-Call-Argumente im Stream (S-10), Obergrenze der Prüfungen (S-13).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -73,6 +74,26 @@ impl Resp {
     }
 
     /// Text der Antwort: JSON (OpenAI/Anthropic) oder zusammengesetzter SSE-Stream.
+    /// Zusammengesetzte Tool-Argumente eines Streams (OpenAI `tool_calls[].function.arguments`,
+    /// Anthropic `input_json_delta`).
+    fn tool_args(&self) -> String {
+        let mut out = String::new();
+        for f in SseParser::new().push(&self.body) {
+            let Ok(v) = serde_json::from_str::<Value>(&f.data) else {
+                continue;
+            };
+            if let Some(t) =
+                v["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"].as_str()
+            {
+                out.push_str(t);
+            }
+            if let Some(t) = v["delta"]["partial_json"].as_str() {
+                out.push_str(t);
+            }
+        }
+        out
+    }
+
     fn text(&self) -> String {
         if let Ok(v) = serde_json::from_slice::<Value>(&self.body) {
             if let Some(t) = v["choices"][0]["message"]["content"].as_str() {
@@ -241,20 +262,48 @@ impl ChatProvider for Chunky {
             model: "chunky".into(),
             created: Some(1),
         }];
-        let mut rest = text.as_str();
-        while !rest.is_empty() {
-            let mut n = rest.len().min(3);
-            while !rest.is_char_boundary(n) {
-                n += 1;
+        // `TOOL: <q>` (AIGW-89/S-10): Text, dann Tool-Aufruf `search` mit `{"q":"<q>"}`.
+        let tool = self.last_user().strip_prefix("TOOL: ").map(str::to_owned);
+        let text = if tool.is_some() {
+            "Einen Moment, ich suche das gerne für dich heraus. ".to_owned()
+        } else {
+            text
+        };
+        let pieces = |s: &str| {
+            let mut out = Vec::new();
+            let mut rest = s;
+            while !rest.is_empty() {
+                let mut n = rest.len().min(3);
+                while !rest.is_char_boundary(n) {
+                    n += 1;
+                }
+                out.push(rest[..n].to_owned());
+                rest = &rest[n..];
             }
-            evs.push(StreamEvent::TextDelta {
-                index: 0,
-                text: rest[..n].to_owned(),
-            });
-            rest = &rest[n..];
+            out
+        };
+        for p in pieces(&text) {
+            evs.push(StreamEvent::TextDelta { index: 0, text: p });
+        }
+        if let Some(q) = &tool {
+            evs.push(StreamEvent::ToolCallStart(aigw_core::ir::ToolCallStart {
+                index: 1,
+                id: "call_1".into(),
+                name: "search".into(),
+            }));
+            for p in pieces(&json!({ "q": q }).to_string()) {
+                evs.push(StreamEvent::ToolCallDelta {
+                    index: 1,
+                    arguments: p,
+                });
+            }
         }
         evs.push(StreamEvent::Stop {
-            reason: StopReason::EndTurn,
+            reason: if tool.is_some() {
+                StopReason::ToolUse
+            } else {
+                StopReason::EndTurn
+            },
             stop_sequence: None,
         });
         evs.push(StreamEvent::Usage(Usage {
@@ -959,4 +1008,338 @@ async fn content_safety_ssrf_rules() {
         .await
         .unwrap_err();
     assert!(!err.0.is_empty());
+}
+
+// ---------------------------------------------------------------------------------------------
+// AIGW-89: Tool-Aufrufe im Stream (S-10), Obergrenze (S-13), Entra ID
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn content_safety_checks_tool_call_arguments_in_stream() {
+    let cs = cs_gateway(
+        json!({"provider": "model", "modelGroup": "guard", "direction": "output",
+               "outputMode": "sentence"}),
+        FailMode::Closed,
+        SEC,
+    )
+    .await;
+    for path in [OPENAI, ANTHROPIC] {
+        // Harmlose Argumente: Text und Tool-Aufruf kommen vollständig an.
+        let r = post(cs.addr, path, body("TOOL: Wetter in Berlin", true)).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.raw());
+        assert_eq!(
+            r.tool_args(),
+            r#"{"q":"Wetter in Berlin"}"#,
+            "{path}: {}",
+            r.raw()
+        );
+        assert!(r.text().starts_with("Einen Moment"), "{}", r.raw());
+
+        // Schädliche Argumente: Text davor geht hinaus, der Tool-Block nie (auch kein
+        // Fragment), Abschluss mit content_filter/refusal.
+        let r = post(cs.addr, path, body("TOOL: ich hasse alle", true)).await;
+        assert_content_filtered(&r, path, true);
+        assert_eq!(r.tool_args(), "", "{path}: {}", r.raw());
+        assert!(!r.raw().contains("search"), "{path}: {}", r.raw());
+        assert!(r.text().starts_with("Einen Moment"), "{}", r.raw());
+    }
+    let rec = cs.records.last().await;
+    assert_eq!(rec.guardrails[0].category, "s10");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn content_safety_max_checks_in_stream_and_request() {
+    let good = "Das ist ein harmloser erster Satz mit Inhalt. Und ein zweiter, ebenso harmloser Satz folgt. Ende";
+    // Stream: Obergrenze wirkt wie ein Fehler der Satzprüfung (`sentenceOnError`).
+    let cs = cs_gateway(
+        json!({"provider": "model", "modelGroup": "guard", "direction": "output",
+               "outputMode": "sentence", "maxChecks": 1}),
+        FailMode::Closed,
+        SEC,
+    )
+    .await;
+    let r = post(cs.addr, OPENAI, body(good, true)).await;
+    assert!(r.raw().contains("plugin_error"), "{}", r.raw());
+    assert!(!r.text().contains("zweiter"), "{}", r.text());
+    let cs = cs_gateway(
+        json!({"provider": "model", "modelGroup": "guard", "direction": "output",
+               "outputMode": "sentence", "maxChecks": 1, "sentenceOnError": "allow"}),
+        FailMode::Closed,
+        SEC,
+    )
+    .await;
+    let r = post(cs.addr, ANTHROPIC, body(good, true)).await;
+    assert_eq!(r.text(), format!("Echo: {good}"), "{}", r.raw());
+
+    // Anfrage + Antwort: die zweite Prüfung überschreitet die Grenze → failMode.
+    let cfg = json!({"provider": "model", "modelGroup": "guard", "direction": "both",
+                     "maxChecks": 1});
+    let closed = cs_gateway(cfg.clone(), FailMode::Closed, SEC).await;
+    let r = post(closed.addr, OPENAI, body("Hallo", false)).await;
+    assert_eq!(r.status, StatusCode::INTERNAL_SERVER_ERROR, "{}", r.raw());
+    assert_eq!(r.error_code().as_deref(), Some("plugin_error"));
+    let open = cs_gateway(cfg, FailMode::Open, SEC).await;
+    let r = post(open.addr, OPENAI, body("Hallo", false)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.raw());
+}
+
+const TENANT: &str = "72f988bf-86f1-41af-91ab-2d7cd011db47";
+const CS_HOST: &str = "cs.cognitiveservices.azure.com";
+
+#[derive(Default)]
+struct EntraFake {
+    token_calls: std::sync::atomic::AtomicUsize,
+    imds_calls: std::sync::atomic::AtomicUsize,
+}
+
+/// Fake: Entra-Token-Endpunkt (Client Credentials), IMDS und Azure Content Safety mit
+/// Bearer-Prüfung.
+async fn entra_fake() -> (SocketAddr, Arc<EntraFake>) {
+    use axum::extract::{RawQuery, State};
+    use std::sync::atomic::Ordering;
+    let fake = Arc::new(EntraFake::default());
+    async fn token(
+        State(f): State<Arc<EntraFake>>,
+        axum::extract::Path(tenant): axum::extract::Path<String>,
+        form: String,
+    ) -> (StatusCode, Json<Value>) {
+        f.token_calls.fetch_add(1, Ordering::SeqCst);
+        let ok = tenant == TENANT
+            && form.contains("grant_type=client_credentials")
+            && form.contains("client_secret=s3cret")
+            && form.contains("scope=https%3A%2F%2Fcognitiveservices.azure.com%2F.default");
+        if !ok {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "invalid_client"})),
+            );
+        }
+        (
+            StatusCode::OK,
+            Json(json!({"access_token": "tok-sp", "expires_in": 3600, "token_type": "Bearer"})),
+        )
+    }
+    async fn imds(
+        State(f): State<Arc<EntraFake>>,
+        headers: AxHeaders,
+        RawQuery(q): RawQuery,
+    ) -> (StatusCode, Json<Value>) {
+        f.imds_calls.fetch_add(1, Ordering::SeqCst);
+        let q = q.unwrap_or_default();
+        if headers.get("metadata").and_then(|h| h.to_str().ok()) != Some("true")
+            || !q.contains("resource=https%3A%2F%2Fcognitiveservices.azure.com")
+        {
+            return (StatusCode::BAD_REQUEST, Json(json!({"error": "bad"})));
+        }
+        (
+            StatusCode::OK,
+            Json(json!({"access_token": "tok-mi", "expires_in": "3600", "token_type": "Bearer"})),
+        )
+    }
+    async fn analyze(headers: AxHeaders, Json(v): Json<Value>) -> (StatusCode, Json<Value>) {
+        let auth = headers
+            .get("authorization")
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or_default();
+        if !matches!(auth, "Bearer tok-sp" | "Bearer tok-mi")
+            || headers.contains_key("ocp-apim-subscription-key")
+        {
+            return (StatusCode::UNAUTHORIZED, Json(json!({"error": "token"})));
+        }
+        let hate = if v["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("hass")
+        {
+            6
+        } else {
+            0
+        };
+        (
+            StatusCode::OK,
+            Json(json!({"categoriesAnalysis": [{"category": "Hate", "severity": hate}]})),
+        )
+    }
+    let app = axum::Router::new()
+        .route("/{tenant}/oauth2/v2.0/token", axpost(token))
+        .route("/metadata/identity/oauth2/token", axum::routing::get(imds))
+        .route("/contentsafety/text:analyze", axpost(analyze))
+        .with_state(Arc::clone(&fake));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (addr, fake)
+}
+
+fn entra_cred(
+    name: &str,
+    kind: aigw_core::resource::EntraCredentialKind,
+    authority: Option<String>,
+) -> aigw_core::resource::ProviderCredential {
+    aigw_core::resource::Object {
+        id: aigw_core::resource::new_id(),
+        metadata: aigw_core::resource::ObjectMeta::named(name),
+        spec: aigw_core::resource::ProviderCredentialInfo {
+            provider: aigw_core::types::ProviderKind::AzureOpenAi,
+            entra: Some(aigw_core::resource::EntraAuth {
+                credential: kind,
+                tenant_id: Some(TENANT.into()),
+                client_id: Some("11111111-2222-3333-4444-555555555555".into()),
+                authority,
+                scope: None,
+            }),
+            fields: Vec::new(),
+            key_id: "k".into(),
+        },
+    }
+}
+
+/// Gateway mit `content-safety` (Azure, `auth: entraId`) gegen [`entra_fake`]; der
+/// Azure-Host wird per fester Namensauflösung auf den Fake gelenkt.
+async fn entra_gateway(credential: &str, fake: SocketAddr) -> (SocketAddr, Arc<Records>) {
+    use aigw_core::resource::EntraCredentialKind as K;
+    let chunky = Arc::new(Chunky::default());
+    let records = Arc::new(Records::default());
+    let mut st = state(Vec::new(), &chunky, Arc::clone(&records));
+    let mut snap = Snapshot::default();
+    let authority = Some(format!("http://{fake}"));
+    snap.credentials.insert(
+        "cs-sp".into(),
+        entra_cred("cs-sp", K::ClientSecret, authority),
+    );
+    snap.credential_data.insert(
+        "cs-sp".into(),
+        Arc::new(CredentialData(BTreeMap::from([(
+            "clientSecret".to_owned(),
+            SecretString::new("s3cret"),
+        )]))),
+    );
+    snap.credentials.insert(
+        "cs-mi".into(),
+        entra_cred("cs-mi", K::ManagedIdentity, None),
+    );
+    // Ohne spec.entra (nur API-Key): bei auth: entraId ein Laufzeitfehler.
+    snap.credentials.insert("az".into(), {
+        let mut c = entra_cred("az", K::ClientSecret, None);
+        c.spec.entra = None;
+        c
+    });
+    snap.credential_data.insert("az".into(), cred("az-key"));
+    let policy = UpstreamPolicy::from_config(&AdminConfig {
+        allow_insecure_upstreams: vec!["127.0.0.1".into(), CS_HOST.into()],
+        allow_private_upstreams: vec!["127.0.0.1".into(), CS_HOST.into()],
+        ..AdminConfig::default()
+    })
+    .unwrap();
+    let client =
+        aigw_outbound::OutboundClient::builder(aigw_outbound::AddressGuard::policy(policy.clone()))
+            .resolver(Arc::new(aigw_outbound::StaticResolver::new().with(
+                CS_HOST,
+                [std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)],
+            )))
+            .build()
+            .unwrap();
+    let host = GatewayHost::new(
+        Arc::clone(&st.routes),
+        Arc::clone(st.limits.counters()),
+        Some(SnapshotHandle::new(snap)),
+        policy,
+        client,
+    )
+    .with_entra_env(aigw_providers::entra::EntraEnv {
+        imds_endpoint: Some(format!("http://{fake}/metadata/identity/oauth2/token")),
+        ..Default::default()
+    });
+    let factory = builtin::content_safety::Factory::new(Arc::new(host));
+    let cfg = json!({"provider": "azure", "auth": "entraId", "credential": credential,
+                     "endpoint": format!("http://{CS_HOST}:{}", fake.port())});
+    let e = entry("cs", &factory, cfg).with_fail_mode(FailMode::Closed);
+    st.plugins = Arc::new(PluginChains::fixed(Chain::new(vec![Arc::new(e)])));
+    (start(st).await, records)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn content_safety_azure_with_entra_id() {
+    use std::sync::atomic::Ordering;
+    let (fake_addr, fake) = entra_fake().await;
+    // Service Principal (Client Credentials): ein Token-Abruf für mehrere Anfragen.
+    let (addr, records) = entra_gateway("cs-sp", fake_addr).await;
+    for _ in 0..2 {
+        let r = post(addr, OPENAI, body("Guten Morgen", false)).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.raw());
+    }
+    let r = post(addr, ANTHROPIC, body("Ich hasse euch", false)).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.raw());
+    assert!(r.raw().contains("hate"), "{}", r.raw());
+    assert_eq!(records.last().await.guardrails[0].category, "hate");
+    assert_eq!(fake.token_calls.load(Ordering::SeqCst), 1);
+
+    // Managed Identity (IMDS, gezielte SSRF-Ausnahme).
+    let (addr, _) = entra_gateway("cs-mi", fake_addr).await;
+    let r = post(addr, OPENAI, body("Guten Morgen", false)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.raw());
+    let r = post(addr, OPENAI, body("Hass", false)).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.raw());
+    assert_eq!(fake.imds_calls.load(Ordering::SeqCst), 1);
+
+    // Zugangsdaten ohne spec.entra bzw. unbekannt: Fehler → failMode closed, nichts verraten.
+    for name in ["az", "fehlt"] {
+        let (addr, _) = entra_gateway(name, fake_addr).await;
+        let r = post(addr, OPENAI, body("Hallo", false)).await;
+        assert_eq!(r.status, StatusCode::INTERNAL_SERVER_ERROR, "{}", r.raw());
+        assert!(!r.raw().contains("az-key") && !r.raw().contains("s3cret"));
+    }
+}
+
+#[test]
+fn content_safety_entra_config_rules() {
+    let chunky = Arc::new(Chunky::default());
+    let st = state(Vec::new(), &chunky, Arc::new(Records::default()));
+    let host = GatewayHost::with_defaults(
+        Arc::clone(&st.routes),
+        Arc::clone(st.limits.counters()),
+        None,
+        UpstreamPolicy::strict(),
+    )
+    .unwrap();
+    let f = builtin::content_safety::Factory::new(Arc::new(host));
+    let ok = |v: Value| f.build(&v).map(drop);
+    let ep = "https://acme.cognitiveservices.azure.com";
+    assert!(
+        ok(json!({"provider": "azure", "auth": "entraId", "credential": "c", "endpoint": ep}))
+            .is_ok()
+    );
+    assert!(
+        ok(
+            json!({"provider": "azure", "auth": "entraId", "credential": "c",
+                  "endpoint": "https://acme.services.ai.azure.com"})
+        )
+        .is_ok()
+    );
+    // Token nie an fremde Hosts.
+    for bad in [
+        "https://evil.example",
+        "https://cognitiveservices.azure.com.evil.example",
+        "https://.cognitiveservices.azure.com",
+    ] {
+        assert!(
+            ok(json!({"provider": "azure", "auth": "entraId", "credential": "c", "endpoint": bad}))
+                .is_err(),
+            "{bad}"
+        );
+    }
+    // credential Pflicht, secret nicht möglich, nur azure.
+    assert!(ok(json!({"provider": "azure", "auth": "entraId", "endpoint": ep})).is_err());
+    assert!(
+        ok(json!({"provider": "azure", "auth": "entraId", "secret": "s", "endpoint": ep})).is_err()
+    );
+    assert!(ok(json!({"provider": "openai", "auth": "entraId", "credential": "c"})).is_err());
+    assert!(ok(json!({"provider": "model", "auth": "entraId", "modelGroup": "g"})).is_err());
+    assert!(
+        ok(json!({"provider": "azure", "auth": "magic", "credential": "c", "endpoint": ep}))
+            .is_err()
+    );
+    assert!(ok(json!({"provider": "model", "modelGroup": "g", "maxChecks": 0})).is_err());
+    assert!(ok(json!({"provider": "model", "modelGroup": "g", "maxChecks": 5})).is_ok());
 }

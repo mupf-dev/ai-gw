@@ -15,7 +15,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aigw_core::ir::{ChatRequest, ChatResponse};
-use aigw_core::resource::CredentialData;
+use aigw_core::observe::PluginCalls;
+use aigw_core::resource::{CredentialData, SecretString};
 use aigw_core::upstream::UpstreamPolicy;
 
 use crate::plugin::{BoxFuture, PluginError};
@@ -58,12 +59,25 @@ pub trait PluginHost: Send + Sync + fmt::Debug + 'static {
     /// `POST` mit JSON an einen Endpunkt; prüft die aufgelöste Adresse erneut.
     fn post_json(&self, call: HttpCall) -> BoxFuture<'static, Result<HttpReply, PluginError>>;
 
-    /// Chat über eine Modellgruppe des Gateways (ohne Plugins und Client-Limits).
+    /// Chat über eine Modellgruppe des Gateways (ohne Plugins und Client-Limits). Der
+    /// Verbrauch wird in `calls` (aus [`crate::CallInfo::plugin_calls`]) gebucht und am Ende
+    /// der Anfrage dem Key/Team zugerechnet (Kosten, Budget, Token-Limits; AIGW-89/S-13).
     fn chat(
         &self,
         model_group: &str,
         req: ChatRequest,
+        calls: &PluginCalls,
     ) -> BoxFuture<'static, Result<ChatResponse, PluginError>>;
+
+    /// Bearer-Token für Microsoft Entra ID aus der `ProviderCredential` `credential` mit
+    /// `spec.entra` (Managed/Workload Identity, Client-Credentials; AIGW-89). Gleiche
+    /// Token-Quelle (Cache, Erneuerung im Hintergrund) wie Deployments mit `auth: entraId`.
+    fn entra_token(
+        &self,
+        _credential: &str,
+    ) -> BoxFuture<'static, Result<SecretString, PluginError>> {
+        Box::pin(async { Err(PluginError::new("keine Entra-Token-Quelle im Gateway-Host")) })
+    }
 }
 
 /// Host ohne Dienste (z. B. für `Registry::validate` und Tests): Endpunkte werden nach den
@@ -97,6 +111,7 @@ impl PluginHost for NoHost {
         &self,
         _model_group: &str,
         _req: ChatRequest,
+        _calls: &PluginCalls,
     ) -> BoxFuture<'static, Result<ChatResponse, PluginError>> {
         Box::pin(async { Err(PluginError::new("kein Gateway-Host für Modellaufrufe")) })
     }

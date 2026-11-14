@@ -21,7 +21,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use aigw_core::ir::{ApiError, ChatRequest, ChatResponse, StreamEvent};
-use aigw_core::observe::GuardrailHits;
+use aigw_core::observe::{GuardrailHits, PluginCalls};
 use aigw_core::snapshot::KeyCtx;
 use aigw_core::wire::WireFormat;
 use http::{HeaderMap, HeaderName, HeaderValue};
@@ -191,6 +191,9 @@ pub struct CallInfo {
     /// Sammelstelle für Guardrail-Erkennungen (Zähler ohne Inhalte, landen im
     /// `RequestRecord` und in `aigw_guardrail_hits_total`).
     pub guardrails: GuardrailHits,
+    /// Modellaufrufe von Plugins und Zähler der Prüfungen je Anfrage (AIGW-89/S-13); der
+    /// Recorder rechnet sie dem Key/Team zu.
+    pub plugin_calls: PluginCalls,
 }
 
 impl CallInfo {
@@ -203,6 +206,7 @@ impl CallInfo {
             model_group: None,
             stream: false,
             guardrails: GuardrailHits::default(),
+            plugin_calls: PluginCalls::default(),
         }
     }
 }

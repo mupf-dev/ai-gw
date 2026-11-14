@@ -238,8 +238,8 @@ impl<'a> Pipeline<'a> {
         if hooks == 0 {
             return Ok(texts);
         }
-        if let Some(hits) = plugins.guardrail_hits() {
-            self.rec.set_guardrails(hits);
+        if let Some(sinks) = plugins.plugin_sinks() {
+            self.rec.set_plugin_sinks(sinks);
         }
         let span = crate::trace::plugins_span("request", hooks);
         let out = {

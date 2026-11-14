@@ -300,7 +300,7 @@ async fn admit_is_atomic_across_levels_and_settles_parts() {
         output_tokens: 5,
         ..Usage::default()
     };
-    a.complete(&mut rec);
+    a.complete(&mut rec, &[]);
     for _ in 0..100 {
         if counters.current(&format!("key:{id}:tokens"), Window::Minute) == 25 {
             break;
@@ -403,7 +403,7 @@ fn overhead() {
             let start = std::time::Instant::now();
             for i in 0..n {
                 let adm = l.admit(a, grp, est, SystemTime::now()).await.unwrap();
-                adm.complete(&mut rec);
+                adm.complete(&mut rec, &[]);
                 if i % 1024 == 0 {
                     // Abgleich-Tasks laufen lassen (sonst wächst nur die Warteschlange).
                     tokio::task::yield_now().await;

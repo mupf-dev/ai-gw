@@ -41,7 +41,9 @@
   let level = $state<S['ScopeLevel']>('team');
   let target = $state('');
   let logging = $state(true);
-  let cs = $state({ provider: '', endpoint: '', secret: '', modelGroup: '' });
+  // AIGW-89: Azure wahlweise mit Entra ID (auth: entraId + ProviderCredential mit spec.entra) statt API-Key-Secret.
+  const CS_EMPTY = { provider: '', endpoint: '', secret: '', modelGroup: '', auth: 'apiKey', credential: '' };
+  let cs = $state({ ...CS_EMPTY });
   let preview = $state<GuardrailProfileApplyResult | null>(null);
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -53,14 +55,14 @@
     level = 'team';
     target = '';
     logging = true;
-    cs = { provider: '', endpoint: '', secret: '', modelGroup: '' };
+    cs = { ...CS_EMPTY };
     preview = null;
     error = null;
     open = true;
   }
   // Jede Eingabe verwirft die Vorschau – angewendet wird nur, was zuvor als Diff zu sehen war.
   $effect(() => {
-    void [level, target, logging, cs.provider, cs.endpoint, cs.secret, cs.modelGroup];
+    void [level, target, logging, cs.provider, cs.endpoint, cs.secret, cs.modelGroup, cs.auth, cs.credential];
     preview = null;
   });
 
@@ -71,7 +73,10 @@
       if (cs.provider === 'model') c.modelGroup = cs.modelGroup.trim();
       else {
         if (cs.endpoint.trim()) c.endpoint = cs.endpoint.trim();
-        if (cs.secret.trim()) c.secret = cs.secret.trim();
+        if (cs.provider === 'azure' && cs.auth === 'entraId') {
+          c.auth = 'entraId';
+          if (cs.credential.trim()) c.credential = cs.credential.trim();
+        } else if (cs.secret.trim()) c.secret = cs.secret.trim();
       }
       b.contentSafety = c as unknown as S['GuardrailProfileApply']['contentSafety'];
     }
@@ -195,9 +200,27 @@
       <Field label="Endpunkt" hint="https://…">
         {#snippet children({ id })}<Input {id} bind:value={cs.endpoint} autocomplete="off" placeholder="https://acme.cognitiveservices.azure.com" />{/snippet}
       </Field>
-      <Field label="Secret" hint="Name eines Secret mit dem API-Key (nur globaler admin)">
-        {#snippet children({ id })}<Input {id} bind:value={cs.secret} autocomplete="off" />{/snippet}
-      </Field>
+      {#if cs.provider === 'azure'}
+        <Field label="Zugang" hint="Entra ID: Managed Identity, Workload Identity oder Service Principal statt API-Key">
+          {#snippet children({ id })}<Select
+              {id}
+              bind:value={cs.auth}
+              items={[
+                { value: 'apiKey', label: 'Secret (API-Key)' },
+                { value: 'entraId', label: 'Entra ID (Anbieter-Zugangsdaten)' },
+              ]}
+            />{/snippet}
+        </Field>
+      {/if}
+      {#if cs.provider === 'azure' && cs.auth === 'entraId'}
+        <Field label="Zugangsdaten (Entra)" hint="Name einer Anbieter-Zugangsdaten mit Entra-Anmeldung (spec.entra; nur globaler admin)">
+          {#snippet children({ id })}<Input {id} bind:value={cs.credential} autocomplete="off" />{/snippet}
+        </Field>
+      {:else}
+        <Field label="Secret" hint="Name eines Secret mit dem API-Key (nur globaler admin)">
+          {#snippet children({ id })}<Input {id} bind:value={cs.secret} autocomplete="off" />{/snippet}
+        </Field>
+      {/if}
     {/if}
   {/if}
   {#if preview}

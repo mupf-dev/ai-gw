@@ -54,11 +54,13 @@ pub const PROFILE_LABEL: &str = "aigw.io/guardrail-profile";
 /// Label: angewendete Version des Profils.
 pub const VERSION_LABEL: &str = "aigw.io/guardrail-profile-version";
 /// Parameter-Schlüssel für `content-safety` beim Anwenden.
-const CONTENT_SAFETY_KEYS: [&str; 10] = [
+const CONTENT_SAFETY_KEYS: [&str; 12] = [
     "provider",
     "endpoint",
     "secret",
     "credential",
+    "auth",
+    "maxChecks",
     "model",
     "apiVersion",
     "modelGroup",
@@ -148,7 +150,8 @@ pub struct GuardrailProfileApply {
     #[serde(default)]
     pub dry_run: bool,
     /// Angaben für `content-safety` (Profil „Streng“): `provider`, `endpoint`, `secret` bzw.
-    /// `credential`, `modelGroup`, `apiVersion`, `model`, `thresholds`, `categories`,
+    /// `credential`, `auth` (`entraId` mit `credential` = ProviderCredential mit `spec.entra`,
+    /// AIGW-89), `maxChecks`, `modelGroup`, `apiVersion`, `model`, `thresholds`, `categories`,
     /// `promptTemplate`. Ohne Angabe wird die Bindung ausgelassen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<Object>)]

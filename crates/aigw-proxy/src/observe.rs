@@ -26,7 +26,8 @@ use aigw_core::ir::{
     ChatRequest, ChatResponse, Content, PartKind, StreamEvent, UpstreamError, Usage,
 };
 use aigw_core::observe::{
-    GuardrailHits, RawPayload, RequestObserver, RequestRecord, error_type, gen_ai_system,
+    GuardrailHits, PluginCalls, RawPayload, RequestObserver, RequestRecord, error_type,
+    gen_ai_system,
 };
 use aigw_core::wire::WireFormat;
 use axum::http::HeaderMap;
@@ -145,6 +146,8 @@ pub(crate) struct Recorder {
     cache_hit: bool,
     /// Erkennungen der Guardrail-Plugins (AIGW-37/38), geteilt mit der Plugin-Kette.
     guardrails: Option<GuardrailHits>,
+    /// Modellaufrufe von Plugins (AIGW-89/S-13), geteilt mit der Plugin-Kette.
+    plugin_calls: Option<PluginCalls>,
 }
 
 impl Recorder {
@@ -174,6 +177,7 @@ impl Recorder {
             admission: None,
             cache_hit: false,
             guardrails: None,
+            plugin_calls: None,
         }
     }
 
@@ -267,9 +271,11 @@ impl Recorder {
         }
     }
 
-    /// Sammelstelle der Guardrail-Erkennungen (nur bei Anfragen mit Plugins).
-    pub(crate) fn set_guardrails(&mut self, hits: GuardrailHits) {
+    /// Sammelstellen der Guardrail-Erkennungen und der Plugin-Modellaufrufe (nur bei
+    /// Anfragen mit Plugins).
+    pub(crate) fn set_plugin_sinks(&mut self, (hits, calls): (GuardrailHits, PluginCalls)) {
         self.guardrails = Some(hits);
+        self.plugin_calls = Some(calls);
     }
 
     /// Zulassung durch die Limits; wird in [`Recorder::finish`] abgeschlossen.
@@ -578,8 +584,16 @@ impl Recorder {
                 .and_then(|a| a.error)
                 .or_else(|| r.error_kind.map(aigw_core::ir::ErrorClass::from_kind));
         }
+        let plugin_calls = self
+            .plugin_calls
+            .take()
+            .map(|c| c.take())
+            .unwrap_or_default();
+        for c in &plugin_calls {
+            r.plugin_usage.add(&c.usage);
+        }
         if let Some(a) = self.admission.take() {
-            a.complete(&mut r);
+            a.complete(&mut r, &plugin_calls);
         }
         if let Some(h) = self.guardrails.take() {
             r.guardrails = h.take();

@@ -414,8 +414,8 @@ async fn chat_inner(
         ingress(format),
         req_stream,
     );
-    if let Some(hits) = plugins.guardrail_hits() {
-        p.rec.set_guardrails(hits);
+    if let Some(sinks) = plugins.plugin_sinks() {
+        p.rec.set_plugin_sinks(sinks);
     }
     let span = crate::trace::plugins_span("request", plugins.hooks(PluginPhase::Request));
     let mut req = match plugins

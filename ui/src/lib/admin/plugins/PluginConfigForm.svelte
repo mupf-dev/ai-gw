@@ -144,8 +144,9 @@
   // ------------------------------------------------------------ Verweise auf Geheimnisse
   const secretItems = $derived<SelectItem[]>([{ value: '', label: 'keins' }, ...secrets.map((s) => ({ value: s, label: s }))]);
   const credItems = $derived<SelectItem[]>([{ value: '', label: 'keine' }, ...credentials.map((s) => ({ value: s, label: s }))]);
-  /** content-safety: secret ODER credential. */
-  const csAuth = $derived(get(['secret']) ? 'secret' : get(['credential']) ? 'credential' : '');
+  /** content-safety: secret ODER credential ODER Entra ID (auth: entraId + credential mit spec.entra, AIGW-89). */
+  const csAuth = $derived(get(['auth']) === 'entraId' ? 'entra' : get(['secret']) ? 'secret' : get(['credential']) ? 'credential' : '');
+  const CS_AUTH_LABEL: Record<string, string> = { secret: 'Secret', credential: 'Zugangsdaten', entra: 'Entra ID über Zugangsdaten' };
   /** webhook: secret = {secret, field?} | {credential, field?} | {env} | {file}. */
   const whKind = $derived.by(() => {
     const s = obj(['secret']);
@@ -298,7 +299,7 @@
     {:else}
       {@render text('Endpunkt', ['endpoint'], { placeholder: 'https://…', hint: 'nur https, SSRF-Regeln wie Deployments' })}
       {#if !secretRefs}
-        {@render refNote(csAuth ? `Zugang: ${csAuth === 'secret' ? 'Secret' : 'Zugangsdaten'} „${str([csAuth])}“` : 'Zugang: ohne')}
+        {@render refNote(csAuth ? `Zugang: ${CS_AUTH_LABEL[csAuth]} „${str([csAuth === 'secret' ? 'secret' : 'credential'])}“` : 'Zugang: ohne')}
       {:else}
       <Field label="Zugang" hint="nur als Verweis – nie Klartext (F149)">
         {#snippet children({ id })}
@@ -308,14 +309,24 @@
             onchange={(v) => {
               set(['secret'], undefined);
               set(['credential'], undefined);
-              if (v) config[v] = v === 'secret' ? (secrets[0] ?? '') : (credentials[0] ?? '');
+              set(['auth'], undefined);
+              if (v === 'entra') {
+                config.auth = 'entraId';
+                config.credential = credentials[0] ?? '';
+              } else if (v) config[v] = v === 'secret' ? (secrets[0] ?? '') : (credentials[0] ?? '');
             }}
-            items={[{ value: '', label: 'ohne' }, { value: 'secret', label: 'Secret' }, { value: 'credential', label: 'Anbieter-Zugangsdaten' }]}
+            items={[
+              { value: '', label: 'ohne' },
+              { value: 'secret', label: 'Secret' },
+              { value: 'credential', label: 'Anbieter-Zugangsdaten' },
+              ...(get(['provider']) === 'azure' ? [{ value: 'entra', label: 'Entra ID (Zugangsdaten mit Entra-Anmeldung)' }] : []),
+            ]}
           />
         {/snippet}
       </Field>
       {#if csAuth === 'secret'}{@render choice('Secret', ['secret'], secretItems)}{/if}
       {#if csAuth === 'credential'}{@render choice('Zugangsdaten', ['credential'], credItems)}{/if}
+      {#if csAuth === 'entra'}{@render choice('Zugangsdaten (Entra)', ['credential'], credItems, 'Managed Identity, Workload Identity oder Service Principal (spec.entra); Endpunkt nur *.cognitiveservices.azure.com bzw. *.services.ai.azure.com')}{/if}
       {/if}
       {#if get(['provider']) === 'azure'}{@render text('API-Version', ['apiVersion'], { placeholder: '2024-09-01' })}{/if}
       {#if get(['provider']) === 'openai'}{@render text('Modell', ['model'], { placeholder: 'omni-moderation-latest' })}{/if}
@@ -327,6 +338,7 @@
     {@render choice('Aktion', ['action'], FILTER_ACTION)}
     {@render choice('Ausgabeprüfung', ['outputMode'], [STD, { value: 'buffered', label: 'buffered – ganze Antwort' }, { value: 'sentence', label: 'sentence – satzweise im Stream' }])}
     {@render text('Höchstzahl Zeichen', ['maxChars'], { numeric: true })}
+    {@render text('Höchstzahl Prüfungen je Anfrage', ['maxChecks'], { numeric: true, hint: 'Standard 100; darüber failMode bzw. im Stream sentenceOnError' })}
   {:else if plugin === 'webhook'}
     {@render text('URL', ['url'], { required: true, placeholder: 'https://policy.example.org/aigw', hint: 'nur https, keine privaten Ziele (SSRF)', wide: true })}
     <fieldset class="flex flex-col gap-1.5">

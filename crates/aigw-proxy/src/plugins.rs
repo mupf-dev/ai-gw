@@ -81,6 +81,7 @@ impl PluginRun {
                 model_group: model_group.map(str::to_owned),
                 stream,
                 guardrails: aigw_core::observe::GuardrailHits::default(),
+                plugin_calls: aigw_core::observe::PluginCalls::default(),
             })
         });
         Self {
@@ -182,9 +183,17 @@ impl PluginRun {
         aigw_plugins::builtin::cache::policy_of(&self.chain)
     }
 
-    /// Sammelstelle der Guardrail-Erkennungen (nur wenn die Anfrage Plugins hat).
-    pub(crate) fn guardrail_hits(&self) -> Option<aigw_core::observe::GuardrailHits> {
-        self.info.as_ref().map(|i| i.guardrails.clone())
+    /// Sammelstellen der Guardrail-Erkennungen und der Plugin-Modellaufrufe (nur wenn die
+    /// Anfrage Plugins hat).
+    pub(crate) fn plugin_sinks(
+        &self,
+    ) -> Option<(
+        aigw_core::observe::GuardrailHits,
+        aigw_core::observe::PluginCalls,
+    )> {
+        self.info
+            .as_ref()
+            .map(|i| (i.guardrails.clone(), i.plugin_calls.clone()))
     }
 
     /// Anzahl der Plugins mit Haken in `phase`.
