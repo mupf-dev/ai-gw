@@ -34,6 +34,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError, Weak};
 
 use aigw_core::ir::{ErrorClass, UpstreamError};
@@ -92,6 +93,26 @@ pub struct EntraEnv {
     pub identity_header: Option<SecretString>,
     /// IMDS-Endpunkt (Standard [`IMDS_ENDPOINT`]; nur Tests ändern ihn).
     pub imds_endpoint: Option<String>,
+    /// Workload/Managed Identity (die Identität des Gateway-Prozesses) freigegeben?
+    /// Startkonfiguration `upstream.entra.ambient_identity` (AIGW-90), Standard `false`.
+    pub ambient_identity: bool,
+}
+
+/// Prozessweite Freigabe für Workload/Managed Identity (`upstream.entra.ambient_identity`).
+static AMBIENT_IDENTITY: AtomicBool = AtomicBool::new(false);
+
+/// Schlüssel der Startkonfiguration, der Workload/Managed Identity freigibt.
+pub const AMBIENT_IDENTITY_KEY: &str = "upstream.entra.ambient_identity";
+
+/// Setzt die Freigabe für Workload/Managed Identity (beim Start aus
+/// `upstream.entra.ambient_identity`, vor dem ersten Routenaufbau).
+pub fn set_ambient_identity(allowed: bool) {
+    AMBIENT_IDENTITY.store(allowed, Ordering::Relaxed);
+}
+
+/// Ist Workload/Managed Identity prozessweit freigegeben?
+pub fn ambient_identity() -> bool {
+    AMBIENT_IDENTITY.load(Ordering::Relaxed)
 }
 
 impl fmt::Debug for EntraEnv {
@@ -106,6 +127,7 @@ impl fmt::Debug for EntraEnv {
                 "identity_header",
                 &self.identity_header.as_ref().map(|_| "***"),
             )
+            .field("ambient_identity", &self.ambient_identity)
             .finish_non_exhaustive()
     }
 }
@@ -122,6 +144,8 @@ impl EntraEnv {
             identity_endpoint: var("IDENTITY_ENDPOINT"),
             identity_header: var("IDENTITY_HEADER").map(SecretString::new),
             imds_endpoint: None,
+            // Wird je Aufruf aus [`ambient_identity`] übernommen (siehe [`token_source`]).
+            ambient_identity: false,
         }
     }
 }
@@ -466,10 +490,19 @@ fn shared(key: [u8; 32], make: impl FnOnce() -> EntraTokenSource) -> Arc<EntraTo
 }
 
 /// Baut (bzw. teilt) die Entra-ID-Token-Quelle eines Azure-Deployments mit
-/// `settings.auth: entraId` und den Werten der Prozessumgebung.
+/// `settings.auth: entraId` und den Werten der Prozessumgebung; Workload/Managed Identity nur
+/// mit [`set_ambient_identity`]`(true)`.
 pub fn token_source(dep: &DeploymentCtx) -> Result<Arc<EntraTokenSource>, ConfigError> {
     static ENV: LazyLock<EntraEnv> = LazyLock::new(EntraEnv::from_process);
-    token_source_with_env(dep, &ENV)
+    if ambient_identity() {
+        let env = EntraEnv {
+            ambient_identity: true,
+            ..ENV.clone()
+        };
+        token_source_with_env(dep, &env)
+    } else {
+        token_source_with_env(dep, &ENV)
+    }
 }
 
 /// Wie [`token_source`], mit vorgegebener Umgebung (Tests).
@@ -501,6 +534,14 @@ pub fn token_source_with_env(
         return Err(s.invalid(format!(
             "settings.entraScope: bei {method} nur {}",
             AMBIENT_SCOPES.join(", ")
+        )));
+    }
+    // AIGW-90: die Identität des Gateway-Prozesses nur mit ausdrücklicher Freigabe.
+    if ambient && !env.ambient_identity {
+        return Err(s.invalid(format!(
+            "{method} nutzt die Identität des Gateway-Prozesses und ist nicht freigegeben – \
+             in der Startkonfiguration {AMBIENT_IDENTITY_KEY}: true setzen \
+             (ENV AIGW_UPSTREAM__ENTRA__AMBIENT_IDENTITY=true)"
         )));
     }
     // IDs: Zugangsdaten vor Einstellungen vor Prozessumgebung (letztere nur für Workload

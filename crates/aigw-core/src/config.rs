@@ -527,6 +527,11 @@ pub struct GitopsConfig {
     /// hinausführen, werden abgelehnt. Die CLI ist nicht eingeschränkt.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secret_dir: Option<PathBuf>,
+    /// Rolle `gitops` darf per `POST /admin/api/v1/config:apply` auch `User` mit Rollen bzw.
+    /// OIDC-Verknüpfung anlegen, ändern und löschen (S-05, AIGW-90). Standard `false`: ein
+    /// gitops-Key ist damit nicht admin-gleichwertig; solche Änderungen lehnt der Plan mit
+    /// `422` ab. Ein globaler `admin` und die CLI sind nicht betroffen.
+    pub manage_users: bool,
 }
 
 /// Limits (AIGW-30, `docs/konzept/11-limits-und-budgets.md`).
@@ -1016,6 +1021,20 @@ pub struct UpstreamConfig {
     /// innerhalb dieses Verzeichnisses), Symlinks, die hinausführen, werden abgelehnt.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ca_dir: Option<PathBuf>,
+    /// Entra-ID-Anmeldung an Anbieter (AIGW-82/84/90).
+    pub entra: UpstreamEntraConfig,
+}
+
+/// Entra-ID-Anmeldung an Anbieter (`upstream.entra`, AIGW-90).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UpstreamEntraConfig {
+    /// Zugangsdaten bzw. Deployments mit `workloadIdentity`/`managedIdentity` dürfen die
+    /// Identität des Gateway-Prozesses nutzen (Managed Identity der VM/Container App,
+    /// föderiertes Token des Pods). Standard `false`: solche Deployments sind nicht nutzbar
+    /// (Fehler beim Routenaufbau, Warnung beim Start) – wer Deployments oder Zugangsdaten
+    /// anlegen darf, kann sonst Tokens der Gateway-Identität anfordern lassen.
+    pub ambient_identity: bool,
 }
 
 /// Einstellungen der Admin-API (AIGW-65, `docs/konzept/08-admin-api.md`).
@@ -1884,6 +1903,8 @@ admin:
         assert_eq!(d.admin.auth.oidc.effective_identity_claim(), "sub");
         assert_eq!(d.admin.auth.max_admin_key_lifetime_secs(), Ok(None));
         assert!(d.gitops.secret_dir.is_none() && d.upstream.ca_dir.is_none());
+        assert!(!d.gitops.manage_users, "S-05: Standard aus");
+        assert!(!d.upstream.entra.ambient_identity, "AIGW-90: Standard aus");
         let cfg = Config::from_yaml_with_env(
             "admin:\n  auth:\n    oidc:\n      profile: entra\n      tenant_id: t-1\n",
             env(&[
@@ -1891,6 +1912,8 @@ admin:
                 ("AIGW_ADMIN__AUTH__AUDIT_REQUIRED", "false"),
                 ("AIGW_GITOPS__SECRET_DIR", "/run/aigw/secrets"),
                 ("AIGW_UPSTREAM__CA_DIR", "/etc/aigw/ca"),
+                ("AIGW_UPSTREAM__ENTRA__AMBIENT_IDENTITY", "true"),
+                ("AIGW_GITOPS__MANAGE_USERS", "true"),
             ]),
         )
         .unwrap();
@@ -1907,6 +1930,7 @@ admin:
             cfg.upstream.ca_dir.as_deref(),
             Some(Path::new("/etc/aigw/ca"))
         );
+        assert!(cfg.upstream.entra.ambient_identity && cfg.gitops.manage_users);
         for (t, v) in [("30", 30), ("5m", 300), ("12h", 43_200), ("1d", 86_400)] {
             assert_eq!(parse_duration_secs(t), Ok(v), "{t}");
         }

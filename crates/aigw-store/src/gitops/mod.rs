@@ -90,6 +90,10 @@ pub struct ApplyOptions {
     /// Persistenzschicht kennt sie nicht, z. B. `aigw_admin::plugin_bindings::check`).
     /// `None` = keine Prüfung.
     pub plugin_bindings: Option<PluginBindingCheck>,
+    /// `User` mit Rollen bzw. OIDC-Verknüpfung anlegen, ändern und löschen (S-05). `false`
+    /// (Admin-API mit Rolle `gitops` ohne `gitops.manage_users`): solche Änderungen sind ein
+    /// Validierungsfehler; unveränderte bzw. beibehaltene Nutzer bleiben erlaubt.
+    pub manage_users: bool,
 }
 
 impl Default for ApplyOptions {
@@ -103,6 +107,7 @@ impl Default for ApplyOptions {
             upstreams: UpstreamPolicy::strict(),
             group_settings: None,
             plugin_bindings: None,
+            manage_users: true,
         }
     }
 }

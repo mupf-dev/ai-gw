@@ -95,6 +95,7 @@ impl Env {
             auth,
             upstreams,
             secret_dir: Some(dir.join("secrets")),
+            manage_users: false,
         }));
         Self { app, dir }
     }
@@ -345,6 +346,54 @@ async fn scenario(store: Store) {
     env.yaml(&viewer, "/config:apply?dryRun=true", manifest)
         .await
         .expect(StatusCode::FORBIDDEN);
+
+    // --- S-05: gitops schreibt ohne gitops.manage_users keine Nutzer mit Rollen/OIDC ---------
+    let user = |name: &str, extra: &str| {
+        format!(
+            "apiVersion: aigw/v1alpha1\nkind: User\nmetadata: {{name: {name}}}\nspec:\n  \
+             email: {name}@example.org\n{extra}"
+        )
+    };
+    let admin_role = "  roles: [{role: admin}]\n";
+    env.yaml(&ci, "/config:apply", &user("s05-plain", ""))
+        .await
+        .expect(ok);
+    for (name, extra) in [
+        ("s05-boss", admin_role),
+        (
+            "s05-plain",
+            "  oidcIssuer: https://idp.example.org\n  oidcSubject: s05\n",
+        ),
+    ] {
+        for path in ["/config:apply?dryRun=true", "/config:apply"] {
+            let r = env
+                .yaml(&ci, path, &user(name, extra))
+                .await
+                .expect(StatusCode::UNPROCESSABLE_ENTITY)
+                .json();
+            let issues = r["issues"].as_array().unwrap();
+            assert_eq!(issues.len(), 1, "{r}");
+            assert_eq!(issues[0]["name"], name);
+            assert!(
+                issues[0]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("gitops.manage_users"),
+                "{r}"
+            );
+        }
+    }
+    // Globaler admin darf; danach unverändert auch gitops (Export-Rundlauf), ändern nicht.
+    env.yaml(BOOT, "/config:apply", &user("s05-boss", admin_role))
+        .await
+        .expect(ok);
+    env.yaml(&ci, "/config:apply", &user("s05-boss", admin_role))
+        .await
+        .expect(ok);
+    let renamed = user("s05-boss", admin_role).replace("s05-boss@", "chef@");
+    env.yaml(&ci, "/config:apply", &renamed)
+        .await
+        .expect(StatusCode::UNPROCESSABLE_ENTITY);
 
     // --- F193: Keys ohne Team gehören Org-Rollen ----------------------------------------------
     let acme_admin = env

@@ -377,6 +377,7 @@ async fn container_apps_managed_identity_shared_by_gpt_and_claude() {
     let env = EntraEnv {
         identity_endpoint: Some(format!("http://localhost:{}/msi/token", addr.port())),
         identity_header: Some(SecretString::new("aca-hdr-geheim")),
+        ambient_identity: true,
         ..EntraEnv::default()
     };
     let mi = json!({"auth": "entraId", "entraCredential": "managedIdentity",
@@ -474,6 +475,7 @@ async fn managed_identity_from_credential_entra() {
     let env = EntraEnv {
         identity_endpoint: Some(format!("http://localhost:{}/msi/token", addr.port())),
         identity_header: Some(SecretString::new("aca-hdr-geheim")),
+        ambient_identity: true,
         ..EntraEnv::default()
     };
     let entra = EntraAuth {
@@ -636,7 +638,11 @@ fn configuration_errors() {
         json!({"auth": "entraId", "entraCredential": "managedIdentity"}),
     );
     d.deployment.spec.endpoint = None;
-    let e = AnthropicAdapter::from_deployment_with_entra_env(&d, &EntraEnv::default())
+    let allowed = EntraEnv {
+        ambient_identity: true,
+        ..EntraEnv::default()
+    };
+    let e = AnthropicAdapter::from_deployment_with_entra_env(&d, &allowed)
         .unwrap_err()
         .to_string();
     assert!(e.contains("endpoint"), "{e}");

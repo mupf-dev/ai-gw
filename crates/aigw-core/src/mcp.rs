@@ -217,6 +217,41 @@ pub fn validate_server(
     Ok(())
 }
 
+/// Prüft, ob der Verweis eines MCP-Servers (`spec.credential` bzw. `spec.secret`) auflösbar
+/// ist (AIGW-90): `fields` sind die gespeicherten Felder des Ziels; gebraucht wird
+/// `settings.credentialField` (Standard `apiKey`), ohne ausdrückliches Feld genügt auch `value`
+/// (Standardfeld eines `Secret`) – wie die Laufzeit im MCP-Client. Ohne Verweis immer `Ok`.
+/// Ungültige Einstellungen meldet [`validate_server`].
+pub fn check_reference_fields<'a>(
+    spec: &McpServerSpec,
+    fields: impl IntoIterator<Item = &'a str>,
+) -> Result<(), String> {
+    let (path, target) = match (&spec.credential, &spec.secret) {
+        (Some(c), _) => ("spec.credential", c),
+        (None, Some(s)) => ("spec.secret", s),
+        (None, None) => return Ok(()),
+    };
+    let Ok(settings) = McpServerSettings::from_json(&spec.settings) else {
+        return Ok(());
+    };
+    let want = settings.credential_field();
+    let fields: Vec<&str> = fields.into_iter().collect();
+    let fallback = settings.credential_field.is_none()
+        && fields.contains(&crate::resource::SecretSpec::DEFAULT_FIELD);
+    if fields.contains(&want) || fallback {
+        return Ok(());
+    }
+    Err(format!(
+        "{path}: {target:?} enthält kein Feld {want:?} (vorhanden: {}; Feld über \
+         settings.credentialField wählen)",
+        if fields.is_empty() {
+            "keine".to_owned()
+        } else {
+            fields.join(", ")
+        }
+    ))
+}
+
 /// Prüft eine MCP-Freigabe: Empfänger `team` oder `api-key`, gültige Tool-Muster.
 pub fn validate_grant(spec: &McpGrantSpec) -> Result<(), String> {
     if !matches!(spec.subject.level, ScopeLevel::Team | ScopeLevel::ApiKey) {
@@ -313,6 +348,34 @@ fn glob_match(p: &[char], t: &[char]) -> bool {
 mod tests {
     use super::*;
     use crate::resource::Scope;
+
+    #[test]
+    fn reference_fields_aigw90() {
+        let spec =
+            |cred: Option<&str>, secret: Option<&str>, settings: serde_json::Value| McpServerSpec {
+                url: "https://mcp.example.org/mcp".into(),
+                transport: McpTransport::StreamableHttp,
+                credential: cred.map(str::to_owned),
+                secret: secret.map(str::to_owned),
+                enabled: true,
+                settings: settings.as_object().cloned().unwrap_or_default(),
+            };
+        let none = serde_json::json!({});
+        assert!(check_reference_fields(&spec(None, None, none.clone()), []).is_ok());
+        assert!(check_reference_fields(&spec(Some("c"), None, none.clone()), ["apiKey"]).is_ok());
+        // Ohne ausdrückliches Feld genügt `value` (Secret-Standardfeld).
+        assert!(check_reference_fields(&spec(None, Some("s"), none.clone()), ["value"]).is_ok());
+        let e = check_reference_fields(&spec(None, Some("s"), none), ["token"]).unwrap_err();
+        assert!(e.contains("spec.secret") && e.contains("\"apiKey\""), "{e}");
+        let field = serde_json::json!({"credentialField": "token"});
+        assert!(check_reference_fields(&spec(None, Some("s"), field.clone()), ["token"]).is_ok());
+        // Ausdrückliches Feld: kein Rückfall auf `value`.
+        let e = check_reference_fields(&spec(Some("c"), None, field), ["value"]).unwrap_err();
+        assert!(
+            e.contains("spec.credential") && e.contains("\"token\""),
+            "{e}"
+        );
+    }
 
     #[test]
     fn glob() {

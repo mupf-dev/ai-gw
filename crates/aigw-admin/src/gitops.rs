@@ -17,6 +17,9 @@
 //!
 //! Berechtigung (F55): Ziel [`Target::GitOps`] – `config:export` lesen globale
 //! Leserollen und `gitops`, `config:apply` (auch Trockenlauf) globaler `admin` und `gitops`.
+//! `User` mit Rollen oder OIDC-Verknüpfung anlegen/ändern/löschen darf über `config:apply` nur
+//! ein globaler `admin`; die Rolle `gitops` nur mit `gitops.manage_users: true` (S-05) –
+//! sonst `422` mit je einem Eintrag in `issues` (auch im Trockenlauf).
 
 // `#[utoipa::path(params(…))]` erzeugt für IntoParams-Typen qualifizierte Pfade.
 #![allow(unused_qualifications)]
@@ -65,6 +68,9 @@ pub struct GitopsState {
     /// `gitops.secret_dir` (F52): `valueFrom.file` nur innerhalb dieses Verzeichnisses;
     /// ohne sind Dateien über die Admin-API verboten.
     pub secret_dir: Option<std::path::PathBuf>,
+    /// `gitops.manage_users` (S-05): Rolle `gitops` darf `User` mit Rollen bzw.
+    /// OIDC-Verknüpfung schreiben. Ein globaler `admin` darf es immer.
+    pub manage_users: bool,
 }
 
 impl fmt::Debug for GitopsState {
@@ -240,6 +246,8 @@ pub(crate) async fn apply_config(
         upstreams: st.upstreams.clone(),
         group_settings: Some(crate::resources::group_settings),
         plugin_bindings: Some(crate::plugin_bindings::check),
+        // S-05: Nutzer mit Rollen/OIDC nur als globaler admin oder mit gitops.manage_users.
+        manage_users: st.manage_users || p.can(Permission::Write, &Target::Global),
     };
     let report = gitops::apply(&st.store, &st.keyring, &docs, &opts, &ProcessSecrets)
         .await

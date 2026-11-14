@@ -49,6 +49,7 @@ async fn app(read_only_mode: bool) -> (Router, Store) {
         auth,
         upstreams: aigw_admin::UpstreamPolicy::strict(),
         secret_dir: None,
+        manage_users: false,
     }));
     (read_only::apply(router, read_only_mode), store)
 }

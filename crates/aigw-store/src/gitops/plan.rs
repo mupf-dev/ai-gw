@@ -438,8 +438,20 @@ pub(crate) fn prepare(
                 }
                 (None, None) => continue,
             }
+            if kind == ResourceKind::User && !opts.manage_users {
+                check_user_change(
+                    &change,
+                    doc.map(|d| &d.manifest),
+                    cur,
+                    doc.map(|d| d.index),
+                    &mut issues,
+                );
+            }
             changes.push(change);
         }
+    }
+    if !issues.is_empty() {
+        return Err(GitopsError::Invalid(issues));
     }
     // Löschen in umgekehrter Abhängigkeitsreihenfolge, nach allen Anlagen/Änderungen.
     deletes.reverse();
@@ -769,6 +781,46 @@ fn collect_refs(
     }
 }
 
+/// Nutzer mit Rollen oder OIDC-Verknüpfung (Anmeldung an der Admin-API möglich bzw. Rechte).
+fn privileged_user(m: &Manifest) -> bool {
+    match &m.spec {
+        ResourceSpec::User(u) => {
+            !u.roles.is_empty() || u.oidc_issuer.is_some() || u.oidc_subject.is_some()
+        }
+        _ => false,
+    }
+}
+
+/// S-05: ohne `manage_users` darf ein Plan Nutzer mit Rollen/OIDC-Verknüpfung weder anlegen
+/// noch ändern noch löschen (auch nicht, um sie zu solchen zu machen oder davon zu befreien).
+fn check_user_change(
+    change: &Change,
+    desired: Option<&Manifest>,
+    current: Option<&Current>,
+    doc: Option<usize>,
+    issues: &mut Vec<Issue>,
+) {
+    let verb = match change.action {
+        ChangeAction::Create => "anlegen",
+        ChangeAction::Update => "ändern",
+        ChangeAction::Delete => "löschen",
+        _ => return,
+    };
+    let privileged = desired.is_some_and(privileged_user)
+        || current.is_some_and(|c| privileged_user(&c.manifest));
+    if privileged {
+        issues.push(Issue::at(
+            doc,
+            ResourceKind::User,
+            &change.name,
+            format!(
+                "Nutzer mit Rollen oder OIDC-Verknüpfung {verb}: nur ein globaler admin \
+                 (Rolle gitops nur mit gitops.manage_users: true in der Startkonfiguration, S-05)"
+            ),
+        ));
+    }
+}
+
 /// Prüft alle Verweise eines Objekts gegen den Endzustand.
 /// Inhaltliche Regeln wie in der Admin-API ([`aigw_core::validate`]) für alle Dokumente des
 /// Manifests: Aliasse, Fallbacks (Ziele, Zyklen im Endzustand), Deployments (SSRF,
@@ -799,6 +851,16 @@ fn check_rules(
                 _ => None,
             })
             .collect();
+    // Feldnamen von Zugangsdaten und Secrets im Endzustand (Verweise der MCP-Server, AIGW-90).
+    let fields = |kind: ResourceKind, name: &str| -> Option<Vec<&str>> {
+        match &fin.objects.get(&kind)?.get(name)?.1.spec {
+            ResourceSpec::ProviderCredential(c) => {
+                Some(c.data.keys().map(String::as_str).collect())
+            }
+            ResourceSpec::Secret(s) => Some(s.data.keys().map(String::as_str).collect()),
+            _ => None,
+        }
+    };
     let team_orgs: BTreeMap<&str, &str> = of(ResourceKind::Team)
         .filter_map(|(n, (_, m))| match &m.spec {
             ResourceSpec::Team(t) => Some((n.as_str(), t.organization.as_str())),
@@ -863,7 +925,17 @@ fn check_rules(
                 }),
                 // MCP-Gateway (AIGW-41): wie in der Admin-API.
                 ResourceSpec::McpServer(s) => {
-                    aigw_core::mcp::validate_server(&opts.upstreams, name, s)
+                    aigw_core::mcp::validate_server(&opts.upstreams, name, s).and_then(|()| {
+                        // Existenz prüft check_refs; hier: liefert das Ziel das Token-Feld?
+                        let target = match (&s.credential, &s.secret) {
+                            (Some(c), _) => fields(ResourceKind::ProviderCredential, c),
+                            (None, Some(x)) => fields(ResourceKind::Secret, x),
+                            (None, None) => None,
+                        };
+                        target.map_or(Ok(()), |f| {
+                            aigw_core::mcp::check_reference_fields(s, f.iter().copied())
+                        })
+                    })
                 }
                 ResourceSpec::McpGrant(g) => aigw_core::mcp::validate_grant(g),
                 // F90: OIDC-Identität vorab (Issuer + Kennung), Rollen (F55: gitops global).

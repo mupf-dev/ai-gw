@@ -7,6 +7,9 @@
 # - Benutzerzugewiesene Managed Identity (UAMI) an der Container App; ihre Client-ID steht in
 #   spec.entra.clientId der Zugangsdaten. Die UAMI braucht auf der Foundry-Ressource die Rolle
 #   „Cognitive Services User“ (bzw. „Azure AI User“).
+# - Startkonfiguration: upstream.entra.ambient_identity: true (bzw.
+#   AIGW_UPSTREAM__ENTRA__AMBIENT_IDENTITY=true) – ohne diese Freigabe nutzt ai-gw die Identität
+#   des Prozesses nicht (AIGW-90), die Deployments sind dann „nicht nutzbar“.
 # - Container Apps setzt IDENTITY_ENDPOINT/IDENTITY_HEADER (App-Service-Protokoll,
 #   api-version 2019-08-01); ai-gw nutzt sie automatisch, sonst IMDS.
 # - Die Anmeldung steht einmal an den Zugangsdaten (spec.entra, AIGW-84); die Deployments

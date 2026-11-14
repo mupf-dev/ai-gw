@@ -77,9 +77,16 @@ AIGW-58). Verweise `S-xx` beziehen sich auf die dortigen Befunde.
 - **OIDC** bevorzugen; Session-`max_age` kurz halten (Gruppenrollen gelten bis Session-Ende,
   S-24). UI nur über HTTPS (Cookies sind `Secure`). Keine fremd kontrollierten
   Schwester-Subdomains unter dem Admin-Host (S-23).
-- **Rolle `gitops` ist admin-gleichwertig** (S-05): `config:apply` kann Nutzer und Rollen
-  schreiben. CI-Keys mit kurzer Laufzeit (`max_admin_key_lifetime`), nur im CI-Secret-Store,
-  Apply nur aus geschützten Branches.
+- **Rolle `gitops`** (S-05): schreibt standardmäßig **keine** Nutzer mit Rollen oder
+  OIDC-Verknüpfung (`422`); `gitops.manage_users: true` nur setzen, wenn Nutzer wirklich per
+  GitOps verwaltet werden – dann ist ein gitops-Key admin-gleichwertig. In jedem Fall: CI-Keys
+  mit kurzer Laufzeit (`max_admin_key_lifetime`), nur im CI-Secret-Store, Apply nur aus
+  geschützten Branches.
+- **Entra Workload/Managed Identity** (AIGW-90): nur freigeben
+  (`upstream.entra.ambient_identity: true`), wenn Anbieter wirklich über die Identität des
+  Gateways angebunden werden; der Identität nur „Cognitive Services OpenAI User“ (bzw. die
+  nötige Foundry-Rolle) auf den vorgesehenen Ressourcen geben – wer Deployments anlegen darf,
+  kann ihre Tokens an jeden erlaubten Endpunkt schicken lassen.
 - Einladungslinks über einen vertraulichen Kanal verschicken; sie sind Inhaber-Token (S-25).
 
 ## Datenebene

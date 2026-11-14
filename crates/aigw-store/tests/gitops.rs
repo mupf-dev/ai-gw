@@ -493,3 +493,110 @@ async fn postgres() {
         .await
         .unwrap();
 }
+
+/// S-05 (AIGW-90): ohne `manage_users` (Rolle `gitops` über die Admin-API) keine Nutzer mit
+/// Rollen bzw. OIDC-Verknüpfung anlegen, ändern oder löschen – auch nicht im Trockenlauf;
+/// unveränderte und beibehaltene Nutzer sowie Nutzer ohne Rollen/OIDC bleiben erlaubt.
+#[tokio::test]
+async fn privileged_users_need_manage_users() {
+    let store = Store::connect("sqlite::memory:").await.unwrap();
+    store.migrate().await.unwrap();
+    let ring = Keyring::new(MasterKey::generate().unwrap().0);
+    let env = Secrets::default();
+    let restricted = ApplyOptions {
+        manage_users: false,
+        ..ApplyOptions::default()
+    };
+    let user = |name: &str, extra: &str| {
+        format!(
+            "apiVersion: aigw/v1alpha1\nkind: User\nmetadata: {{name: {name}}}\nspec:\n  \
+             email: {name}@example.org\n{extra}"
+        )
+    };
+    let admin_role = "  roles: [{role: admin}]\n";
+    let oidc = "  oidcIssuer: https://idp.example.org\n  oidcSubject: s-1\n";
+    let rejected = |r: Result<aigw_store::gitops::ApplyReport, GitopsError>, name: &str| {
+        let Err(GitopsError::Invalid(issues)) = r else {
+            panic!("{name}: Validierungsfehler erwartet: {r:?}");
+        };
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert_eq!(issues[0].name.as_deref(), Some(name));
+        assert!(
+            issues[0].message.contains("gitops.manage_users"),
+            "{}",
+            issues[0].message
+        );
+    };
+
+    // Nutzer ohne Rollen/OIDC: erlaubt.
+    let plain = parse_documents(&user("plain", "")).unwrap();
+    apply(&store, &ring, &plain, &restricted, &env)
+        .await
+        .unwrap();
+    // Anlegen mit Rolle bzw. OIDC: abgelehnt (Trockenlauf ebenso).
+    for (name, extra) in [("boss", admin_role), ("linked", oidc)] {
+        let docs = parse_documents(&user(name, extra)).unwrap();
+        rejected(
+            apply(&store, &ring, &docs, &dry(restricted.clone()), &env).await,
+            name,
+        );
+        rejected(apply(&store, &ring, &docs, &restricted, &env).await, name);
+    }
+    // Bestehenden Nutzer zum Admin machen bzw. verknüpfen: abgelehnt.
+    let promote = parse_documents(&user("plain", admin_role)).unwrap();
+    rejected(
+        apply(&store, &ring, &promote, &restricted, &env).await,
+        "plain",
+    );
+    let link = parse_documents(&user("plain", oidc)).unwrap();
+    rejected(
+        apply(&store, &ring, &link, &restricted, &env).await,
+        "plain",
+    );
+
+    // Mit Freigabe (globaler admin bzw. gitops.manage_users): erlaubt.
+    let boss = parse_documents(&user("boss", admin_role)).unwrap();
+    apply(&store, &ring, &boss, &ApplyOptions::default(), &env)
+        .await
+        .unwrap();
+    // Unverändert erneut anwenden und beibehalten: erlaubt.
+    let r = apply(&store, &ring, &boss, &restricted, &env)
+        .await
+        .unwrap();
+    assert_eq!(
+        action(&r.plan, ResourceKind::User, "boss"),
+        ChangeAction::Unchanged
+    );
+    apply(&store, &ring, &plain, &restricted, &env)
+        .await
+        .unwrap();
+    // Ändern (auch nur die E-Mail) und Löschen per Prune: abgelehnt.
+    let changed =
+        parse_documents(&user("boss", admin_role).replace("boss@example.org", "chef@example.org"))
+            .unwrap();
+    rejected(
+        apply(&store, &ring, &changed, &restricted, &env).await,
+        "boss",
+    );
+    rejected(
+        apply(&store, &ring, &plain, &pruning(restricted.clone()), &env).await,
+        "boss",
+    );
+    // Rollen entziehen ist ebenfalls eine Änderung eines berechtigten Nutzers.
+    let demote = parse_documents(&user("boss", "")).unwrap();
+    rejected(
+        apply(&store, &ring, &demote, &restricted, &env).await,
+        "boss",
+    );
+    assert_eq!(
+        store
+            .get::<aigw_core::resource::UserSpec>("boss")
+            .await
+            .unwrap()
+            .spec
+            .roles
+            .len(),
+        1
+    );
+    store.close().await;
+}

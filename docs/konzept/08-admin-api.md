@@ -586,7 +586,7 @@ eingeschränkt. Jede Operation fordert `Permission::Read`/`Write` auf einem `Tar
 | `team-admin` (Team T) | T, Keys in T, Katalog; O nur, wenn die Zuweisung `organization` nennt | Keys und Plugin-Bindungen in T |
 | `viewer` | im Bereich (global: alles), Katalog | – |
 | `auditor` | wie `viewer`; dazu das Audit-Log (§5.10) und gespeicherte Payloads (§5.11) | – |
-| `gitops` (nur global, F55) | nur `config:export` | nur `config:apply` (auch Trockenlauf) – für Admin-API-Keys der CI; sonst keine Rechte, Listen bleiben leer. **Achtung (AIGW-58):** `config:apply` schreibt auch `User` samt Rollen und OIDC-Verknüpfung – ein gitops-Key ist damit **admin-gleichwertig** und wie ein Admin-Key zu schützen |
+| `gitops` (nur global, F55) | nur `config:export` | nur `config:apply` (auch Trockenlauf) – für Admin-API-Keys der CI; sonst keine Rechte, Listen bleiben leer. **S-05 (AIGW-90):** `User` mit Rollen oder OIDC-Verknüpfung anlegen/ändern/löschen nur mit `gitops.manage_users: true` (Standard `false` → `422` mit `issues`, auch im Trockenlauf); mit dem Schalter ist ein gitops-Key **admin-gleichwertig** und wie ein Admin-Key zu schützen. Admin-API-Keys sind keine GitOps-Ressource |
 
 - **Geheimnis-Verweise in Plugin-Bindungen (AIGW-58):** Bindungen, deren `config` `secret`
   oder `credential` enthält, schreibt nur ein globaler `admin` (`403` für eingeschränkte

@@ -81,6 +81,11 @@ pub use aigw_cache::ResponseCache;
 pub use aigw_core::config::{DEFAULT_MAX_AUDIO_BYTES, DEFAULT_MAX_BODY_BYTES};
 pub use aigw_mcp::McpGateway;
 pub use aigw_plugins::{IndexOptions, PluginChains, Registry as PluginRegistry};
+/// Freigabe für Entra Workload/Managed Identity (`upstream.entra.ambient_identity`, AIGW-90).
+pub use aigw_providers::entra::{
+    AMBIENT_IDENTITY_KEY as ENTRA_AMBIENT_IDENTITY_KEY,
+    set_ambient_identity as set_entra_ambient_identity,
+};
 pub use cache::{CACHE_HEADER, CACHE_REASON_HEADER, CACHE_TTL_HEADER};
 pub use guard_host::GatewayHost;
 

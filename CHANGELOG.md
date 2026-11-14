@@ -96,6 +96,20 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 - OpenAI-Antworten ohne Text, Ablehnung und Tool-Aufrufe (z. B. Claude hat `max_tokens`
   komplett für Thinking verbraucht, `finish_reason: length`) haben `content: ""` statt `null`
   – wie OpenAI selbst (AIGW-86).
+- **Entra Workload/Managed Identity nur mit Freigabe (AIGW-90, inkompatibel):** Zugangsdaten
+  bzw. Deployments mit `managedIdentity`/`workloadIdentity` nutzen die Identität des
+  Gateway-Prozesses nur noch mit `upstream.entra.ambient_identity: true` (ENV
+  `AIGW_UPSTREAM__ENTRA__AMBIENT_IDENTITY=true`, Standard `false`). Ohne Freigabe sind sie
+  „nicht nutzbar“ (Meldung nennt den Schlüssel), beim Start warnt das Log mit den betroffenen
+  Objekten. **Bestehende Installationen mit Managed Identity müssen den Schalter setzen.**
+- **Rolle `gitops` nicht mehr admin-gleichwertig (S-05, AIGW-90, inkompatibel):**
+  `config:apply` mit einem gitops-Key lehnt das Anlegen, Ändern und Löschen von `User` mit
+  Rollen oder OIDC-Verknüpfung mit `422` ab (auch `dryRun`, je Nutzer ein Eintrag in `issues`),
+  außer mit `gitops.manage_users: true`. Globaler `admin` und CLI unverändert.
+- **MCP-Server prüfen ihren Geheimnis-Verweis (AIGW-90):** Admin-API (Anlegen/Ändern) und
+  GitOps verlangen, dass `spec.secret` bzw. `spec.credential` existiert und das Token-Feld
+  (`settings.credentialField`, Standard `apiKey`, sonst `value`) enthält – sonst `422` mit
+  `issues`.
 
 ## [0.1.0] – MVP – Datum offen
 

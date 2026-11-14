@@ -167,6 +167,9 @@ fn serve(
     // dem Bau des ersten Clients, Fehler (z. B. unlesbare CA-Datei) brechen den Start ab.
     aigw_outbound::install_default_tls(aigw_outbound::TlsOptions::from_config(&config.upstream))
         .map_err(|e| format!("upstream: {e}"))?;
+    // AIGW-90: Entra Workload/Managed Identity (Identität des Prozesses) nur mit Freigabe; vor
+    // dem ersten Aufbau einer Token-Quelle.
+    aigw_proxy::set_entra_ambient_identity(config.upstream.entra.ambient_identity);
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -183,6 +186,7 @@ fn serve(
             ui = aigw_admin::ui::KIND,
             "ai-gw gestartet"
         );
+        entra_ambient_notice(&config, &runtime_state.snapshot.load());
         // Routing aus dem Snapshot (AIGW-24): Neuaufbau bei jeder neuen config_version,
         // Health Checks im Hintergrund; Keys und Modellfreigaben prüft der Snapshot (AIGW-28).
         let routes = std::sync::Arc::new(
@@ -358,6 +362,7 @@ fn serve(
                 upstreams,
                 // F52: valueFrom.file über die Admin-API nur innerhalb von gitops.secret_dir.
                 secret_dir: config.gitops.secret_dir.clone(),
+                manage_users: config.gitops.manage_users,
             },
         ))
         .merge(aigw_admin::usage::router(aigw_admin::usage::UsageState {
@@ -442,6 +447,63 @@ fn serve(
 }
 
 /// Tool-Inventar mit Store-Persistenz, Warmstart der bekannten Hashes und Ereignis-Webhooks.
+/// Objekte, die Entra Workload/Managed Identity nutzen (Zugangsdaten mit `spec.entra`,
+/// Deployments mit `settings.entraCredential`).
+fn entra_ambient_users(snap: &aigw_core::snapshot::Snapshot) -> Vec<String> {
+    use aigw_core::resource::EntraCredentialKind as K;
+    let mut out: Vec<String> =
+        snap.credentials
+            .values()
+            .filter(|c| {
+                c.spec.entra.as_ref().is_some_and(|e| {
+                    matches!(e.credential, K::ManagedIdentity | K::WorkloadIdentity)
+                })
+            })
+            .map(|c| format!("provider-credential/{}", c.metadata.name))
+            .collect();
+    for (name, g) in &snap.model_groups {
+        // Aliasse zeigen auf dieselbe Gruppe.
+        if g.group.metadata.name != *name {
+            continue;
+        }
+        for d in &g.deployments {
+            let m = d
+                .deployment
+                .spec
+                .settings
+                .get("entraCredential")
+                .and_then(serde_json::Value::as_str);
+            if matches!(m, Some("managedIdentity" | "workloadIdentity")) {
+                out.push(format!("deployment/{}", d.deployment.metadata.name));
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Startmeldung zu `upstream.entra.ambient_identity` (AIGW-90): ohne Freigabe eine Warnung,
+/// wenn die Konfiguration Workload/Managed Identity nutzt – diese Deployments sind gesperrt.
+fn entra_ambient_notice(config: &aigw_core::Config, snap: &aigw_core::snapshot::Snapshot) {
+    let users = entra_ambient_users(snap);
+    if config.upstream.entra.ambient_identity {
+        tracing::info!(
+            objects = users.len(),
+            "Entra Workload/Managed Identity freigegeben ({} = true)",
+            aigw_proxy::ENTRA_AMBIENT_IDENTITY_KEY
+        );
+    } else if !users.is_empty() {
+        tracing::warn!(
+            objects = %users.join(", "),
+            "Entra Workload/Managed Identity nicht freigegeben – betroffene Deployments sind \
+             nicht nutzbar; zum Freigeben in der Startkonfiguration {}: true setzen \
+             (ENV AIGW_UPSTREAM__ENTRA__AMBIENT_IDENTITY=true)",
+            aigw_proxy::ENTRA_AMBIENT_IDENTITY_KEY
+        );
+    }
+}
+
 async fn tool_inventory(
     config: &aigw_core::Config,
     rt: &runtime::Runtime,

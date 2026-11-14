@@ -141,9 +141,12 @@ spec:
 ```
 
 **Zugangsdaten:** Verweis auf eine `ProviderCredential` (verschlüsselt wie bei Anbietern;
-Anbieterart beliebig, empfohlen `openai-compatible`, da ohne Pflichtfelder). Das Feld
-`credentialField` (Standard `apiKey`) geht als `Authorization: Bearer …` bzw. unverändert in
-`credentialHeader`. Statische Header dürfen keine Geheimnisse und keine Protokoll-Header
+Anbieterart beliebig, empfohlen `openai-compatible`, da ohne Pflichtfelder) bzw. – bevorzugt –
+auf ein `Secret` (`spec.secret`, F149). Das Feld `credentialField` (Standard `apiKey`; ohne
+Angabe ersatzweise `value`, das Standardfeld eines `Secret`) geht als `Authorization: Bearer …`
+bzw. unverändert in `credentialHeader`. Beim Anlegen/Ändern (Admin-API und GitOps) muss der
+Verweis existieren und dieses Feld enthalten, sonst `422` mit `issues` (AIGW-90,
+`aigw_core::mcp::check_reference_fields`). Statische Header dürfen keine Geheimnisse und keine Protokoll-Header
 enthalten (`authorization`, `cookie`, `mcp-session-id` … werden abgelehnt).
 
 **OAuth (Erweiterungspunkt, nicht gebaut):** Die MCP-Spezifikation sieht OAuth 2.1 zwischen
@@ -244,8 +247,8 @@ ENV wie üblich, z. B. `AIGW_MCP__ALLOW_STDIO_COMMANDS=/usr/local/bin/mcp-fs`.
 - `GET/POST /admin/api/v1/mcp-servers`, `GET/PUT/DELETE …/{name}` – Katalog (`Target::Catalog`:
   lesen jede wirksame Rolle, schreiben globaler `admin`). Filter `q` (Name/URL), `label`,
   `transport`, `credential`, `enabled`. Prüfung: `aigw_core::mcp::validate_server` (Name ohne
-  `__`, SSRF, Einstellungen ohne unbekannte Schlüssel, stdio: absoluter Pfad), Zugangsdaten
-  müssen existieren (`422`). Löschen entfernt die Freigaben des Servers mit (Fremdschlüssel);
+  `__`, SSRF, Einstellungen ohne unbekannte Schlüssel, stdio: absoluter Pfad), Zugangsdaten bzw.
+  Secret müssen existieren und das Token-Feld enthalten (`422` mit `issues`, AIGW-90). Löschen entfernt die Freigaben des Servers mit (Fremdschlüssel);
   Zugangsdaten in Benutzung lassen sich nicht löschen (`409`).
 - `GET/POST /admin/api/v1/mcp-grants`, `GET/PUT/DELETE …/{name}` – Geltungsbereich: Team-Freigabe
   = das Team (Org-Admin/Admin schreiben), Key-Freigabe = im Team des Keys (auch Team-Admin),

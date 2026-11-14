@@ -612,6 +612,7 @@ async fn workload_identity_reads_federated_token_each_fetch() {
         client_id: Some(CLIENT.into()),
         federated_token_file: Some(file.clone()),
         authority_host: Some(format!("http://{addr}")),
+        ambient_identity: true,
         ..EntraEnv::default()
     };
     let d = azure(
@@ -652,8 +653,55 @@ async fn workload_identity_reads_federated_token_each_fetch() {
         &[],
         json!({"auth": "entraId", "entraCredential": "workloadIdentity"}),
     );
-    let e = OpenAiAdapter::from_deployment_with_entra_env(&d, &EntraEnv::default()).unwrap_err();
+    let allowed = EntraEnv {
+        ambient_identity: true,
+        ..EntraEnv::default()
+    };
+    let e = OpenAiAdapter::from_deployment_with_entra_env(&d, &allowed).unwrap_err();
     assert!(e.to_string().contains("AZURE_FEDERATED_TOKEN_FILE"), "{e}");
+}
+
+/// AIGW-90: Workload/Managed Identity nur mit `upstream.entra.ambient_identity: true` – sonst
+/// Fehler beim Aufbau mit dem Schlüssel in der Meldung; Service Principals sind nicht betroffen.
+#[test]
+fn ambient_identity_requires_opt_in() {
+    for method in ["workloadIdentity", "managedIdentity"] {
+        let d = azure(
+            "https://res.openai.azure.com",
+            &[],
+            json!({"auth": "entraId", "entraCredential": method}),
+        );
+        let off = EntraEnv {
+            federated_token_file: Some("/var/run/token".into()),
+            tenant_id: Some(TENANT.into()),
+            client_id: Some(CLIENT.into()),
+            ..EntraEnv::default()
+        };
+        let e = OpenAiAdapter::from_deployment_with_entra_env(&d, &off)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("upstream.entra.ambient_identity") && e.contains(method),
+            "{method}: {e}"
+        );
+        let on = EntraEnv {
+            ambient_identity: true,
+            ..off
+        };
+        OpenAiAdapter::from_deployment_with_entra_env(&d, &on).unwrap();
+    }
+    // Prozessweite Freigabe: Standard aus.
+    assert!(!aigw_providers::entra::ambient_identity());
+    let sp = azure(
+        "https://res.openai.azure.com",
+        &[
+            ("tenantId", TENANT),
+            ("clientId", CLIENT),
+            ("clientSecret", "geheim"),
+        ],
+        json!({"auth": "entraId"}),
+    );
+    OpenAiAdapter::from_deployment_with_entra_env(&sp, &EntraEnv::default()).unwrap();
 }
 
 /// Client wie im Gateway: strenge SSRF-Regeln, nur der Name `aoai.test` (→ 127.0.0.1) ist für
@@ -680,6 +728,7 @@ async fn managed_identity_imds_with_targeted_ssrf_exemption() {
     let (addr, fake) = env().await;
     let env = EntraEnv {
         imds_endpoint: Some(format!("http://{addr}/metadata/identity/oauth2/token")),
+        ambient_identity: true,
         ..EntraEnv::default()
     };
     let model = format!("http://aoai.test:{}", addr.port());
@@ -727,6 +776,7 @@ async fn managed_identity_imds_with_targeted_ssrf_exemption() {
     // Metadatendienst noch nicht bereit (404) → retrybar.
     let env404 = EntraEnv {
         imds_endpoint: Some(format!("http://{addr}/gibt-es-nicht")),
+        ambient_identity: true,
         ..EntraEnv::default()
     };
     let d = azure(
@@ -750,6 +800,7 @@ async fn managed_identity_app_service() {
     let env = EntraEnv {
         identity_endpoint: Some(format!("http://{addr}/msi/token")),
         identity_header: Some(SecretString::new("hdr-geheim")),
+        ambient_identity: true,
         ..EntraEnv::default()
     };
     let d = azure(

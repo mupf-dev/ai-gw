@@ -91,6 +91,8 @@ impl Env {
         .await
         .unwrap();
         let snapshot = reloader.handle().clone();
+        // Managed Identity der Foundry-Deployments (AIGW-90: ausdrücklich freigeben).
+        aigw_proxy::set_entra_ambient_identity(true);
         let policy = UpstreamPolicy::strict();
         let routes = Arc::new(SnapshotRoutes::with_policy(policy.clone()).unwrap());
         let routes_task = routes.spawn(snapshot.clone());

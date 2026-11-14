@@ -409,6 +409,46 @@ async fn scenario(store: Store) {
     )
     .await
     .expect(StatusCode::UNPROCESSABLE_ENTITY);
+    // AIGW-90: Secret-Verweis muss existieren und das Token-Feld liefern (422 mit issues).
+    env.admin(
+        Method::POST,
+        "/secrets",
+        Some(
+            json!({"metadata": {"name": "mcp-other"}, "spec": {"data": {"token": {"value": "t"}}}}),
+        ),
+    )
+    .await
+    .expect(StatusCode::CREATED);
+    for (spec, needle) in [
+        (
+            json!({"url": fake_url, "secret": "fehlt"}),
+            "existiert nicht",
+        ),
+        (
+            json!({"url": fake_url, "secret": "mcp-other"}),
+            "\"apiKey\"",
+        ),
+        (
+            json!({"url": fake_url, "credential": "mcp-cred", "settings": {"credentialField": "token"}}),
+            "\"token\"",
+        ),
+    ] {
+        let r = env
+            .admin(
+                Method::POST,
+                "/mcp-servers",
+                Some(json!({"metadata": {"name": "x"}, "spec": spec})),
+            )
+            .await
+            .expect(StatusCode::UNPROCESSABLE_ENTITY)
+            .json();
+        let issues = r["issues"]
+            .as_array()
+            .unwrap_or_else(|| panic!("issues fehlt: {r}"));
+        assert_eq!(issues[0]["name"], "x", "{r}");
+        let m = issues[0]["message"].as_str().unwrap();
+        assert!(m.contains(needle), "{needle}: {m}");
+    }
 
     // --- Server: CRUD ---
     let r = env
@@ -659,6 +699,11 @@ metadata: {name: ok}
 spec: {url: 'https://mcp.example.org/mcp', settings: {unknownKey: 1}}
 ---
 apiVersion: aigw/v1alpha1
+kind: McpServer
+metadata: {name: ohne-feld}
+spec: {url: 'https://mcp.example.org/mcp', secret: mcp-other}
+---
+apiVersion: aigw/v1alpha1
 kind: McpGrant
 metadata: {name: g}
 spec: {server: ok, subject: {level: team, target: t1}, tools: ['a b']}
@@ -676,7 +721,14 @@ spec: {server: ok, subject: {level: team, target: t1}, tools: ['a b']}
     };
     let text: Vec<String> = issues.iter().map(ToString::to_string).collect();
     let text = text.join("\n");
-    for want in ["169.254.169.254", "__", "unknownKey", "ungültiges Muster"] {
+    for want in [
+        "169.254.169.254",
+        "__",
+        "unknownKey",
+        "ungültiges Muster",
+        // AIGW-90: Secret ohne Token-Feld.
+        "\"mcp-other\" enthält kein Feld \"apiKey\"",
+    ] {
         assert!(text.contains(want), "{want} fehlt in:\n{text}");
     }
     // Gültiges Manifest wird angewendet.

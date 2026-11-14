@@ -1,6 +1,7 @@
 # Sicherheitsreview ai-gw (AIGW-58)
 
-Stand: 2026-11-13, Basis `main` f4de6bd, Branch `p7-58-security`. Defensives Review des
+Stand: 2026-11-13, Basis `main` f4de6bd, Branch `p7-58-security`; Status nachgeführt bis
+AIGW-90 (2026-11-14). Defensives Review des
 eigenen Codes; Befunde mit Schweregrad wurden – soweit ohne Kollision mit parallelen Paketen
 möglich – direkt behoben und mit Regressionstests abgesichert. Betriebshinweise:
 [haertung.md](haertung.md).
@@ -57,7 +58,7 @@ Schweregrade: **hoch** – ausnutzbar mit geringen Rechten, deutlicher Schaden;
 | ID | Befund | Status |
 |---|---|---|
 | S-04 | **SSRF-Blockliste: IPv6-Übergangsformate** fehlten: IPv4-compatible `::a.b.c.d`, lokales NAT64 `64:ff9b:1::/48`, 6to4 `2002::/16` mit privater IPv4, Teredo `2001::/32`. Relevant v. a. in IPv6-only-Clustern mit NAT64 (Cloud-Metadaten). | **behoben:** `upstream.rs` (`canonical`, `is_private_ip`); Tests `strict_policy`, `ip_check_after_resolution`. |
-| S-05 | **Rolle `gitops` ist admin-gleichwertig:** `config:apply` schreibt auch `User` mit Rollen und OIDC-Verknüpfung. | **akzeptiert** (GitOps verwaltet bewusst die gesamte Konfiguration); Doku 08-admin-api.md korrigiert, Härtungshinweis. |
+| S-05 | **Rolle `gitops` ist admin-gleichwertig:** `config:apply` schreibt auch `User` mit Rollen und OIDC-Verknüpfung. | **behoben (AIGW-90):** Ohne `gitops.manage_users: true` (Standard `false`) lehnt `config:apply` (auch `dryRun`) für die Rolle `gitops` das Anlegen, Ändern und Löschen von Nutzern mit Rollen oder OIDC-Verknüpfung mit `422` ab (je Nutzer ein Eintrag in `issues`); unveränderte/beibehaltene Nutzer und Nutzer ohne Rollen/OIDC bleiben erlaubt. Globaler `admin` und CLI unverändert. Admin-API-Keys sind keine GitOps-Ressource (nur `admin` schreibt sie). Tests `privileged_users_need_manage_users` (aigw-store), `admin_auth_api.rs` (S-05-Abschnitt). |
 | S-06 | **Bootstrap-Token im Klartext über `tracing`** – landete in zentralem Logging. | **behoben:** einmalig direkt auf stderr, `tracing` nur ohne Token. Fehlversuche werden weiterhin nicht gezählt (S-29). |
 | S-07 | **Snapshot-Cache ohne Altersgrenze:** Beim Kaltstart ohne DB galt jeder entschlüsselbare Cache – inzwischen gesperrte/widerrufene Keys wurden wieder gültig. | **behoben:** `snapshot.cache_max_age_secs` (Standard 86 400, `0` = unbegrenzt); Test `cache_max_age`. Rest: Einspielen einer älteren gültigen Datei innerhalb der Frist (Dateirechte, haertung.md). |
 | S-08 | **Audit-Kette: unverkettete Einträge** (`seq IS NULL`) wurden nur gezählt; per DB eingeschobene Einträge ohne Kettenfelder ließen `ok` auf `true`. | **teilweise behoben:** unverkettete Einträge mit `at` ab Kettenbeginn sind ein Befund (Test in `restpunkte.rs`). Mit rückdatiertem `at` bleibt es bei der Zählung (`unchained`); Abgleich des Kettenkopfs mit externer Kopie empfohlen. |
@@ -90,6 +91,13 @@ Schweregrade: **hoch** – ausnutzbar mit geringen Rechten, deutlicher Schaden;
 | S-30 | Webhook-Plugin `modify`: `n`/`max_tokens` nach der Admission nicht erneut geprüft. | offen |
 | S-31 | (unsicher) Freigabe und Routing-Tabelle werden getrennt geladen – bei Konfig-Wechsel kann ein umgehängter Alias kurz auf eine andere Gruppe zeigen. | offen |
 | S-32 | Keine globale Verbindungs-/Nebenläufigkeitsgrenze, kein expliziter Header-/Body-Lese-Timeout (Slowloris) im Server. | **behoben (AIGW-80):** eigene Accept-Schleife (`aigw/src/serve.rs`): `server.data|control.max_connections` (über der Grenze sofort `503` + Schließen, Accept blockiert nie), `server.http`: Kopf-Timeout ab dem ersten Byte, Körper-Pause und -Mindestrate, Keep-Alive-Leerlauf, HTTP/2 max. Streams und PING-Keepalive; laufende Antworten (SSE) ohne Lese-Timeout. Metriken `aigw_server_connections_*`, `aigw_server_timeouts_total`. Tests in `serve.rs` (Slowloris Kopf/Körper/Mindestrate, Grenze, Leerlauf, Streams über HTTP/1.1 und h2). Limits je Client-IP und TLS bleiben beim Reverse Proxy (haertung.md). |
+
+### Nachträge (AIGW-90)
+
+| ID | Befund | Status |
+|---|---|---|
+| S-33 | **Gateway-Identität für jedes Entra-Deployment** (Restrisiko AIGW-82/84): Wer Deployments bzw. Zugangsdaten anlegen durfte, konnte mit `managedIdentity`/`workloadIdentity` Tokens der Identität des Gateway-Prozesses (Scope Cognitive Services) an einen erlaubten Endpunkt schicken lassen – ohne dass der Betreiber das freigegeben hatte. | **behoben (AIGW-90):** Opt-in `upstream.entra.ambient_identity` (Standard `false`, ENV `AIGW_UPSTREAM__ENTRA__AMBIENT_IDENTITY`). Ohne Freigabe baut die Token-Quelle nicht (Deployment „nicht nutzbar“ mit Meldung inkl. Schlüssel), beim Start warnt das Log mit den betroffenen Zugangsdaten/Deployments. Restrisiko mit Freigabe wie bisher (Rolle der Identität eng fassen). Test `ambient_identity_requires_opt_in`. |
+| S-34 | **MCP-Server mit nicht auflösbarem Geheimnis:** Admin-API prüfte nur `credential`, nicht `secret`; ein fehlendes Token-Feld fiel erst zur Laufzeit auf. | **behoben (AIGW-90):** Admin-API (Anlegen/Ändern) prüft, dass `credential` bzw. `secret` existiert und das Feld `settings.credentialField` (Standard `apiKey`, sonst `value`) enthält – `422` mit `issues`; GitOps prüft das Feld ebenso (Existenz schon bisher). Tests `mcp_api.rs`, `reference_fields_aigw90`. |
 
 ### Info
 

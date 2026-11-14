@@ -5,8 +5,8 @@
 //!
 //! - `/admin/api/v1/mcp-servers` – Katalog (lesen: jede wirksame Rolle, schreiben: globaler
 //!   `admin`). Prüfung wie in GitOps über [`aigw_core::mcp::validate_server`]: URL gegen die
-//!   SSRF-Regeln ([`aigw_core::upstream`]), Name ohne `__`, Einstellungen; Zugangsdaten
-//!   müssen existieren (`422`).
+//!   SSRF-Regeln ([`aigw_core::upstream`]), Name ohne `__`, Einstellungen; Zugangsdaten bzw.
+//!   Secret müssen existieren und das Token-Feld enthalten (`422` mit `issues`, AIGW-90).
 //! - `/admin/api/v1/mcp-grants` – Freigaben für ein Team (Geltungsbereich: das Team, schreiben
 //!   also Org-/globaler Admin) oder einen API-Key (Geltungsbereich: im Team des Keys, schreiben
 //!   also auch Team-Admins; die Team-Freigabe bleibt Obergrenze, siehe
@@ -18,7 +18,8 @@
 use std::collections::HashMap;
 
 use aigw_core::resource::{
-    Id, McpGrantSpec, McpServerSpec, McpTransport, Object, ObjectMeta, ScopeLevel, TeamSpec,
+    Id, McpGrantSpec, McpServerSpec, McpTransport, Object, ObjectMeta, ResourceKind, ScopeLevel,
+    TeamSpec,
 };
 use aigw_store::{ListFilter, StoreError};
 use axum::Json;
@@ -124,14 +125,40 @@ impl AdminResource for McpServerSpec {
         _current: Option<&Object<Self>>,
     ) -> Result<(), Problem> {
         aigw_core::mcp::validate_server(&st.upstreams, name, spec).map_err(Problem::invalid)?;
-        if let Some(cred) = &spec.credential {
-            // Unbekannte Zugangsdaten → 422 (wie andere Verweise).
-            st.store.get_credential(cred).await.map_err(|e| match e {
-                StoreError::NotFound { kind, name } => StoreError::InvalidReference { kind, name },
-                other => other,
-            })?;
-        }
-        Ok(())
+        // AIGW-90: Verweis muss existieren und das Token-Feld liefern → sonst 422 mit `issues`.
+        let invalid = |message: String| {
+            Problem::invalid(message.clone()).with_issues(vec![aigw_store::gitops::Issue {
+                document: None,
+                kind: Some(ResourceKind::McpServer),
+                name: Some(name.to_owned()),
+                message,
+                line: None,
+                column: None,
+            }])
+        };
+        let missing = |e: StoreError, what: String| match e {
+            StoreError::NotFound { .. } => invalid(format!("{what} existiert nicht")),
+            other => other.into(),
+        };
+        let fields = if let Some(cred) = &spec.credential {
+            st.store
+                .get_credential(cred)
+                .await
+                .map_err(|e| missing(e, format!("spec.credential: Zugangsdaten {cred:?}")))?
+                .spec
+                .fields
+        } else if let Some(secret) = &spec.secret {
+            st.store
+                .get_secret(secret)
+                .await
+                .map_err(|e| missing(e, format!("spec.secret: Secret {secret:?}")))?
+                .spec
+                .fields
+        } else {
+            return Ok(());
+        };
+        aigw_core::mcp::check_reference_fields(spec, fields.iter().map(String::as_str))
+            .map_err(invalid)
     }
 }
 

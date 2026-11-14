@@ -51,6 +51,7 @@ async fn app() -> (Router, Store) {
         auth,
         upstreams: policy(),
         secret_dir: None,
+        manage_users: false,
     }));
     (router, store)
 }

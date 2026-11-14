@@ -145,6 +145,18 @@ Inline-Deployments ohne Zugangsdaten.
 | Workload Identity (AKS) | `auth: entraId`, `entraCredential: workloadIdentity` | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_FEDERATED_TOKEN_FILE`, optional `AZURE_AUTHORITY_HOST` (setzt der AKS-Webhook) |
 | Managed Identity (VM, AKS-Knoten, App Service, Container Apps) | `auth: entraId`, `entraCredential: managedIdentity`, optional `entraClientId` | keine; App Service: `IDENTITY_ENDPOINT`/`IDENTITY_HEADER` |
 
+- **Workload/Managed Identity freigeben (AIGW-90):** beide Varianten nutzen die Identität des
+  Gateway-Prozesses und sind nur mit diesem Schalter erlaubt (Standard `false`):
+
+  ```yaml
+  upstream:
+    entra:
+      ambient_identity: true   # bzw. AIGW_UPSTREAM__ENTRA__AMBIENT_IDENTITY=true
+  ```
+
+  Ohne Schalter sind solche Deployments „nicht nutzbar“ (Log: „Deployment nicht nutzbar –
+  ausgelassen“ mit dem Schlüssel in der Meldung), beim Start warnt das Log mit allen
+  betroffenen Zugangsdaten/Deployments. Service Principals brauchen den Schalter nicht.
 - Sovereign Clouds: `entraAuthority` (z. B. `https://login.microsoftonline.us`) und
   `entraScope` (z. B. `https://cognitiveservices.azure.us/.default`).
 - Die Identität braucht auf der Azure-OpenAI-Ressource die Rolle **Cognitive Services OpenAI

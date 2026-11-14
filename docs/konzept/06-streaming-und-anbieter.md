@@ -143,10 +143,18 @@ entfernt (OpenAI lehnt es sonst ab). Azure-Deployment-Namen werden auf `[A-Za-z0
   (`OutboundClient::with_exempt_host`), die **genau** den Host des Metadaten-Endpunkts (fest
   im Code bzw. `IDENTITY_ENDPOINT` aus der Prozessumgebung) freischaltet. Der Modell-Endpunkt
   und alle anderen Ziele unterliegen weiter den normalen Regeln.
-- **Restrisiko:** Wer Deployments anlegen darf, kann ein Token der Gateway-Identität (Scope
-  Cognitive Services) an einen beliebigen erlaubten Endpunkt schicken lassen – gleiche
-  Vertrauensstufe wie das Hinterlegen von Zugangsdaten. Die Gateway-Identität sollte daher nur
-  die Rolle „Cognitive Services OpenAI User“ auf den vorgesehenen Ressourcen haben.
+- **Freigabe (AIGW-90):** Workload/Managed Identity nutzen die Identität des Gateway-Prozesses
+  und sind nur mit `upstream.entra.ambient_identity: true` in der Startkonfiguration erlaubt
+  (Standard `false`, ENV `AIGW_UPSTREAM__ENTRA__AMBIENT_IDENTITY`). Ohne Freigabe scheitert der
+  Aufbau der Token-Quelle (Deployment „nicht nutzbar“, Meldung nennt den Schlüssel), beim
+  Start warnt das Log mit den betroffenen Zugangsdaten/Deployments; Service Principals
+  (`clientSecret`/`clientCertificate`) sind nicht betroffen. Umsetzung: prozessweiter Schalter
+  `aigw_providers::entra::set_ambient_identity`, in Tests `EntraEnv::ambient_identity`.
+- **Restrisiko (mit Freigabe):** Wer Deployments anlegen darf, kann ein Token der
+  Gateway-Identität (Scope Cognitive Services) an einen beliebigen erlaubten Endpunkt schicken
+  lassen – gleiche Vertrauensstufe wie das Hinterlegen von Zugangsdaten. Die Gateway-Identität
+  sollte daher nur die Rolle „Cognitive Services OpenAI User“ auf den vorgesehenen Ressourcen
+  haben.
 
 `OpenAiAdapter::azure_with_token_source` bleibt für eigene `TokenSource`-Implementierungen.
 

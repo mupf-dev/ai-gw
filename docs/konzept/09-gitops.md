@@ -203,7 +203,24 @@ Versionsprüfung des Plans (§4.1, Schritt 7) übernimmt diese Rolle.
 
 **Rolle `gitops` (F55):** für Admin-API-Keys der CI-Pipeline – nur `config:export` und
 `config:apply` (inkl. `dryRun`), keine anderen Routen (`403`, Listen leer). Nur global wirksam
-(mit `organization`/`team` → `422`). Beispiel:
+(mit `organization`/`team` → `422`).
+
+**Nutzer mit Rechten (S-05, AIGW-90):** Ein `User` mit `roles` oder OIDC-Verknüpfung
+(`oidcIssuer`/`oidcSubject`) darf über `config:apply` nur ein globaler `admin` anlegen, ändern
+oder (mit `prune`) löschen – die Rolle `gitops` nur mit `gitops.manage_users: true` in der
+Startkonfiguration (Standard `false`). Sonst bricht der Plan (auch `dryRun`) mit `422` ab, je
+betroffenem Nutzer ein Eintrag in `issues` („Nutzer mit Rollen oder OIDC-Verknüpfung
+anlegen/ändern/löschen: nur ein globaler admin …“). Erlaubt bleiben unveränderte Nutzer (ein
+exportiertes Manifest lässt sich also wieder anwenden), beibehaltene Nutzer (ohne `prune`) und
+Nutzer ohne Rollen/OIDC. Die CLI (`aigw config apply`) ist nicht betroffen
+(`ApplyOptions::manage_users`, Standard `true`). Admin-API-Keys sind keine GitOps-Ressource.
+
+```yaml
+gitops:
+  manage_users: false        # bzw. AIGW_GITOPS__MANAGE_USERS=true
+```
+
+Beispiel eines CI-Keys:
 
 ```json
 POST /admin/api/v1/admin-api-keys
@@ -243,7 +260,9 @@ den Modus über `GET /admin/api/v1/auth/info` (`readOnly`, F56) und blendet Schr
   create, retain, Geheimnis geändert), Prune (inkl. Ablehnung bei noch verwendeten
   Ressourcen), wandernde Aliasse, Fehler in einem Dokument → nichts angewendet, fehlende
   Variable, Geheimnis aus Datei, eingeschränkte Herkunft, alle Key-Fälle, leeres Manifest +
-  Prune löscht alles.
+  Prune löscht alles. `privileged_users_need_manage_users` (S-05): Nutzer mit Rollen/OIDC ohne
+  `manage_users` weder anlegen, ändern, verknüpfen, Rechte entziehen noch per Prune löschen;
+  unverändert und ohne Rollen erlaubt.
 - `crates/aigw-admin/tests/gitops_api.rs`: Export/Apply über HTTP, `422`, Geheimnis-Policy,
   Nur-YAML-Modus (auch `auth/info.readOnly`), Teil-Export (Art, Name, Organisation, Team) und
   `issues` mit Zeile (Feldfehler, Verweisfehler, YAML-Syntax).
@@ -251,6 +270,7 @@ den Modus über `GET /admin/api/v1/auth/info` (`readOnly`, F56) und blendet Schr
   Team-Detailseite, Fehler mit Zeilenbezug im Editor, Trockenlauf, Anwenden mit Bestätigung.
 - `crates/aigw-admin/tests/admin_auth_api.rs` (SQLite und Postgres): Rolle `gitops`, `viewer`
   nur Export, `gitops.secret_dir` (innerhalb, `..`, außerhalb, Symlink), API-Keys standardmäßig
-  `skip`, Kompatibilitätsliste der Zugangsdaten.
+  `skip`, Kompatibilitätsliste der Zugangsdaten, S-05 (gitops-Key: Nutzer mit Rolle/OIDC → `422`
+  mit `issues`, auch `dryRun`; globaler admin darf; unverändert erneut anwenden erlaubt).
 - Unit-Tests: Platzhalternamen, `spec.secret`, Dubletten, Geheimnis-Policy, CLI-Parser,
   Offline-Validierung des Beispiels.

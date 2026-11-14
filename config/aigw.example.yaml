@@ -119,6 +119,9 @@ gitops:
   # valueFrom.file in Manifesten über die Admin-API (POST config:apply) nur aus diesem
   # Verzeichnis (F52; ohne: keine Dateien). Die CLI ist nicht eingeschränkt.
   # secret_dir: /run/aigw/secrets
+  # Rolle gitops darf per config:apply auch Nutzer mit Rollen/OIDC-Verknüpfung schreiben
+  # (S-05; Standard false: nur ein globaler admin bzw. die CLI).
+  manage_users: false
 
 # Audit-Log (docs/konzept/08-admin-api.md): Hash-Kette gegen Manipulation (immer aktiv,
 # Prüfung: `aigw audit verify` bzw. GET /admin/api/v1/audit-log/verify) und Aufbewahrung.
@@ -136,6 +139,10 @@ upstream:
   # ca_file: /etc/aigw/ca.pem
   # Verzeichnis für settings.caFile der Deployments (F177; ohne: settings.caFile verboten)
   # ca_dir: /etc/aigw/ca
+  entra:
+    # Workload/Managed Identity des Gateway-Prozesses für Anbieter-Zugangsdaten freigeben
+    # (AIGW-90; Standard false: Deployments mit managedIdentity/workloadIdentity sind gesperrt).
+    ambient_identity: false
 
 # Admin-API (docs/konzept/08-admin-api.md).
 admin:
