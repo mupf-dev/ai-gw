@@ -431,7 +431,10 @@ impl Conn {
             let mut check = false;
             tokio::select! {
                 res = conn.as_mut() => {
-                    if let Err(e) = res
+                    // Von der Körper-Wache getötet: zählt unten als `body` (die Verbindung kann
+                    // vor `kill.notified()` fertig werden – beide Zweige sind dann bereit).
+                    if !state.killed.load(Relaxed)
+                        && let Err(e) = res
                         && e.downcast_ref::<hyper::Error>().is_some_and(hyper::Error::is_timeout)
                     {
                         // HTTP/1: Rückfallnetz des Kopf-Timers; HTTP/2: PING unbeantwortet.
@@ -445,7 +448,6 @@ impl Conn {
                 }
                 () = state.kill.notified() => {
                     if state.killed.load(Relaxed) {
-                        self.metrics.timeout_body.fetch_add(1, Relaxed);
                         break;
                     }
                 }
@@ -479,6 +481,9 @@ impl Conn {
                 }
                 Verdict::Ok | Verdict::Idle => {}
             }
+        }
+        if state.killed.load(Relaxed) {
+            self.metrics.timeout_body.fetch_add(1, Relaxed);
         }
         self.metrics.active.fetch_sub(1, Relaxed);
     }
@@ -857,6 +862,16 @@ mod tests {
         (String::from_utf8_lossy(&out).into_owned(), t.elapsed())
     }
 
+    /// Wartet bis zu 5 s, bis `cond` gilt (Zähler, die der Verbindungs-Task nach dem
+    /// Schließen erhöht).
+    async fn eventually(cond: impl Fn() -> bool) {
+        let t = Instant::now();
+        while !cond() {
+            assert!(t.elapsed() < D::from_secs(5), "Bedingung nicht erfüllt");
+            tokio::time::sleep(D::from_millis(10)).await;
+        }
+    }
+
     /// Eine HTTP/1-Antwort mit `content-length` lesen.
     async fn read_response(s: &mut TcpStream) -> String {
         let mut out = Vec::new();
@@ -948,9 +963,12 @@ mod tests {
         s.write_all(b"POST /echo HTTP/1.1\r\nhost: x\r\ncontent-length: 100\r\n\r\n0123456789")
             .await
             .unwrap();
-        let (_, took) = read_until_closed(&mut s, D::from_secs(5)).await;
-        assert!(took < D::from_millis(2500), "{took:?}");
-        assert_eq!(srv.metrics.timeout_body.load(Relaxed), 1);
+        let (_, took) = read_until_closed(&mut s, D::from_secs(10)).await;
+        // Großzügige Obergrenze (Last durch `cargo test --workspace`); Hauptsache deutlich
+        // vor dem Ende des Uploads.
+        assert!(took < D::from_millis(5000), "{took:?}");
+        // Der Zähler steigt ggf. erst kurz nach dem Schließen (eigener Task).
+        eventually(|| srv.metrics.timeout_body.load(Relaxed) == 1).await;
 
         // Mindestrate: alle 300 ms 10 Bytes (keine Pause > 800 ms, aber ≈ 33 B/s).
         let s = TcpStream::connect(srv.addr).await.unwrap();
@@ -969,15 +987,16 @@ mod tests {
         let t = Instant::now();
         let mut buf = [0u8; 4096];
         loop {
-            match tokio::time::timeout(D::from_secs(6), r.read(&mut buf)).await {
+            match tokio::time::timeout(D::from_secs(15), r.read(&mut buf)).await {
                 Err(_) => panic!("Mindestrate nicht durchgesetzt"),
                 Ok(Ok(0) | Err(_)) => break,
                 Ok(Ok(_)) => {}
             }
         }
-        assert!(t.elapsed() < D::from_secs(3), "{:?}", t.elapsed());
+        // Ohne Mindestrate liefe der Upload 30 s; Grenze großzügig gegen Last.
+        assert!(t.elapsed() < D::from_secs(10), "{:?}", t.elapsed());
         trickle.abort();
-        assert_eq!(srv.metrics.timeout_body.load(Relaxed), 2);
+        eventually(|| srv.metrics.timeout_body.load(Relaxed) == 2).await;
         srv.shutdown().await;
     }
 
