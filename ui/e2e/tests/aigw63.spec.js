@@ -29,7 +29,7 @@ test('WASM-Module: hochladen, binden, Löschschutz, löschen', async ({ page, re
   await form.getByTestId('wasm-file').setInputFiles(WASM);
   await form.getByRole('textbox', { name: 'Name' }).fill(mod);
   await form.getByRole('textbox', { name: 'Beschreibung' }).fill('Stichwort-Blocker (e2e)');
-  await page.getByRole('button', { name: 'Hochladen' }).click();
+  await page.getByTestId('wasm-form-submit').click();
   await expect(form).toBeHidden();
   const row = page.getByTestId('wasm-row').filter({ hasText: mod });
   await expect(row).toBeVisible();
@@ -47,7 +47,7 @@ test('WASM-Module: hochladen, binden, Löschschutz, löschen', async ({ page, re
   await pick(page, dlg, 'Plugin', 'wasm');
   await pick(page, dlg, 'Modul', mod);
   await page.getByTestId('wasm-config').fill('{"block": ["geheimprojekt"]}');
-  await page.getByRole('button', { name: 'Anlegen' }).click();
+  await page.getByTestId('binding-form-submit').click();
   await expect(dlg).toBeHidden();
   const b = await api(request, 'GET', `plugin-bindings/${binding}`);
   expect(b.status).toBe(200);
@@ -58,7 +58,7 @@ test('WASM-Module: hochladen, binden, Löschschutz, löschen', async ({ page, re
   await page.getByTestId('tab-wasm').click();
   await expect(row).toContainText(binding);
   await page.getByTestId(`wasm-delete-${mod}`).click();
-  await page.getByTestId('wasm-delete-dialog').getByRole('button', { name: 'Löschen' }).click();
+  await page.getByTestId('confirm-action').click();
   await expect(page.getByTestId('wasm-delete-dialog')).toContainText(/verwendet/);
   await page.keyboard.press('Escape');
 
@@ -67,7 +67,7 @@ test('WASM-Module: hochladen, binden, Löschschutz, löschen', async ({ page, re
   await page.reload();
   await expect(row).toBeVisible();
   await page.getByTestId(`wasm-delete-${mod}`).click();
-  await page.getByTestId('wasm-delete-dialog').getByRole('button', { name: 'Löschen' }).click();
+  await page.getByTestId('confirm-action').click();
   await expect(row).toHaveCount(0);
   expect((await api(request, 'GET', `wasm-modules/${mod}`)).status).toBe(404);
   clean(page);

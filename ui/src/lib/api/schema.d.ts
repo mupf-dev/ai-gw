@@ -1108,6 +1108,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/wasm-modules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Module auflisten. */
+        get: operations["list_wasm_modules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/wasm-modules/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Metadaten eines Moduls. */
+        get: operations["get_wasm_module"];
+        /** Modul hochladen oder ersetzen (nur globaler `admin`). */
+        put: operations["put_wasm_module"];
+        post?: never;
+        /** Modul löschen (nur globaler `admin`, nur ohne verweisende Bindungen). */
+        delete: operations["delete_wasm_module"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/wasm-modules/{name}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inhalt eines Moduls (Komponente). */
+        get: operations["get_wasm_module_content"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/auth/callback": {
         parameters: {
             query?: never;
@@ -3570,6 +3623,43 @@ export interface components {
             message: string;
             /** @description Name des betroffenen Objekts. */
             name: string;
+        };
+        /**
+         * Format: binary
+         * @description Binärer Inhalt (WebAssembly-Komponente).
+         */
+        WasmBinary: string;
+        /** @description Ein WASM-Modul (Metadaten). */
+        WasmModule: {
+            /** @description Angelegt (RFC 3339). */
+            createdAt: string;
+            /** @description Hochgeladen von. */
+            createdBy: string;
+            /** @description Beschreibung. */
+            description?: string | null;
+            /**
+             * Format: uuid
+             * @description ID (UUIDv7).
+             */
+            id: string;
+            /** @description Name. */
+            name: string;
+            /** @description SHA-256 des Inhalts (hex). */
+            sha256: string;
+            /**
+             * Format: int64
+             * @description Größe in Byte.
+             */
+            size: number;
+            /** @description Zuletzt ersetzt (RFC 3339). */
+            updatedAt: string;
+            /** @description Plugin-Bindungen, die das Modul verwenden. */
+            usedBy: string[];
+        };
+        /** @description Liste der Module. */
+        WasmModuleList: {
+            /** @description Module (nach Name sortiert). */
+            items: components["schemas"]["WasmModule"][];
         };
     };
     responses: never;
@@ -11098,6 +11188,261 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionInfo"];
+                };
+            };
+        };
+    };
+    list_wasm_modules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Module */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WasmModuleList"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_wasm_module: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name des Moduls */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Modul */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WasmModule"];
+                };
+            };
+            /** @description Unbekannt */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    put_wasm_module: {
+        parameters: {
+            query: {
+                /** @description SHA-256 des Inhalts (hex, Pflicht; Integritätsprüfung). */
+                sha256: string;
+                /** @description Beschreibung (höchstens 1024 Zeichen). */
+                description?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Name des Moduls */
+                name: string;
+            };
+            cookie?: never;
+        };
+        /** @description WebAssembly-Komponente (WIT-Welt aigw:plugin/plugin) */
+        requestBody: {
+            content: {
+                "application/wasm": components["schemas"]["WasmBinary"];
+            };
+        };
+        responses: {
+            /** @description Ersetzt bzw. unverändert */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WasmModule"];
+                };
+            };
+            /** @description Angelegt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WasmModule"];
+                };
+            };
+            /** @description Nur globaler admin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Zu groß (wasm.max_module_bytes) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Content-Type nicht application/wasm */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Kein gültiges Modul oder SHA-256 passt nicht */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Ersetzen ohne If-Match */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_wasm_module: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name des Moduls */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gelöscht */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unbekannt */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Noch von Plugin-Bindungen verwendet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match passt nicht */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match fehlt */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_wasm_module_content: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name des Moduls */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Komponente */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/wasm": components["schemas"]["WasmBinary"];
+                };
+            };
+            /** @description Unbekannt */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };

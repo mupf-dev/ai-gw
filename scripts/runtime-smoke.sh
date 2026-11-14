@@ -350,6 +350,37 @@ ETAG=$(curl -fsS -D - -o /dev/null "$CBASE/admin/api/v1/plugin-bindings/smoke-pi
 test -n "$ETAG"
 curl -fsS -X DELETE "$CBASE/admin/api/v1/plugin-bindings/smoke-pii" -H "authorization: Bearer $TOKEN" \
   -H "if-match: $ETAG"
+if [[ -f crates/aigw-wasm/tests/data/keyword-guard.wasm ]]; then
+  echo "--- WASM-Plugin (AIGW-63): Modul hochladen (SHA-256), Bindung, Stichwort blockiert, Header gesetzt"
+  WASM=crates/aigw-wasm/tests/data/keyword-guard.wasm
+  SHA=$(sha256sum "$WASM" | cut -d' ' -f1)
+  test "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$CBASE/admin/api/v1/wasm-modules/smoke-guard?sha256=$(printf '0%.0s' $(seq 64))" \
+    -H "authorization: Bearer $TOKEN" -H 'content-type: application/wasm' --data-binary @"$WASM")" = 422
+  curl -fsS -X PUT "$CBASE/admin/api/v1/wasm-modules/smoke-guard?sha256=$SHA" -H "authorization: Bearer $TOKEN" \
+    -H 'content-type: application/wasm' --data-binary @"$WASM" -o "$TMP/wu.json"
+  grep -q "\"sha256\":\"$SHA\"" "$TMP/wu.json"
+  curl -fsS "$CBASE/admin/api/v1/plugin-bindings" -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+    -d "{\"metadata\":{\"name\":\"smoke-wasm\"},\"spec\":{\"scope\":{\"level\":\"model-group\",\"target\":\"mock-2\"},\"plugin\":\"wasm\",\"config\":{\"module\":\"smoke-guard\",\"sha256\":\"$SHA\",\"config\":{\"block\":[\"geheimprojekt\"],\"responseHeaders\":{\"x-smoke-wasm\":\"geprueft\"}}}}}" >/dev/null
+  FOUND=0
+  for _ in $(seq 1 50); do
+    CODE=$(curl -s -D "$TMP/w1.txt" -o "$TMP/w1.json" -w '%{http_code}' "$BASE/v1/chat/completions" \
+      -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+      -d '{"model":"mock-2","messages":[{"role":"user","content":"Zum Geheimprojekt bitte"}]}')
+    if [[ "$CODE" == 400 ]] && grep -q keyword_blocked "$TMP/w1.json"; then FOUND=1; break; fi
+    sleep 0.2
+  done
+  test "$FOUND" = 1
+  grep -qi '^x-aigw-guardrail: wasm' "$TMP/w1.txt"
+  curl -fsS -D "$TMP/w2.txt" -o /dev/null "$BASE/v1/chat/completions" -H "authorization: Bearer $KEY" \
+    -H 'content-type: application/json' -d '{"model":"mock-2","messages":[{"role":"user","content":"Hallo"}]}'
+  grep -qi '^x-smoke-wasm: geprueft' "$TMP/w2.txt"
+  curl -fsS -o "$TMP/wm.txt" "$CBASE/metrics"
+  grep -q 'aigw_wasm_calls_total{module="smoke-guard",phase="request",outcome="block"}' "$TMP/wm.txt"
+  test "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$CBASE/admin/api/v1/wasm-modules/smoke-guard" \
+    -H "authorization: Bearer $TOKEN" -H 'if-match: *')" = 409
+  curl -fsS -X DELETE "$CBASE/admin/api/v1/plugin-bindings/smoke-wasm" -H "authorization: Bearer $TOKEN" -H 'if-match: *'
+  curl -fsS -X DELETE "$CBASE/admin/api/v1/wasm-modules/smoke-guard" -H "authorization: Bearer $TOKEN" -H 'if-match: *'
+fi
 echo "--- Antwort-Cache (AIGW-39): zweite gleiche Anfrage mit temperature 0 = hit-exact"
 for i in 1 2; do
   curl -fsS -D "$TMP/c$i.txt" -o "$TMP/c$i.json" "$BASE/v1/chat/completions" \

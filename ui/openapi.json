@@ -11348,6 +11348,363 @@
         }
       }
     },
+    "/admin/api/v1/wasm-modules": {
+      "get": {
+        "tags": [
+          "wasm-modules"
+        ],
+        "summary": "Module auflisten.",
+        "operationId": "list_wasm_modules",
+        "responses": {
+          "200": {
+            "description": "Module",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WasmModuleList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/wasm-modules/{name}": {
+      "get": {
+        "tags": [
+          "wasm-modules"
+        ],
+        "summary": "Metadaten eines Moduls.",
+        "operationId": "get_wasm_module",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name des Moduls",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Modul",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WasmModule"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unbekannt",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "wasm-modules"
+        ],
+        "summary": "Modul hochladen oder ersetzen (nur globaler `admin`).",
+        "operationId": "put_wasm_module",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name des Moduls",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sha256",
+            "in": "query",
+            "description": "SHA-256 des Inhalts (hex, Pflicht; Integritätsprüfung).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "description",
+            "in": "query",
+            "description": "Beschreibung (höchstens 1024 Zeichen).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "WebAssembly-Komponente (WIT-Welt aigw:plugin/plugin)",
+          "content": {
+            "application/wasm": {
+              "schema": {
+                "$ref": "#/components/schemas/WasmBinary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ersetzt bzw. unverändert",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WasmModule"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Angelegt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WasmModule"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nur globaler admin",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Zu groß (wasm.max_module_bytes)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type nicht application/wasm",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Kein gültiges Modul oder SHA-256 passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Ersetzen ohne If-Match",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "wasm-modules"
+        ],
+        "summary": "Modul löschen (nur globaler `admin`, nur ohne verweisende Bindungen).",
+        "operationId": "delete_wasm_module",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name des Moduls",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Gelöscht"
+          },
+          "404": {
+            "description": "Unbekannt",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Noch von Plugin-Bindungen verwendet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match passt nicht",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match fehlt",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/wasm-modules/{name}/content": {
+      "get": {
+        "tags": [
+          "wasm-modules"
+        ],
+        "summary": "Inhalt eines Moduls (Komponente).",
+        "operationId": "get_wasm_module_content",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name des Moduls",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Komponente",
+            "content": {
+              "application/wasm": {
+                "schema": {
+                  "$ref": "#/components/schemas/WasmBinary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unbekannt",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/admin/auth/callback": {
       "get": {
         "tags": [
@@ -17575,6 +17932,88 @@
             "description": "Name des betroffenen Objekts."
           }
         }
+      },
+      "WasmBinary": {
+        "type": "string",
+        "format": "binary",
+        "description": "Binärer Inhalt (WebAssembly-Komponente)."
+      },
+      "WasmModule": {
+        "type": "object",
+        "description": "Ein WASM-Modul (Metadaten).",
+        "required": [
+          "id",
+          "name",
+          "sha256",
+          "size",
+          "createdBy",
+          "createdAt",
+          "updatedAt",
+          "usedBy"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "description": "Angelegt (RFC 3339)."
+          },
+          "createdBy": {
+            "type": "string",
+            "description": "Hochgeladen von."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Beschreibung."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID (UUIDv7)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 des Inhalts (hex)."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Größe in Byte.",
+            "minimum": 0
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "Zuletzt ersetzt (RFC 3339)."
+          },
+          "usedBy": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Plugin-Bindungen, die das Modul verwenden."
+          }
+        }
+      },
+      "WasmModuleList": {
+        "type": "object",
+        "description": "Liste der Module.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WasmModule"
+            },
+            "description": "Module (nach Name sortiert)."
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -17647,6 +18086,10 @@
     {
       "name": "plugin-bindings",
       "description": "Plugin-Kette: Bindungen je Ebene (Guardrails, Webhooks, Header …) mit wirksamem Fehlermodus"
+    },
+    {
+      "name": "wasm-modules",
+      "description": "WASM-Module (WebAssembly-Komponenten) für Plugins der Art wasm: hochladen mit SHA-256, auflisten, löschen (AIGW-63)"
     },
     {
       "name": "guardrail-profiles",

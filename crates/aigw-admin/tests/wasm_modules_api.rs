@@ -110,7 +110,14 @@ fn component(tail: &[u8]) -> Vec<u8> {
     v
 }
 
-async fn upload(app: &Router, token: &str, name: &str, content: &[u8], sha: &str, if_match: Option<&str>) -> Resp {
+async fn upload(
+    app: &Router,
+    token: &str,
+    name: &str,
+    content: &[u8],
+    sha: &str,
+    if_match: Option<&str>,
+) -> Resp {
     let mut h = vec![("content-type", "application/wasm")];
     if let Some(m) = if_match {
         h.push(("if-match", m));
@@ -145,7 +152,12 @@ async fn upload_rights_integrity_and_lifecycle() {
     // Falscher SHA, falscher Medientyp, zu groß, kein Komponenten-Format, SHA fehlt.
     let r = upload(&app, "admin", "guard", &v1, &"0".repeat(64), None).await;
     assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(r.body["detail"].as_str().unwrap().contains("sha256 stimmt nicht"));
+    assert!(
+        r.body["detail"]
+            .as_str()
+            .unwrap()
+            .contains("sha256 stimmt nicht")
+    );
     let r = call(
         &app,
         "admin",
@@ -187,11 +199,15 @@ async fn upload_rights_integrity_and_lifecycle() {
     let v2 = component(b"zwei");
     let sha2 = sha256_hex(&v2);
     assert_eq!(
-        upload(&app, "admin", "guard", &v2, &sha2, None).await.status,
+        upload(&app, "admin", "guard", &v2, &sha2, None)
+            .await
+            .status,
         StatusCode::PRECONDITION_REQUIRED
     );
     assert_eq!(
-        upload(&app, "admin", "guard", &v2, &sha2, Some("\"falsch\"")).await.status,
+        upload(&app, "admin", "guard", &v2, &sha2, Some("\"falsch\""))
+            .await
+            .status,
         StatusCode::PRECONDITION_FAILED
     );
     let r = upload(&app, "admin", "guard", &v2, &sha2, Some(&etag)).await;
@@ -199,7 +215,15 @@ async fn upload_rights_integrity_and_lifecycle() {
     assert_eq!(r.body["sha256"], sha2);
 
     // Download.
-    let r = call(&app, "viewer", Method::GET, &format!("{BASE}/guard/content"), &[], Body::empty()).await;
+    let r = call(
+        &app,
+        "viewer",
+        Method::GET,
+        &format!("{BASE}/guard/content"),
+        &[],
+        Body::empty(),
+    )
+    .await;
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(r.raw, v2);
 
@@ -214,9 +238,24 @@ async fn upload_rights_integrity_and_lifecycle() {
                 .to_string(),
         )
     };
-    let post = |b| call(&app, "admin", Method::POST, "/admin/api/v1/plugin-bindings", &[("content-type", "application/json")], b);
-    assert_eq!(post(binding("fehlt", None)).await.status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(post(binding("guard", Some(&sha1))).await.status, StatusCode::UNPROCESSABLE_ENTITY);
+    let post = |b| {
+        call(
+            &app,
+            "admin",
+            Method::POST,
+            "/admin/api/v1/plugin-bindings",
+            &[("content-type", "application/json")],
+            b,
+        )
+    };
+    assert_eq!(
+        post(binding("fehlt", None)).await.status,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        post(binding("guard", Some(&sha1))).await.status,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
     let r = post(binding("guard", Some(&sha2))).await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
     assert_eq!(r.body["effective"]["failMode"], "closed");
@@ -224,22 +263,73 @@ async fn upload_rights_integrity_and_lifecycle() {
     // Liste zeigt die Verwendung; Löschen verwendeter Module → 409.
     let r = call(&app, "admin", Method::GET, BASE, &[], Body::empty()).await;
     assert_eq!(r.body["items"][0]["usedBy"], json!(["b"]));
-    let r = call(&app, "admin", Method::DELETE, &format!("{BASE}/guard"), &[("if-match", "*")], Body::empty()).await;
+    let r = call(
+        &app,
+        "admin",
+        Method::DELETE,
+        &format!("{BASE}/guard"),
+        &[("if-match", "*")],
+        Body::empty(),
+    )
+    .await;
     assert_eq!(r.status, StatusCode::CONFLICT);
-    let r = call(&app, "admin", Method::DELETE, "/admin/api/v1/plugin-bindings/b", &[("if-match", "*")], Body::empty()).await;
+    let r = call(
+        &app,
+        "admin",
+        Method::DELETE,
+        "/admin/api/v1/plugin-bindings/b",
+        &[("if-match", "*")],
+        Body::empty(),
+    )
+    .await;
     assert_eq!(r.status, StatusCode::NO_CONTENT);
     assert_eq!(
-        call(&app, "admin", Method::DELETE, &format!("{BASE}/guard"), &[], Body::empty()).await.status,
+        call(
+            &app,
+            "admin",
+            Method::DELETE,
+            &format!("{BASE}/guard"),
+            &[],
+            Body::empty()
+        )
+        .await
+        .status,
         StatusCode::PRECONDITION_REQUIRED
     );
     assert_eq!(
-        call(&app, "viewer", Method::DELETE, &format!("{BASE}/guard"), &[("if-match", "*")], Body::empty()).await.status,
+        call(
+            &app,
+            "viewer",
+            Method::DELETE,
+            &format!("{BASE}/guard"),
+            &[("if-match", "*")],
+            Body::empty()
+        )
+        .await
+        .status,
         StatusCode::FORBIDDEN
     );
-    let r = call(&app, "admin", Method::DELETE, &format!("{BASE}/guard"), &[("if-match", "*")], Body::empty()).await;
+    let r = call(
+        &app,
+        "admin",
+        Method::DELETE,
+        &format!("{BASE}/guard"),
+        &[("if-match", "*")],
+        Body::empty(),
+    )
+    .await;
     assert_eq!(r.status, StatusCode::NO_CONTENT);
     assert_eq!(
-        call(&app, "admin", Method::GET, &format!("{BASE}/guard"), &[], Body::empty()).await.status,
+        call(
+            &app,
+            "admin",
+            Method::GET,
+            &format!("{BASE}/guard"),
+            &[],
+            Body::empty()
+        )
+        .await
+        .status,
         StatusCode::NOT_FOUND
     );
 }
