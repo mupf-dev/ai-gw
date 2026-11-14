@@ -1806,6 +1806,11 @@ export interface components {
             /** @description Scope (Standard `https://cognitiveservices.azure.com/.default`). */
             scope?: string | null;
             /**
+             * @description Zertifikatskette als `x5c` im Header der Client-Assertion mitsenden (AIGW-94; nur
+             *     `clientCertificate`; nötig für Subject-Name/Issuer-Anmeldung, „SNI“).
+             */
+            sendX5c?: boolean | null;
+            /**
              * @description Tenant-ID (GUID oder Domäne; Pflicht für `clientSecret`/`clientCertificate`, falls
              *     nicht in `data.tenantId`).
              */

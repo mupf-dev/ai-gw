@@ -12952,6 +12952,13 @@
             ],
             "description": "Scope (Standard `https://cognitiveservices.azure.com/.default`)."
           },
+          "sendX5c": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Zertifikatskette als `x5c` im Header der Client-Assertion mitsenden (AIGW-94; nur\n`clientCertificate`; nötig für Subject-Name/Issuer-Anmeldung, „SNI“)."
+          },
           "tenantId": {
             "type": [
               "string",
