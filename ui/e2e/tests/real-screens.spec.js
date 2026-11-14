@@ -106,7 +106,7 @@ const SCENES = [
       const d = page.getByTestId('credential-form-dialog');
       await d.getByRole('combobox').first().click();
       await page.getByRole('option', { name: 'Azure OpenAI' }).click();
-      await d.getByText('Entra ID (Service Principal)').click();
+      await d.getByText('Entra ID – Managed Identity').click();
     },
   },
   {

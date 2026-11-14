@@ -110,7 +110,7 @@ test('Teams, Anbieter, Preise, Admin-Keys, Einstellungen (Mock)', async ({ page 
   await page.getByTestId('create-credential').click();
   await page.getByTestId('credential-form-dialog').getByRole('combobox').first().click();
   await page.getByRole('option', { name: 'Azure OpenAI' }).click();
-  await expect(page.getByText('Entra ID (Service Principal)')).toBeVisible();
+  await expect(page.getByText('Entra ID – Managed Identity')).toBeVisible();
   await page.keyboard.press('Escape');
   await goto(page, '/prices');
   await expect(page.getByTestId('prices-table')).toContainText('gültig');
