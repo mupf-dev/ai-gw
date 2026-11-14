@@ -50,18 +50,47 @@ Eigenschaften des Images:
 
 ### Mehrere Architekturen (amd64 + arm64)
 
-Das Dockerfile ist für `docker buildx` vorbereitet (`--platform=$BUILDPLATFORM` für die UI,
-getrennte Caches je `TARGETPLATFORM`). Das Rust-Binary wird **für** die Zielplattform **auf**
-ihr gebaut: entweder per QEMU-Emulation (funktioniert überall, aber deutlich langsamer) oder mit
-einem nativen arm64-Builder (`docker buildx create --append …`).
+Seit AIGW-91 werden **linux/amd64 und linux/arm64** gebaut und getestet. Die Stufe `build`
+läuft immer auf der Build-Plattform (`FROM --platform=$BUILDPLATFORM`) und kompiliert für die
+Zielplattform **quer**: Rust-Ziel `aarch64-unknown-linux-gnu` bzw. `x86_64-unknown-linux-gnu`,
+Linker und C-Compiler aus Debian (`gcc-aarch64-linux-gnu`, `libc6-dev-arm64-cross`). Der
+Compiler läuft also nativ, nicht unter QEMU – der arm64-Build dauert etwa so lange wie der
+amd64-Build. Die C-Anteile werden mit demselben Cross-GCC gebaut:
+
+| Komponente | Besonderheit bei arm64 |
+|---|---|
+| aws-lc-rs / aws-lc-sys (TLS, AES-GCM) | `cc`-Builder mit vorgenerierten Bindings – kein cmake, kein bindgen, kein Go; `ring` ist nicht im Abhängigkeitsbaum |
+| mimalloc (Standard-Allokator, AIGW-57) | baut quer ohne Anpassung; `CARGO_FEATURES=--no-default-features` schaltet auf den System-Allokator |
+| SQLite (`sqlite-bundled`) | wird mitkompiliert, keine Laufzeit-Abhängigkeit |
+| glibc | Cross-Sysroot aus bookworm (2.36) = glibc von `distroless/cc-debian12` |
+
+```sh
+scripts/build-images.sh                               # beide Architekturen → ai-gw:dev-amd64, ai-gw:dev-arm64
+PLATFORMS=linux/arm64 TAG=0.1.0 SAVE_DIR=dist scripts/build-images.sh   # + dist/ai-gw-0.1.0-arm64.tar.gz
+SMOKE=1 scripts/build-images.sh                       # danach scripts/container-smoke.sh je Image
+PUSH=registry.example.org/ai-gw TAG=0.1.0 scripts/build-images.sh       # Multi-Arch-Manifest pushen
+```
+
+Direkt mit buildx (Multi-Arch-Manifest braucht den containerd-Image-Store oder einen
+`docker-container`-Builder):
 
 ```sh
 docker buildx build --platform linux/amd64,linux/arm64 \
   --build-arg VERSION=0.1.0 -t registry.example.org/ai-gw:0.1.0 --push .
 ```
 
-Das MVP wird nur für amd64 gebaut und getestet; arm64 ist vorbereitet, aber noch nicht
-abgenommen.
+Testen eines fremden Architektur-Images: `SMOKE=1` registriert bei Bedarf QEMU über
+`tonistiigi/binfmt` (privilegierter Container, nur auf Build-Maschinen) und führt den
+vollständigen Container-Smoke (SQLite read-only, Compose mit Postgres/Redis/OTel) mit dem
+arm64-Image aus. Auf einem arm64-Host genügt `docker load` des Tarballs:
+
+```sh
+gunzip -c ai-gw-0.1.0-arm64.tar.gz | docker load
+docker run -d --name aigw -p 4001:4001 -e AIGW_MASTER_KEY=$(docker run --rm ai-gw:0.1.0-arm64 keygen) ai-gw:0.1.0-arm64
+curl -fsS http://127.0.0.1:4001/readyz
+```
+
+Größen (Stand AIGW-91): siehe Tabelle oben; arm64 GROESSE_ARM64.
 
 ### Starten (SQLite, Einzelinstanz)
 
@@ -130,6 +159,14 @@ kubectl -n aigw create secret generic aigw \
   --from-literal=store-url='postgres://aigw:<passwort>@postgres:5432/aigw'
 kubectl -n aigw apply -k deploy/kubernetes
 ```
+
+Prüfen ohne Cluster: `scripts/k8s-check.sh` rendert das Grundgerüst mit `kubectl kustomize`
+und validiert alle Objekte streng mit [kubeconform](https://github.com/yannh/kubeconform) gegen
+die Schemas von Kubernetes 1.34 (Werkzeuge werden bei Bedarf mit SHA-256-Prüfung geladen; läuft
+auch in CI). Mit erreichbarem Cluster zusätzlich `KUBE_SERVER_DRY_RUN=1 scripts/k8s-check.sh`
+(`kubectl apply --dry-run=server`). `kubectl apply --dry-run=client` braucht ebenfalls einen
+erreichbaren API-Server (Discovery). Das Image ist Multi-Arch-fähig; gemischte Knotenpools
+amd64/arm64 brauchen ein Multi-Arch-Manifest (`PUSH=… scripts/build-images.sh`).
 
 Ingress/Gateway-API, NetworkPolicies und Ressourcengrenzen an die eigene Umgebung anpassen;
 die Steuerebene nicht öffentlich veröffentlichen.

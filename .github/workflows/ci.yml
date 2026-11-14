@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # CI für Rust und UI. Das Repo ist privat: um Actions-Minuten zu sparen, läuft der Workflow
-# NICHT bei jedem Push, sondern nur bei Pull Requests und manuell (workflow_dispatch).
+# NICHT bei jedem Push, sondern nur bei Pull Requests, Release-Tags (v*) und manuell
+# (workflow_dispatch). Der teure arm64-Image-Job (AIGW-91) läuft nur bei Tags und manuell.
 # Die eigentliche Logik steckt in scripts/check.sh – derselbe Einstieg wie auf der Buildbox.
 # Härtung: Actions auf Commit-SHAs gepinnt (Tag als Kommentar), minimale Rechte,
 # keine persistierten Checkout-Credentials.
@@ -10,7 +11,14 @@ name: ci
 
 on:
   pull_request:
+  push:
+    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      images:
+        description: "Container-Images amd64 + arm64 bauen und testen (arm64 quer kompiliert, Smoke unter QEMU)"
+        type: boolean
+        default: true
 
 permissions: {}
 
@@ -54,3 +62,47 @@ jobs:
           . "$HOME/.cargo/env"
           export PATH="$HOME/.local/bin:$PATH"
           scripts/check.sh
+      # Lizenzübersicht (AIGW-91): THIRD-PARTY.md muss zu Cargo.lock und pnpm-lock.yaml passen
+      # (ui/node_modules hat check.sh installiert). Zulässige Lizenzen prüft cargo-deny oben.
+      - name: Drittanbieter-Lizenzen (THIRD-PARTY.md aktuell?)
+        run: |
+          . "$HOME/.cargo/env"
+          scripts/third-party.sh --check
+
+  manifests:
+    name: Kubernetes-Manifeste (kubeconform)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: kustomize + kubeconform
+        run: scripts/k8s-check.sh
+
+  images:
+    name: Container-Images (amd64 + arm64)
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.images)
+    needs: [check, manifests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Baut beide Architekturen (arm64 quer kompiliert, kein QEMU für den Compiler) und
+      # startet danach je Image scripts/container-smoke.sh; arm64 läuft dabei unter QEMU.
+      - name: Bauen + Smoke
+        env:
+          TAG: ci
+          SMOKE: "1"
+          SAVE_DIR: dist
+        run: scripts/build-images.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ai-gw-images
+          path: dist/*.tar.gz
+          retention-days: 7

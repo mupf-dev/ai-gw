@@ -378,3 +378,6 @@ Status: [ ] offen, [x] entschieden (Ergebnis dahinter)
 214. [x] Plugin-Formulare je Plugin erst mit Plugin-Schema → Empfehlung übernommen
 - Verdacht Bug: Key löschen + gleichnamig neu anlegen → 401 (inkrementeller Snapshot) – Fix-Agent beauftragt
 - Folge: ui/e2e fixtures.js ensure() für api-keys bei 409 hart fehlschlagen lassen (verdeckte sonst 428/409-Ketten)
+
+## AIGW-91 – Hinweise (2026-11-14, nicht entschieden)
+- Lizenz tiktoken-Rangtabellen (`crates/aigw-tokenizer/data/*.bin`) weiterhin **offen**: THIRD-PARTY.md weist sie als MIT (Projekt tiktoken) aus, die `*.tiktoken`-Dateien selbst tragen keine Lizenzangabe. Die neue CI-Stufe `scripts/third-party.sh --check` prüft nur, ob THIRD-PARTY.md zum Lockfile passt, nicht diese Rechtsfrage – vor einem öffentlichen Release (und vor Veröffentlichung von Images in einer öffentlichen Registry) juristisch klären; Alternative wäre Laden der Tabellen zur Laufzeit statt Einbetten (`limits.tokenizer_dir`).

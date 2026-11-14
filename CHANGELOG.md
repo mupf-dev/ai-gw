@@ -63,6 +63,17 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   `IDENTITY_HEADER`, benutzerzugewiesen), Postgres mit TLS (`sslmode=require`/`verify-full`,
   eingebettete Wurzeln für Azure Database for PostgreSQL).
 
+- **Container-Image für linux/arm64 (AIGW-91):** Das Dockerfile kompiliert das Binary auf der
+  Build-Plattform quer (Cross-GCC aus Debian, `rustup target add`), arm64 braucht daher kein
+  QEMU für den Compiler; aws-lc-sys, mimalloc und SQLite bauen ohne Anpassung mit.
+  `scripts/build-images.sh` baut amd64 + arm64 (`--load`, optional Tarballs `SAVE_DIR`,
+  Smoke `SMOKE=1` mit QEMU/binfmt, Multi-Arch-Manifest `PUSH=…`). arm64-Image unter QEMU mit
+  dem vollständigen `container-smoke.sh` und nativ auf einem arm64-Host geprüft.
+- `scripts/k8s-check.sh`: `kubectl kustomize` + kubeconform (strikt, Kubernetes 1.34) für
+  `deploy/kubernetes`, optional `kubectl apply --dry-run=server`.
+- CI: Lizenzübersicht `scripts/third-party.sh --check` und Manifest-Prüfung in jedem Lauf;
+  Job „Container-Images (amd64 + arm64)“ bei Tags `v*` und manuell (Tarballs als Artefakt).
+
 ### Geändert
 
 - OpenAI-Antworten ohne Text, Ablehnung und Tool-Aufrufe (z. B. Claude hat `max_tokens`
@@ -130,7 +141,8 @@ Erste Version: AI-Gateway, Admin-API und Admin-UI in einem Binary.
 ### Bekannte Einschränkungen
 
 - GitOps-Manifeste: höchstens 1 024 YAML-Dokumente je Datei.
-- Container-Image nur für linux/amd64 gebaut und getestet; arm64 vorbereitet.
+- Container-Image nur für linux/amd64 gebaut und getestet; arm64 vorbereitet
+  (behoben in Unreleased, AIGW-91).
 - Lizenz der eingebetteten tiktoken-Rangtabellen (MIT) vor einem öffentlichen Release
   rechtlich bestätigen.
 

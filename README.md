@@ -65,7 +65,7 @@ Kubernetes: [deploy/kubernetes/](deploy/kubernetes/), Details:
 | `config/` | Startkonfigurationen (`aigw.example.yaml` mit allen Feldern) und `examples/` |
 | `deploy/` | Docker Compose, Kubernetes |
 | `docs/` | `konzept/` (Architektur), `betrieb/` (Betriebshandbuch) |
-| `scripts/` | `check.sh` (alle Prüfungen), `runtime-smoke.sh`, `container-smoke.sh`, `gen-api.sh`, `third-party.sh`, Benchmarks |
+| `scripts/` | `check.sh` (alle Prüfungen), `runtime-smoke.sh`, `container-smoke.sh`, `build-images.sh`, `k8s-check.sh`, `gen-api.sh`, `third-party.sh`, Benchmarks |
 
 Endpunkte – Datenebene (`server.data.listen`, Standard `127.0.0.1:4000`, im Container `0.0.0.0`):
 
@@ -138,8 +138,11 @@ Hinweise:
 
 ### CI
 
-`.github/workflows/ci.yml` führt `scripts/check.sh` aus. Weil das Repo privat ist und
-Actions-Minuten kostet, läuft der Workflow **nur bei Pull Requests und manuell**
+`.github/workflows/ci.yml` führt `scripts/check.sh` und `scripts/third-party.sh --check`
+(THIRD-PARTY.md aktuell) aus, prüft die Kubernetes-Manifeste (`scripts/k8s-check.sh`) und baut
+bei Release-Tags oder manuell die Container-Images für amd64 und arm64
+(`scripts/build-images.sh`, arm64 quer kompiliert, Smoke unter QEMU). Weil das Repo privat ist
+und Actions-Minuten kostet, läuft der Workflow **nur bei Pull Requests, Tags `v*` und manuell**
 (`workflow_dispatch`), nicht bei jedem Push.
 
 ## Lizenz
