@@ -371,6 +371,10 @@ Bereich des Teams), entscheidend bleibt der Server.
 |---|---|---|
 | ![](ux/echt-guardrails-pii-hell-desktop.png) | ![](ux/echt-plugin-kette-hell-desktop.png) | ![](ux/echt-mcp-freigaben-hell-desktop.png) |
 
+| Guardrail-Profile (AIGW-86) | Diff vor dem Anwenden |
+|---|---|
+| ![](ux/echt-guardrail-profile-hell-desktop.png) | ![](ux/echt-guardrail-profil-diff-hell-desktop.png) |
+
 **Playground (AIGW-54).** `/playground`: Key wählen (aktive Keys mit Schreibrecht), Modellgruppen
 aus `GET /playground/models`, bis zu drei Spalten mit eigenem Verlauf, gemeinsamer Eingabe (Strg+Enter) und
 Parametern. Antworten laufen über `POST /admin/api/v1/playground/chat` (fetch-Stream, SSE selbst geparst) und
