@@ -127,4 +127,4 @@ AIGW-58). Verweise `S-xx` beziehen sich auf die dortigen Befunde.
 ## Abhängigkeiten
 
 - `scripts/check.sh` führt `cargo deny` aus; zusätzlich `pnpm audit --prod` im UI.
-- Ausnahme `RUSTSEC-2026-0459` bis 2027-01-31 erneut prüfen (deny.toml).
+- Ausnahme `RUSTSEC-2026-0459` bis 2027-01-31 erneut prüfen (deny.toml). Stand 2026-11-14 (AIGW-64): sqlx 0.9.0 pinnt libsqlite3-sys <0.38, gepatcht erst ab 0.39 – noch nicht lösbar.

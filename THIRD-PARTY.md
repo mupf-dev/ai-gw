@@ -10,7 +10,7 @@ eingebettete Admin-UI eingehen. Die zulässigen Lizenzen legt `deny.toml` fest
 
 | Datei | Herkunft | Lizenz |
 |---|---|---|
-| `crates/aigw-tokenizer/data/cl100k_base.bin`, `o200k_base.bin` | BPE-Rangtabellen aus den von OpenAI veröffentlichten `*.tiktoken`-Dateien (Projekt tiktoken), umkodiert | MIT (`LICENSES/MIT.txt`; **vor einem öffentlichen Release rechtlich bestätigen**) |
+| `crates/aigw-tokenizer/data/cl100k_base.bin`, `o200k_base.bin` | BPE-Rangtabellen aus den von OpenAI veröffentlichten `*.tiktoken`-Dateien (openaipublic.blob.core.windows.net/encodings, referenziert vom Projekt tiktoken), umkodiert. **Nur im Binary bei Cargo-Feature `embedded-tokenizers`** (Standard, Dockerfile/offizielle Images); ohne das Feature lädt der Betreiber die Dateien selbst (`tokenizer.ranks_dir`, AIGW-95) | MIT laut Repo tiktoken (`LICENSES/MIT.txt`); die Dateien selbst tragen keine Lizenzangabe – **vor einem öffentlichen Release rechtlich bestätigen** (docs/konzept/99-offene-fragen.md) |
 | `crates/aigw-billing/catalog/prices.yaml` | Eigene, gepflegte Datei (AIGW-85): Listenpreise (Fakten) aus den öffentlichen Preisseiten von OpenAI, Anthropic, Mistral und Google (Gemini API); Werte abgeglichen mit LiteLLM `model_prices_and_context_window.json` (BerriAI, MIT) – keine Übernahme der fremden Datei | AGPL-3.0-or-later (wie der Code) |
 | Laufzeit: Azure Retail Prices API (`prices.azure.com`) | Öffentliche Preisabfrage von Microsoft ohne Anmeldung, nur zur Anzeige von Vorschlägen; nichts wird mitgeliefert | – |
 

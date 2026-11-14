@@ -25,6 +25,9 @@ ignore = [
     # Ausnutzbar nur, wenn das Gateway eine DB- und -wal-Datei öffnet, die ein weniger
     # vertrauenswürdiger Dritter geschrieben hat; die DB gehört dem Gateway-Prozess allein.
     # Entfernen, sobald sqlx libsqlite3-sys >= 0.39 zulässt. Erneut prüfen bis 2027-01-31.
+    # Geprüft 2026-11-14 (AIGW-64): sqlx 0.9.0 ist weiter neuestes Release, sqlx-sqlite 0.9.0
+    # verlangt libsqlite3-sys <0.38 (gepatcht ab 0.39, aktuell 0.40.0); sqlx main erlaubt <0.40,
+    # aber unveröffentlicht – keine Git-Abhängigkeit, Ausnahme bleibt.
     { id = "RUSTSEC-2026-0459", reason = "sqlx-sqlite 0.9.0 pinnt libsqlite3-sys <0.38; nur lokale Ausnutzung mit fremden DB/WAL-Dateien" },
 ]
 

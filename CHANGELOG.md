@@ -19,6 +19,10 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   testet auch die Variante ohne Feature. Lizenzfrage der Tabellen weiter offen
   (docs/konzept/99-offene-fragen.md, THIRD-PARTY.md).
 
+- **RUSTSEC-2026-0459 erneut geprüft (AIGW-64):** weiterhin nicht ohne Ausnahme lösbar –
+  sqlx 0.9.0 (neuestes Release) pinnt libsqlite3-sys <0.38, gepatcht ist erst 0.39; Ausnahme
+  in `deny.toml` bleibt (Stand dort vermerkt).
+
 - **content-safety mit Entra ID (AIGW-89):** `provider: azure` mit `auth: entraId` und
   `credential` = ProviderCredential mit `spec.entra` (Managed Identity, Workload Identity,
   Client Credentials mit Secret/Zertifikat) – `Authorization: Bearer` statt
