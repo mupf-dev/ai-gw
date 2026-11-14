@@ -1249,6 +1249,8 @@ async fn entra_gateway(credential: &str, fake: SocketAddr) -> (SocketAddr, Arc<R
     )
     .with_entra_env(aigw_providers::entra::EntraEnv {
         imds_endpoint: Some(format!("http://{fake}/metadata/identity/oauth2/token")),
+        // Managed Identity muss ausdrücklich freigegeben sein (AIGW-90).
+        ambient_identity: true,
         ..Default::default()
     });
     let factory = builtin::content_safety::Factory::new(Arc::new(host));

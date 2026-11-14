@@ -30,6 +30,8 @@ printf 'admin:\n  ui:\n    trace_url: "https://tracing.example.org/trace/{traceI
 # AIGW-85: Preisvorschläge gegen eine lokale Fake-Retail-API (kein Internet nötig).
 RETAIL_PORT=$((PORT + 2))
 printf 'billing:\n  price_suggestions:\n    azure:\n      api_url: "http://127.0.0.1:%s/api/retail/prices"\n' "$RETAIL_PORT" >> "$RUN/aigw.yaml"
+# AIGW-90: Managed Identity muss ausdrücklich freigegeben sein (AIGW-84-Tests mit Foundry-MI-Endpunkt).
+printf 'upstream:\n  entra:\n    ambient_identity: true\n' >> "$RUN/aigw.yaml"
 # Zweiter Server mit OIDC (Einladungen, F90): Issuer wird erst beim Login abgefragt, der Test meldet sich per
 # Bootstrap-Token an (sessionStorage) und erzeugt nur Einladungslinks.
 OIDC_PORT=$((PORT + 1))
