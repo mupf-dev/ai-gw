@@ -686,6 +686,23 @@ export interface paths {
         patch: operations["patch_credential"];
         trace?: never;
     };
+    "/admin/api/v1/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Anbieter-Übersicht je Anbieter und Endpunkt. */
+        get: operations["provider_overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/request-logs": {
         parameters: {
             query?: never;
@@ -1340,9 +1357,33 @@ export interface components {
             /** @description Mock-Modus der UI anbieten (`admin.ui.mock`, F135): `false` blendet den Schalter aus. */
             uiMock: boolean;
         };
+        /**
+         * @description Anmeldeart.
+         * @enum {string}
+         */
+        AuthKind: "apiKey" | "entraId" | "awsAccessKey" | "serviceAccount" | "accessToken" | "credential" | "none";
+        /** @description Eine Anmeldung, wie sie Deployments eines Endpunkts nutzen. */
+        AuthUse: {
+            /** @description Bei Entra ID: Client-ID aus den Einstellungen bzw. `spec.entra` (nicht geheim). */
+            clientId?: string | null;
+            /** @description Name der Zugangsdaten (fehlt bei Inline-Einstellungen bzw. ohne Anmeldung). */
+            credential?: string | null;
+            /**
+             * @description Bei Entra ID: `managedIdentity`, `workloadIdentity`, `clientSecret`,
+             *     `clientCertificate`.
+             */
+            entraCredential?: string | null;
+            /** @description Art. */
+            kind: components["schemas"]["AuthKind"];
+        };
         BTreeMap: {
             [key: string]: string;
         };
+        /**
+         * @description Circuit Breaker.
+         * @enum {string}
+         */
+        Breaker: "closed" | "open" | "halfOpen";
         /** @description Budget mit Warnschwellen und harter Grenze. */
         Budget: {
             /** @description Betrag je Zeitraum in der Abrechnungswährung. */
@@ -1491,6 +1532,7 @@ export interface components {
             data?: {
                 [key: string]: components["schemas"]["CredentialValue"];
             };
+            entra?: components["schemas"]["EntraAuth"] | null;
             provider?: components["schemas"]["ProviderKind"] | null;
         };
         /** @description Ein Geheimwert in der Eingabe. */
@@ -1578,6 +1620,30 @@ export interface components {
              */
             timeoutMs: number;
         };
+        /** @description Entra-ID-Anmeldung einer [`ProviderCredentialSpec`] (AIGW-84). Enthält keine Geheimnisse. */
+        EntraAuth: {
+            /**
+             * @description Authority (nur `https://host`, Sovereign Clouds; Standard
+             *     `https://login.microsoftonline.com`; nicht bei `workloadIdentity`).
+             */
+            authority?: string | null;
+            /** @description Client-ID (Service Principal bzw. benutzerzugewiesene Managed Identity). */
+            clientId?: string | null;
+            /** @description Art der Anmeldung. */
+            credential: components["schemas"]["EntraCredentialKind"];
+            /** @description Scope (Standard `https://cognitiveservices.azure.com/.default`). */
+            scope?: string | null;
+            /**
+             * @description Tenant-ID (GUID oder Domäne; Pflicht für `clientSecret`/`clientCertificate`, falls
+             *     nicht in `data.tenantId`).
+             */
+            tenantId?: string | null;
+        };
+        /**
+         * @description Art der Entra-ID-Anmeldung (wie `settings.entraCredential`, AIGW-82/84).
+         * @enum {string}
+         */
+        EntraCredentialKind: "managedIdentity" | "workloadIdentity" | "clientSecret" | "clientCertificate";
         /** @description Fallback auf eine andere Modellgruppe. */
         Fallback: {
             /** @description Ziel-Modellgruppe (Name). */
@@ -1692,6 +1758,11 @@ export interface components {
             /** @description Plugin (`pii`, `prompt-filter`, `content-safety` …). */
             plugin: string;
         };
+        /**
+         * @description Zustand eines Deployments bzw. Endpunkts.
+         * @enum {string}
+         */
+        HealthState: "ok" | "degraded" | "down" | "unusable" | "disabled" | "unknown";
         /** @description Einladung eines Nutzers (ohne Token). */
         Invitation: {
             /**
@@ -2367,10 +2438,14 @@ export interface components {
         };
         /** @description Spezifikation beim Anlegen/Ersetzen. */
         ProviderCredentialInputSpec: {
-            /** @description Felder, z. B. `{"apiKey": {"value": "sk-…"}}`. */
-            data: {
+            /**
+             * @description Felder, z. B. `{"apiKey": {"value": "sk-…"}}` (mit `entra` und Managed/Workload
+             *     Identity leer).
+             */
+            data?: {
                 [key: string]: components["schemas"]["CredentialValue"];
             };
+            entra?: components["schemas"]["EntraAuth"] | null;
             /** @description Anbieter. */
             provider: components["schemas"]["ProviderKind"];
         };
@@ -2395,10 +2470,54 @@ export interface components {
         };
         /** @description Anbieter und Namen der gespeicherten Felder. */
         ProviderCredentialSummary: {
+            entra?: components["schemas"]["EntraAuth"] | null;
             /** @description Namen der gespeicherten Felder (sortiert), z. B. `["apiKey"]`. */
             fields: string[];
             /** @description Anbieter. */
             provider: components["schemas"]["ProviderKind"];
+        };
+        /** @description Deployment in der Übersicht. */
+        ProviderDeployment: {
+            /** @description Anmeldung. */
+            auth: components["schemas"]["AuthUse"];
+            breaker?: components["schemas"]["Breaker"] | null;
+            /** @description Aktiv. */
+            enabled: boolean;
+            /** @description Grund bei `unusable` (ohne Geheimnisse). */
+            error?: string | null;
+            /**
+             * Format: int32
+             * @description Aufeinanderfolgende fehlgeschlagene Health Checks.
+             */
+            healthFailures: number;
+            /**
+             * Format: int32
+             * @description Offene Anfragen dieser Instanz.
+             */
+            inFlight: number;
+            /** @description Modellgruppe. */
+            modelGroup: string;
+            /** @description Name. */
+            name: string;
+            /** @description Modellname beim Anbieter. */
+            providerModel: string;
+            /** @description Zustand (dieser Instanz). */
+            state: components["schemas"]["HealthState"];
+        };
+        /** @description Anbieter + Endpunkt. */
+        ProviderEndpoint: {
+            /** @description Genutzte Anmeldungen (sortiert, ohne Doppelte). */
+            auth: components["schemas"]["AuthUse"][];
+            /** @description Deployments (nach Name). */
+            deployments: components["schemas"]["ProviderDeployment"][];
+            /** @description Endpunkt (fehlt = Standard-Endpunkt des Anbieters). */
+            endpoint?: string | null;
+            /** @description Modellgruppen (sortiert). */
+            modelGroups: string[];
+            /** @description Anbieter. */
+            provider: components["schemas"]["ProviderKind"];
+            /** @description Zusammengefasster Zustand. */
+            state: components["schemas"]["HealthState"];
         };
         /**
          * @description Art eines Upstream-Anbieters (MVP-Umfang laut E5).
@@ -2409,6 +2528,13 @@ export interface components {
          * @enum {string}
          */
         ProviderKind: "openai" | "anthropic" | "azure-openai" | "bedrock" | "vertex" | "mistral" | "ollama" | "vllm" | "openai-compatible" | "mock";
+        /** @description Antwort von `GET /providers`. */
+        ProviderOverview: {
+            /** @description Je Anbieter und Endpunkt (nach Anbieter, dann Endpunkt). */
+            items: components["schemas"]["ProviderEndpoint"][];
+            /** @description Laufzeitzustand verfügbar (sonst alle aktiven Deployments `unknown`). */
+            runtime: boolean;
+        };
         /** @description Einzelanfrage. */
         RequestLogDetail: components["schemas"]["RequestLogItem"] & {
             /** @description Upstream-Versuche in Reihenfolge (leer bei älteren Einträgen bzw. ohne Upstream). */
@@ -7695,7 +7821,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Anbieterwechsel bei verwendeten Zugangsdaten */
+            /** @description Anbieter- oder Anmeldungswechsel würde Deployments ungültig machen */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7877,7 +8003,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Anbieterwechsel bei verwendeten Zugangsdaten */
+            /** @description Anbieter- oder Anmeldungswechsel würde Deployments ungültig machen */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7906,6 +8032,44 @@ export interface operations {
             };
             /** @description If-Match fehlt (F38) */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    provider_overview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Übersicht je Anbieter und Endpunkt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderOverview"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

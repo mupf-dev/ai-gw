@@ -7216,7 +7216,7 @@
             }
           },
           "409": {
-            "description": "Anbieterwechsel bei verwendeten Zugangsdaten",
+            "description": "Anbieter- oder Anmeldungswechsel würde Deployments ungültig machen",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7461,7 +7461,7 @@
             }
           },
           "409": {
-            "description": "Anbieterwechsel bei verwendeten Zugangsdaten",
+            "description": "Anbieter- oder Anmeldungswechsel würde Deployments ungültig machen",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7492,6 +7492,55 @@
           },
           "428": {
             "description": "If-Match fehlt (F38)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/providers": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Anbieter-Übersicht je Anbieter und Endpunkt.",
+        "operationId": "provider_overview",
+        "responses": {
+          "200": {
+            "description": "Übersicht je Anbieter und Endpunkt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderOverview"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10929,6 +10978,53 @@
           }
         }
       },
+      "AuthKind": {
+        "type": "string",
+        "description": "Anmeldeart.",
+        "enum": [
+          "apiKey",
+          "entraId",
+          "awsAccessKey",
+          "serviceAccount",
+          "accessToken",
+          "credential",
+          "none"
+        ]
+      },
+      "AuthUse": {
+        "type": "object",
+        "description": "Eine Anmeldung, wie sie Deployments eines Endpunkts nutzen.",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "clientId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Bei Entra ID: Client-ID aus den Einstellungen bzw. `spec.entra` (nicht geheim)."
+          },
+          "credential": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name der Zugangsdaten (fehlt bei Inline-Einstellungen bzw. ohne Anmeldung)."
+          },
+          "entraCredential": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Bei Entra ID: `managedIdentity`, `workloadIdentity`, `clientSecret`,\n`clientCertificate`."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AuthKind",
+            "description": "Art."
+          }
+        }
+      },
       "BTreeMap": {
         "type": "object",
         "additionalProperties": {
@@ -10937,6 +11033,15 @@
         "propertyNames": {
           "type": "string"
         }
+      },
+      "Breaker": {
+        "type": "string",
+        "description": "Circuit Breaker.",
+        "enum": [
+          "closed",
+          "open",
+          "halfOpen"
+        ]
       },
       "Budget": {
         "type": "object",
@@ -11288,6 +11393,17 @@
               "type": "string"
             }
           },
+          "entra": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EntraAuth",
+                "description": "Entra-ID-Anmeldung als Ganzes ersetzen (`null` entfernt sie, weglassen = unverändert)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "provider": {
             "oneOf": [
               {
@@ -11485,6 +11601,58 @@
             "minimum": 0
           }
         }
+      },
+      "EntraAuth": {
+        "type": "object",
+        "description": "Entra-ID-Anmeldung einer [`ProviderCredentialSpec`] (AIGW-84). Enthält keine Geheimnisse.",
+        "required": [
+          "credential"
+        ],
+        "properties": {
+          "authority": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Authority (nur `https://host`, Sovereign Clouds; Standard\n`https://login.microsoftonline.com`; nicht bei `workloadIdentity`)."
+          },
+          "clientId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Client-ID (Service Principal bzw. benutzerzugewiesene Managed Identity)."
+          },
+          "credential": {
+            "$ref": "#/components/schemas/EntraCredentialKind",
+            "description": "Art der Anmeldung."
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Scope (Standard `https://cognitiveservices.azure.com/.default`)."
+          },
+          "tenantId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Tenant-ID (GUID oder Domäne; Pflicht für `clientSecret`/`clientCertificate`, falls\nnicht in `data.tenantId`)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "EntraCredentialKind": {
+        "type": "string",
+        "description": "Art der Entra-ID-Anmeldung (wie `settings.entraCredential`, AIGW-82/84).",
+        "enum": [
+          "managedIdentity",
+          "workloadIdentity",
+          "clientSecret",
+          "clientCertificate"
+        ]
       },
       "Fallback": {
         "type": "object",
@@ -11767,6 +11935,18 @@
             "description": "Plugin (`pii`, `prompt-filter`, `content-safety` …)."
           }
         }
+      },
+      "HealthState": {
+        "type": "string",
+        "description": "Zustand eines Deployments bzw. Endpunkts.",
+        "enum": [
+          "ok",
+          "degraded",
+          "down",
+          "unusable",
+          "disabled",
+          "unknown"
+        ]
       },
       "Invitation": {
         "type": "object",
@@ -13469,19 +13649,29 @@
         "type": "object",
         "description": "Spezifikation beim Anlegen/Ersetzen.",
         "required": [
-          "provider",
-          "data"
+          "provider"
         ],
         "properties": {
           "data": {
             "type": "object",
-            "description": "Felder, z. B. `{\"apiKey\": {\"value\": \"sk-…\"}}`.",
+            "description": "Felder, z. B. `{\"apiKey\": {\"value\": \"sk-…\"}}` (mit `entra` und Managed/Workload\nIdentity leer).",
             "additionalProperties": {
               "$ref": "#/components/schemas/CredentialValue"
             },
             "propertyNames": {
               "type": "string"
             }
+          },
+          "entra": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EntraAuth",
+                "description": "Entra-ID-Anmeldung (AIGW-84; nur `azure-openai` und `anthropic`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "provider": {
             "$ref": "#/components/schemas/ProviderKind",
@@ -13568,6 +13758,17 @@
           "fields"
         ],
         "properties": {
+          "entra": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EntraAuth",
+                "description": "Entra-ID-Anmeldung (AIGW-84; nicht geheim)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "fields": {
             "type": "array",
             "items": {
@@ -13578,6 +13779,125 @@
           "provider": {
             "$ref": "#/components/schemas/ProviderKind",
             "description": "Anbieter."
+          }
+        }
+      },
+      "ProviderDeployment": {
+        "type": "object",
+        "description": "Deployment in der Übersicht.",
+        "required": [
+          "name",
+          "modelGroup",
+          "providerModel",
+          "enabled",
+          "auth",
+          "state",
+          "inFlight",
+          "healthFailures"
+        ],
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/AuthUse",
+            "description": "Anmeldung."
+          },
+          "breaker": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Breaker",
+                "description": "Circuit Breaker (nur bei gerouteten Deployments)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Aktiv."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Grund bei `unusable` (ohne Geheimnisse)."
+          },
+          "healthFailures": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Aufeinanderfolgende fehlgeschlagene Health Checks.",
+            "minimum": 0
+          },
+          "inFlight": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Offene Anfragen dieser Instanz.",
+            "minimum": 0
+          },
+          "modelGroup": {
+            "type": "string",
+            "description": "Modellgruppe."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          },
+          "providerModel": {
+            "type": "string",
+            "description": "Modellname beim Anbieter."
+          },
+          "state": {
+            "$ref": "#/components/schemas/HealthState",
+            "description": "Zustand (dieser Instanz)."
+          }
+        }
+      },
+      "ProviderEndpoint": {
+        "type": "object",
+        "description": "Anbieter + Endpunkt.",
+        "required": [
+          "provider",
+          "auth",
+          "state",
+          "modelGroups",
+          "deployments"
+        ],
+        "properties": {
+          "auth": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuthUse"
+            },
+            "description": "Genutzte Anmeldungen (sortiert, ohne Doppelte)."
+          },
+          "deployments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderDeployment"
+            },
+            "description": "Deployments (nach Name)."
+          },
+          "endpoint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Endpunkt (fehlt = Standard-Endpunkt des Anbieters)."
+          },
+          "modelGroups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Modellgruppen (sortiert)."
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ProviderKind",
+            "description": "Anbieter."
+          },
+          "state": {
+            "$ref": "#/components/schemas/HealthState",
+            "description": "Zusammengefasster Zustand."
           }
         }
       },
@@ -13596,6 +13916,27 @@
           "openai-compatible",
           "mock"
         ]
+      },
+      "ProviderOverview": {
+        "type": "object",
+        "description": "Antwort von `GET /providers`.",
+        "required": [
+          "runtime",
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderEndpoint"
+            },
+            "description": "Je Anbieter und Endpunkt (nach Anbieter, dann Endpunkt)."
+          },
+          "runtime": {
+            "type": "boolean",
+            "description": "Laufzeitzustand verfügbar (sonst alle aktiven Deployments `unknown`)."
+          }
+        }
       },
       "RequestLogDetail": {
         "allOf": [
@@ -15141,6 +15482,10 @@
     {
       "name": "provider-credentials",
       "description": "Zugangsdaten der Anbieter (Werte nur schreibbar)"
+    },
+    {
+      "name": "providers",
+      "description": "Anbieter-Übersicht je Anbieter und Endpunkt: Anmeldeart, Deployments, Laufzeitzustand"
     },
     {
       "name": "secrets",
