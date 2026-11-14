@@ -6288,6 +6288,203 @@
         ]
       }
     },
+    "/admin/api/v1/price-suggestions": {
+      "get": {
+        "tags": [
+          "prices"
+        ],
+        "summary": "Preisvorschläge je Deployment.",
+        "operationId": "list_suggestions",
+        "parameters": [
+          {
+            "name": "modelGroup",
+            "in": "query",
+            "description": "Nur Deployments dieser Modellgruppe.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "deployment",
+            "in": "query",
+            "description": "Nur dieses Deployment.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "description": "Quellen neu abrufen (Azure Retail Prices, Katalog-URL) statt Zwischenspeicher.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vorschläge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceSuggestionReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Preisvorschläge ausgeschaltet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/price-suggestions:accept": {
+      "post": {
+        "tags": [
+          "prices"
+        ],
+        "summary": "Übernimmt Vorschläge als neue Preisversionen.",
+        "operationId": "accept_suggestions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceSuggestionAccept"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Angelegte und übersprungene Vorschläge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceSuggestionAcceptResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungültige Anfrage",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Keine Berechtigung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Preisvorschläge ausgeschaltet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Manueller Preis ohne overrideManual, widersprüchliche Auswahl oder neuere Version vorhanden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unbekanntes Deployment, kein Vorschlag oder validFrom in der Vergangenheit",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/prices": {
       "get": {
         "tags": [
@@ -11025,6 +11222,15 @@
           }
         }
       },
+      "AzureDeploymentType": {
+        "type": "string",
+        "description": "Bereitstellungsart eines Azure-Deployments (bestimmt die Meter).",
+        "enum": [
+          "global",
+          "data-zone",
+          "regional"
+        ]
+      },
       "BTreeMap": {
         "type": "object",
         "additionalProperties": {
@@ -11431,6 +11637,29 @@
           }
         },
         "additionalProperties": false
+      },
+      "CurrentPriceVersion": {
+        "type": "object",
+        "description": "Aktuell gültige Preisversion.",
+        "required": [
+          "name",
+          "manual",
+          "spec"
+        ],
+        "properties": {
+          "manual": {
+            "type": "boolean",
+            "description": "Manuell gepflegt (ohne Label `aigw.io/price-source`) – hat Vorrang."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name der Preisversion."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/PriceSpec",
+            "description": "Preis."
+          }
+        }
       },
       "Deployment": {
         "type": "object",
@@ -13361,6 +13590,36 @@
           }
         }
       },
+      "PriceCheckSummary": {
+        "type": "object",
+        "description": "Ergebnis des letzten periodischen Abgleichs.",
+        "required": [
+          "at",
+          "differing",
+          "missing"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Zeitpunkt."
+          },
+          "differing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Deployments mit abweichendem Preis."
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Deployments ohne Preis, für die es einen Vorschlag gibt."
+          }
+        }
+      },
       "PriceInput": {
         "type": "object",
         "required": [
@@ -13397,6 +13656,52 @@
               "null"
             ],
             "description": "Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite."
+          }
+        }
+      },
+      "PriceSourceStatus": {
+        "type": "object",
+        "description": "Zustand einer Quelle.",
+        "required": [
+          "source",
+          "scope",
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "integer",
+            "description": "Anzahl Meter bzw. Katalogmodelle.",
+            "minimum": 0
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fehler des letzten Abrufs (ältere Daten bleiben in Gebrauch)."
+          },
+          "fetchedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Letzter erfolgreicher Abruf."
+          },
+          "scope": {
+            "type": "string",
+            "description": "Azure-Region bzw. Herkunft des Katalogs (`builtin` oder URL)."
+          },
+          "source": {
+            "$ref": "#/components/schemas/PriceSuggestionSource",
+            "description": "Quelle."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stand des Katalogs."
           }
         }
       },
@@ -13478,6 +13783,268 @@
           }
         },
         "additionalProperties": false
+      },
+      "PriceSuggestion": {
+        "type": "object",
+        "description": "Vorschlag für ein Deployment.",
+        "required": [
+          "deployment",
+          "modelGroup",
+          "provider",
+          "providerModel",
+          "enabled",
+          "status"
+        ],
+        "properties": {
+          "current": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CurrentPriceVersion",
+                "description": "Aktuell gültige Preisversion (gleiche Suche wie die Abrechnung)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deployment": {
+            "type": "string",
+            "description": "Deployment."
+          },
+          "deploymentType": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AzureDeploymentType",
+                "description": "Azure-Bereitstellungsart."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "differences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Abweichende Felder (z. B. `perMillionTokens.input`)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Deployment aktiv."
+          },
+          "matched": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Gefundenes Modell (Katalogname bzw. Modellteil der Meter)."
+          },
+          "meters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Verwendete Azure-Meter (`skuName`)."
+          },
+          "modelGroup": {
+            "type": "string",
+            "description": "Modellgruppe."
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Hinweise (Ersatzquelle, Mehrdeutigkeit, fehlende Region …)."
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ProviderKind",
+            "description": "Anbieter."
+          },
+          "providerModel": {
+            "type": "string",
+            "description": "Modell beim Anbieter (Preisschlüssel)."
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Azure-Region."
+          },
+          "source": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PriceSuggestionSource",
+                "description": "Quelle des Vorschlags."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/PriceSuggestionStatus",
+            "description": "Vergleich."
+          },
+          "suggested": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PriceSpec",
+                "description": "Vorgeschlagene Preisversion (`validFrom` = Gültigkeit laut Quelle, sonst jetzt)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "PriceSuggestionAccept": {
+        "type": "object",
+        "description": "Übernahme von Vorschlägen.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PriceSuggestionAcceptItem"
+            },
+            "description": "Ausgewählte Deployments (1–500)."
+          },
+          "validFrom": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Gültig ab (RFC 3339, nicht in der Vergangenheit); Standard: jetzt."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PriceSuggestionAcceptItem": {
+        "type": "object",
+        "description": "Auswahl eines Vorschlags.",
+        "required": [
+          "deployment"
+        ],
+        "properties": {
+          "deployment": {
+            "type": "string",
+            "description": "Deployment, dessen Vorschlag übernommen wird."
+          },
+          "overrideManual": {
+            "type": "boolean",
+            "description": "Einen abweichenden **manuellen** Preis ersetzen (neue Version)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PriceSuggestionAcceptResult": {
+        "type": "object",
+        "description": "Ergebnis der Übernahme.",
+        "required": [
+          "created",
+          "skipped"
+        ],
+        "properties": {
+          "created": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Price"
+            },
+            "description": "Angelegte Preisversionen."
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PriceSuggestionSkipped"
+            },
+            "description": "Übersprungen (Preis bereits aktuell, gleicher Preisschlüssel doppelt gewählt)."
+          }
+        }
+      },
+      "PriceSuggestionReport": {
+        "type": "object",
+        "description": "Alle Vorschläge.",
+        "required": [
+          "generatedAt",
+          "items",
+          "sources"
+        ],
+        "properties": {
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Erzeugt."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PriceSuggestion"
+            },
+            "description": "Je Deployment."
+          },
+          "lastCheck": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PriceCheckSummary",
+                "description": "Letzter periodischer Abgleich (falls eingeschaltet)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PriceSourceStatus"
+            },
+            "description": "Zustand der Quellen."
+          }
+        }
+      },
+      "PriceSuggestionSkipped": {
+        "type": "object",
+        "description": "Nicht angelegter Vorschlag.",
+        "required": [
+          "deployment",
+          "reason"
+        ],
+        "properties": {
+          "deployment": {
+            "type": "string",
+            "description": "Deployment."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Grund."
+          }
+        }
+      },
+      "PriceSuggestionSource": {
+        "type": "string",
+        "description": "Quelle eines Vorschlags.",
+        "enum": [
+          "azure-retail",
+          "catalog"
+        ]
+      },
+      "PriceSuggestionStatus": {
+        "type": "string",
+        "description": "Vergleich Vorschlag ↔ aktueller Preis.",
+        "enum": [
+          "missing",
+          "unchanged",
+          "differs",
+          "conflict",
+          "no-suggestion"
+        ]
       },
       "Problem": {
         "type": "object",
@@ -15493,7 +16060,7 @@
     },
     {
       "name": "prices",
-      "description": "Preise je Anbieter-Modell, versioniert über validFrom"
+      "description": "Preise je Anbieter-Modell, versioniert über validFrom; Preisvorschläge aus Azure Retail Prices und Preiskatalog"
     },
     {
       "name": "mcp-servers",

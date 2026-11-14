@@ -613,6 +613,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/price-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preisvorschläge je Deployment. */
+        get: operations["list_suggestions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/price-suggestions:accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Übernimmt Vorschläge als neue Preisversionen. */
+        post: operations["accept_suggestions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/prices": {
         parameters: {
             query?: never;
@@ -1376,6 +1410,11 @@ export interface components {
             /** @description Art. */
             kind: components["schemas"]["AuthKind"];
         };
+        /**
+         * @description Bereitstellungsart eines Azure-Deployments (bestimmt die Meter).
+         * @enum {string}
+         */
+        AzureDeploymentType: "global" | "data-zone" | "regional";
         BTreeMap: {
             [key: string]: string;
         };
@@ -1539,6 +1578,15 @@ export interface components {
         CredentialValue: {
             /** @description Klartext (wird sofort verschlüsselt, nie wieder ausgegeben). */
             value: components["schemas"]["SecretString"];
+        };
+        /** @description Aktuell gültige Preisversion. */
+        CurrentPriceVersion: {
+            /** @description Manuell gepflegt (ohne Label `aigw.io/price-source`) – hat Vorrang. */
+            manual: boolean;
+            /** @description Name der Preisversion. */
+            name: string;
+            /** @description Preis. */
+            spec: components["schemas"]["PriceSpec"];
         };
         Deployment: {
             /**
@@ -2335,6 +2383,18 @@ export interface components {
             /** @description Spezifikation. */
             spec: components["schemas"]["PriceSpec"];
         };
+        /** @description Ergebnis des letzten periodischen Abgleichs. */
+        PriceCheckSummary: {
+            /**
+             * Format: date-time
+             * @description Zeitpunkt.
+             */
+            at: string;
+            /** @description Deployments mit abweichendem Preis. */
+            differing: string[];
+            /** @description Deployments ohne Preis, für die es einen Vorschlag gibt. */
+            missing: string[];
+        };
         PriceInput: {
             /** @description Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert). */
             metadata?: components["schemas"]["ObjectMeta"];
@@ -2346,6 +2406,24 @@ export interface components {
             items: components["schemas"]["Price"][];
             /** @description Cursor der nächsten Seite (`?cursor=`), fehlt auf der letzten Seite. */
             nextCursor?: string | null;
+        };
+        /** @description Zustand einer Quelle. */
+        PriceSourceStatus: {
+            /** @description Anzahl Meter bzw. Katalogmodelle. */
+            entries: number;
+            /** @description Fehler des letzten Abrufs (ältere Daten bleiben in Gebrauch). */
+            error?: string | null;
+            /**
+             * Format: date-time
+             * @description Letzter erfolgreicher Abruf.
+             */
+            fetchedAt?: string | null;
+            /** @description Azure-Region bzw. Herkunft des Katalogs (`builtin` oder URL). */
+            scope: string;
+            /** @description Quelle. */
+            source: components["schemas"]["PriceSuggestionSource"];
+            /** @description Stand des Katalogs. */
+            version?: string | null;
         };
         /** @description Preis eines Anbieter-Modells ab einem Zeitpunkt (versioniert). */
         PriceSpec: {
@@ -2364,6 +2442,89 @@ export interface components {
              */
             validFrom: string;
         };
+        /** @description Vorschlag für ein Deployment. */
+        PriceSuggestion: {
+            current?: components["schemas"]["CurrentPriceVersion"] | null;
+            /** @description Deployment. */
+            deployment: string;
+            deploymentType?: components["schemas"]["AzureDeploymentType"] | null;
+            /** @description Abweichende Felder (z. B. `perMillionTokens.input`). */
+            differences?: string[];
+            /** @description Deployment aktiv. */
+            enabled: boolean;
+            /** @description Gefundenes Modell (Katalogname bzw. Modellteil der Meter). */
+            matched?: string | null;
+            /** @description Verwendete Azure-Meter (`skuName`). */
+            meters?: string[];
+            /** @description Modellgruppe. */
+            modelGroup: string;
+            /** @description Hinweise (Ersatzquelle, Mehrdeutigkeit, fehlende Region …). */
+            notes?: string[];
+            /** @description Anbieter. */
+            provider: components["schemas"]["ProviderKind"];
+            /** @description Modell beim Anbieter (Preisschlüssel). */
+            providerModel: string;
+            /** @description Azure-Region. */
+            region?: string | null;
+            source?: components["schemas"]["PriceSuggestionSource"] | null;
+            /** @description Vergleich. */
+            status: components["schemas"]["PriceSuggestionStatus"];
+            suggested?: components["schemas"]["PriceSpec"] | null;
+        };
+        /** @description Übernahme von Vorschlägen. */
+        PriceSuggestionAccept: {
+            /** @description Ausgewählte Deployments (1–500). */
+            items: components["schemas"]["PriceSuggestionAcceptItem"][];
+            /**
+             * Format: date-time
+             * @description Gültig ab (RFC 3339, nicht in der Vergangenheit); Standard: jetzt.
+             */
+            validFrom?: string | null;
+        };
+        /** @description Auswahl eines Vorschlags. */
+        PriceSuggestionAcceptItem: {
+            /** @description Deployment, dessen Vorschlag übernommen wird. */
+            deployment: string;
+            /** @description Einen abweichenden **manuellen** Preis ersetzen (neue Version). */
+            overrideManual?: boolean;
+        };
+        /** @description Ergebnis der Übernahme. */
+        PriceSuggestionAcceptResult: {
+            /** @description Angelegte Preisversionen. */
+            created: components["schemas"]["Price"][];
+            /** @description Übersprungen (Preis bereits aktuell, gleicher Preisschlüssel doppelt gewählt). */
+            skipped: components["schemas"]["PriceSuggestionSkipped"][];
+        };
+        /** @description Alle Vorschläge. */
+        PriceSuggestionReport: {
+            /**
+             * Format: date-time
+             * @description Erzeugt.
+             */
+            generatedAt: string;
+            /** @description Je Deployment. */
+            items: components["schemas"]["PriceSuggestion"][];
+            lastCheck?: components["schemas"]["PriceCheckSummary"] | null;
+            /** @description Zustand der Quellen. */
+            sources: components["schemas"]["PriceSourceStatus"][];
+        };
+        /** @description Nicht angelegter Vorschlag. */
+        PriceSuggestionSkipped: {
+            /** @description Deployment. */
+            deployment: string;
+            /** @description Grund. */
+            reason: string;
+        };
+        /**
+         * @description Quelle eines Vorschlags.
+         * @enum {string}
+         */
+        PriceSuggestionSource: "azure-retail" | "catalog";
+        /**
+         * @description Vergleich Vorschlag ↔ aktueller Preis.
+         * @enum {string}
+         */
+        PriceSuggestionStatus: "missing" | "unchanged" | "differs" | "conflict" | "no-suggestion";
         /** @description Problem Details (RFC 9457). */
         Problem: {
             /** @description Maschinenlesbarer Code (`not-found`, `conflict`, `precondition-failed` …). */
@@ -7194,6 +7355,147 @@ export interface operations {
             };
             /** @description Keine Berechtigung */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_suggestions: {
+        parameters: {
+            query?: {
+                /** @description Nur Deployments dieser Modellgruppe. */
+                modelGroup?: string;
+                /** @description Nur dieses Deployment. */
+                deployment?: string;
+                /** @description Quellen neu abrufen (Azure Retail Prices, Katalog-URL) statt Zwischenspeicher. */
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Vorschläge */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceSuggestionReport"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Preisvorschläge ausgeschaltet */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    accept_suggestions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceSuggestionAccept"];
+            };
+        };
+        responses: {
+            /** @description Angelegte und übersprungene Vorschläge */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceSuggestionAcceptResult"];
+                };
+            };
+            /** @description Ungültige Anfrage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Berechtigung */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Preisvorschläge ausgeschaltet */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Manueller Preis ohne overrideManual, widersprüchliche Auswahl oder neuere Version vorhanden */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unbekanntes Deployment, kein Vorschlag oder validFrom in der Vergangenheit */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
