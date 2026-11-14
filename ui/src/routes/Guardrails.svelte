@@ -358,7 +358,7 @@
     <Tabs.Trigger value="wasm" class={tabsTrigger} data-testid="tab-wasm">WASM-Module</Tabs.Trigger>
   </Tabs.List>
   <Tabs.Content value="wasm">
-    <WasmModules />
+    {#if tab === 'wasm'}<WasmModules />{/if}
   </Tabs.Content>
   <Tabs.Content value="profiles">
     <GuardrailProfiles
