@@ -100,6 +100,14 @@ pub struct WasmConfig {
     pub compiled_cache_entries: usize,
     /// Module aus Dateien, beim Start in die Datenbank übernommen (Akteur `startup-config`).
     pub modules: Vec<WasmModuleFile>,
+    /// Vertrauenswürdige öffentliche Ed25519-Schlüssel für Modul-Signaturen (AIGW-101).
+    /// Leer = Signaturprüfung aus.
+    pub trusted_keys: Vec<crate::wasm::TrustedKey>,
+    /// Signatur Pflicht? Standard (`null`): **Pflicht, sobald `trusted_keys` gesetzt ist** –
+    /// wer Schlüssel hinterlegt, will signierte Module; ein unsigniertes Modul würde die
+    /// Prüfung sonst unbemerkt umgehen. `false` erlaubt unsignierte Module (Übergangszeit);
+    /// vorhandene Signaturen müssen trotzdem gültig sein.
+    pub require_signature: Option<bool>,
 }
 
 impl Default for WasmConfig {
@@ -116,6 +124,8 @@ impl Default for WasmConfig {
             epoch_tick_ms: 2,
             compiled_cache_entries: 64,
             modules: Vec::new(),
+            trusted_keys: Vec::new(),
+            require_signature: None,
         }
     }
 }
@@ -133,6 +143,23 @@ pub struct WasmModuleFile {
     /// Beschreibung.
     #[serde(default)]
     pub description: Option<String>,
+    /// Ed25519-Signatur (Base64) über den SHA-256 (AIGW-101; `aigw wasm sign`).
+    #[serde(default)]
+    pub signature: Option<String>,
+    /// Schlüssel-ID der Signatur (aus `wasm.trusted_keys`).
+    #[serde(default)]
+    pub key_id: Option<String>,
+}
+
+impl WasmModuleFile {
+    /// Signatur der Datei (beide Felder oder keines).
+    pub fn signature(&self) -> Result<Option<crate::wasm::ModuleSignature>, String> {
+        match (&self.key_id, &self.signature) {
+            (None, None) => Ok(None),
+            (Some(k), Some(s)) => crate::wasm::ModuleSignature::parse(k, s).map(Some),
+            _ => Err("signature und key_id nur gemeinsam angeben".into()),
+        }
+    }
 }
 
 impl WasmConfig {
@@ -163,7 +190,10 @@ impl WasmConfig {
                 .map_err(|e| format!("wasm.modules[{}]: {e}", m.name))?;
             crate::wasm::normalize_sha256(&m.sha256)
                 .map_err(|e| format!("wasm.modules[{}]: {e}", m.name))?;
+            m.signature()
+                .map_err(|e| format!("wasm.modules[{}]: {e}", m.name))?;
         }
+        crate::wasm::TrustPolicy::from_config(self)?;
         Ok(())
     }
 }

@@ -108,6 +108,8 @@ pub struct AdminState {
     pub(crate) price_suggester: Option<Arc<aigw_billing::suggest::Suggester>>,
     /// Höchstgröße hochgeladener WASM-Module (`wasm.max_module_bytes`, AIGW-63).
     pub(crate) wasm_max_bytes: u64,
+    /// Signatur-Richtlinie der WASM-Module (`wasm.trusted_keys`, AIGW-101).
+    pub(crate) wasm_trust: Arc<aigw_core::wasm::TrustPolicy>,
 }
 
 /// Einstellungen der Anmeldung (aus `admin.auth`).
@@ -150,6 +152,7 @@ impl AdminState {
             trace_url: None,
             price_suggester: None,
             wasm_max_bytes: aigw_core::config::WasmConfig::default().max_module_bytes,
+            wasm_trust: Arc::default(),
         }
     }
 
@@ -190,6 +193,14 @@ impl AdminState {
     #[must_use]
     pub fn with_wasm_max_module_bytes(mut self, bytes: u64) -> Self {
         self.wasm_max_bytes = bytes;
+        self
+    }
+
+    /// Signatur-Richtlinie der WASM-Module (`wasm.trusted_keys`/`require_signature`,
+    /// AIGW-101): Prüfung beim Hochladen und Anzeige in der Liste.
+    #[must_use]
+    pub fn with_wasm_trust(mut self, trust: Arc<aigw_core::wasm::TrustPolicy>) -> Self {
+        self.wasm_trust = trust;
         self
     }
 
@@ -261,6 +272,7 @@ impl AdminState {
             trace_url: None,
             price_suggester: None,
             wasm_max_bytes: aigw_core::config::WasmConfig::default().max_module_bytes,
+            wasm_trust: Arc::default(),
         })
     }
 

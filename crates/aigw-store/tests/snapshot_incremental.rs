@@ -104,6 +104,7 @@ async fn random_change(store: &Store, keyring: &Keyring, rng: &mut Rng) {
                             description: None,
                             content,
                             sha256: None,
+                            signature: None,
                         },
                         1024,
                     )
@@ -809,6 +810,9 @@ async fn sample(store: &Store, keyring: &Keyring) {
                 description: Some("Test".into()),
                 content: b"\0asm\x0d\0\x01\0inhalt".to_vec(),
                 sha256: None,
+                signature: Some(
+                    aigw_core::wasm::ModuleSignature::parse("release", &"A".repeat(86)).unwrap(),
+                ),
             },
             1024,
         )

@@ -11,6 +11,11 @@
 //! - [`Factory`]: Plugin-Art `wasm` – sucht das Modul der Bindung im Snapshot, kompiliert es
 //!   (Cache), ruft einmal `describe(config)` auf und baut die Instanz. Ein neues Modul unter
 //!   gleichem Namen ändert den Fingerabdruck (SHA-256) – der Reload baut die Bindung neu.
+//! - Signaturen (AIGW-101): vor dem Kompilieren prüft die Fabrik das Modul gegen
+//!   `wasm.trusted_keys` ([`aigw_core::wasm::TrustPolicy::check_module`]: SHA-256 des Inhalts
+//!   neu berechnet, Ed25519-Signatur, Pflicht). Nicht ladbare Module machen die Bindung
+//!   ungültig (→ `failMode`) – auch wenn sie an der Admin-API vorbei in Datenbank oder
+//!   Snapshot-Cache gelangt sind.
 //! - Je Aufruf eine frische Instanz (kein Zustand zwischen Anfragen): Anfrage- und
 //!   Antwort-Phase laufen über `spawn_blocking` ([`aigw_plugins::Hook::Pending`], Zeitgrenze
 //!   der Kette + Epoch-Deadline), die Stream-Phase synchron ([`run_blocking`]).
@@ -123,6 +128,10 @@ impl PluginFactory for Factory {
                 m.name, sha, m.sha256
             ));
         }
+        if let Err(e) = rt.trust().check_module(m) {
+            rt.metrics().signature_rejected(e.code());
+            return Err(format!("module {:?}: {e}", m.name));
+        }
         let limits = self.limits(rt, &p.cfg, ctx.timeout)?;
         let compiled = rt.compile(m)?;
         let module: Arc<str> = Arc::from(m.name.as_str());
@@ -164,7 +173,11 @@ impl PluginFactory for Factory {
             .get("module")
             .and_then(Value::as_str)
             .and_then(|m| snap.wasm_modules.get(m))
-            .map(|m| m.sha256.clone())
+            .map(|m| match &m.signature {
+                // Neu signiert (gleicher Inhalt) → Prüfergebnis kann sich ändern → neu bauen.
+                Some(s) => format!("{}:{}:{}", m.sha256, s.key_id, s.signature),
+                None => m.sha256.clone(),
+            })
             .unwrap_or_default()
     }
 

@@ -333,3 +333,146 @@ async fn upload_rights_integrity_and_lifecycle() {
         StatusCode::NOT_FOUND
     );
 }
+
+// ------------------------------------------------------------------ AIGW-101: Signaturen
+
+fn router_trust(store: &Store, keys: &[(&str, &[u8])], require: Option<bool>) -> Router {
+    let keys: Vec<aigw_core::wasm::TrustedKey> = keys
+        .iter()
+        .map(|(id, der)| aigw_core::wasm::TrustedKey {
+            id: (*id).into(),
+            public_key: aigw_core::wasm::public_key_pem(
+                &aigw_core::wasm::public_key_of(der).unwrap(),
+            ),
+        })
+        .collect();
+    let trust = aigw_core::wasm::TrustPolicy::new(&keys, require).unwrap();
+    router_with(
+        AdminState::new(store.clone(), Arc::new(Roles))
+            .with_wasm_max_module_bytes(1024)
+            .with_wasm_trust(Arc::new(trust)),
+    )
+}
+
+/// Base64 URL-sicher kodiert (Query-Parameter ohne Prozent-Kodierung).
+fn sign(der: &[u8], sha: &str) -> String {
+    use base64::Engine as _;
+    let std = aigw_core::wasm::sign_sha256(der, sha).unwrap();
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(std)
+        .unwrap();
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw)
+}
+
+async fn upload_signed(
+    app: &Router,
+    name: &str,
+    content: &[u8],
+    sig: Option<(&str, &str)>,
+    if_match: Option<&str>,
+) -> Resp {
+    let sha = sha256_hex(content);
+    let mut url = format!("{BASE}/{name}?sha256={sha}");
+    if let Some((k, s)) = sig {
+        url.push_str(&format!("&keyId={k}&signature={s}"));
+    }
+    let mut h = vec![("content-type", "application/wasm")];
+    if let Some(m) = if_match {
+        h.push(("if-match", m));
+    }
+    call(app, "admin", Method::PUT, &url, &h, Body::from(content.to_vec())).await
+}
+
+#[tokio::test]
+async fn signatures_upload_list_and_rotation() {
+    let store = Store::connect("sqlite::memory:").await.unwrap();
+    store.migrate().await.unwrap();
+    let k1 = aigw_core::wasm::generate_pkcs8().unwrap();
+    let k2 = aigw_core::wasm::generate_pkcs8().unwrap();
+    let app = router_trust(&store, &[("k1", &k1)], None);
+    let v1 = component(b"signiert");
+    let sha = sha256_hex(&v1);
+
+    // Pflicht (Standard mit Schlüsseln): unsigniert, unbekannter Schlüssel, falsche Signatur,
+    // unvollständige Angabe → 422, nichts geschrieben.
+    let detail = |r: &Resp| r.body["detail"].as_str().unwrap_or_default().to_owned();
+    let r = upload_signed(&app, "guard", &v1, None, None).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(detail(&r).contains("Signatur fehlt"), "{}", r.body);
+    let r = upload_signed(&app, "guard", &v1, Some(("fremd", &sign(&k1, &sha))), None).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(detail(&r).contains("unbekannter Schlüssel"), "{}", r.body);
+    let r = upload_signed(&app, "guard", &v1, Some(("k1", &sign(&k2, &sha))), None).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(detail(&r).contains("ungültig"), "{}", r.body);
+    let other = sha256_hex(b"anderer Inhalt");
+    let r = upload_signed(&app, "guard", &v1, Some(("k1", &sign(&k1, &other))), None).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    let r = call(
+        &app,
+        "admin",
+        Method::PUT,
+        &format!("{BASE}/guard?sha256={sha}&keyId=k1"),
+        &[("content-type", "application/wasm")],
+        Body::from(v1.clone()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(store.config_version().await.unwrap(), 0);
+
+    // Gültig.
+    let r = upload_signed(&app, "guard", &v1, Some(("k1", &sign(&k1, &sha))), None).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(
+        r.body["signature"],
+        json!({"keyId": "k1", "status": "valid", "loadable": true})
+    );
+    let etag = r.etag.unwrap();
+    let r = call(&app, "viewer", Method::GET, BASE, &[], Body::empty()).await;
+    assert_eq!(r.body["signatureRequired"], true);
+    assert_eq!(r.body["trustedKeys"], json!(["k1"]));
+    assert_eq!(r.body["items"][0]["signature"]["status"], "valid");
+
+    // Schlüsselwechsel: Übergang mit k1+k2, neu signieren (gleicher Inhalt) = ersetzt.
+    let both = router_trust(&store, &[("k1", &k1), ("k2", &k2)], None);
+    let r = upload_signed(
+        &both,
+        "guard",
+        &v1,
+        Some(("k2", &sign(&k2, &sha))),
+        Some(&etag),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(r.body["signature"]["keyId"], "k2");
+    assert_eq!(store.config_version().await.unwrap(), 2);
+    // Nach dem Wechsel (nur k2) gültig; mit nur k1 wäre das Modul nicht mehr ladbar.
+    let only2 = router_trust(&store, &[("k2", &k2)], None);
+    let r = call(&only2, "viewer", Method::GET, &format!("{BASE}/guard"), &[], Body::empty()).await;
+    assert_eq!(r.body["signature"]["status"], "valid");
+    let r = call(&app, "viewer", Method::GET, &format!("{BASE}/guard"), &[], Body::empty()).await;
+    assert_eq!(
+        r.body["signature"],
+        json!({"keyId": "k2", "status": "unknown-key", "loadable": false})
+    );
+
+    // Übergangsmodus (require_signature: false): unsigniert erlaubt, falsche Signatur nicht.
+    let lax = router_trust(&store, &[("k1", &k1)], Some(false));
+    let v2 = component(b"unsigniert");
+    let r = upload_signed(&lax, "plain", &v2, None, None).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(
+        r.body["signature"],
+        json!({"status": "unsigned", "loadable": true})
+    );
+    let r = upload_signed(&lax, "bad", &v2, Some(("k1", &sign(&k2, &sha256_hex(&v2)))), None).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    // Ohne Schlüssel: Signatur nur gespeichert, nicht geprüft.
+    let (off, _) = self::app().await;
+    let r = upload_signed(&off, "x", &v2, Some(("k9", &sign(&k2, &sha))), None).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(
+        r.body["signature"],
+        json!({"keyId": "k9", "status": "unchecked", "loadable": true})
+    );
+}

@@ -11,6 +11,8 @@
 //! - `aigw_wasm_call_duration_seconds{module,phase}` – Dauer je Aufruf (Instanz + Aufruf).
 //! - `aigw_wasm_fuel_consumed_total{module}` – verbrauchtes Fuel.
 //! - `aigw_wasm_compile_total{outcome}` – Kompilierungen (`ok`, `error`, `cached`).
+//! - `aigw_wasm_signature_rejected_total{reason}` – beim Aufbau der Kette abgelehnte Module
+//!   (AIGW-101: `missing`, `unknown-key`, `invalid`, `digest`).
 //!
 //! `module` ist der Modulname (begrenzt: Module legt nur ein globaler `admin` an).
 
@@ -38,6 +40,7 @@ struct Inner {
     durations: BTreeMap<(String, &'static str), Histogram>,
     fuel: BTreeMap<String, u64>,
     compile: BTreeMap<&'static str, u64>,
+    signature: BTreeMap<&'static str, u64>,
 }
 
 /// Zähler der WASM-Plugins (eine Instanz je Laufzeit).
@@ -88,6 +91,16 @@ impl WasmMetrics {
     /// Zählt eine Kompilierung (`ok`, `error`, `cached`).
     pub fn record_compile(&self, outcome: &'static str) {
         *self.lock().compile.entry(outcome).or_default() += 1;
+    }
+
+    /// Zählt ein wegen der Signatur abgelehntes Modul (AIGW-101).
+    pub fn signature_rejected(&self, reason: &'static str) {
+        *self.lock().signature.entry(reason).or_default() += 1;
+    }
+
+    /// Stand des Zählers abgelehnter Signaturen (Tests).
+    pub fn signature_rejections(&self, reason: &str) -> u64 {
+        self.lock().signature.get(reason).copied().unwrap_or(0)
     }
 
     /// Stand eines Aufrufzählers (Tests).
@@ -174,6 +187,16 @@ impl WasmMetrics {
         );
         for (outcome, n) in &m.compile {
             let _ = writeln!(out, "aigw_wasm_compile_total{{outcome=\"{outcome}\"}} {n}");
+        }
+        out.push_str(
+            "# HELP aigw_wasm_signature_rejected_total Wegen der Signatur nicht geladene WASM-Module\n\
+             # TYPE aigw_wasm_signature_rejected_total counter\n",
+        );
+        for (reason, n) in &m.signature {
+            let _ = writeln!(
+                out,
+                "aigw_wasm_signature_rejected_total{{reason=\"{reason}\"}} {n}"
+            );
         }
     }
 }

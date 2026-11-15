@@ -13,6 +13,9 @@ publish.workspace = true
 
 [dependencies]
 arc-swap.workspace = true
+# Ed25519-Signaturen der WASM-Module (AIGW-101) und SHA-256; schon im Workspace (TLS).
+aws-lc-rs.workspace = true
+base64.workspace = true
 bytes.workspace = true
 http.workspace = true
 serde.workspace = true

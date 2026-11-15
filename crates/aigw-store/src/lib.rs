@@ -199,6 +199,11 @@ const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
         "wasm_modules",
         include_str!("../migrations/sqlite/0009_wasm_modules.sql"),
     ),
+    (
+        11,
+        "wasm_signatures",
+        include_str!("../migrations/sqlite/0011_wasm_signatures.sql"),
+    ),
 ];
 
 /// Migrationssatz für Postgres (`migrations/postgres/`), gleiche Versionen wie SQLite.
@@ -247,6 +252,11 @@ const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
         9,
         "wasm_modules",
         include_str!("../migrations/postgres/0009_wasm_modules.sql"),
+    ),
+    (
+        11,
+        "wasm_signatures",
+        include_str!("../migrations/postgres/0011_wasm_signatures.sql"),
     ),
 ];
 

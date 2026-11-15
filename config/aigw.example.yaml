@@ -302,3 +302,11 @@ wasm:
   #  - name: keyword-guard
   #    path: /etc/aigw/plugins/keyword-guard.wasm
   #    sha256: <64 Hex-Zeichen>
+  #    key_id: release-2026        # Signatur (AIGW-101): aigw wasm sign --key … --key-id …
+  #    signature: <Base64>
+  # Signaturen (AIGW-101, Doku 17-wasm-plugins.md §3a): Ed25519 über den SHA-256 des Moduls.
+  # Leer = keine Prüfung. Mit Schlüsseln ist die Signatur standardmäßig Pflicht (Upload und Laden).
+  trusted_keys: []
+  #  - id: release-2026
+  #    public_key: MCowBQYDK2VwAyEA…    # Base64 (roh/SPKI) oder PEM; aigw wasm keygen gibt ihn aus
+  require_signature: null          # null = Pflicht, sobald trusted_keys gesetzt; false = Übergang

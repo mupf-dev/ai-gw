@@ -164,6 +164,9 @@ struct CachedWasm {
     #[serde(with = "time::serde::rfc3339")]
     updated_at: time::OffsetDateTime,
     content: String,
+    /// Signatur (AIGW-101; ältere Caches ohne Feld lesbar).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    signature: Option<aigw_core::wasm::ModuleSignature>,
 }
 
 impl Body {
@@ -225,6 +228,7 @@ impl Body {
                         &base64::engine::general_purpose::STANDARD,
                         &m.content,
                     ),
+                    signature: m.signature,
                 })
                 .collect(),
         }
@@ -288,6 +292,7 @@ impl Body {
                         created_at: m.created_at,
                         updated_at: m.updated_at,
                         content: bytes::Bytes::from(content),
+                        signature: m.signature,
                     })
                 })
                 .collect::<Result<Vec<_>, CacheError>>()?,

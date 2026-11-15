@@ -46,7 +46,7 @@ pub(crate) fn encode(bytes: &[u8], format: KeyFormat) -> String {
 }
 
 /// Schreibt `text` + Zeilenumbruch in eine Datei mit Rechten 0600 (neu, außer `force`).
-fn write_private(path: &Path, text: &str, force: bool) -> std::io::Result<()> {
+pub(crate) fn write_private(path: &Path, text: &str, force: bool) -> std::io::Result<()> {
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true);
     if force {

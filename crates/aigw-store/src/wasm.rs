@@ -9,9 +9,14 @@
 //! Audit-Eintrag der Art [`AUDIT_KIND`] und `object_id`, damit der inkrementelle Neubau sie
 //! über das Journal findet. Der Audit-Eintrag enthält nur Metadaten (Name, SHA-256, Größe),
 //! nie den Inhalt.
+//!
+//! Signaturen (AIGW-101, Migration 0011): optional Ed25519-Signatur + Schlüssel-ID je Modul.
+//! Der Store prüft nur das Format; ob eine Signatur gültig bzw. Pflicht ist, entscheidet die
+//! [`aigw_core::wasm::TrustPolicy`] der Aufrufer (Admin-API, Startkonfiguration) und der
+//! Laufzeit (vor dem Kompilieren).
 
 use aigw_core::resource::{Id, PluginBindingSpec, new_id};
-use aigw_core::wasm::WasmModule;
+use aigw_core::wasm::{ModuleSignature, WasmModule};
 use bytes::Bytes;
 use serde::Serialize;
 use time::OffsetDateTime;
@@ -28,14 +33,7 @@ pub const STARTUP_ACTOR: &str = "startup-config";
 
 /// SHA-256 als Hex (klein).
 pub fn sha256_hex(content: &[u8]) -> String {
-    let d = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, content);
-    d.as_ref()
-        .iter()
-        .fold(String::with_capacity(64), |mut s, b| {
-            use std::fmt::Write as _;
-            let _ = write!(s, "{b:02x}");
-            s
-        })
+    aigw_core::wasm::sha256_hex(content)
 }
 
 /// Metadaten eines Moduls (ohne Inhalt).
@@ -61,6 +59,9 @@ pub struct WasmModuleInfo {
     /// Zuletzt ersetzt.
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
+    /// Signatur (AIGW-101); fehlt = unsigniert.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<ModuleSignature>,
 }
 
 /// Neues bzw. ersetzendes Modul.
@@ -74,6 +75,8 @@ pub struct NewWasmModule {
     pub content: Vec<u8>,
     /// Erwarteter SHA-256 des Inhalts (Integrität des Uploads); Abweichung = Fehler.
     pub sha256: Option<String>,
+    /// Ed25519-Signatur (AIGW-101); vom Aufrufer gegen die Richtlinie geprüft.
+    pub signature: Option<ModuleSignature>,
 }
 
 /// Ergebnis von [`Store::put_wasm_module`].
@@ -96,7 +99,8 @@ impl PutOutcome {
     }
 }
 
-const META_COLS: &str = "id, name, sha256, size, description, created_by, created_at, updated_at";
+const META_COLS: &str = "id, name, sha256, size, description, created_by, created_at, updated_at, \
+                         signature, signature_key_id";
 
 fn info_from_row(row: &DbRow) -> Result<WasmModuleInfo, StoreError> {
     Ok(WasmModuleInfo {
@@ -108,6 +112,10 @@ fn info_from_row(row: &DbRow) -> Result<WasmModuleInfo, StoreError> {
         created_by: row.text("created_by")?,
         created_at: row.time("created_at")?,
         updated_at: row.time("updated_at")?,
+        signature: match (row.opt_text("signature_key_id")?, row.opt_text("signature")?) {
+            (Some(key_id), Some(signature)) => Some(ModuleSignature { key_id, signature }),
+            _ => None,
+        },
     })
 }
 
@@ -122,6 +130,7 @@ fn module_from_row(row: &DbRow) -> Result<WasmModule, StoreError> {
         created_at: info.created_at,
         updated_at: info.updated_at,
         content: Bytes::from(row.bytes("content")?),
+        signature: info.signature,
     })
 }
 
@@ -244,6 +253,7 @@ impl Store {
         if let Some(old) = &existing
             && old.sha256 == sha
             && old.description == m.description
+            && old.signature == m.signature
         {
             return Ok(PutOutcome::Unchanged(old.clone()));
         }
@@ -254,13 +264,16 @@ impl Store {
             Some(old) => {
                 Q::new(
                     "UPDATE wasm_module SET sha256 = $1, size = $2, description = $3, \
-                     content = $4, updated_at = $5 WHERE id = $6",
+                     content = $4, updated_at = $5, signature = $6, signature_key_id = $7 \
+                     WHERE id = $8",
                 )
                 .bind(Val::text(sha.clone()))
                 .bind(Val::int(size))
                 .bind(Val::Text(m.description.clone()))
                 .bind(Val::Bytes(Some(m.content)))
                 .bind(Val::time(t))
+                .bind(Val::Text(m.signature.as_ref().map(|s| s.signature.clone())))
+                .bind(Val::Text(m.signature.as_ref().map(|s| s.key_id.clone())))
                 .bind(Val::uuid(old.id))
                 .execute(&mut tx.tx)
                 .await?;
@@ -269,6 +282,7 @@ impl Store {
                     size: size as u64,
                     description: m.description,
                     updated_at: t,
+                    signature: m.signature,
                     ..old.clone()
                 };
                 tx.audit_kind(
@@ -292,10 +306,12 @@ impl Store {
                     created_by: actor.to_owned(),
                     created_at: t,
                     updated_at: t,
+                    signature: m.signature,
                 };
                 Q::new(
                     "INSERT INTO wasm_module (id, name, sha256, size, description, content, \
-                     created_by, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                     created_by, created_at, updated_at, signature, signature_key_id) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
                 )
                 .bind(Val::uuid(info.id))
                 .bind(Val::text(info.name.clone()))
@@ -306,6 +322,10 @@ impl Store {
                 .bind(Val::text(info.created_by.clone()))
                 .bind(Val::time(t))
                 .bind(Val::time(t))
+                .bind(Val::Text(
+                    info.signature.as_ref().map(|s| s.signature.clone()),
+                ))
+                .bind(Val::Text(info.signature.as_ref().map(|s| s.key_id.clone())))
                 .execute(&mut tx.tx)
                 .await
                 .map_err(|e| crate::repo::map_db(e, "WASM-Modul"))?;

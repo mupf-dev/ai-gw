@@ -26,6 +26,7 @@ mod runtime;
 mod serve;
 mod server;
 mod tokenizer;
+mod wasm_sign;
 
 use std::io::{IsTerminal as _, Write as _};
 use std::path::PathBuf;
@@ -66,6 +67,10 @@ enum Command {
     /// Audit-Log: Hash-Kette prüfen (F116).
     #[command(subcommand)]
     Audit(cli_audit::AuditCommand),
+    /// WASM-Module signieren (AIGW-101): Schlüsselpaar erzeugen, Modul signieren, Signatur
+    /// prüfen.
+    #[command(subcommand)]
+    Wasm(wasm_sign::WasmCommand),
     /// Bereitschaftsprüfung (`GET /readyz` der Steuerebene) für Container-HEALTHCHECKs;
     /// Exit-Code 0 = bereit.
     Healthcheck(healthcheck::HealthcheckArgs),
@@ -129,6 +134,13 @@ fn main() -> ExitCode {
             }
         },
         Command::Healthcheck(args) => healthcheck::run(&args),
+        Command::Wasm(cmd) => match wasm_sign::run(&cmd) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                let _ = writeln!(std::io::stderr(), "aigw wasm: {e}");
+                ExitCode::FAILURE
+            }
+        },
         Command::Config(cmd) => {
             init_tracing(cli.log_format);
             cli_config::run(cmd)
@@ -367,6 +379,9 @@ fn serve(
                 .with_keyring(std::sync::Arc::clone(&runtime_state.keyring))
                 .with_upstream_policy(upstreams.clone())
                 .with_wasm_max_module_bytes(config.wasm.max_module_bytes)
+                .with_wasm_trust(std::sync::Arc::new(
+                    aigw_core::wasm::TrustPolicy::from_config(&config.wasm)?,
+                ))
                 .with_read_only(config.gitops.read_only_admin)
                 .with_ui_mock(config.admin.ui.mock)
                 .with_trace_url(config.admin.ui.trace_url.clone()),

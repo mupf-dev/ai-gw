@@ -13,12 +13,18 @@
 //!   `admin`** (Freigabe: ein Modul läuft im Gateway-Prozess). Größe: `wasm.max_module_bytes`.
 //! - `DELETE /wasm-modules/{name}` – nur, wenn keine Bindung mehr darauf verweist (`409`).
 //!
+//! Signaturen (AIGW-101): `PUT …?keyId=…&signature=…` (Ed25519 über
+//! `aigw-wasm-module-v1:<sha256>`, `aigw wasm sign`). Mit `wasm.trusted_keys` prüft der Upload
+//! gegen die Richtlinie (`422` bei fehlender Pflicht-Signatur, unbekanntem Schlüssel oder
+//! ungültiger Signatur); Liste und Einzelabfrage zeigen den Prüfstatus (`signature`).
+//!
 //! Inhalte erscheinen nie im Audit-Log (nur Name, SHA-256, Größe). Modus „nur YAML“: Schreiben
 //! gesperrt – Module kommen dann aus `wasm.modules` der Startkonfiguration.
 
 // `#[utoipa::path(params(…))]` erzeugt für IntoParams-Typen qualifizierte Pfade.
 #![allow(unused_qualifications)]
 
+use aigw_core::wasm::ModuleSignature;
 use aigw_store::wasm::{NewWasmModule, PutOutcome, WasmModuleInfo};
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
@@ -60,13 +66,50 @@ pub struct WasmModule {
     pub updated_at: String,
     /// Plugin-Bindungen, die das Modul verwenden.
     pub used_by: Vec<String>,
+    /// Signatur und Prüfergebnis gegen die aktuelle Richtlinie (AIGW-101).
+    pub signature: SignatureInfo,
+}
+
+/// Prüfstatus der Signatur eines Moduls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum SignatureStatus {
+    /// Gültige Signatur eines vertrauenswürdigen Schlüssels.
+    Valid,
+    /// Signatur passt nicht zu Inhalt und Schlüssel.
+    Invalid,
+    /// Schlüssel-ID nicht in `wasm.trusted_keys` (z. B. nach Schlüsselwechsel entfernt).
+    UnknownKey,
+    /// Unsigniert.
+    Unsigned,
+    /// Nicht geprüft (keine `wasm.trusted_keys` konfiguriert).
+    Unchecked,
+}
+
+/// Signatur eines Moduls (AIGW-101).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SignatureInfo {
+    /// Schlüssel-ID der Signatur (fehlt = unsigniert).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_id: Option<String>,
+    /// Prüfergebnis.
+    pub status: SignatureStatus,
+    /// Darf das Modul unter der aktuellen Richtlinie geladen werden? (`false`: Bindungen
+    /// darauf sind ungültig → `failMode`.)
+    pub loadable: bool,
 }
 
 /// Liste der Module.
 #[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct WasmModuleList {
     /// Module (nach Name sortiert).
     pub items: Vec<WasmModule>,
+    /// Signatur Pflicht (`wasm.require_signature`, Standard: sobald Schlüssel konfiguriert).
+    pub signature_required: bool,
+    /// IDs der vertrauenswürdigen Schlüssel (`wasm.trusted_keys`).
+    pub trusted_keys: Vec<String>,
 }
 
 /// Binärer Inhalt (WebAssembly-Komponente).
@@ -83,6 +126,12 @@ pub struct UploadQuery {
     pub sha256: String,
     /// Beschreibung (höchstens 1024 Zeichen).
     pub description: Option<String>,
+    /// Schlüssel-ID der Signatur (aus `wasm.trusted_keys`; nur zusammen mit `signature`).
+    #[serde(rename = "keyId")]
+    pub key_id: Option<String>,
+    /// Ed25519-Signatur (Base64, Standard- oder URL-Alphabet) über
+    /// `aigw-wasm-module-v1:<sha256>` (`aigw wasm sign`).
+    pub signature: Option<String>,
 }
 
 fn rfc3339(t: time::OffsetDateTime) -> String {
@@ -94,7 +143,33 @@ fn etag(sha: &str) -> String {
     format!("\"{sha}\"")
 }
 
-fn view(i: WasmModuleInfo, used_by: Vec<String>) -> WasmModule {
+fn signature_info(
+    trust: &aigw_core::wasm::TrustPolicy,
+    sha256: &str,
+    sig: Option<&ModuleSignature>,
+) -> SignatureInfo {
+    use aigw_core::wasm::{SignatureError, Verified};
+    let res = trust.verify(sha256, sig);
+    let status = match &res {
+        Ok(Verified::Valid { .. }) => SignatureStatus::Valid,
+        Ok(Verified::Unchecked) => SignatureStatus::Unchecked,
+        Ok(Verified::Unsigned) | Err(SignatureError::Missing) => SignatureStatus::Unsigned,
+        Err(SignatureError::UnknownKey(_)) => SignatureStatus::UnknownKey,
+        Err(SignatureError::Invalid(_) | SignatureError::Digest(_)) => SignatureStatus::Invalid,
+    };
+    SignatureInfo {
+        key_id: sig.map(|s| s.key_id.clone()),
+        status,
+        loadable: res.is_ok(),
+    }
+}
+
+fn view(
+    trust: &aigw_core::wasm::TrustPolicy,
+    i: WasmModuleInfo,
+    used_by: Vec<String>,
+) -> WasmModule {
+    let signature = signature_info(trust, &i.sha256, i.signature.as_ref());
     WasmModule {
         id: i.id,
         name: i.name,
@@ -105,6 +180,7 @@ fn view(i: WasmModuleInfo, used_by: Vec<String>) -> WasmModule {
         created_at: rfc3339(i.created_at),
         updated_at: rfc3339(i.updated_at),
         used_by,
+        signature,
     }
 }
 
@@ -153,10 +229,15 @@ pub(crate) async fn list_wasm_modules(
         .into_iter()
         .map(|i| {
             let u = users.remove(&i.name).unwrap_or_default();
-            view(i, u)
+            view(&st.wasm_trust, i, u)
         })
         .collect();
-    Ok(json_with(StatusCode::OK, None, &WasmModuleList { items }))
+    let list = WasmModuleList {
+        items,
+        signature_required: st.wasm_trust.required(),
+        trusted_keys: st.wasm_trust.key_ids().map(str::to_owned).collect(),
+    };
+    Ok(json_with(StatusCode::OK, None, &list))
 }
 
 /// Metadaten eines Moduls.
@@ -182,7 +263,7 @@ pub(crate) async fn get_wasm_module(
         .ok_or_else(|| not_found(&name))?;
     let users = st.store.wasm_module_users(&name).await?;
     let tag = etag(&info.sha256);
-    Ok(json_with(StatusCode::OK, Some(tag), &view(info, users)))
+    Ok(json_with(StatusCode::OK, Some(tag), &view(&st.wasm_trust, info, users)))
 }
 
 /// Inhalt eines Moduls (Komponente).
@@ -234,7 +315,7 @@ pub(crate) async fn get_wasm_module_content(
         (status = 412, description = "If-Match passt nicht", body = Problem, content_type = "application/problem+json"),
         (status = 413, description = "Zu groß (wasm.max_module_bytes)", body = Problem, content_type = "application/problem+json"),
         (status = 415, description = "Content-Type nicht application/wasm", body = Problem, content_type = "application/problem+json"),
-        (status = 422, description = "Kein gültiges Modul oder SHA-256 passt nicht", body = Problem, content_type = "application/problem+json"),
+        (status = 422, description = "Kein gültiges Modul, SHA-256 passt nicht oder Signatur fehlt/ungültig (wasm.trusted_keys)", body = Problem, content_type = "application/problem+json"),
         (status = 428, description = "Ersetzen ohne If-Match", body = Problem, content_type = "application/problem+json"),
     ),
     security(("bearer" = []), ("session" = []))
@@ -262,6 +343,23 @@ pub(crate) async fn put_wasm_module(
             "Content-Type: application/wasm erwartet",
         ));
     }
+    let signature = match (q.key_id.as_deref(), q.signature.as_deref()) {
+        (None, None) => None,
+        (Some(k), Some(s)) => Some(ModuleSignature::parse(k, s).map_err(Problem::invalid)?),
+        _ => {
+            return Err(Problem::invalid(
+                "keyId und signature nur gemeinsam angeben",
+            ));
+        }
+    };
+    // Signatur gegen die Richtlinie (über den SHA-256 des tatsächlichen Inhalts; passt der
+    // angegebene SHA nicht, meldet das der Store).
+    let actual = aigw_core::wasm::sha256_hex(&body);
+    if aigw_core::wasm::normalize_sha256(&q.sha256).as_deref() == Ok(actual.as_str()) {
+        st.wasm_trust
+            .verify(&actual, signature.as_ref())
+            .map_err(|e| Problem::invalid(format!("signature: {e}")))?;
+    }
     let _guard = st.write_lock.lock().await;
     if let Some(cur) = st.store.wasm_module_info(&name).await? {
         check_if_match(&headers, &etag(&cur.sha256), None)?;
@@ -275,6 +373,7 @@ pub(crate) async fn put_wasm_module(
                 description: q.description.filter(|d| !d.trim().is_empty()),
                 content: body.to_vec(),
                 sha256: Some(q.sha256),
+                signature,
             },
             st.wasm_max_bytes,
         )
@@ -286,7 +385,7 @@ pub(crate) async fn put_wasm_module(
     };
     let info = outcome.info().clone();
     let tag = etag(&info.sha256);
-    let res = json_with(status, Some(tag), &view(info, users));
+    let res = json_with(status, Some(tag), &view(&st.wasm_trust, info, users));
     Ok(if status == StatusCode::CREATED {
         created_at(res, &format!("{BASE}/wasm-modules/{name}"))
     } else {

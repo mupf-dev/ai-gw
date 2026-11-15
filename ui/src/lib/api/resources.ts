@@ -239,14 +239,19 @@ export async function sha256Hex(data: ArrayBuffer): Promise<string> {
 /** WASM-Module (Komponenten für die Plugin-Art `wasm`): Schreiben nur globaler Admin. */
 export const wasmModules = {
   list: async () => (await unwrap<S['WasmModuleList']>(api.GET('/admin/api/v1/wasm-modules'))).items,
-  /** Hochladen bzw. Ersetzen (`exists`: If-Match mit dem aktuellen ETag). */
-  upload: async (name: string, content: ArrayBuffer, opts: { sha256?: string; description?: string; exists?: boolean }) => {
+  /** Liste samt Signatur-Richtlinie (AIGW-101: `signatureRequired`, `trustedKeys`). */
+  overview: async () => unwrap<S['WasmModuleList']>(api.GET('/admin/api/v1/wasm-modules')),
+  /** Hochladen bzw. Ersetzen (`exists`: If-Match mit dem aktuellen ETag; `keyId`+`signature`: Ed25519-Signatur, AIGW-101). */
+  upload: async (name: string, content: ArrayBuffer, opts: { sha256?: string; description?: string; exists?: boolean; keyId?: string; signature?: string }) => {
     const sha256 = opts.sha256?.trim() || (await sha256Hex(content));
     const headers: Record<string, string> = { 'Content-Type': 'application/wasm' };
     if (opts.exists) headers['If-Match'] = await etagFor(WASM_ITEM, name);
     return unwrap<WasmModule>(
       api.PUT(WASM_ITEM, {
-        params: { path: { name }, query: { sha256, description: opts.description?.trim() || undefined } },
+        params: {
+          path: { name },
+          query: { sha256, description: opts.description?.trim() || undefined, keyId: opts.keyId?.trim() || undefined, signature: opts.signature?.trim() || undefined },
+        },
         body: content as unknown as string,
         bodySerializer: (b: unknown) => b as BodyInit,
         headers,

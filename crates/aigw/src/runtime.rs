@@ -245,15 +245,22 @@ async fn connect_and_load(
 }
 
 /// Übernimmt die WASM-Module aus `wasm.modules` in die Datenbank (AIGW-63; unverändert =
-/// kein Schreibvorgang). Der SHA-256 der Datei muss zur Konfiguration passen.
+/// kein Schreibvorgang). Der SHA-256 der Datei muss zur Konfiguration passen, die Signatur
+/// (`key_id`/`signature`, AIGW-101) zu `wasm.trusted_keys` – sonst bricht der Start ab.
 async fn import_wasm_modules(
     store: &Store,
     cfg: &aigw_core::config::WasmConfig,
 ) -> Result<(), StoreError> {
+    let trust = aigw_core::wasm::TrustPolicy::from_config(cfg).map_err(StoreError::Invalid)?;
     for m in &cfg.modules {
         let content = tokio::fs::read(&m.path).await.map_err(|e| {
             StoreError::Invalid(format!("wasm.modules[{}]: {}: {e}", m.name, m.path))
         })?;
+        let invalid = |e: String| StoreError::Invalid(format!("wasm.modules[{}]: {e}", m.name));
+        let signature = m.signature().map_err(invalid)?;
+        trust
+            .verify(&aigw_core::wasm::sha256_hex(&content), signature.as_ref())
+            .map_err(|e| invalid(format!("signature: {e}")))?;
         let out = store
             .put_wasm_module(
                 aigw_store::wasm::STARTUP_ACTOR,
@@ -262,6 +269,7 @@ async fn import_wasm_modules(
                     description: m.description.clone(),
                     content,
                     sha256: Some(m.sha256.clone()),
+                    signature,
                 },
                 cfg.max_module_bytes,
             )

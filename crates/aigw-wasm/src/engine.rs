@@ -195,6 +195,7 @@ pub struct WasmRuntime {
     engine: Engine,
     linker: Linker<HostState>,
     cfg: WasmConfig,
+    trust: aigw_core::wasm::TrustPolicy,
     pooling: bool,
     cache: Mutex<Cache>,
     metrics: Arc<WasmMetrics>,
@@ -240,6 +241,7 @@ impl WasmRuntime {
     /// Instanzen bei Bedarf zurück, wenn das System den Adressraum nicht reservieren kann.
     pub fn new(cfg: &WasmConfig) -> Result<Arc<Self>, String> {
         cfg.validate()?;
+        let trust = aigw_core::wasm::TrustPolicy::from_config(cfg)?;
         let (engine, pooling) = match Engine::new(&engine_config(cfg, cfg.pooling)) {
             Ok(e) => (e, cfg.pooling),
             Err(e) if cfg.pooling => {
@@ -302,6 +304,7 @@ impl WasmRuntime {
             engine,
             linker,
             cfg: cfg.clone(),
+            trust,
             pooling,
             cache: Mutex::new(Cache::default()),
             metrics: Arc::new(WasmMetrics::default()),
@@ -317,6 +320,11 @@ impl WasmRuntime {
     /// Konfiguration.
     pub fn config(&self) -> &WasmConfig {
         &self.cfg
+    }
+
+    /// Signatur-Richtlinie (`wasm.trusted_keys`, AIGW-101).
+    pub fn trust(&self) -> &aigw_core::wasm::TrustPolicy {
+        &self.trust
     }
 
     /// Läuft der Pooling-Allocator?

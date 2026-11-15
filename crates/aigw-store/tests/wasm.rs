@@ -33,6 +33,7 @@ fn new(name: &str, content: Vec<u8>, sha: Option<String>) -> NewWasmModule {
         description: None,
         content,
         sha256: sha,
+        signature: None,
     }
 }
 
@@ -188,6 +189,46 @@ async fn run(store: Store) {
         .map(|m| m.name)
         .collect();
     assert_eq!(names, ["guard"]);
+
+    // Signatur (AIGW-101, Migration 0011): gleicher Inhalt + neue Signatur = ersetzt (neue
+    // Version), gleiche Signatur = unverändert; Snapshot (voll und inkrementell) trägt sie.
+    let sig = aigw_core::wasm::ModuleSignature::parse("release", &"A".repeat(86)).unwrap();
+    let signed = NewWasmModule {
+        signature: Some(sig.clone()),
+        ..new("guard", v2.clone(), None)
+    };
+    let PutOutcome::Replaced(info) = store
+        .put_wasm_module(ACTOR, signed.clone(), 1024)
+        .await
+        .unwrap()
+    else {
+        panic!("Replaced erwartet")
+    };
+    assert_eq!(info.signature.as_ref(), Some(&sig));
+    assert!(matches!(
+        store.put_wasm_module(ACTOR, signed, 1024).await.unwrap(),
+        PutOutcome::Unchanged(_)
+    ));
+    let Incremental::Built { snapshot: s4, .. } =
+        load_incremental(&store, &ring, &s3, 100).await.unwrap()
+    else {
+        panic!("inkrementell erwartet")
+    };
+    assert_eq!(*s4, load_snapshot(&store, &ring).await.unwrap());
+    assert_eq!(s4.wasm_modules["guard"].signature.as_ref(), Some(&sig));
+    assert_eq!(
+        store.wasm_module_info("guard").await.unwrap().unwrap().signature,
+        Some(sig)
+    );
+    // Signatur entfernen (unsigniert ersetzen) = neue Version.
+    assert!(matches!(
+        store
+            .put_wasm_module(ACTOR, new("guard", v2.clone(), None), 1024)
+            .await
+            .unwrap(),
+        PutOutcome::Replaced(_)
+    ));
+    assert!(store.wasm_module("guard").await.unwrap().unwrap().signature.is_none());
     store.close().await;
 }
 

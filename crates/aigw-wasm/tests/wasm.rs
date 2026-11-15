@@ -553,3 +553,118 @@ async fn disabled_runtime_fails_calls() {
 fn wit_is_exposed() {
     assert!(aigw_wasm::WIT.contains("package aigw:plugin@0.1.0"));
 }
+
+// ------------------------------------------------------------------ AIGW-101: Signaturen
+
+/// Modul mit echtem SHA-256 (für die Signaturprüfung).
+fn real(name: &str) -> aigw_core::wasm::WasmModule {
+    let mut m = module(name, "testkit", SHA_A);
+    m.sha256 = aigw_core::wasm::sha256_hex(&m.content);
+    m
+}
+
+fn trusted(keys: &[(&str, &[u8])], require: Option<bool>) -> WasmConfig {
+    WasmConfig {
+        trusted_keys: keys
+            .iter()
+            .map(|(id, der)| aigw_core::wasm::TrustedKey {
+                id: (*id).into(),
+                public_key: aigw_core::wasm::public_key_pem(
+                    &aigw_core::wasm::public_key_of(der).unwrap(),
+                ),
+            })
+            .collect(),
+        require_signature: require,
+        ..WasmConfig::default()
+    }
+}
+
+fn signed(mut m: aigw_core::wasm::WasmModule, id: &str, der: &[u8]) -> aigw_core::wasm::WasmModule {
+    let sig = aigw_core::wasm::sign_sha256(der, &m.sha256).unwrap();
+    m.signature = Some(aigw_core::wasm::ModuleSignature::parse(id, &sig).unwrap());
+    m
+}
+
+fn loads(cfg: &WasmConfig, m: aigw_core::wasm::WasmModule) -> bool {
+    let (reg, _) = registry(cfg);
+    let snap = snapshot(
+        vec![m],
+        vec![binding("b", json!({"module": "testkit"}), None, None)],
+    );
+    chain(&snap, &reg).1 == 1
+}
+
+#[test]
+fn signature_checked_before_loading() {
+    let k1 = aigw_core::wasm::generate_pkcs8().unwrap();
+    let k2 = aigw_core::wasm::generate_pkcs8().unwrap();
+    let cfg = trusted(&[("k1", &k1)], None);
+    // gültig
+    assert!(loads(&cfg, signed(real("testkit"), "k1", &k1)));
+    // Pflicht ohne Signatur
+    assert!(!loads(&cfg, real("testkit")));
+    // unbekannter Schlüssel
+    assert!(!loads(&cfg, signed(real("testkit"), "k9", &k1)));
+    // falsche Signatur (anderer privater Schlüssel unter bekannter ID)
+    assert!(!loads(&cfg, signed(real("testkit"), "k1", &k2)));
+    // Inhalt nach dem Signieren getauscht (z. B. direkt in der Datenbank): SHA passt nicht.
+    let mut swapped = signed(real("testkit"), "k1", &k1);
+    swapped.content = bytes::Bytes::from(support::wasm("keyword-guard"));
+    assert!(!loads(&cfg, swapped.clone()));
+    // ... auch wenn der SHA mitgeändert wurde (Signatur gilt für den alten SHA).
+    swapped.sha256 = aigw_core::wasm::sha256_hex(&swapped.content);
+    assert!(!loads(&cfg, swapped));
+    // Übergangsmodus: unsigniert erlaubt, falsche Signatur nicht.
+    let lax = trusted(&[("k1", &k1)], Some(false));
+    assert!(loads(&lax, real("testkit")));
+    assert!(!loads(&lax, signed(real("testkit"), "k1", &k2)));
+    // Ohne Schlüssel: keine Prüfung (Verhalten wie vor AIGW-101).
+    assert!(loads(&WasmConfig::default(), signed(real("testkit"), "k1", &k2)));
+
+    // Metrik der Ablehnungen.
+    let (reg, rt) = registry(&cfg);
+    let snap = snapshot(
+        vec![real("testkit")],
+        vec![binding("b", json!({"module": "testkit"}), None, None)],
+    );
+    assert_eq!(chain(&snap, &reg).1, 0);
+    assert_eq!(rt.metrics().signature_rejections("missing"), 1);
+    let mut out = String::new();
+    rt.metrics().render_prometheus(&mut out);
+    assert!(
+        out.contains("aigw_wasm_signature_rejected_total{reason=\"missing\"} 1\n"),
+        "{out}"
+    );
+}
+
+#[test]
+fn signature_key_rotation() {
+    let old = aigw_core::wasm::generate_pkcs8().unwrap();
+    let new = aigw_core::wasm::generate_pkcs8().unwrap();
+    let m_old = signed(real("testkit"), "k2026", &old);
+    let m_new = signed(real("testkit"), "k2027", &new);
+    // Übergang: beide Schlüssel vertraut.
+    let both = trusted(&[("k2026", &old), ("k2027", &new)], None);
+    assert!(loads(&both, m_old.clone()));
+    assert!(loads(&both, m_new.clone()));
+    // Alter Schlüssel entfernt: nur neu signierte Module laden.
+    let only_new = trusted(&[("k2027", &new)], None);
+    assert!(!loads(&only_new, m_old.clone()));
+    assert!(loads(&only_new, m_new.clone()));
+    // Neu signieren (gleicher Inhalt) ändert den Fingerabdruck → Bindung wird neu gebaut.
+    let (reg, _) = registry(&only_new);
+    let f = reg.get("wasm").unwrap();
+    let cfg = json!({"module": "testkit"});
+    let a = snapshot(vec![m_old], vec![]);
+    let b = snapshot(vec![m_new], vec![]);
+    assert_ne!(f.fingerprint(&a, &cfg), f.fingerprint(&b, &cfg));
+}
+
+#[test]
+fn invalid_trust_config_is_rejected() {
+    let cfg = WasmConfig {
+        require_signature: Some(true),
+        ..WasmConfig::default()
+    };
+    assert!(aigw_wasm::WasmRuntime::new(&cfg).is_err());
+}
