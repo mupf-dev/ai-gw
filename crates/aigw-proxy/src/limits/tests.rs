@@ -13,7 +13,7 @@ use aigw_core::resource::{
 use aigw_core::snapshot::{KeyCtx, ModelGroupCtx};
 use aigw_counters::{LocalCounters, Window};
 
-use super::plan::{Level, plan};
+use super::plan::{Level, plan, plan_slots};
 use super::*;
 
 fn limit(metric: LimitMetric, n: u64, window: LimitWindow, group: Option<&str>) -> LimitSpec {
@@ -345,6 +345,223 @@ async fn too_large_request_has_no_retry_after() {
         .unwrap_err();
     assert_eq!(denied.error.retry_after, None);
     assert!(denied.error.error.message.contains("max_tokens"));
+}
+
+#[test]
+fn plan_slots_levels_and_group_scope() {
+    use LimitMetric as M;
+    use LimitWindow as W;
+    let g = group(
+        "gpt-4o",
+        &["latest"],
+        vec![limit(M::Concurrency, 9, W::Minute, Some("egal"))],
+    );
+    let k = key(
+        vec![
+            limit(M::Concurrency, 2, W::Minute, None),
+            limit(M::Concurrency, 1, W::Minute, Some("latest")),
+            limit(M::Concurrency, 1, W::Minute, Some("claude")),
+            limit(M::Requests, 5, W::Minute, None),
+        ],
+        vec![limit(M::Concurrency, 4, W::Second, None)],
+        vec![],
+    );
+    let mut out = Vec::new();
+    plan_slots(Some(&k), Some(&g), &mut out);
+    let got: Vec<_> = out
+        .iter()
+        .map(|p| (p.key.clone(), p.limit, p.level))
+        .collect();
+    let (kid, tid) = (k.key.id, k.team.as_ref().unwrap().id);
+    assert_eq!(
+        got,
+        [
+            (format!("key:{kid}:concurrency"), 2, Level::Key),
+            (format!("key:{kid}:concurrency:gpt-4o"), 1, Level::Key),
+            (format!("team:{tid}:concurrency"), 4, Level::Team),
+            (
+                format!("group:{}:concurrency", g.group.id),
+                9,
+                Level::ModelGroup
+            ),
+        ]
+    );
+    // Fenster-Limits enthalten `concurrency` nicht.
+    let mut win = Vec::new();
+    plan(Some(&k), Some(&g), &Periods::default(), 0, &mut win);
+    assert_eq!(win.len(), 1);
+}
+
+fn conc_auth(key_limit: u64, team_limit: u64) -> (AuthContext, Arc<KeyCtx>) {
+    let k = key(
+        vec![limit(
+            LimitMetric::Concurrency,
+            key_limit,
+            LimitWindow::Minute,
+            None,
+        )],
+        vec![limit(
+            LimitMetric::Concurrency,
+            team_limit,
+            LimitWindow::Minute,
+            None,
+        )],
+        vec![],
+    );
+    (
+        AuthContext {
+            key_id: None,
+            key: Some(Arc::clone(&k)),
+            snapshot: None,
+        },
+        k,
+    )
+}
+
+/// S-12: Plätze werden mit `complete` und beim Fallenlassen frei; Ablehnung `429` mit
+/// `concurrency_limit_exceeded`, `Retry-After` und atomar über die Ebenen.
+#[tokio::test]
+async fn concurrency_admit_release_and_reject() {
+    let counters = Arc::new(LocalCounters::new());
+    let limiter = Limiter::new(counters.clone(), None, &LimitsConfig::default());
+    let (auth, k) = conc_auth(2, 3);
+    let kk = format!("key:{}:concurrency", k.key.id);
+    let tk = format!("team:{}:concurrency", k.team.as_ref().unwrap().id);
+    let now = SystemTime::now;
+    let est = TokenEstimate::default();
+    let a = limiter.admit(&auth, None, est, now()).await.unwrap();
+    let b = limiter.admit(&auth, None, est, now()).await.unwrap();
+    assert_eq!(counters.in_flight(&kk).await, 2);
+    let d = limiter.admit(&auth, None, est, now()).await.unwrap_err();
+    assert_eq!(
+        d.error.error.code.as_deref(),
+        Some("concurrency_limit_exceeded")
+    );
+    assert_eq!(d.error.retry_after, Some(Duration::from_secs(1)));
+    assert!(d.error.error.message.contains("API-Key"));
+    assert_eq!(counters.in_flight(&tk).await, 2, "Ablehnung belegt nichts");
+    // Abschluss gibt frei.
+    let mut rec = RequestRecord::new("r", aigw_core::wire::WireFormat::OpenAiChat, 200);
+    a.complete(&mut rec, &[]);
+    assert_eq!(counters.in_flight(&kk).await, 1);
+    // Fallenlassen (Abbruch) gibt frei.
+    drop(b);
+    assert_eq!(counters.in_flight(&kk).await, 0);
+    assert_eq!(counters.in_flight(&tk).await, 0);
+}
+
+/// S-12: Ein anderes Limit lehnt nach der Platzbelegung ab → Plätze sofort wieder frei.
+#[tokio::test]
+async fn concurrency_released_when_window_limit_rejects() {
+    let counters = Arc::new(LocalCounters::new());
+    let limiter = Limiter::new(counters.clone(), None, &LimitsConfig::default());
+    let k = key(
+        vec![
+            limit(LimitMetric::Concurrency, 5, LimitWindow::Minute, None),
+            limit(LimitMetric::Requests, 1, LimitWindow::Minute, None),
+        ],
+        vec![],
+        vec![],
+    );
+    let auth = AuthContext {
+        key_id: None,
+        key: Some(Arc::clone(&k)),
+        snapshot: None,
+    };
+    let kk = format!("key:{}:concurrency", k.key.id);
+    let est = TokenEstimate::default();
+    let a = limiter
+        .admit(&auth, None, est, SystemTime::now())
+        .await
+        .unwrap();
+    let d = limiter
+        .admit(&auth, None, est, SystemTime::now())
+        .await
+        .unwrap_err();
+    assert_eq!(d.error.error.code.as_deref(), Some("rate_limit_exceeded"));
+    assert_eq!(counters.in_flight(&kk).await, 1);
+    drop(a);
+    assert_eq!(counters.in_flight(&kk).await, 0);
+}
+
+/// S-12 Nebenläufigkeit: viele Tasks gleichzeitig, nie mehr als das Limit; abgebrochene Tasks
+/// (abort mitten in der Anfrage) geben ihre Plätze frei.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrency_parallel_never_exceeds_and_abort_releases() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let counters = Arc::new(LocalCounters::new());
+    let limiter = Arc::new(Limiter::new(
+        counters.clone(),
+        None,
+        &LimitsConfig::default(),
+    ));
+    let (auth, k) = conc_auth(3, 100);
+    let kk = format!("key:{}:concurrency", k.key.id);
+    let auth = Arc::new(auth);
+    let (cur, peak, ok) = (
+        Arc::new(AtomicU64::new(0)),
+        Arc::new(AtomicU64::new(0)),
+        Arc::new(AtomicU64::new(0)),
+    );
+    let mut tasks = Vec::new();
+    for _ in 0..32 {
+        let (l, a) = (Arc::clone(&limiter), Arc::clone(&auth));
+        let (cur, peak, ok) = (Arc::clone(&cur), Arc::clone(&peak), Arc::clone(&ok));
+        tasks.push(tokio::spawn(async move {
+            for _ in 0..50 {
+                if let Ok(adm) = l
+                    .admit(&a, None, TokenEstimate::default(), SystemTime::now())
+                    .await
+                {
+                    let n = cur.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(n, Ordering::SeqCst);
+                    ok.fetch_add(1, Ordering::Relaxed);
+                    tokio::task::yield_now().await;
+                    cur.fetch_sub(1, Ordering::SeqCst);
+                    drop(adm);
+                }
+            }
+        }));
+    }
+    for t in tasks {
+        t.await.unwrap();
+    }
+    assert!(peak.load(Ordering::SeqCst) <= 3);
+    assert!(ok.load(Ordering::Relaxed) > 0);
+    assert_eq!(counters.in_flight(&kk).await, 0);
+
+    // Abbruch: Tasks halten Plätze und werden abgebrochen.
+    let mut held = Vec::new();
+    for _ in 0..3 {
+        let (l, a) = (Arc::clone(&limiter), Arc::clone(&auth));
+        held.push(tokio::spawn(async move {
+            let _adm = l
+                .admit(&a, None, TokenEstimate::default(), SystemTime::now())
+                .await
+                .unwrap();
+            std::future::pending::<()>().await;
+        }));
+    }
+    for _ in 0..200 {
+        if counters.in_flight(&kk).await == 3 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(counters.in_flight(&kk).await, 3);
+    assert!(
+        limiter
+            .admit(&auth, None, TokenEstimate::default(), SystemTime::now())
+            .await
+            .is_err()
+    );
+    for h in &held {
+        h.abort();
+    }
+    for h in held {
+        let _ = h.await;
+    }
+    assert_eq!(counters.in_flight(&kk).await, 0);
 }
 
 /// Overhead je Anfrage mit `local`: `admit` (Plan + Reservierung von 5 Limits auf 4 Ebenen)

@@ -118,19 +118,30 @@ pub struct ServerEvent {
 
 /// Empfänger für Benachrichtigungen, die zu **einer** Anfrage gehören (Fortschritt,
 /// Log-Meldungen). Ersetzt das Fortschritts-Token des Gateways wieder durch das des Clients.
+///
+/// Der Kanal ist begrenzt (S-28): Liest der Client nicht schnell genug, werden weitere
+/// Meldungen verworfen (Warnung einmal je Anfrage, Anzahl bei Ende im Debug-Log) – ein
+/// Upstream kann so keinen unbegrenzten Speicher belegen.
 #[derive(Debug, Clone)]
 pub struct NoteSink {
-    tx: tokio::sync::mpsc::UnboundedSender<Value>,
+    tx: tokio::sync::mpsc::Sender<Value>,
     token: Option<(Value, Value)>,
+    dropped: Arc<AtomicU64>,
 }
 
 impl NoteSink {
     /// Neuer Empfänger; `token` = (Token beim Upstream, Token des Clients).
-    pub fn new(
-        tx: tokio::sync::mpsc::UnboundedSender<Value>,
-        token: Option<(Value, Value)>,
-    ) -> Self {
-        Self { tx, token }
+    pub fn new(tx: tokio::sync::mpsc::Sender<Value>, token: Option<(Value, Value)>) -> Self {
+        Self {
+            tx,
+            token,
+            dropped: Arc::default(),
+        }
+    }
+
+    /// Bisher verworfene Meldungen (Kanal voll).
+    pub fn dropped(&self) -> u64 {
+        self.dropped.load(Ordering::Relaxed)
     }
 
     fn send(&self, mut msg: Value) {
@@ -140,7 +151,15 @@ impl NoteSink {
         {
             *t = down.clone();
         }
-        let _ = self.tx.send(msg);
+        if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = self.tx.try_send(msg) {
+            let n = self.dropped.fetch_add(1, Ordering::Relaxed);
+            if n == 0 {
+                tracing::warn!(
+                    "MCP: Benachrichtigungen des Upstreams verworfen – Client liest zu langsam \
+                     (mcp.notification_buffer)"
+                );
+            }
+        }
     }
 }
 

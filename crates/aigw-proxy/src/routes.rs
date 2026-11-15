@@ -14,6 +14,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use aigw_core::ir::ModelInfo;
+use aigw_core::snapshot::{ModelGroupCtx, Snapshot};
 
 use crate::provider::ChatProvider;
 use crate::routing::GroupRoute;
@@ -22,6 +23,19 @@ use crate::routing::GroupRoute;
 pub trait ModelRoutes: Send + Sync + 'static {
     /// Route für den angefragten Modellnamen (Name oder Alias; `None` = unbekannt).
     fn route(&self, model: &str) -> Option<Arc<GroupRoute>>;
+    /// Route zur freigegebenen Modellgruppe `group` aus dem Snapshot `snap` der Anfrage
+    /// (S-31): Freigabe und Route stammen aus **derselben** Konfigurationsversion – ein
+    /// zwischenzeitlich umgehängter Alias kann nicht auf eine andere Gruppe zeigen als die
+    /// geprüfte. Standard (ohne Snapshot-Bezug, z. B. [`StaticRoutes`]): [`Self::route`].
+    fn route_for(
+        &self,
+        model: &str,
+        snap: Option<&Snapshot>,
+        group: Option<&ModelGroupCtx>,
+    ) -> Option<Arc<GroupRoute>> {
+        let _ = (snap, group);
+        self.route(model)
+    }
     /// Öffentliche Modellliste (`GET /v1/models`, wenn der Key keine eigene liefert).
     fn models(&self) -> Vec<ModelInfo>;
 }

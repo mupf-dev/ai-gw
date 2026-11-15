@@ -220,10 +220,10 @@ pub struct LimitWarning {
     pub message: String,
 }
 
-/// Hinweise zu Limits: `concurrency` wird nicht durchgesetzt (AIGW-58, jedes Backend);
-/// Sekundenlimits bei `counters.backend: postgres-sync` (F29): Die Instanzen
-/// gleichen nur im Abstand `sync_interval_ms` ab, im Cluster kann ein Sekundenlimit daher
-/// mehrfach ausgeschöpft werden. `objects`: (Art, Name, Limits).
+/// Hinweise zu Limits bei `counters.backend: postgres-sync`: Sekundenlimits (F29) – die
+/// Instanzen gleichen nur im Abstand `sync_interval_ms` ab, im Cluster kann ein Sekundenlimit
+/// daher mehrfach ausgeschöpft werden; `concurrency` (S-12) gilt nur je Instanz (kein
+/// Abgleich gleichzeitiger Anfragen über Postgres). `objects`: (Art, Name, Limits).
 pub fn limit_warnings<'a>(
     backend: crate::config::CounterBackendKind,
     objects: impl IntoIterator<Item = (&'a str, &'a str, &'a [LimitSpec])>,
@@ -232,18 +232,19 @@ pub fn limit_warnings<'a>(
     let mut out = Vec::new();
     for (kind, name, limits) in objects {
         for (i, l) in limits.iter().enumerate() {
-            // AIGW-58: `concurrency` wird von der Datenebene noch nicht durchgesetzt – nicht
-            // still ignorieren, sondern sichtbar warnen.
             if l.metric == LimitMetric::Concurrency {
-                out.push(LimitWarning {
-                    kind: kind.to_owned(),
-                    name: name.to_owned(),
-                    field: format!("limits[{i}]"),
-                    code: "concurrency-not-enforced".to_owned(),
-                    message: "concurrency (gleichzeitige Anfragen) wird noch nicht \
-                              durchgesetzt – das Limit ist wirkungslos"
-                        .to_owned(),
-                });
+                if pg_sync {
+                    out.push(LimitWarning {
+                        kind: kind.to_owned(),
+                        name: name.to_owned(),
+                        field: format!("limits[{i}]"),
+                        code: "concurrency-per-instance".to_owned(),
+                        message: "concurrency mit counters.backend = postgres-sync gilt je \
+                                  Instanz – im Cluster sind bis zu Instanzen × Limit \
+                                  gleichzeitige Anfragen möglich (redis verwenden)"
+                            .to_owned(),
+                    });
+                }
                 continue;
             }
             if pg_sync && l.window == LimitWindow::Second {
@@ -564,20 +565,19 @@ mod tests {
             lim(Concurrency, 2, LimitWindow::Second, None),
         ];
         let objs = || [("team", "t1", &limits[..])];
-        // AIGW-58: concurrency warnt bei jedem Backend (nicht durchgesetzt).
+        // S-12: concurrency wird durchgesetzt; nur postgres-sync warnt (je Instanz).
         for k in [K::Local, K::Redis] {
-            let w = limit_warnings(k, objs());
-            assert_eq!(w.len(), 1);
-            assert_eq!(
-                (w[0].code.as_str(), w[0].field.as_str()),
-                ("concurrency-not-enforced", "limits[2]")
-            );
+            assert!(limit_warnings(k, objs()).is_empty());
         }
         let w = limit_warnings(K::PostgresSync, objs());
         assert_eq!(w.len(), 2);
         assert_eq!(
             (w[0].kind.as_str(), w[0].name.as_str(), w[0].field.as_str()),
             ("team", "t1", "limits[0]")
+        );
+        assert_eq!(
+            (w[1].code.as_str(), w[1].field.as_str()),
+            ("concurrency-per-instance", "limits[2]")
         );
         assert_eq!(w[0].code, "second-limit-postgres-sync");
         assert!(w[0].message.contains("redis"));

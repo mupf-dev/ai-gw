@@ -12,6 +12,8 @@
 //! (Session beenden). Anmeldung wie auf `/v1/*` (API-Key über [`Authenticator`]); Sessions
 //! sind an den Key gebunden. Jeder `tools/call` durchläuft die Limits des Keys (eine Anfrage)
 //! und erzeugt einen Eintrag im Request-Log ([`WireFormat::Mcp`], `aigw_mcp_calls_total`).
+//! Auch `initialize`, Listen, Ressourcen und Prompts durchlaufen die Limits (S-28: Anfragen,
+//! `concurrency`), Sessions sind je Key/Team begrenzt, Benachrichtigungskanäle sind begrenzt.
 //!
 //! [`Authenticator`]: crate::Authenticator
 
@@ -49,7 +51,7 @@ use tracing::Instrument as _;
 
 use crate::ProxyState;
 use crate::auth::{AuthContext, extract_api_key};
-use crate::limits::{TokenEstimate, retry_after_secs};
+use crate::limits::{Admission, TokenEstimate, retry_after_secs};
 use crate::observe::Recorder;
 use crate::request_id::{RequestId as HttpRequestId, RequestStart};
 
@@ -260,6 +262,60 @@ fn check_version_header(headers: &HeaderMap) -> Result<(), Response> {
     }
 }
 
+/// Ablehnung durch Limits: JSON-RPC-Fehler und `Retry-After` (Sekunden).
+struct Limited {
+    error: RpcError,
+    retry_after: Option<u64>,
+}
+
+impl Limited {
+    /// `status`: HTTP-Status (`initialize`: `429`, da keine Session entsteht; sonst `200` mit
+    /// JSON-RPC-Fehler).
+    fn response(self, status: StatusCode, id: RequestId) -> Response {
+        let mut res = json_body(status, &Message::error(Some(id), self.error));
+        if let Some(v) = self
+            .retry_after
+            .and_then(|s| HeaderValue::from_str(&s.to_string()).ok())
+        {
+            res.headers_mut().insert(header::RETRY_AFTER, v);
+        }
+        res
+    }
+}
+
+/// Limits des Keys (eine Anfrage, keine Tokens; `concurrency` bis zum Fallenlassen der
+/// [`Admission`]).
+async fn admit(st: &McpState, caller: &Caller) -> Result<Admission, Limited> {
+    st.proxy
+        .limits
+        .admit(
+            &caller.auth,
+            None,
+            TokenEstimate::default(),
+            std::time::SystemTime::now(),
+        )
+        .await
+        .map_err(|denied| {
+            let secs = denied.error.retry_after.map(retry_after_secs);
+            let code = denied
+                .error
+                .error
+                .code
+                .clone()
+                .unwrap_or_else(|| "rate_limited".to_owned());
+            Limited {
+                error: RpcError {
+                    code: RATE_LIMITED,
+                    message: denied.error.error.message.clone(),
+                    data: Some(json!({
+                        "status": 429, "code": "rate_limited", "reason": code, "retryAfter": secs
+                    })),
+                },
+                retry_after: secs,
+            }
+        })
+}
+
 // ---------------------------------------------------------------------------------------------
 // POST
 // ---------------------------------------------------------------------------------------------
@@ -347,6 +403,11 @@ async fn post(
     };
 
     if method == method::INITIALIZE {
+        // S-28: auch `initialize` zählt gegen die Limits des Keys.
+        let _admission = match admit(st, &caller).await {
+            Ok(a) => a,
+            Err(l) => return l.response(StatusCode::TOO_MANY_REQUESTS, id),
+        };
         return initialize(st, &caller, id, params.as_ref());
     }
     let session = match session_of(st, &headers, &caller) {
@@ -354,6 +415,16 @@ async fn post(
         Err(res) => return res,
     };
     let params = params.unwrap_or_else(|| json!({}));
+    // S-28: Listen, Ressourcen und Prompts durchlaufen die Limits (ping nicht; `tools/call`
+    // mit eigenem Request-Log-Eintrag unten). Die Admission lebt bis zur Antwort.
+    let _admission = if method == method::PING || method == method::TOOLS_CALL {
+        None
+    } else {
+        match admit(st, &caller).await {
+            Ok(a) => Some(a),
+            Err(l) => return l.response(StatusCode::OK, id),
+        }
+    };
     let gw = &st.gateway;
     let view = &caller.view;
     let result = match method.as_str() {
@@ -387,6 +458,7 @@ fn initialize(st: &McpState, caller: &Caller, id: RequestId, params: Option<&Val
     let version = protocol::negotiate(requested);
     let session = match st.gateway.sessions().create(
         caller.auth.api_key_id(),
+        caller.auth.team_id(),
         caller.view.scope.clone(),
         version,
     ) {
@@ -481,39 +553,20 @@ async fn tool_call(
     rec.set_mcp(&target.server, &target.tool, McpOutcome::Cancelled);
 
     // Limits des Keys (eine Anfrage, keine Tokens).
-    match st
-        .proxy
-        .limits
-        .admit(
-            &caller.auth,
-            None,
-            TokenEstimate::default(),
-            std::time::SystemTime::now(),
-        )
-        .await
-    {
+    match admit(st, &caller).await {
         Ok(a) => rec.set_admission(a),
-        Err(denied) => {
-            let secs = denied.error.retry_after.map(retry_after_secs);
-            let e = RpcError {
-                code: RATE_LIMITED,
-                message: denied.error.error.message.clone(),
-                data: Some(json!({"status": 429, "code": "rate_limited", "retryAfter": secs})),
-            };
+        Err(l) => {
             rec.set_mcp_outcome(McpOutcome::RateLimited, 429, Some(ErrorKind::RateLimit));
             rec.finish(false);
-            let mut res = json_body(StatusCode::OK, &Message::error(Some(id), e));
-            if let Some(v) = secs.and_then(|s| HeaderValue::from_str(&s.to_string()).ok()) {
-                res.headers_mut().insert(header::RETRY_AFTER, v);
-            }
-            return res;
+            return l.response(StatusCode::OK, id);
         }
     }
 
     // Bis zum Ergebnis gilt der Aufruf als abgebrochen (Verbindungsabbruch verwirft ihn).
     rec.set_mcp_outcome(McpOutcome::Cancelled, 499, None);
     let want_sse = accepts_sse(headers);
-    let (notes_tx, notes_rx) = mpsc::unbounded_channel();
+    // Begrenzt (S-28): voll → weitere Meldungen verwerfen (NoteSink loggt).
+    let (notes_tx, notes_rx) = mpsc::channel(st.gateway.notification_buffer());
     let inflight = session.begin(id.clone());
     let gw = Arc::clone(&st.gateway);
     let call = async move {
@@ -582,7 +635,7 @@ type CallFuture = Pin<Box<dyn Future<Output = Option<Message>> + Send>>;
 /// `notifications/cancelled`, Request-Log: `client_aborted`).
 struct CallStream {
     call: Option<CallFuture>,
-    notes: mpsc::UnboundedReceiver<Value>,
+    notes: mpsc::Receiver<Value>,
     keepalive: tokio::time::Interval,
 }
 
@@ -650,14 +703,26 @@ fn get(st: &Arc<McpState>, server: Option<&str>, headers: &HeaderMap) -> Respons
             let frame = tokio::select! {
                 m = session_rx.recv() => match m {
                     Ok(v) => sse_frame(&v),
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        // S-28: begrenzter Kanal – ein langsamer Client verliert Meldungen.
+                        tracing::warn!(
+                            dropped = n,
+                            "MCP: Benachrichtigungen der Session verworfen – Client liest zu \
+                             langsam (mcp.notification_buffer)"
+                        );
+                        continue;
+                    }
                     Err(_) => break,
                 },
                 e = upstream_rx.recv() => match e {
                     Ok(ev) if servers.contains(&ev.server) => {
                         sse_frame(&Message::notification(ev.kind.changed_method(), None).to_value())
                     }
-                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Ok(_) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(dropped = n, "MCP: Server-Ereignisse für GET-Strom verworfen");
+                        continue;
+                    }
                     Err(_) => break,
                 },
                 _ = tick.tick() => {

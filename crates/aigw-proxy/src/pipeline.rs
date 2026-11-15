@@ -174,7 +174,12 @@ impl<'a> Pipeline<'a> {
         let group = auth.authorize_model(model)?;
         let route_span = crate::trace::route_span(model);
         let route = route_span
-            .in_scope(|| self.st.routes.route(model))
+            // S-31: Route zur freigegebenen Gruppe aus derselben Konfigurationsversion.
+            .in_scope(|| {
+                self.st
+                    .routes
+                    .route_for(model, auth.snapshot.as_deref(), group.as_deref())
+            })
             .ok_or_else(|| {
                 crate::trace::fail(&route_span, "not_found");
                 ApiError::new(

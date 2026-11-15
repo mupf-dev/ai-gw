@@ -30,8 +30,8 @@ use sqlx::postgres::PgPoolOptions;
 use crate::engine::Engine;
 use crate::local::spawn_janitor;
 use crate::{
-    Clock, CounterBackend, CounterError, DEFAULT_JANITOR, Health, LimitCheck, Rejection,
-    Reservation, SystemClock, Window,
+    Clock, CounterBackend, CounterError, DEFAULT_JANITOR, Health, LimitCheck, LocalSlots,
+    Rejection, Reservation, SlotCheck, SlotLease, SlotRejection, SystemClock, Window,
 };
 
 /// Einstellungen für `postgres-sync`.
@@ -92,6 +92,8 @@ struct Inner {
     backlog: Mutex<HashMap<BacklogKey, i64>>,
     sync_lock: tokio::sync::Mutex<()>,
     state: Mutex<SyncState>,
+    /// Gleichzeitigkeits-Limits: je Instanz (kein Abgleich über Postgres).
+    slots: Arc<LocalSlots>,
 }
 
 /// Zähler mit periodischem Abgleich über Postgres (unscharf im Cluster: ±Intervall).
@@ -202,6 +204,7 @@ impl PgSyncCounters {
                 backlog: Mutex::new(HashMap::new()),
                 sync_lock: tokio::sync::Mutex::new(()),
                 state: Mutex::new(SyncState::default()),
+                slots: LocalSlots::new(),
             }),
         }
     }
@@ -401,6 +404,14 @@ impl Inner {
 impl CounterBackend for PgSyncCounters {
     async fn reserve(&self, checks: &[LimitCheck<'_>]) -> Result<Reservation, Rejection> {
         self.inner.engine.reserve(checks)
+    }
+
+    async fn acquire_slots(&self, checks: &[SlotCheck<'_>]) -> Result<SlotLease, SlotRejection> {
+        self.inner.slots.acquire(checks)
+    }
+
+    async fn in_flight(&self, key: &str) -> u64 {
+        self.inner.slots.in_flight(key)
     }
 
     async fn settle(&self, reservation: Reservation, actual: u64) {

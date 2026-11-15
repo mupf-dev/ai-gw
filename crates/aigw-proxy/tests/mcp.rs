@@ -382,7 +382,7 @@ fn build_snapshot(fake: SocketAddr) -> Snapshot {
         None,
         vec![LimitSpec {
             metric: LimitMetric::Requests,
-            limit: 1,
+            limit: 3,
             window: LimitWindow::Minute,
             model_group: None,
         }],
@@ -423,6 +423,14 @@ fn build_snapshot(fake: SocketAddr) -> Snapshot {
 }
 
 async fn start() -> Env {
+    start_with(McpConfig {
+        call_timeout_secs: 20,
+        ..McpConfig::default()
+    })
+    .await
+}
+
+async fn start_with(cfg: McpConfig) -> Env {
     let (fake_addr, fake) = start_fake().await;
     let snapshot = SnapshotHandle::new(build_snapshot(fake_addr));
     let records = Arc::new(Capture::default());
@@ -437,10 +445,6 @@ async fn start() -> Env {
         ..AdminConfig::default()
     })
     .unwrap();
-    let cfg = McpConfig {
-        call_timeout_secs: 20,
-        ..McpConfig::default()
-    };
     let gateway = Arc::new(McpGateway::new(&cfg, policy).unwrap());
     let task = gateway.spawn(snapshot.clone());
     let app = aigw_proxy::router(state.clone()).merge(aigw_proxy::mcp::router(state, gateway));
@@ -1102,8 +1106,8 @@ async fn cancellation_progress_and_list_changed() {
 async fn key_limits_apply_to_tool_calls() {
     let env = start().await;
     let mut c = McpClient::new(&env, "/mcp", Some(KEY_LIMITED));
+    // S-28: initialize und Listen zählen mit (Limit 3 Anfragen je Minute).
     c.initialize().await;
-    // tools/list zählt nicht.
     assert_eq!(c.tool_names().await.len(), 5);
     let r = c
         .call(
@@ -1128,4 +1132,57 @@ async fn key_limits_apply_to_tool_calls() {
             .is_some_and(|m| m.outcome == McpOutcome::RateLimited)
             && r.status == 429
     }));
+    // Ressourcen und Listen sind ebenfalls begrenzt.
+    for m in ["resources/list", "tools/list", "prompts/list"] {
+        let r = c.request(m, json!({})).await;
+        assert!(r.headers.get("retry-after").is_some(), "{m}");
+        assert_eq!(err_status(&r.last()), 429, "{m}");
+    }
+    // ping bleibt frei (Keep-Alive).
+    let r = c.call("ping", json!({})).await;
+    assert!(r.get("result").is_some(), "{r}");
+    // Neue Session: initialize wird abgelehnt.
+    let mut d = McpClient::new(&env, "/mcp", Some(KEY_LIMITED));
+    let r = d.initialize_with("2025-06-18").await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(r.headers.get("mcp-session-id").is_none());
+    assert!(r.headers.get("retry-after").is_some());
+    assert_eq!(err_status(&r.last()), 429);
+}
+
+/// S-28: Sessions je Key und Team begrenzt; andere Keys sind nicht betroffen; DELETE gibt frei.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sessions_limited_per_key_and_team() {
+    let env = start_with(McpConfig {
+        max_sessions_per_key: 2,
+        max_sessions_per_team: 1,
+        ..McpConfig::default()
+    })
+    .await;
+    let mut a1 = McpClient::new(&env, "/mcp", Some(KEY_A));
+    a1.initialize().await;
+    let mut a2 = McpClient::new(&env, "/mcp/gh", Some(KEY_A));
+    a2.initialize().await;
+    let mut a3 = McpClient::new(&env, "/mcp", Some(KEY_A));
+    let r = a3.initialize_with("2025-06-18").await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(r.last()["error"]["data"]["code"], "too_many_sessions");
+    // KEY_B (Team t1, Grenze 1) ist unabhängig von KEY_A.
+    let mut b1 = McpClient::new(&env, "/mcp", Some(KEY_B));
+    b1.initialize().await;
+    let mut b2 = McpClient::new(&env, "/mcp", Some(KEY_B));
+    let r = b2.initialize_with("2025-06-18").await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        r.last()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Team")
+    );
+    // Beenden gibt einen Platz frei.
+    assert_eq!(
+        a1.send(hyper::Method::DELETE, None, &[]).await.status,
+        StatusCode::NO_CONTENT
+    );
+    a3.initialize().await;
 }

@@ -56,6 +56,7 @@ counters:
   sync_interval_ms: 1000    # postgres-sync: Abgleichintervall (F26)
   redis_pool_size: 4        # redis: multiplexte Verbindungen (F26)
   redis_timeout_ms: 250     # redis: Zeitlimit je Operation, danach lokaler Rückfall (F26)
+  concurrency_lease_secs: 30 # redis: Gültigkeit eines concurrency-Platzes ohne Verlängerung (S-12)
 ```
 
 ENV wie üblich, z. B. `AIGW_COUNTERS__SYNC_INTERVAL_MS=2000`, `AIGW_COUNTERS__REDIS_POOL_SIZE=8`.
@@ -194,6 +195,21 @@ Korrekturen sättigen bei 0. Eine nie abgeglichene Reservierung bleibt voll gebu
   `aigw_counter_replay_dropped_total`, `aigw_counter_replay_pending`; dazu
   `aigw_counter_backend_degraded`.
 - Voraussetzung: Redis ≥ 7 oder Valkey (Skripte mit `TIME` und Schreibzugriffen).
+
+### 3a Gleichzeitigkeits-Plätze (`concurrency`, S-12)
+
+`acquire_slots(&[SlotCheck])` belegt je Limit einen Platz (alle oder keiner) und liefert eine
+`SlotLease`; deren `Drop` gibt die Plätze frei. `in_flight(key)` liefert den Stand.
+
+- `local`, `postgres-sync`: `LocalSlots` (Map unter einer Sperre), exakt **je Instanz**; bei
+  `postgres-sync` gibt es keinen Abgleich über die Datenbank.
+- `redis`: je Schlüssel eine sortierte Menge `<prefix>slot:<schlüssel>`, Mitglied
+  `<Instanz>:<Lease>`, Score = Ablaufzeit (Redis-`TIME` + `concurrency_lease_secs`). Das
+  Belegen-Skript entfernt abgelaufene Mitglieder, prüft alle Limits und trägt dann ein.
+  Laufende Leases verlängert ein Hintergrund-Task alle `concurrency_lease_secs / 3` (`ZADD XX`);
+  die Freigabe (`ZREM`) läuft als Task. Stürzt eine Instanz ab, sind ihre Plätze spätestens
+  nach `concurrency_lease_secs` frei. Ausfall/Zeitüberschreitung → lokaler Rückfall
+  (`LocalSlots`, je Instanz), vorsorgliche Freigabe des evtl. doch eingetragenen Mitglieds.
 
 ## 4. Genauigkeit und Ausfall im Überblick
 

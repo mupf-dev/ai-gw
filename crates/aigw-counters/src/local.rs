@@ -9,12 +9,16 @@ use std::time::Duration;
 use aigw_core::config::CounterBackendKind;
 
 use crate::engine::Engine;
-use crate::{Clock, CounterBackend, LimitCheck, Rejection, Reservation, SystemClock, Window};
+use crate::{
+    Clock, CounterBackend, LimitCheck, LocalSlots, Rejection, Reservation, SlotCheck, SlotLease,
+    SlotRejection, SystemClock, Window,
+};
 
 /// Zähler im Prozess-RAM (Sliding Window, geshardete Map, kurze Sperren je Schlüssel).
 #[derive(Debug)]
 pub struct LocalCounters {
     engine: Arc<Engine>,
+    slots: Arc<LocalSlots>,
 }
 
 impl Default for LocalCounters {
@@ -33,6 +37,7 @@ impl LocalCounters {
     pub fn with_clock(clock: Arc<dyn Clock>) -> Self {
         Self {
             engine: Arc::new(Engine::new(clock, false)),
+            slots: LocalSlots::new(),
         }
     }
 
@@ -95,6 +100,14 @@ pub(crate) fn spawn_janitor(engine: Weak<Engine>, interval: Duration) {
 impl CounterBackend for LocalCounters {
     async fn reserve(&self, checks: &[LimitCheck<'_>]) -> Result<Reservation, Rejection> {
         self.engine.reserve(checks)
+    }
+
+    async fn acquire_slots(&self, checks: &[SlotCheck<'_>]) -> Result<SlotLease, SlotRejection> {
+        self.slots.acquire(checks)
+    }
+
+    async fn in_flight(&self, key: &str) -> u64 {
+        self.slots.in_flight(key)
     }
 
     async fn settle(&self, reservation: Reservation, actual: u64) {

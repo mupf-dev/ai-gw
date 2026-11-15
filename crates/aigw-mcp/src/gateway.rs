@@ -139,6 +139,7 @@ pub struct McpGateway {
     pool: Pool,
     sessions: Sessions,
     progress_seq: AtomicU64,
+    notification_buffer: usize,
 }
 
 /// Fingerabdruck der MCP-relevanten Konfiguration (Server, Freigaben).
@@ -184,10 +185,16 @@ impl McpGateway {
         }
         Ok(Self {
             pool: Pool::new(env),
-            sessions: Sessions::new(
-                cfg.max_sessions,
+            sessions: Sessions::with_limits(
+                crate::SessionLimits {
+                    max: cfg.max_sessions,
+                    per_key: cfg.max_sessions_per_key,
+                    per_team: cfg.max_sessions_per_team,
+                    notification_buffer: cfg.notification_buffer,
+                },
                 Duration::from_secs(cfg.session_idle_timeout_secs.max(1)),
             ),
+            notification_buffer: cfg.notification_buffer.clamp(1, 65_536),
             progress_seq: AtomicU64::new(1),
         })
     }
@@ -195,6 +202,11 @@ impl McpGateway {
     /// Sessions.
     pub fn sessions(&self) -> &Sessions {
         &self.sessions
+    }
+
+    /// Puffergröße der Benachrichtigungskanäle (`mcp.notification_buffer`, S-28).
+    pub fn notification_buffer(&self) -> usize {
+        self.notification_buffer
     }
 
     /// Ereignisse der Upstreams (`…/list_changed`).
@@ -386,7 +398,7 @@ impl McpGateway {
         &self,
         target: &ToolTarget,
         params: Value,
-        notes: Option<tokio::sync::mpsc::UnboundedSender<Value>>,
+        notes: Option<tokio::sync::mpsc::Sender<Value>>,
     ) -> Result<Value, ClientError> {
         let mut params = match params {
             Value::Object(m) => m,

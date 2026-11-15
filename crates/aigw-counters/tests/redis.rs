@@ -21,7 +21,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use aigw_counters::{
-    CounterBackend, CounterError, Health, LimitCheck, RedisCounters, RedisOptions, Window,
+    CounterBackend, CounterError, Health, LimitCheck, RedisCounters, RedisOptions, SlotCheck,
+    Window,
 };
 
 /// Ausfall-Simulation (AIGW-94): ein TCP-Proxy vor Redis, der auf Kommando alle Daten
@@ -458,4 +459,119 @@ async fn unreachable_redis_counts_locally() {
             .await
             .is_err()
     );
+}
+
+/// S-12: Gleichzeitigkeits-Plätze über zwei Instanzen – nie mehr als das Limit gleichzeitig,
+/// Freigabe beim Fallenlassen, atomar über mehrere Schlüssel.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn slots_shared_between_instances() {
+    let Some(url) = url() else { return };
+    let (a, b) = pair(&url).await;
+    let l1 = a
+        .acquire_slots(&[SlotCheck::new("key:x", 2), SlotCheck::new("team:t", 3)])
+        .await
+        .unwrap();
+    let l2 = b
+        .acquire_slots(&[SlotCheck::new("key:x", 2), SlotCheck::new("team:t", 3)])
+        .await
+        .unwrap();
+    let e = a
+        .acquire_slots(&[SlotCheck::new("key:x", 2), SlotCheck::new("team:t", 3)])
+        .await
+        .unwrap_err();
+    assert_eq!((e.index, e.limit, e.in_flight), (0, 2, 2));
+    // Abgelehnt: Team nicht mitgezählt.
+    assert_eq!(b.in_flight("team:t").await, 2);
+    drop(l1);
+    // Freigabe läuft im Hintergrund.
+    for _ in 0..100 {
+        if a.in_flight("key:x").await == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(a.in_flight("key:x").await, 1);
+    let l3 = b
+        .acquire_slots(&[SlotCheck::new("key:x", 2)])
+        .await
+        .unwrap();
+    drop((l2, l3));
+
+    // Viele Tasks auf beiden Instanzen: höchstens `limit` gleichzeitig.
+    let now = Arc::new(AtomicU64::new(0));
+    let peak = Arc::new(AtomicU64::new(0));
+    let mut tasks = Vec::new();
+    for t in 0..32u64 {
+        let c = if t % 2 == 0 { a.clone() } else { b.clone() };
+        let (now, peak) = (now.clone(), peak.clone());
+        tasks.push(tokio::spawn(async move {
+            for _ in 0..20 {
+                if let Ok(l) = c.acquire_slots(&[SlotCheck::new("key:many", 4)]).await {
+                    let n = now.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(n, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(2)).await;
+                    now.fetch_sub(1, Ordering::SeqCst);
+                    // Synchron freigeben wäre schneller; hier über Drop wie im Gateway.
+                    drop(l);
+                }
+            }
+        }));
+    }
+    for t in tasks {
+        t.await.unwrap();
+    }
+    assert!(
+        peak.load(Ordering::SeqCst) <= 4,
+        "{}",
+        peak.load(Ordering::SeqCst)
+    );
+}
+
+/// S-12: Nicht freigegebene Plätze (Absturz) verfallen nach `slot_ttl`; laufende werden
+/// verlängert.
+#[tokio::test]
+async fn slots_expire_without_refresh_and_refresh_keeps_them() {
+    let Some(url) = url() else { return };
+    let prefix = format!("aigwtest:{}:", uuid::Uuid::now_v7().simple());
+    let o = RedisOptions {
+        slot_ttl: Duration::from_secs(1),
+        ..opts(&prefix)
+    };
+    let a = RedisCounters::connect(&url, o.clone()).await.unwrap();
+    let held = a.acquire_slots(&[SlotCheck::new("k", 1)]).await.unwrap();
+    // Länger als die Gültigkeit: Verlängerung hält den Platz.
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert_eq!(a.in_flight("k").await, 1);
+    drop(held);
+    // „Absturz“ einer Instanz: zweite Instanz sieht deren Platz bis zum Ablauf.
+    let crashed = RedisCounters::connect(&url, o.clone()).await.unwrap();
+    let lease = crashed
+        .acquire_slots(&[SlotCheck::new("c", 1)])
+        .await
+        .unwrap();
+    let b = RedisCounters::connect(&url, o).await.unwrap();
+    assert!(b.acquire_slots(&[SlotCheck::new("c", 1)]).await.is_err());
+    // Instanz weg: keine Verlängerung, keine Freigabe (Lease in einen Thread ohne Laufzeit).
+    drop(crashed);
+    std::thread::spawn(move || drop(lease)).join().unwrap();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(b.acquire_slots(&[SlotCheck::new("c", 1)]).await.is_ok());
+}
+
+#[tokio::test]
+async fn unreachable_redis_slots_local() {
+    let c = RedisCounters::connect(
+        "redis://127.0.0.1:1/0",
+        RedisOptions {
+            connect_timeout: Duration::from_millis(300),
+            ..RedisOptions::default()
+        },
+    )
+    .await
+    .unwrap();
+    let l = c.acquire_slots(&[SlotCheck::new("k", 1)]).await.unwrap();
+    assert!(c.acquire_slots(&[SlotCheck::new("k", 1)]).await.is_err());
+    assert_eq!(c.in_flight("k").await, 1);
+    drop(l);
+    assert_eq!(c.in_flight("k").await, 0);
 }

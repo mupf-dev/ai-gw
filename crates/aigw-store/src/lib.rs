@@ -200,6 +200,11 @@ const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
         include_str!("../migrations/sqlite/0009_wasm_modules.sql"),
     ),
     (
+        10,
+        "cache_aad",
+        include_str!("../migrations/sqlite/0010_cache_aad.sql"),
+    ),
+    (
         11,
         "wasm_signatures",
         include_str!("../migrations/sqlite/0011_wasm_signatures.sql"),
@@ -252,6 +257,11 @@ const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
         9,
         "wasm_modules",
         include_str!("../migrations/postgres/0009_wasm_modules.sql"),
+    ),
+    (
+        10,
+        "cache_aad",
+        include_str!("../migrations/postgres/0010_cache_aad.sql"),
     ),
     (
         11,

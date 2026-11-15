@@ -8,6 +8,12 @@
 //! [`GroupRoute`] bis zum Ende. Der Laufzeitzustand der Deployments ([`DeploymentState`])
 //! hängt an der Deployment-ID und wird beim Neuaufbau übernommen, solange sich das Deployment
 //! nicht wesentlich geändert hat.
+//!
+//! Konsistenz mit der Freigabe (S-31): [`ModelRoutes::route_for`] sucht die Route zur
+//! **freigegebenen** Gruppe (kanonischer Name) in der Tabelle derselben `config_version` wie
+//! der Snapshot der Anfrage. Ist die Tabelle älter als der Snapshot, wird sie sofort (unter
+//! Sperre, einmal je Version) neu gebaut; ist sie neuer, gilt die vorige Tabelle, solange sie
+//! zur Version passt. Ein umgehängter Alias kann so nie auf eine ungeprüfte Gruppe zeigen.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -65,6 +71,10 @@ impl RouteTable {
 /// Routing aus dem Snapshot; implementiert [`ModelRoutes`].
 pub struct SnapshotRoutes {
     table: ArcSwap<RouteTable>,
+    /// Vorige Tabelle (Anfragen, die noch mit dem vorigen Snapshot laufen; S-31).
+    previous: ArcSwap<RouteTable>,
+    /// Serialisiert Neuaufbauten (Hintergrund-Task und Hot Path).
+    rebuild_lock: Mutex<()>,
     states: Mutex<HashMap<Id, Arc<DeploymentState>>>,
     registry: Registry,
     client: UpstreamClient,
@@ -116,6 +126,8 @@ impl SnapshotRoutes {
     pub fn new(registry: Registry, client: UpstreamClient) -> Self {
         Self {
             table: ArcSwap::from_pointee(RouteTable::default()),
+            previous: ArcSwap::from_pointee(RouteTable::default()),
+            rebuild_lock: Mutex::new(()),
             states: Mutex::new(HashMap::new()),
             registry,
             client,
@@ -222,6 +234,29 @@ impl SnapshotRoutes {
     /// sich nicht bauen lässt (unbekannter Anbieter, fehlende Zugangsdaten …), werden
     /// ausgelassen und gemeldet; die übrigen bleiben erreichbar.
     pub fn rebuild(&self, snap: &Snapshot) {
+        let _guard = self
+            .rebuild_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        self.rebuild_locked(snap);
+    }
+
+    /// Baut die Tabelle nur, wenn sie älter als `snap` ist (S-31, Hot Path).
+    fn ensure_at_least(&self, snap: &Snapshot) {
+        let _guard = self
+            .rebuild_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if self.table.load().version < snap.version {
+            tracing::debug!(
+                config_version = snap.version,
+                "Routing-Tabelle älter als der Snapshot der Anfrage – sofort neu gebaut"
+            );
+            self.rebuild_locked(snap);
+        }
+    }
+
+    fn rebuild_locked(&self, snap: &Snapshot) {
         let now = OffsetDateTime::now_utc();
         let mut states = self.states.lock().unwrap_or_else(PoisonError::into_inner);
         let mut live: HashSet<Id> = HashSet::new();
@@ -341,7 +376,8 @@ impl SnapshotRoutes {
             deployments,
             "Routing-Tabelle aufgebaut"
         );
-        self.table.store(Arc::new(table));
+        let old = self.table.swap(Arc::new(table));
+        self.previous.store(old);
     }
 
     fn build_provider(&self, d: &DeploymentCtx) -> Result<Arc<dyn ChatProvider>, String> {
@@ -395,6 +431,34 @@ impl SnapshotRoutes {
 impl ModelRoutes for SnapshotRoutes {
     fn route(&self, model: &str) -> Option<Arc<GroupRoute>> {
         self.table.load().by_name.get(model).cloned()
+    }
+
+    fn route_for(
+        &self,
+        model: &str,
+        snap: Option<&Snapshot>,
+        group: Option<&ModelGroupCtx>,
+    ) -> Option<Arc<GroupRoute>> {
+        let Some(g) = group else {
+            return self.route(model);
+        };
+        let name = g.group.metadata.name.as_str();
+        // Immer über den kanonischen Namen der geprüften Gruppe, nie über den Alias.
+        let pick = |t: &RouteTable| t.by_name.get(name).filter(|r| r.name() == name).cloned();
+        let Some(snap) = snap else {
+            return pick(&self.table.load());
+        };
+        let mut t = self.table.load_full();
+        if t.version < snap.version {
+            self.ensure_at_least(snap);
+            t = self.table.load_full();
+        } else if t.version > snap.version {
+            let prev = self.previous.load_full();
+            if prev.version == snap.version {
+                t = prev;
+            }
+        }
+        pick(&t)
     }
 
     fn models(&self) -> Vec<ModelInfo> {

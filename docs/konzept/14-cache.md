@@ -151,7 +151,7 @@ pub trait VectorIndex: Send + Sync {
 
 | Backend | Eigenschaften |
 |---|---|
-| `memory` (Standard) | eigener HNSW je Partition im RAM (Kosinus, `m`/`ef_construction`/`ef_search`); Ersetzen/Löschen über Grabsteine, Neuaufbau einer Partition, sobald Grabsteine > lebende Knoten (und > 64); TTL bei der Suche + Aufräum-Task (60 s); Grenzen `max_entries`/`max_bytes` (älteste zuerst verdrängt); Warmstart aus Tabelle `cache_vector` (Migration 0007, Vektor + Antwort AES-256-GCM-verschlüsselt mit dem Master-Key, AAD = ID), asynchron gebündelt geschrieben |
+| `memory` (Standard) | eigener HNSW je Partition im RAM (Kosinus, `m`/`ef_construction`/`ef_search`); Ersetzen/Löschen über Grabsteine, Neuaufbau einer Partition, sobald Grabsteine > lebende Knoten (und > 64); TTL bei der Suche + Aufräum-Task (60 s); Grenzen `max_entries`/`max_bytes` (älteste zuerst verdrängt); Warmstart aus Tabelle `cache_vector` (Migration 0007, Vektor + Antwort AES-256-GCM-verschlüsselt mit dem Master-Key, AAD = `aigw-cache:v2:` ‖ ID ‖ Partition – S-27, ältere Einträge verwirft Migration 0010), asynchron gebündelt geschrieben |
 | `pgvector` | Postgres + Erweiterung `vector`; Tabelle `aigw_semantic_cache_<dim>` mit HNSW-Index (`vector_cosine_ops`), vom Backend selbst angelegt (`CREATE EXTENSION` braucht ggf. erhöhte Rechte); Suche mit `SET LOCAL hnsw.ef_search`, ab pgvector 0.8 `hnsw.iterative_scan = relaxed_order` gegen zu wenige Treffer nach dem Partitionsfilter; Verbindung verzögert, Zeitlimit `backend_timeout_ms` |
 | `redis` | Redis Stack / Valkey Search: `FT.CREATE … VECTOR HNSW … DISTANCE_METRIC COSINE`, Partition als TAG, `FT.SEARCH … =>[KNN k @v $B EF_RUNTIME ef AS score]`; TTL nativ (`PEXPIREAT`) |
 

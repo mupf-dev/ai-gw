@@ -123,6 +123,22 @@ billing:
 - Limits gelten für die **angefragte** Modellgruppe; ein Fallback auf eine andere Gruppe
   (AIGW-25) verbraucht kein zusätzliches Kontingent der Fallback-Gruppe.
 
+### 3.1a Gleichzeitige Anfragen (`concurrency`, S-12)
+
+- `metric: concurrency` begrenzt die **gleichzeitig laufenden** Anfragen je Key, Team,
+  Organisation (optional nur für eine Modellgruppe, `modelGroup`) und je Modellgruppe global;
+  `window` wird ignoriert. Schlüssel `<ebene>:<id>:concurrency[:<gruppe>]`.
+- Ablauf in `Limiter::admit`: zuerst die Plätze (`CounterBackend::acquire_slots`, atomar über
+  alle Ebenen), dann Budget und Fenster-Limits. Lehnt danach etwas ab, sind die Plätze sofort
+  wieder frei. Die Plätze hält die `Admission`: frei mit dem Abschluss (letztes Byte) bzw. beim
+  Fallenlassen (Client-Abbruch, Fehler, Panic) – Retries/Fallbacks laufen im selben Platz.
+- Ablehnung `429` im Eingangsformat mit Code `concurrency_limit_exceeded`, `Retry-After: 1`,
+  ohne `x-ratelimit-*`-Header.
+- Gilt auch für das MCP-Gateway (`tools/call`, `initialize`, Listen/Ressourcen/Prompts).
+- Backends (05 §3a): `local` exakt je Instanz; `postgres-sync` **je Instanz** (Hinweis
+  `concurrency-per-instance` in `GET /usage/limit-warnings` und im Start-Log); `redis` exakt im
+  Cluster mit Lease-Ablauf `counters.concurrency_lease_secs` (Standard 30 s).
+
 ### 3.2 Reservierung und Abgleich
 
 - Reserviert wird mit **einem** `CounterBackend::reserve` über alle Ebenen: alle oder keines
@@ -486,7 +502,8 @@ zusätzlich je Budget einen Map-Zugriff und eine Mutex-Sperre (keine I/O).
 - `aigw-store/tests/budget.rs`: Ledger gegen SQLite und Postgres (additiv, Rücklesen, > 100
   Schlüssel, zwei `Budgets`-Instanzen auf einer Datenbank, Bereinigung).
 - `aigw-counters`: `Reservation::split_off`.
-- `aigw-proxy` (Unit): Planung (Sortierung, Gruppenbezug über Alias, `concurrency` ignoriert),
+- `aigw-proxy` (Unit): Planung (Sortierung, Gruppenbezug über Alias, `concurrency` getrennt
+  geplant), `concurrency` (Freigabe bei `complete`/Drop/Abbruch, Ablehnung, parallele Tasks),
   Atomarität über Ebenen, Abgleich je Metrik, zu große Anfrage ohne `Retry-After`, Header.
 - `aigw-proxy/tests/limits.rs` (HTTP): `requests` auf jeder Ebene (Key, Team, Org, Gruppe) mit
   429, `Retry-After` und Headern; Atomarität (Team lehnt ab → Key unverändert); Token-Abgleich je
@@ -547,8 +564,7 @@ Crate `aigw-tokenizer` (Eigenentwicklung, keine fremde Tokenizer-Bibliothek):
 
 ## 9. Offene Punkte
 
-- `concurrency`-Limits (gleichzeitig offene Anfragen) sind im Ressourcenmodell vorgesehen, aber
-  nicht umgesetzt (brauchen einen eigenen Zählertyp ohne Fenster bzw. mit Lease-Ablauf).
+- Erledigt (AIGW-100, S-12): `concurrency`-Limits werden durchgesetzt (§3.1a).
 - Budget-Ereignisse tragen nur die Ziel-ID (kein Name); Anreicherung aus dem Snapshot folgt bei Bedarf.
 - Audio-/Bildpreise, sobald die IR-Usage diese Mengen führt.
 - Budgets je Nutzer (`user`) und je Modellgruppe sind im Ressourcenmodell nicht vorgesehen.

@@ -29,4 +29,4 @@ pub use gateway::{GatewayTask, McpGateway, ResolveError, ToolTarget, View};
 pub use grants::Access;
 pub use httpc::HttpClient;
 pub use jsonrpc::{Message, RequestId, RpcError};
-pub use session::{Scope, Session, Sessions};
+pub use session::{Scope, Session, SessionLimits, Sessions};

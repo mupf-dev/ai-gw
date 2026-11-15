@@ -14,6 +14,9 @@
 //! | `postgres-sync` | [`PgSyncCounters`] | lokal exakt, im Cluster ±Abgleichintervall |
 //! | `redis` | [`RedisCounters`] | exakt im Cluster; bei Ausfall Rückfall auf lokal |
 //!
+//! Gleichzeitigkeits-Limits (`concurrency`) belegen Plätze ohne Zeitfenster
+//! ([`CounterBackend::acquire_slots`], [`SlotLease`]).
+//!
 //! Auswahl über `counters.backend` mit [`from_config`]. Ausführlich:
 //! `docs/konzept/05-zaehler.md`.
 
@@ -22,6 +25,7 @@ mod engine;
 mod local;
 mod pgsync;
 mod redis_backend;
+mod slots;
 pub mod window;
 
 use std::fmt;
@@ -34,6 +38,7 @@ pub use clock::{Clock, ManualClock, SystemClock};
 pub use local::LocalCounters;
 pub use pgsync::{PgSyncCounters, PgSyncOptions, SyncReport};
 pub use redis_backend::{RedisCounters, RedisOptions};
+pub use slots::{LocalSlots, SlotCheck, SlotLease, SlotRejection};
 pub use window::Window;
 
 /// Ob eine Buchung beim Abgleich ([`CounterBackend::settle`]) korrigiert wird.
@@ -253,6 +258,13 @@ pub trait CounterBackend: Send + Sync + fmt::Debug {
 
     /// Geschätzter Verbrauch im gleitenden Fenster.
     async fn get(&self, key: &str, window: Window) -> u64;
+
+    /// Belegt je Gleichzeitigkeits-Limit (`concurrency`, ohne Fenster) einen Platz – alle
+    /// oder keines. Die Plätze bleiben belegt, bis die [`SlotLease`] fallen gelassen wird.
+    async fn acquire_slots(&self, checks: &[SlotCheck<'_>]) -> Result<SlotLease, SlotRejection>;
+
+    /// Belegte Plätze eines Gleichzeitigkeits-Schlüssels.
+    async fn in_flight(&self, key: &str) -> u64;
 
     /// Art des Backends.
     fn kind(&self) -> CounterBackendKind;

@@ -17,6 +17,11 @@
 //!   gleitende Fenster Sekunde/Minute/Stunde/Tag/30 Tage (RPM/RPD, TPM/TPD) und
 //!   Kalenderzeiträume Tag/Woche/Monat in `billing.timezone` (F25). Alle Ebenen werden mit
 //!   **einem** [`CounterBackend::reserve`] atomar geprüft und gebucht.
+//! - `concurrency` (S-12): gleichzeitig laufende Anfragen je Key, Team, Organisation und
+//!   Modellgruppe ([`CounterBackend::acquire_slots`], atomar über alle Ebenen). Die Plätze hält
+//!   die [`Admission`]; sie werden frei, sobald sie abgeschlossen oder fallen gelassen wird
+//!   (letztes Byte, Abbruch, Fehler). `local`/`postgres-sync`: je Instanz, `redis`: im
+//!   Cluster. Ablehnung `429` mit Code `concurrency_limit_exceeded` und `Retry-After: 1`.
 //! - Token-Reservierung = geschätzte Prompt-Tokens + `max_tokens` (ohne Angabe:
 //!   `limits.default_max_tokens`); abgeglichen wird mit der gemeldeten (bzw. bei Abbruch
 //!   geschätzten) Usage. Die Prompt-Tokens zählt der Tokenizer der Modellgruppe
@@ -46,7 +51,10 @@ use aigw_core::ir::{ApiError, ChatRequest, ErrorClass, ErrorKind, UpstreamError,
 use aigw_core::observe::{PluginCall, RequestRecord};
 use aigw_core::resource::Amount;
 use aigw_core::snapshot::{KeyCtx, ModelGroupCtx, Snapshot};
-use aigw_counters::{CounterBackend, LimitCheck, LocalCounters, Rejection, Reservation};
+use aigw_counters::{
+    CounterBackend, LimitCheck, LocalCounters, Rejection, Reservation, SlotCheck, SlotLease,
+    SlotRejection,
+};
 use aigw_tokenizer::Tokenizer;
 use time::OffsetDateTime;
 
@@ -55,7 +63,7 @@ use crate::observe::{estimate_tokens, request_bytes};
 
 pub(crate) use headers::RateHeaders;
 pub use plan::Metric;
-use plan::{Periods, Planned, plan};
+use plan::{Periods, Planned, PlannedSlot, plan, plan_slots};
 pub use redis_budget::RedisBudgets;
 use tokens::Tokenizers;
 pub(crate) use tokens::{output_tokens, request_tokens};
@@ -229,6 +237,23 @@ impl Limiter {
         let now_ms = unix_ms(now);
         let key = auth.key.as_ref();
 
+        // Gleichzeitigkeit zuerst (S-12): lehnt danach Budget oder Limit ab, gibt das
+        // Verwerfen der Lease die Plätze sofort frei (Fenster-Zähler blieben gebucht).
+        let mut slot_plan: Vec<PlannedSlot> = Vec::new();
+        plan_slots(key.map(Arc::as_ref), group.map(Arc::as_ref), &mut slot_plan);
+        let slots = if slot_plan.is_empty() {
+            None
+        } else {
+            let checks: Vec<SlotCheck<'_>> = slot_plan
+                .iter()
+                .map(|p| SlotCheck::new(&p.key, p.limit))
+                .collect();
+            match self.counters.acquire_slots(&checks).await {
+                Ok(l) => Some(l),
+                Err(rej) => return Err(Box::new(Denied::concurrency(&slot_plan, &rej))),
+            }
+        };
+
         // Budgets: harte Grenze vor dem Upstream-Aufruf; `strict` reserviert die geschätzten
         // Kosten (F106). Lehnt danach ein Limit ab, gibt das Verwerfen des Holds sie frei.
         let mut budget_hold = None;
@@ -285,6 +310,7 @@ impl Limiter {
             budget_hold,
             estimate: est,
             tokenizer: self.tokenizer(group.map(Arc::as_ref)),
+            slots,
         })
     }
 }
@@ -390,7 +416,8 @@ impl Parts {
 /// Zugelassene Anfrage: hält die Reservierungen bis zum Ende der Anfrage.
 ///
 /// Wird sie ohne [`Admission::complete`] verworfen, bleiben die Reservierungen voll gebucht
-/// (konservativ) und es wird nichts abgerechnet.
+/// (konservativ) und es wird nichts abgerechnet. Gleichzeitigkeits-Plätze werden in beiden
+/// Fällen freigegeben.
 pub struct Admission {
     counters: Arc<dyn CounterBackend>,
     budgets: Option<Arc<Budgets>>,
@@ -404,6 +431,8 @@ pub struct Admission {
     estimate: TokenEstimate,
     /// Tokenizer der Modellgruppe (Usage-Schätzung bei Abbruch/fehlender Usage).
     tokenizer: Tokenizer,
+    /// Belegte Gleichzeitigkeits-Plätze (S-12); frei mit dem Ende der `Admission`.
+    slots: Option<SlotLease>,
 }
 
 impl fmt::Debug for Admission {
@@ -411,6 +440,7 @@ impl fmt::Debug for Admission {
         f.debug_struct("Admission")
             .field("parts", &self.parts)
             .field("headers", &self.headers)
+            .field("slots", &self.slots)
             .finish_non_exhaustive()
     }
 }
@@ -440,6 +470,8 @@ impl Admission {
     /// `record.cost` (Anteil in `record.plugin_cost`) und auf den Budgets, ihre Tokens auf den
     /// Token-Limits des Keys/Teams.
     pub(crate) fn complete(mut self, record: &mut RequestRecord, plugin_calls: &[PluginCall]) {
+        // Die Anfrage ist zu Ende: Plätze sofort frei.
+        drop(self.slots.take());
         let mut cost = self.price(record);
         let plugin_cost = self.plugin_price(record, plugin_calls);
         if let Some(p) = plugin_cost {
@@ -566,6 +598,25 @@ impl Denied {
         Self {
             error: err,
             headers: RateHeaders::from_rejection(planned, rej),
+        }
+    }
+
+    fn concurrency(planned: &[PlannedSlot], rej: &SlotRejection) -> Self {
+        let level = planned.get(rej.index).map_or("", |p| p.level.label());
+        let msg = format!(
+            "Zu viele gleichzeitige Anfragen: höchstens {} gleichzeitig ({level}); laufende \
+             Anfragen abwarten und erneut versuchen",
+            rej.limit
+        );
+        let mut err = UpstreamError::new(
+            ErrorClass::RateLimit,
+            ApiError::new(ErrorKind::RateLimit, msg).with_code("concurrency_limit_exceeded"),
+        )
+        .with_retry_after(Some(Duration::from_secs(1)));
+        err.retryable = false;
+        Self {
+            error: err,
+            headers: RateHeaders::default(),
         }
     }
 

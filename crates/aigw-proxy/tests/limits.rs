@@ -676,6 +676,85 @@ async fn stream_abort_settles_with_estimated_usage() {
     wait_counter(&counters, &key, actual).await;
 }
 
+/// S-12: `concurrency` über HTTP – ein laufender Stream belegt den Platz, eine zweite Anfrage
+/// bekommt `429 concurrency_limit_exceeded` mit `Retry-After`; nach dem Abbruch des Streams
+/// ist der Platz frei. Abgeschlossene Anfragen geben ihn ebenfalls frei.
+#[tokio::test]
+async fn concurrency_limit_holds_during_stream_and_frees_on_abort() {
+    let (snap, ids) = Fixture {
+        team: TeamSpec {
+            limits: vec![lim(LimitMetric::Concurrency, 1)],
+            ..TeamSpec::default()
+        },
+        ..Fixture::default()
+    }
+    .build();
+    let counters = Arc::new(LocalCounters::new());
+    let (addr, _capture) = gateway(
+        &snap,
+        single_route(TestProvider::endless("d")),
+        counters.clone(),
+        None,
+    )
+    .await;
+    let slot = format!("team:{}:concurrency", ids.team);
+
+    let client = Client::builder(TokioExecutor::new()).build_http::<Full<Bytes>>();
+    let body = json!({"model": "m", "max_tokens": 10, "stream": true,
+        "messages": [{"role": "user", "content": "hello"}]});
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri(format!("http://{addr}/v1/chat/completions"))
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {SECRET}"))
+        .body(Full::new(serde_json::to_vec(&body).unwrap().into()))
+        .unwrap();
+    let res = client.request(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(counters.in_flight(&slot).await, 1);
+
+    let r = post(
+        addr,
+        "/v1/chat/completions",
+        json!({"model": "m", "messages": [{"role": "user", "content": "x"}]}),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(r.json()["error"]["code"], "concurrency_limit_exceeded");
+    assert_eq!(r.header("retry-after"), Some("1"));
+
+    // Client bricht den Stream ab → Platz frei.
+    let mut body = res.into_body();
+    body.frame().await.unwrap().unwrap();
+    drop(body);
+    drop(client);
+    for _ in 0..400 {
+        if counters.in_flight(&slot).await == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(counters.in_flight(&slot).await, 0);
+}
+
+/// S-12: Nicht-Stream-Anfragen nacheinander: der Platz ist nach jeder Antwort wieder frei.
+#[tokio::test]
+async fn concurrency_limit_frees_after_each_response() {
+    let (gw, ids) = local_gateway(Fixture {
+        key: ApiKeySpec {
+            limits: vec![lim(LimitMetric::Concurrency, 1)],
+            ..ApiKeySpec::default()
+        },
+        ..Fixture::default()
+    })
+    .await;
+    for _ in 0..3 {
+        assert_eq!(chat(gw.addr).await.status, StatusCode::OK);
+    }
+    let slot = format!("key:{}:concurrency", ids.key);
+    assert_eq!(gw.counters.in_flight(&slot).await, 0);
+}
+
 #[tokio::test]
 async fn retries_use_one_reservation_per_client_request() {
     let (snap, ids) = Fixture {

@@ -739,6 +739,14 @@ pub struct McpConfig {
     pub session_idle_timeout_secs: u64,
     /// Höchstzahl gleichzeitiger Client-Sessions je Instanz.
     pub max_sessions: usize,
+    /// Höchstzahl gleichzeitiger Client-Sessions je API-Key und Instanz (S-28).
+    pub max_sessions_per_key: usize,
+    /// Höchstzahl gleichzeitiger Client-Sessions je Team und Instanz (S-28).
+    pub max_sessions_per_team: usize,
+    /// Puffer für Benachrichtigungen je Session bzw. je `tools/call`-Strom (Nachrichten,
+    /// S-28). Voll → älteste (Session) bzw. neue (`tools/call`) Meldungen werden verworfen
+    /// und geloggt.
+    pub notification_buffer: usize,
     /// Zeitlimit je Upstream-Anfrage (Sekunden), falls der Server keins setzt (`timeoutMs`).
     pub call_timeout_secs: u64,
     /// Zeitlimit für den Verbindungsaufbau zum Upstream (Sekunden).
@@ -757,6 +765,9 @@ impl Default for McpConfig {
             allow_stdio_commands: Vec::new(),
             session_idle_timeout_secs: 3600,
             max_sessions: 10_000,
+            max_sessions_per_key: 100,
+            max_sessions_per_team: 1_000,
+            notification_buffer: 64,
             call_timeout_secs: 120,
             connect_timeout_secs: 10,
             max_message_bytes: 16 * 1024 * 1024,

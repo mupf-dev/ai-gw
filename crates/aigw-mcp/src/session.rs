@@ -8,6 +8,11 @@
 //! laufende Anfragen (für `notifications/cancelled`), die Zuordnung Ressourcen-URI → Server
 //! (aggregierter Endpunkt) und einen Kanal für Benachrichtigungen an `GET`-Ströme. Sessions
 //! liegen im Speicher der Instanz (Load-Balancer: Sticky Sessions, siehe Doku).
+//!
+//! Grenzen (S-28): `max_sessions` je Instanz, zusätzlich `max_sessions_per_key` und
+//! `max_sessions_per_team`, damit ein einzelner Key bzw. ein Team die Instanz nicht für alle
+//! anderen sperrt. Der Benachrichtigungskanal ist begrenzt (`notification_buffer`); langsame
+//! `GET`-Ströme verlieren die ältesten Meldungen (mit Log), die Session bleibt bestehen.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -35,6 +40,8 @@ pub struct Session {
     pub id: String,
     /// API-Key, an den die Session gebunden ist.
     pub key: Option<Id>,
+    /// Team des Keys (Grenze `max_sessions_per_team`).
+    pub team: Option<Id>,
     /// Endpunkt.
     pub scope: Scope,
     /// Ausgehandelte Protokollversion.
@@ -136,7 +143,35 @@ impl Session {
 pub struct Sessions {
     map: Mutex<HashMap<String, Arc<Session>>>,
     max: usize,
+    per_key: usize,
+    per_team: usize,
+    buffer: usize,
     idle: Duration,
+}
+
+/// Grenzen für [`Sessions`] (S-28).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionLimits {
+    /// Höchstzahl je Instanz.
+    pub max: usize,
+    /// Höchstzahl je API-Key.
+    pub per_key: usize,
+    /// Höchstzahl je Team.
+    pub per_team: usize,
+    /// Puffer des Benachrichtigungskanals je Session (Nachrichten).
+    pub notification_buffer: usize,
+}
+
+impl SessionLimits {
+    /// Nur eine Gesamtgrenze (ohne Grenzen je Key/Team), Puffer 64.
+    pub fn total(max: usize) -> Self {
+        Self {
+            max,
+            per_key: usize::MAX,
+            per_team: usize::MAX,
+            notification_buffer: 64,
+        }
+    }
 }
 
 fn random_id() -> Result<String, RpcError> {
@@ -151,19 +186,30 @@ fn random_id() -> Result<String, RpcError> {
 }
 
 impl Sessions {
-    /// Leere Verwaltung.
+    /// Leere Verwaltung, nur mit Gesamtgrenze.
     pub fn new(max: usize, idle: Duration) -> Self {
+        Self::with_limits(SessionLimits::total(max), idle)
+    }
+
+    /// Leere Verwaltung mit Grenzen je Instanz, Key und Team.
+    pub fn with_limits(limits: SessionLimits, idle: Duration) -> Self {
         Self {
             map: Mutex::new(HashMap::new()),
-            max: max.max(1),
+            max: limits.max.max(1),
+            per_key: limits.per_key.max(1),
+            per_team: limits.per_team.max(1),
+            buffer: limits.notification_buffer.clamp(1, 65_536),
             idle,
         }
     }
 
-    /// Legt eine Session an (Fehler bei Erreichen von `max_sessions`).
+    /// Legt eine Session an. Fehler bei Erreichen von `max_sessions` (`503`) bzw. der Grenze
+    /// je Key/Team (`429`, Code `too_many_sessions`); abgelaufene Sessions werden vorher
+    /// entfernt.
     pub fn create(
         &self,
         key: Option<Id>,
+        team: Option<Id>,
         scope: Scope,
         protocol_version: &'static str,
     ) -> Result<Arc<Session>, RpcError> {
@@ -171,7 +217,19 @@ impl Sessions {
             .map
             .lock()
             .map_err(|_| RpcError::new(INTERNAL_ERROR, "Sessions gesperrt"))?;
-        if map.len() >= self.max {
+        let count = |map: &HashMap<String, Arc<Session>>| {
+            let (mut k, mut t) = (0usize, 0usize);
+            for s in map.values() {
+                k += usize::from(key.is_some() && s.key == key);
+                t += usize::from(team.is_some() && s.team == team);
+            }
+            (k, t)
+        };
+        let over = |map: &HashMap<String, Arc<Session>>| {
+            let (k, t) = count(map);
+            map.len() >= self.max || k >= self.per_key || t >= self.per_team
+        };
+        if over(&map) {
             // Zuerst abgelaufene entfernen.
             let idle = self.idle;
             map.retain(|_, s| s.idle_for() < idle);
@@ -183,11 +241,36 @@ impl Sessions {
                     "Zu viele MCP-Sessions auf dieser Instanz",
                 ));
             }
+            let (k, t) = count(&map);
+            if k >= self.per_key {
+                return Err(RpcError::gateway(
+                    crate::jsonrpc::RATE_LIMITED,
+                    429,
+                    "too_many_sessions",
+                    format!(
+                        "Zu viele MCP-Sessions für diesen API-Key (höchstens {}); nicht mehr \
+                         benötigte Sessions mit DELETE beenden",
+                        self.per_key
+                    ),
+                ));
+            }
+            if t >= self.per_team {
+                return Err(RpcError::gateway(
+                    crate::jsonrpc::RATE_LIMITED,
+                    429,
+                    "too_many_sessions",
+                    format!(
+                        "Zu viele MCP-Sessions für dieses Team (höchstens {})",
+                        self.per_team
+                    ),
+                ));
+            }
         }
-        let (notify, _) = broadcast::channel(64);
+        let (notify, _) = broadcast::channel(self.buffer);
         let s = Arc::new(Session {
             id: random_id()?,
             key,
+            team,
             scope,
             protocol_version,
             last_seen: Mutex::new(Instant::now()),
@@ -256,13 +339,18 @@ mod tests {
     #[test]
     fn lifecycle_and_cancel() {
         let s = Sessions::new(2, Duration::from_secs(60));
-        let a = s.create(None, Scope::Aggregate, "2025-06-18").unwrap();
+        let a = s
+            .create(None, None, Scope::Aggregate, "2025-06-18")
+            .unwrap();
         assert_eq!(a.id.len(), 64);
         let b = s
-            .create(None, Scope::Server("x".into()), "2025-06-18")
+            .create(None, None, Scope::Server("x".into()), "2025-06-18")
             .unwrap();
         assert_ne!(a.id, b.id);
-        assert!(s.create(None, Scope::Aggregate, "2025-06-18").is_err());
+        assert!(
+            s.create(None, None, Scope::Aggregate, "2025-06-18")
+                .is_err()
+        );
         assert!(s.get(&a.id).is_some());
         let mut f = a.begin(RequestId::Num(7));
         assert!(a.cancel(&RequestId::Num(7)));
@@ -271,7 +359,72 @@ mod tests {
         assert!(s.remove(&b.id));
         assert!(s.get(&b.id).is_none());
         let short = Sessions::new(10, Duration::ZERO);
-        let c = short.create(None, Scope::Aggregate, "2025-06-18").unwrap();
+        let c = short
+            .create(None, None, Scope::Aggregate, "2025-06-18")
+            .unwrap();
         assert!(short.get(&c.id).is_none());
+    }
+
+    /// S-28: Grenzen je Key und Team; andere Keys bleiben unberührt; Beenden gibt frei.
+    #[test]
+    fn per_key_and_team_limits() {
+        let s = Sessions::with_limits(
+            SessionLimits {
+                max: 100,
+                per_key: 2,
+                per_team: 3,
+                notification_buffer: 4,
+            },
+            Duration::from_secs(60),
+        );
+        let (k1, k2, k3, t) = (
+            aigw_core::resource::new_id(),
+            aigw_core::resource::new_id(),
+            aigw_core::resource::new_id(),
+            aigw_core::resource::new_id(),
+        );
+        let v = "2025-06-18";
+        let a = s.create(Some(k1), Some(t), Scope::Aggregate, v).unwrap();
+        s.create(Some(k1), Some(t), Scope::Aggregate, v).unwrap();
+        let e = s
+            .create(Some(k1), Some(t), Scope::Aggregate, v)
+            .unwrap_err();
+        assert_eq!(e.status(), Some(429));
+        assert!(e.message.contains("API-Key"));
+        s.create(Some(k2), Some(t), Scope::Aggregate, v).unwrap();
+        let e = s
+            .create(Some(k2), Some(t), Scope::Aggregate, v)
+            .unwrap_err();
+        assert!(e.message.contains("Team"));
+        // Anderes Team, anderer Key: frei.
+        s.create(Some(k3), None, Scope::Aggregate, v).unwrap();
+        assert!(s.remove(&a.id));
+        s.create(Some(k1), Some(t), Scope::Aggregate, v).unwrap();
+        assert_eq!(s.len(), 4);
+    }
+
+    /// S-28: Der Benachrichtigungskanal ist begrenzt – ein langsamer Empfänger verliert die
+    /// ältesten Meldungen, der Speicher wächst nicht.
+    #[test]
+    fn notification_channel_is_bounded() {
+        let s = Sessions::with_limits(
+            SessionLimits {
+                notification_buffer: 2,
+                ..SessionLimits::total(10)
+            },
+            Duration::from_secs(60),
+        );
+        let a = s
+            .create(None, None, Scope::Aggregate, "2025-06-18")
+            .unwrap();
+        let mut rx = a.subscribe();
+        for i in 0..10 {
+            a.notify(serde_json::json!(i));
+        }
+        assert!(matches!(
+            rx.try_recv(),
+            Err(broadcast::error::TryRecvError::Lagged(8))
+        ));
+        assert_eq!(rx.try_recv().unwrap(), serde_json::json!(8));
     }
 }

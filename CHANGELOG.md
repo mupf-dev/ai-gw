@@ -19,6 +19,12 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   `signatureRequired`/`trustedKeys`; Admin-UI mit Spalte „Signatur“ und Feldern im
   Upload-Dialog. CLI `aigw wasm keygen|pubkey|sign|verify`. Migration 0011 (beide Dialekte),
   Metrik `aigw_wasm_signature_rejected_total`. Doku `17-wasm-plugins.md` §3a, S-37.
+- **`concurrency`-Limits werden durchgesetzt (S-12, AIGW-100):** gleichzeitige Anfragen je
+  Key, Team, Organisation (optional je Modellgruppe) und je Modellgruppe; atomar über alle
+  Ebenen, Freigabe bei Abschluss, Client-Abbruch und Fehler; `429
+  concurrency_limit_exceeded` mit `Retry-After: 1`. `local` je Instanz, `redis` im Cluster
+  (Lease-Ablauf `counters.concurrency_lease_secs`, Standard 30 s), `postgres-sync` je Instanz.
+
 - **WASM-Plugins (AIGW-63):** Plugin-Art `wasm` führt hochgeladene WebAssembly-Komponenten
   (Component Model, WIT-Welt `aigw:plugin/plugin` in `crates/aigw-wasm/wit/plugin.wit`) in der
   Plugin-Kette aus – Anfrage, Antwort und Stream, Ergebnis weiter/ändern/blockieren/ablehnen,
@@ -142,6 +148,24 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   Job „Container-Images (amd64 + arm64)“ bei Tags `v*` und manuell (Tarballs als Artefakt).
 
 ### Geändert
+
+- **MCP-Grenzen (S-28, AIGW-100, verhaltensändernd):** `initialize`, `tools/list`,
+  `resources/*` und `prompts/*` zählen gegen die Limits des Keys (`requests`, `concurrency`;
+  `ping` nicht) – Keys mit knappem RPM-Limit brauchen ggf. mehr Spielraum. Neu
+  `mcp.max_sessions_per_key` (100), `mcp.max_sessions_per_team` (1000; darüber
+  `429 too_many_sessions`) und `mcp.notification_buffer` (64; begrenzte Benachrichtigungskanäle,
+  Überlauf wird verworfen und geloggt). `Sessions::create` bekommt das Team, `NoteSink` einen
+  begrenzten `mpsc::Sender`.
+- **Cache-AAD mit Partition (S-27, AIGW-100):** Warmstart-Einträge des semantischen Caches
+  binden ID **und** Partition in die AAD; Migration 0010 (SQLite + Postgres) leert
+  `cache_vector` einmalig (Cache wird neu aufgebaut).
+- **Route aus derselben Konfigurationsversion wie die Freigabe (S-31, AIGW-100):**
+  `ModelRoutes::route_for` (Standard: `route`); `SnapshotRoutes` sucht über den kanonischen
+  Namen der freigegebenen Gruppe in der passenden Tabelle (älter → sofortiger Neuaufbau, neuer →
+  vorige Tabelle).
+- `CounterBackend` hat die neuen Pflichtmethoden `acquire_slots` und `in_flight` (S-12).
+- Hinweis `concurrency-not-enforced` entfällt; bei `postgres-sync` meldet
+  `GET /usage/limit-warnings` stattdessen `concurrency-per-instance`.
 
 - `PluginHost::chat` bekommt die Sammelstelle `&PluginCalls` (aus `CallInfo::plugin_calls`)
   für die Kostenzurechnung; `CallInfo` hat das neue Feld `plugin_calls` (AIGW-89).

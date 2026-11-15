@@ -98,8 +98,11 @@ AIGW-58). Verweise `S-xx` beziehen sich auf die dortigen Befunde.
 
 - Keys mit Ablaufdatum, Limits und Budgets je Org/Team; widerrufene Keys wirken sofort
   (Snapshot), auch über Instanzen hinweg nach dem Reload.
-- Limit-Metrik `concurrency` wird **noch nicht durchgesetzt** (S-12) – `GET
-  /admin/api/v1/usage/limit-warnings` zeigt betroffene Objekte.
+- Limit-Metrik `concurrency` begrenzt gleichzeitige Anfragen je Key/Team/Organisation/
+  Modellgruppe (S-12). Mit mehreren Instanzen `counters.backend: redis` verwenden – bei
+  `postgres-sync` gilt das Limit je Instanz (Hinweis in `GET /admin/api/v1/usage/limit-warnings`).
+- MCP: `mcp.max_sessions_per_key`/`max_sessions_per_team` passend zur Nutzung wählen (S-28);
+  `initialize`, Listen und Ressourcen zählen gegen die Limits des Keys.
 - Guardrails:
   - `content-safety` prüft den ganzen Text in bis zu 16 Fenstern zu `maxChars`; längere
     Eingaben scheitern nach `failMode` (Standard `closed`). `maxChars` passend zum Dienst wählen.

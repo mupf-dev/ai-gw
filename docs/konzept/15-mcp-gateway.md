@@ -67,7 +67,14 @@ Ein Header `MCP-Protocol-Version` mit nicht unterstützter Version → `400`; fe
 **Sessions:** `initialize` legt eine Session an (`Mcp-Session-Id`, 256 Bit zufällig). Alle
 weiteren Anfragen brauchen den Header: fehlt er → `400`; unbekannt, abgelaufen, an einen
 anderen Key oder anderen Endpunkt gebunden → `404` (Client initialisiert neu). Sessions enden
-nach `mcp.session_idle_timeout_secs` ohne Anfrage; höchstens `mcp.max_sessions` je Instanz.
+nach `mcp.session_idle_timeout_secs` ohne Anfrage; höchstens `mcp.max_sessions` je Instanz,
+`mcp.max_sessions_per_key` je API-Key und `mcp.max_sessions_per_team` je Team (S-28; darüber
+`429 too_many_sessions`, über der Instanzgrenze `503`). `initialize`, Listen, Ressourcen und
+Prompts durchlaufen wie `tools/call` die Limits des Keys (`requests`, `concurrency`; `ping`
+nicht) – abgelehnt mit JSON-RPC-Fehler `-32004` und `Retry-After` (bei `initialize` zusätzlich
+HTTP `429`). Benachrichtigungskanäle sind begrenzt (`mcp.notification_buffer`): Ein langsamer
+`GET`-Strom verliert die ältesten Meldungen, ein `tools/call`-Strom verwirft neue
+Fortschrittsmeldungen – jeweils mit Warnung im Log; die Session bleibt bestehen.
 Sessions liegen im Speicher der Instanz – bei mehreren Instanzen braucht der Load-Balancer
 Sticky Sessions (z. B. nach `Mcp-Session-Id`), siehe offene Punkte.
 
@@ -210,8 +217,10 @@ Gateway meldet diese Fähigkeiten nicht an); `ping` wird beantwortet.
 
 - **Limits:** Jeder `tools/call` reserviert eine Anfrage in den Limits von Key, Team und
   Organisation (gleicher `Limiter` wie `/v1/*`, keine Tokens, keine Modellgruppe). Abgelehnt →
-  `-32004` mit `data.status = 429`, `data.retryAfter` und Header `Retry-After`. Listen,
-  `ping` usw. zählen nicht. Budgets: harte Budgetgrenzen sperren auch Tool-Aufrufe; Kosten
+  `-32004` mit `data.status = 429`, `data.retryAfter`, `data.reason` (z. B.
+  `rate_limit_exceeded`, `concurrency_limit_exceeded`) und Header `Retry-After`. Seit S-28
+  zählen auch `initialize`, `tools/list`, `resources/*` und `prompts/*` je eine Anfrage (ohne
+  Request-Log-Eintrag); nur `ping` und Benachrichtigungen nicht. Budgets: harte Budgetgrenzen sperren auch Tool-Aufrufe; Kosten
   entstehen keine.
 - **Request-Log:** je `tools/call` ein `RequestRecord` mit `ingress = mcp` (Spalte
   `endpoint = "mcp"`), `model_requested = "<server>__<tool>"`, `RequestRecord.mcp` (Server,
@@ -235,6 +244,9 @@ Gateway meldet diese Fähigkeiten nicht an); `ping` wird beantwortet.
 | `allow_stdio_commands` | `[]` | freigeschaltete stdio-Programme (leer = stdio aus) |
 | `session_idle_timeout_secs` | `3600` | Ablauf einer Client-Session |
 | `max_sessions` | `10000` | Sessions je Instanz |
+| `max_sessions_per_key` | `100` | Sessions je API-Key (je Instanz) |
+| `max_sessions_per_team` | `1000` | Sessions je Team (je Instanz) |
+| `notification_buffer` | `64` | Puffer je Benachrichtigungskanal (Nachrichten) |
 | `call_timeout_secs` | `120` | Zeitlimit je Upstream-Anfrage |
 | `connect_timeout_secs` | `10` | Verbindungsaufbau |
 | `max_message_bytes` | `16777216` | größte Upstream-Nachricht |

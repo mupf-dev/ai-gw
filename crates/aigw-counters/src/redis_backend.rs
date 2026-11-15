@@ -38,7 +38,8 @@ use crate::engine::{Engine, SyncDelta};
 use crate::local::spawn_janitor;
 use crate::{
     Booked, Clock, CounterBackend, CounterError, CounterStats, DEFAULT_JANITOR, Health, LimitCheck,
-    Origin, Quota, Rejection, Reservation, SettleMode, SystemClock, Window,
+    LocalSlots, Origin, Quota, Rejection, Reservation, SettleMode, SlotCheck, SlotLease,
+    SlotRejection, SystemClock, Window,
 };
 
 /// Einstellungen für `redis`.
@@ -59,6 +60,10 @@ pub struct RedisOptions {
     /// Höchstzahl nachzutragender Deltas (Rückstau nach einem Ausfall, Standard 100 000);
     /// darüber werden die ältesten verworfen.
     pub max_backlog: usize,
+    /// Gültigkeit eines belegten Gleichzeitigkeits-Platzes ohne Verlängerung (Standard 30 s);
+    /// laufende Anfragen verlängern im Abstand `slot_ttl / 3`. Nach einem Absturz einer
+    /// Instanz sind ihre Plätze spätestens nach dieser Zeit wieder frei.
+    pub slot_ttl: Duration,
 }
 
 impl Default for RedisOptions {
@@ -71,6 +76,7 @@ impl Default for RedisOptions {
             key_prefix: "aigw:c:".to_owned(),
             clock: None,
             max_backlog: 100_000,
+            slot_ttl: Duration::from_secs(30),
         }
     }
 }
@@ -201,6 +207,56 @@ local v = redis.call('HMGET', KEYS[1], string.format('%d', idx), string.format('
 return {now, idx, tonumber(v[1]) or 0, tonumber(v[2]) or 0}
 ";
 
+/// Lua: Gleichzeitigkeits-Plätze belegen (alle oder keiner). KEYS[i]: sortierte Menge je
+/// Limit; ARGV[1]: Gültigkeit (ms), ARGV[2]: Mitglied (`Instanz:Lease`), ARGV[2 + i]: Limit.
+/// Abgelaufene Mitglieder (Score = Ablaufzeit ≤ jetzt) werden zuerst entfernt.
+/// Antwort {Index des vollen Limits (0-basiert) bzw. -1, belegte Plätze}.
+const SLOT_ACQUIRE_LUA: &str = r"
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local ttl = tonumber(ARGV[1])
+for i = 1, #KEYS do
+  redis.call('ZREMRANGEBYSCORE', KEYS[i], '-inf', now)
+  local c = redis.call('ZCARD', KEYS[i])
+  if c >= tonumber(ARGV[2 + i]) then
+    return {i - 1, c}
+  end
+end
+for i = 1, #KEYS do
+  redis.call('ZADD', KEYS[i], now + ttl, ARGV[2])
+  redis.call('PEXPIRE', KEYS[i], ttl * 2)
+end
+return {-1, 0}
+";
+
+/// Lua: Plätze freigeben. KEYS[i]: Mengen, ARGV[1]: Mitglied.
+const SLOT_RELEASE_LUA: &str = r"
+for i = 1, #KEYS do
+  redis.call('ZREM', KEYS[i], ARGV[1])
+end
+return 0
+";
+
+/// Lua: laufende Plätze verlängern (nur vorhandene, `XX`). KEYS[i]: Menge, ARGV[1]:
+/// Gültigkeit (ms), ARGV[1 + i]: Mitglied für KEYS[i].
+const SLOT_REFRESH_LUA: &str = r"
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local ttl = tonumber(ARGV[1])
+for i = 1, #KEYS do
+  redis.call('ZADD', KEYS[i], 'XX', now + ttl, ARGV[1 + i])
+  redis.call('PEXPIRE', KEYS[i], ttl * 2)
+end
+return 0
+";
+
+/// Lua: belegte (nicht abgelaufene) Plätze zählen.
+const SLOT_COUNT_LUA: &str = r"
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+return redis.call('ZCOUNT', KEYS[1], '(' .. now, '+inf')
+";
+
 /// Rückstau-Schlüssel: (Zählerschlüssel, Fenster, Bucket).
 type BacklogKey = (Box<str>, Window, u64);
 
@@ -259,6 +315,17 @@ struct Inner {
     replayed: AtomicU64,
     dropped: AtomicU64,
     opts: RedisOptions,
+    slot_acquire: Script,
+    slot_release: Script,
+    slot_refresh: Script,
+    slot_count: Script,
+    /// Rückfall der Gleichzeitigkeits-Limits (exakt je Instanz).
+    slots_local: Arc<LocalSlots>,
+    /// Kennung dieser Instanz in den Mitgliedern der Platz-Mengen.
+    slot_instance: String,
+    slot_seq: AtomicU64,
+    /// Laufende Redis-Leases (ID → Redis-Schlüssel) für die Verlängerung.
+    slot_leases: Mutex<HashMap<u64, Vec<String>>>,
 }
 
 /// Exakte, verteilte Zähler über Redis mit lokalem Rückfall.
@@ -295,6 +362,14 @@ impl RedisCounters {
                 replayed: AtomicU64::new(0),
                 dropped: AtomicU64::new(0),
                 opts,
+                slot_acquire: Script::new(SLOT_ACQUIRE_LUA),
+                slot_release: Script::new(SLOT_RELEASE_LUA),
+                slot_refresh: Script::new(SLOT_REFRESH_LUA),
+                slot_count: Script::new(SLOT_COUNT_LUA),
+                slots_local: LocalSlots::new(),
+                slot_instance: uuid::Uuid::now_v7().simple().to_string(),
+                slot_seq: AtomicU64::new(1),
+                slot_leases: Mutex::new(HashMap::new()),
             }),
         });
         match this.inner.try_connect().await {
@@ -307,6 +382,7 @@ impl RedisCounters {
         }
         spawn_janitor(Arc::downgrade(&this.inner.local), DEFAULT_JANITOR);
         spawn_monitor(Arc::downgrade(&this.inner));
+        spawn_slot_refresh(Arc::downgrade(&this.inner));
         Ok(this)
     }
 
@@ -352,6 +428,41 @@ impl RedisCounters {
         s.push(':');
         s.push_str(key);
         s
+    }
+
+    fn slot_key(&self, key: &str) -> String {
+        format!("{}slot:{key}", self.inner.opts.key_prefix)
+    }
+
+    fn slot_ttl_ms(&self) -> u64 {
+        u64::try_from(self.inner.opts.slot_ttl.as_millis())
+            .unwrap_or(u64::MAX)
+            .max(1000)
+    }
+
+    async fn acquire_slots_redis(
+        &self,
+        con: &mut ConnectionManager,
+        keys: &[String],
+        member: &str,
+        limits: &[u64],
+    ) -> RedisResult<(i64, i64)> {
+        let mut inv = self.inner.slot_acquire.prepare_invoke();
+        for k in keys {
+            inv.key(k);
+        }
+        inv.arg(self.slot_ttl_ms()).arg(member);
+        for l in limits {
+            inv.arg(*l);
+        }
+        let out: Vec<i64> = inv.invoke_async(con).await?;
+        let [idx, used] = out[..] else {
+            return Err(redis::RedisError::from((
+                redis::ErrorKind::UnexpectedReturnType,
+                "slot_acquire: unerwartete Antwortlänge",
+            )));
+        };
+        Ok((idx, used))
     }
 
     async fn reserve_redis(
@@ -791,6 +902,86 @@ fn spawn_monitor(inner: Weak<Inner>) {
     });
 }
 
+/// Gibt Redis-Plätze frei (im Hintergrund; ohne Laufzeit oder Verbindung verfallen sie nach
+/// `slot_ttl`).
+fn release_redis_slots(inner: &Arc<Inner>, id: u64, keys: Vec<String>, member: String) {
+    inner
+        .slot_leases
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .remove(&id);
+    let Ok(rt) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    let Some(mut con) = inner.conn() else {
+        return;
+    };
+    let inner = Arc::clone(inner);
+    rt.spawn(async move {
+        let mut inv = inner.slot_release.prepare_invoke();
+        for k in &keys {
+            inv.key(k);
+        }
+        inv.arg(&member);
+        let r = tokio::time::timeout(inner.opts.timeout, inv.invoke_async::<i64>(&mut con)).await;
+        if let Err(e) = timeout_err(r) {
+            tracing::debug!(error = %e, "Redis: Freigabe der Gleichzeitigkeits-Plätze fehlgeschlagen – sie verfallen nach slot_ttl");
+        }
+    });
+}
+
+/// Verlängert laufende Redis-Leases im Abstand `slot_ttl / 3`.
+fn spawn_slot_refresh(inner: Weak<Inner>) {
+    tokio::spawn(async move {
+        loop {
+            let every = match inner.upgrade() {
+                Some(i) => (i.opts.slot_ttl / 3).max(Duration::from_millis(300)),
+                None => break,
+            };
+            tokio::time::sleep(every).await;
+            let Some(inner) = inner.upgrade() else {
+                break;
+            };
+            let pairs: Vec<(String, String)> = {
+                let leases = inner
+                    .slot_leases
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                leases
+                    .iter()
+                    .flat_map(|(id, keys)| {
+                        let member = format!("{}:{id}", inner.slot_instance);
+                        keys.iter().map(move |k| (k.clone(), member.clone()))
+                    })
+                    .collect()
+            };
+            if pairs.is_empty() {
+                continue;
+            }
+            let Some(mut con) = inner.active_conn() else {
+                continue;
+            };
+            let ttl = u64::try_from(inner.opts.slot_ttl.as_millis())
+                .unwrap_or(u64::MAX)
+                .max(1000);
+            for chunk in pairs.chunks(REPLAY_CHUNK) {
+                let mut inv = inner.slot_refresh.prepare_invoke();
+                inv.arg(ttl);
+                for (k, m) in chunk {
+                    inv.key(k);
+                    inv.arg(m);
+                }
+                let r = tokio::time::timeout(inner.opts.timeout, inv.invoke_async::<i64>(&mut con))
+                    .await;
+                if let Err(e) = timeout_err(r) {
+                    tracing::debug!(error = %e, "Redis: Verlängern der Gleichzeitigkeits-Plätze fehlgeschlagen");
+                    break;
+                }
+            }
+        }
+    });
+}
+
 fn timeout_err<T>(r: Result<RedisResult<T>, tokio::time::error::Elapsed>) -> Result<T, String> {
     match r {
         Ok(Ok(v)) => Ok(v),
@@ -854,6 +1045,72 @@ impl CounterBackend for RedisCounters {
             }
         }
         self.inner.local.get(key, window)
+    }
+
+    async fn acquire_slots(&self, checks: &[SlotCheck<'_>]) -> Result<SlotLease, SlotRejection> {
+        if checks.is_empty() {
+            return Ok(SlotLease::empty());
+        }
+        if let Some(mut con) = self.inner.active_conn() {
+            let d = crate::slots::distinct(checks);
+            let keys: Vec<String> = d.iter().map(|(_, c)| self.slot_key(c.key)).collect();
+            let limits: Vec<u64> = d.iter().map(|(_, c)| c.limit).collect();
+            let id = self.inner.slot_seq.fetch_add(1, Ordering::Relaxed);
+            let member = format!("{}:{id}", self.inner.slot_instance);
+            let r = tokio::time::timeout(
+                self.inner.opts.timeout,
+                self.acquire_slots_redis(&mut con, &keys, &member, &limits),
+            )
+            .await;
+            match timeout_err(r) {
+                Ok((idx, used)) => {
+                    if let Some((i, c)) = usize::try_from(idx).ok().and_then(|i| d.get(i)) {
+                        return Err(SlotRejection {
+                            index: *i,
+                            key: c.key.to_owned(),
+                            limit: c.limit,
+                            in_flight: to_u64(used),
+                        });
+                    }
+                    self.inner
+                        .slot_leases
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .insert(id, keys.clone());
+                    let inner = Arc::clone(&self.inner);
+                    let names: Vec<String> = d.iter().map(|(_, c)| c.key.to_owned()).collect();
+                    return Ok(SlotLease::new(
+                        names,
+                        Box::new(move |_| release_redis_slots(&inner, id, keys, member)),
+                    ));
+                }
+                Err(e) => {
+                    // Unklar, ob das Skript lief: Plätze vorsorglich freigeben (sonst bis
+                    // zum Ablauf belegt), dann lokal weiter.
+                    release_redis_slots(&self.inner, id, keys, member);
+                    self.inner.mark_down(e);
+                }
+            }
+        }
+        self.inner.slots_local.acquire(checks)
+    }
+
+    async fn in_flight(&self, key: &str) -> u64 {
+        if let Some(mut con) = self.inner.active_conn() {
+            let r = tokio::time::timeout(
+                self.inner.opts.timeout,
+                self.inner
+                    .slot_count
+                    .key(self.slot_key(key))
+                    .invoke_async::<i64>(&mut con),
+            )
+            .await;
+            match timeout_err(r) {
+                Ok(v) => return to_u64(v),
+                Err(e) => self.inner.mark_down(e),
+            }
+        }
+        self.inner.slots_local.in_flight(key)
     }
 
     fn kind(&self) -> CounterBackendKind {

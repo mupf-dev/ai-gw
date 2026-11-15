@@ -1109,3 +1109,67 @@ async fn mock_deployments_and_unsupported_providers() {
     assert_eq!(e.routes.route("m").unwrap().members().len(), 2);
     e.capture.clear();
 }
+
+/// S-31: Freigabe und Route aus derselben Konfigurationsversion. Ein Alias wird von Gruppe
+/// „a“ auf „b“ umgehängt: Eine Anfrage, die noch mit dem alten Snapshot (Freigabe für „a“)
+/// läuft, landet bei „a“, auch wenn die Tabelle schon neu ist; ist die Tabelle älter als der
+/// Snapshot, wird sie sofort neu gebaut.
+#[tokio::test]
+async fn route_for_uses_the_same_config_version_as_the_grant() {
+    let (base, _fake) = start_fake().await;
+    let mk = |version: i64, alias_on_a: bool| {
+        let g = |name: &str, with_alias: bool| {
+            let mut g = group(
+                name,
+                RoutingStrategy::Weighted,
+                fast(json!({})),
+                vec![],
+                vec![deployment(name, &dep("d"), &base, None)],
+            );
+            if with_alias {
+                Arc::get_mut(&mut g)
+                    .unwrap()
+                    .group
+                    .spec
+                    .aliases
+                    .push("x".into());
+            }
+            g
+        };
+        snapshot(version, vec![g("a", alias_on_a), g("b", !alias_on_a)])
+    };
+    let v1 = mk(1, true);
+    let v2 = mk(2, false);
+    let routes = new_routes();
+    routes.rebuild(&v1);
+    routes.rebuild(&v2);
+    // Ohne Bezug: neue Tabelle, x → b.
+    assert_eq!(routes.route("x").unwrap().name(), "b");
+    // Anfrage mit Snapshot v1 (Freigabe für a): Route aus der Tabelle v1.
+    let ga = v1.model_group("x").unwrap();
+    assert_eq!(ga.group.metadata.name, "a");
+    let r = routes.route_for("x", Some(&v1), Some(ga.as_ref())).unwrap();
+    assert_eq!(r.name(), "a");
+    // Mit Snapshot v2: b.
+    let gb = v2.model_group("x").unwrap();
+    assert_eq!(
+        routes
+            .route_for("x", Some(&v2), Some(gb.as_ref()))
+            .unwrap()
+            .name(),
+        "b"
+    );
+
+    // Tabelle älter als der Snapshot (Reload-Task noch nicht gelaufen): sofort neu gebaut.
+    let v3 = mk(3, true);
+    let g3 = v3.model_group("x").unwrap();
+    assert_eq!(routes.version(), 2);
+    assert_eq!(
+        routes
+            .route_for("x", Some(&v3), Some(g3.as_ref()))
+            .unwrap()
+            .name(),
+        "a"
+    );
+    assert_eq!(routes.version(), 3);
+}

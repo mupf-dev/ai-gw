@@ -7,7 +7,11 @@
 //! Der Hot Path schreibt nie selbst: [`crate::vector::memory::MemoryIndex`] legt Aufträge in
 //! eine begrenzte Warteschlange (voll → verwerfen + zählen), ein Hintergrund-Task schreibt sie
 //! gebündelt (bis 256 je Transaktion). Klartext = Länge des Vektors (u32 LE) ‖ Vektor
-//! (`f32` LE) ‖ Antwort-JSON; AES-256-GCM mit dem Master-Key, AAD = `aigw-cache:` ‖ ID.
+//! (`f32` LE) ‖ Antwort-JSON; AES-256-GCM mit dem Master-Key,
+//! AAD = `aigw-cache:v2:` ‖ ID ‖ `:` ‖ Partition (S-27): Wer in die Datenbank schreiben kann,
+//! kann einen Eintrag weder einer anderen ID noch einer anderen Partition (Mandant/Scope)
+//! unterschieben – das Öffnen scheitert, der Eintrag wird übersprungen. Einträge mit der
+//! alten AAD (nur ID) verwirft Migration 0010.
 
 use std::sync::Arc;
 
@@ -34,9 +38,12 @@ pub enum PersistOp {
 pub const QUEUE: usize = 4096;
 const BATCH: usize = 256;
 
-fn aad(id: &str) -> Vec<u8> {
-    let mut a = b"aigw-cache:".to_vec();
+fn aad(id: &str, partition: &str) -> Vec<u8> {
+    let mut a = Vec::with_capacity(16 + id.len() + partition.len());
+    a.extend_from_slice(b"aigw-cache:v2:");
     a.extend_from_slice(id.as_bytes());
+    a.push(b':');
+    a.extend_from_slice(partition.as_bytes());
     a
 }
 
@@ -47,10 +54,11 @@ fn seal(keyring: &Keyring, e: &VectorEntry) -> Option<CacheVectorRow> {
     plain.extend_from_slice(&dims.to_le_bytes());
     plain.extend_from_slice(&vector_to_le_bytes(&e.vector));
     plain.extend_from_slice(&e.payload);
-    let sealed = keyring.seal(&aad(&id), &plain).ok()?;
+    let partition_key = e.partition.to_hex();
+    let sealed = keyring.seal(&aad(&id, &partition_key), &plain).ok()?;
     Some(CacheVectorRow {
         id,
-        partition_key: e.partition.to_hex(),
+        partition_key,
         dims: i64::from(dims),
         created_at: now_ms(),
         expires_at: e.expires_at_ms,
@@ -59,7 +67,9 @@ fn seal(keyring: &Keyring, e: &VectorEntry) -> Option<CacheVectorRow> {
 }
 
 fn open(keyring: &Keyring, row: &CacheVectorRow) -> Option<VectorEntry> {
-    let plain = keyring.open(&aad(&row.id), &row.sealed).ok()?;
+    let plain = keyring
+        .open(&aad(&row.id, &row.partition_key), &row.sealed)
+        .ok()?;
     let dims = u32::from_le_bytes(plain.get(..4)?.try_into().ok()?) as usize;
     let end = 4 + dims * 4;
     let vector = vector_from_le_bytes(plain.get(4..end)?)?;
@@ -166,5 +176,19 @@ mod tests {
         let mut moved = row.clone();
         moved.id = Hash32([3; 32]).to_hex(); // AAD bindet an die ID
         assert!(open(&ring, &moved).is_none());
+        // S-27: AAD bindet auch an die Partition (Mandant/Scope).
+        let mut other_tenant = row.clone();
+        other_tenant.partition_key = Hash32([9; 32]).to_hex();
+        assert!(open(&ring, &other_tenant).is_none());
+        // Alte AAD (nur ID) wird nicht mehr akzeptiert.
+        let mut old = row.clone();
+        let mut plain = Vec::new();
+        plain.extend_from_slice(&3u32.to_le_bytes());
+        plain.extend_from_slice(&vector_to_le_bytes(&e.vector));
+        plain.extend_from_slice(&e.payload);
+        let mut old_aad = b"aigw-cache:".to_vec();
+        old_aad.extend_from_slice(row.id.as_bytes());
+        old.sealed = ring.seal(&old_aad, &plain).unwrap();
+        assert!(open(&ring, &old).is_none());
     }
 }

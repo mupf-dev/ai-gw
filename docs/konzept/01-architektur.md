@@ -219,7 +219,7 @@ pub trait Plugin: Send + Sync {
 ## 14. Konfigurations-Snapshot und Verteilung
 
 - Jede Admin-Änderung läuft als DB-Transaktion, erhöht `config_version` und schreibt das `audit_log`.
-- Jede Instanz hält `ArcSwap<Snapshot>`. Ein Snapshot ist unveränderlich und enthält vorberechnete Indizes (Key-Hash → KeyCtx, Alias → Modellgruppe, zusammengesetzte Plugin-Ketten). Laufende Anfragen behalten ihren Snapshot.
+- Jede Instanz hält `ArcSwap<Snapshot>`. Ein Snapshot ist unveränderlich und enthält vorberechnete Indizes (Key-Hash → KeyCtx, Alias → Modellgruppe, zusammengesetzte Plugin-Ketten). Laufende Anfragen behalten ihren Snapshot. Die Routing-Tabelle wird je `config_version` aus dem Snapshot gebaut; die Route einer Anfrage wird über den kanonischen Namen der **freigegebenen** Gruppe in der Tabelle derselben Version gesucht (S-31: ggf. sofortiger Neuaufbau bzw. die vorige Tabelle), nie über den Alias in einer anderen Version.
 - **Aktualisierung:** SQLite in einer Instanz → direkt nach dem Commit. Postgres → `NOTIFY aigw_config, '<version>'` an alle Instanzen, die neu aufbauen (inkrementell, siehe unten). Zusätzlich wird alle 30 s die Version abgefragt, falls eine Benachrichtigung verloren geht.
 - **Umsetzung (AIGW-10):** `aigw_core::snapshot::SnapshotHandle` (`load()` lock-frei, Versions-Abo per `tokio::sync::watch`), `aigw_store::reload::Reloader`. Auslöser werden 100 ms zusammengefasst (Debounce). Schlägt der Neubau fehl oder ist die Datenbank nicht erreichbar, bleibt der letzte Snapshot aktiv (Q8); erneuter Versuch mit Backoff (0,25 s → 30 s), LISTEN-Verbindung mit Reconnect. Abfrageintervall: `store.reload_poll_secs` (0 = aus).
 - **Inkrementeller Neubau (AIGW-75, F16):** Änderungsjournal ist das `audit_log` (jede Änderung
