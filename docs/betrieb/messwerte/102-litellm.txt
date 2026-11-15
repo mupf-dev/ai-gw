@@ -1,0 +1,252 @@
+# ai-gw-Image aigw102-ai-gw:bench gebaut in 5 s
+# 2026-11-15T13:36:24Z 8 vCPU,  AMD EPYC-Genoa Processor, Last vorher: 2.44 5.05 8.31
+# Upstream: Kerne 0-1, Gateway-Container: Kerne 2-3, Last: Kerne 4-6, Postgres: Kern 7, RT=1
+# LiteLLM: ghcr.io/berriai/litellm:v1.108.8 / ghcr.io/berriai/litellm-database:v1.108.8 (ghcr.io/berriai/litellm@sha256:f0c49f0b498b57853ca8fb56fb002a275ac9e84ae460f8646b79c1332d55f7ec)
+# ai-gw: aigw102-ai-gw:bench (sha256:7e690ebdf17d)
+## Image-Größen (entpackt laut docker image inspect / komprimiert docker save | gzip -1)
+image aigw102-ai-gw:bench: 111 MiB / 30 MiB
+image ghcr.io/berriai/litellm:v1.108.8: 1730 MiB / 398 MiB
+image ghcr.io/berriai/litellm-database:v1.108.8: 1648 MiB / 383 MiB
+## direkt (Fake-Upstream ohne Gateway)
+== direkt: seriell (json, 1 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 1 Verbindungen, 17759 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=    51µs p90=    78µs p99=   122µs p99.9=    145µs max=     206µs
+gesamt   p50=    52µs p90=    79µs p99=   122µs p99.9=    145µs max=     206µs
+direkt      seriell        json   c=1   17759 req/s Fehler={} ttfb p50=51µs p90=78µs p99=122µs gesamt p50=52µs p90=79µs p99=122µs
+== direkt: 200req/s (json, 10 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 10 Verbindungen, 200 req/s (Ziel Some(200.0)), stream=false, format=openai, Fehler={}
+ttfb     p50=   211µs p90=   265µs p99=   352µs p99.9=    520µs max=     631µs
+gesamt   p50=   211µs p90=   266µs p99=   353µs p99.9=    521µs max=     631µs
+direkt      200req/s       json   c=10  200 req/s Fehler={} ttfb p50=211µs p90=265µs p99=352µs gesamt p50=211µs p90=266µs p99=353µs
+== direkt: seriell (stream, 1 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 1 Verbindungen, 10462 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=    85µs p90=   127µs p99=   248µs p99.9=   2196µs max=    3546µs
+gesamt   p50=    85µs p90=   127µs p99=   248µs p99.9=   2197µs max=    3547µs
+direkt      seriell        stream c=1   10462 req/s Fehler={} ttfb p50=85µs p90=127µs p99=248µs gesamt p50=85µs p90=127µs p99=248µs
+== direkt: 200req/s (stream, 10 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 10 Verbindungen, 200 req/s (Ziel Some(200.0)), stream=true, format=openai, Fehler={}
+ttfb     p50=   204µs p90=   268µs p99=   368µs p99.9=    610µs max=    1998µs
+gesamt   p50=   204µs p90=   270µs p99=   368µs p99.9=    610µs max=    1998µs
+direkt      200req/s       stream c=10  200 req/s Fehler={} ttfb p50=204µs p90=268µs p99=368µs gesamt p50=204µs p90=270µs p99=368µs
+## aigw-sqlite
+aigw-sqlite kaltstart_erster_start=600 ms (mit leerer DB; LiteLLM inkl. Prisma-Migration)
+aigw-sqlite kaltstart_neustart=274 ms (DB vorhanden)
+aigw-sqlite mem_leerlauf=35.4 MiB
+== aigw-sqlite: seriell (json, 1 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 1 Verbindungen, 2661 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=   365µs p90=   489µs p99=   580µs p99.9=    702µs max=    2401µs
+gesamt   p50=   366µs p90=   490µs p99=   580µs p99.9=    702µs max=    2402µs
+aigw-sqlite seriell        json   c=1   2661 req/s Fehler={} ttfb p50=365µs p90=489µs p99=580µs gesamt p50=366µs p90=490µs p99=580µs cpu=311 µs/Anfrage
+== aigw-sqlite: 200req/s (json, 10 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 10 Verbindungen, 200 req/s (Ziel Some(200.0)), stream=false, format=openai, Fehler={}
+ttfb     p50=   611µs p90=   732µs p99=   944µs p99.9=   1706µs max=    2362µs
+gesamt   p50=   611µs p90=   733µs p99=   944µs p99.9=   1707µs max=    2363µs
+aigw-sqlite 200req/s       json   c=10  200 req/s Fehler={} ttfb p50=611µs p90=732µs p99=944µs gesamt p50=611µs p90=733µs p99=944µs cpu=637 µs/Anfrage
+== aigw-sqlite: seriell (stream, 1 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 1 Verbindungen, 2412 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=   410µs p90=   538µs p99=   699µs p99.9=    915µs max=    1121µs
+gesamt   p50=   411µs p90=   539µs p99=   701µs p99.9=    917µs max=    1122µs
+aigw-sqlite seriell        stream c=1   2412 req/s Fehler={} ttfb p50=410µs p90=538µs p99=699µs gesamt p50=411µs p90=539µs p99=701µs cpu=352 µs/Anfrage
+== aigw-sqlite: 200req/s (stream, 10 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 10 Verbindungen, 200 req/s (Ziel Some(200.0)), stream=true, format=openai, Fehler={}
+ttfb     p50=   644µs p90=   784µs p99=  1042µs p99.9=   2696µs max=    5038µs
+gesamt   p50=   647µs p90=   787µs p99=  1045µs p99.9=   2698µs max=    5040µs
+aigw-sqlite 200req/s       stream c=10  200 req/s Fehler={} ttfb p50=644µs p90=784µs p99=1042µs gesamt p50=647µs p90=787µs p99=1045µs cpu=672 µs/Anfrage
+== aigw-sqlite: Sättigung (json, 10 Verbindungen, 40000 Anfragen)
+40000 Anfragen, 10 Verbindungen, 16413 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=   562µs p90=   875µs p99=  1393µs p99.9=   2264µs max=    4684µs
+gesamt   p50=   563µs p90=   875µs p99=  1393µs p99.9=   2265µs max=    4685µs
+aigw-sqlite Sättigung     json   c=10  16413 req/s Fehler={} ttfb p50=562µs p90=875µs p99=1393µs gesamt p50=563µs p90=875µs p99=1393µs cpu=120 µs/Anfrage mem_peak=125.8 MiB
+== aigw-sqlite: Sättigung (json, 100 Verbindungen, 40000 Anfragen)
+40000 Anfragen, 100 Verbindungen, 26313 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=  3722µs p90=  5094µs p99=  6871µs p99.9=   9069µs max=   10800µs
+gesamt   p50=  3723µs p90=  5094µs p99=  6871µs p99.9=   9069µs max=   10800µs
+aigw-sqlite Sättigung     json   c=100 26313 req/s Fehler={} ttfb p50=3722µs p90=5094µs p99=6871µs gesamt p50=3723µs p90=5094µs p99=6871µs cpu=79 µs/Anfrage mem_peak=155.4 MiB
+== aigw-sqlite: Sättigung (json, 500 Verbindungen, 40000 Anfragen)
+40000 Anfragen, 500 Verbindungen, 17734 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50= 21494µs p90= 47344µs p99= 69983µs p99.9=  88331µs max=  109078µs
+gesamt   p50= 21494µs p90= 47344µs p99= 69984µs p99.9=  88331µs max=  109078µs
+aigw-sqlite Sättigung     json   c=500 17734 req/s Fehler={} ttfb p50=21494µs p90=47344µs p99=69983µs gesamt p50=21494µs p90=47344µs p99=69984µs cpu=128 µs/Anfrage mem_peak=231.7 MiB
+== aigw-sqlite: Sättigung (stream, 10 Verbindungen, 40000 Anfragen)
+40000 Anfragen, 10 Verbindungen, 14087 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=   655µs p90=  1039µs p99=  1492µs p99.9=   2302µs max=   30377µs
+gesamt   p50=   656µs p90=  1040µs p99=  1493µs p99.9=   2303µs max=   30378µs
+aigw-sqlite Sättigung     stream c=10  14087 req/s Fehler={} ttfb p50=655µs p90=1039µs p99=1492µs gesamt p50=656µs p90=1040µs p99=1493µs cpu=141 µs/Anfrage mem_peak=247.4 MiB
+== aigw-sqlite: Sättigung (stream, 100 Verbindungen, 40000 Anfragen)
+40000 Anfragen, 100 Verbindungen, 15264 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=  6390µs p90=  8955µs p99= 12054µs p99.9=  17088µs max=   29967µs
+gesamt   p50=  6391µs p90=  8956µs p99= 12055µs p99.9=  17089µs max=   29969µs
+aigw-sqlite Sättigung     stream c=100 15264 req/s Fehler={} ttfb p50=6390µs p90=8955µs p99=12054µs gesamt p50=6391µs p90=8956µs p99=12055µs cpu=134 µs/Anfrage mem_peak=267.3 MiB
+== aigw-sqlite: Sättigung (stream, 500 Verbindungen, 40000 Anfragen)
+40000 Anfragen, 500 Verbindungen, 9562 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50= 25194µs p90= 50167µs p99= 71202µs p99.9=  89698µs max= 3866970µs
+gesamt   p50= 25198µs p90= 50169µs p99= 71203µs p99.9=  89700µs max= 3866975µs
+aigw-sqlite Sättigung     stream c=500 9562 req/s Fehler={} ttfb p50=25194µs p90=50167µs p99=71202µs gesamt p50=25198µs p90=50169µs p99=71203µs cpu=155 µs/Anfrage mem_peak=316.9 MiB
+aigw-sqlite mem_nach_last=284.6 MiB
+## aigw-pg
+aigw-pg kaltstart_erster_start=359 ms (mit leerer DB; LiteLLM inkl. Prisma-Migration)
+aigw-pg kaltstart_neustart=350 ms (DB vorhanden)
+aigw-pg mem_leerlauf=28.9 MiB
+== aigw-pg: seriell (json, 1 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 1 Verbindungen, 2618 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=   348µs p90=   495µs p99=   626µs p99.9=   5456µs max=   15640µs
+gesamt   p50=   348µs p90=   495µs p99=   626µs p99.9=   5457µs max=   15641µs
+aigw-pg     seriell        json   c=1   2618 req/s Fehler={} ttfb p50=348µs p90=495µs p99=626µs gesamt p50=348µs p90=495µs p99=626µs cpu=295 µs/Anfrage
+== aigw-pg: 200req/s (json, 10 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 10 Verbindungen, 200 req/s (Ziel Some(200.0)), stream=false, format=openai, Fehler={}
+ttfb     p50=   657µs p90=   776µs p99=  1173µs p99.9=   3304µs max=    8382µs
+gesamt   p50=   657µs p90=   777µs p99=  1173µs p99.9=   3304µs max=    8382µs
+aigw-pg     200req/s       json   c=10  200 req/s Fehler={} ttfb p50=657µs p90=776µs p99=1173µs gesamt p50=657µs p90=777µs p99=1173µs cpu=640 µs/Anfrage
+== aigw-pg: seriell (stream, 1 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 1 Verbindungen, 2396 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=   406µs p90=   540µs p99=   680µs p99.9=    890µs max=    4315µs
+gesamt   p50=   407µs p90=   542µs p99=   682µs p99.9=    892µs max=    4317µs
+aigw-pg     seriell        stream c=1   2396 req/s Fehler={} ttfb p50=406µs p90=540µs p99=680µs gesamt p50=407µs p90=542µs p99=682µs cpu=358 µs/Anfrage
+== aigw-pg: 200req/s (stream, 10 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 10 Verbindungen, 200 req/s (Ziel Some(200.0)), stream=true, format=openai, Fehler={}
+ttfb     p50=   618µs p90=   793µs p99=   964µs p99.9=   1214µs max=    7871µs
+gesamt   p50=   621µs p90=   796µs p99=   966µs p99.9=   1216µs max=    7872µs
+aigw-pg     200req/s       stream c=10  200 req/s Fehler={} ttfb p50=618µs p90=793µs p99=964µs gesamt p50=621µs p90=796µs p99=966µs cpu=618 µs/Anfrage
+== aigw-pg: Sättigung (json, 10 Verbindungen, 40000 Anfragen)
+40000 Anfragen, 10 Verbindungen, 18076 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=   531µs p90=   758µs p99=  1102µs p99.9=   1558µs max=    2520µs
+gesamt   p50=   531µs p90=   758µs p99=  1102µs p99.9=   1558µs max=    2520µs
+aigw-pg     Sättigung     json   c=10  18076 req/s Fehler={} ttfb p50=531µs p90=758µs p99=1102µs gesamt p50=531µs p90=758µs p99=1102µs cpu=110 µs/Anfrage mem_peak=127.7 MiB
+== aigw-pg: Sättigung (json, 100 Verbindungen, 40000 Anfragen)
+40000 Anfragen, 100 Verbindungen, 20210 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=  4800µs p90=  6826µs p99=  9600µs p99.9=  14171µs max=   17097µs
+gesamt   p50=  4800µs p90=  6827µs p99=  9600µs p99.9=  14171µs max=   17097µs
+aigw-pg     Sättigung     json   c=100 20210 req/s Fehler={} ttfb p50=4800µs p90=6826µs p99=9600µs gesamt p50=4800µs p90=6827µs p99=9600µs cpu=101 µs/Anfrage mem_peak=122.8 MiB
+== aigw-pg: Sättigung (json, 500 Verbindungen, 40000 Anfragen)
+40000 Anfragen, 500 Verbindungen, 24023 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50= 12557µs p90= 40472µs p99= 65213µs p99.9=  82745µs max=  105688µs
+gesamt   p50= 12557µs p90= 40472µs p99= 65213µs p99.9=  82745µs max=  105688µs
+aigw-pg     Sättigung     json   c=500 24023 req/s Fehler={} ttfb p50=12557µs p90=40472µs p99=65213µs gesamt p50=12557µs p90=40472µs p99=65213µs cpu=97 µs/Anfrage mem_peak=169.7 MiB
+== aigw-pg: Sättigung (stream, 10 Verbindungen, 40000 Anfragen)
+40000 Anfragen, 10 Verbindungen, 15501 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=   612µs p90=   877µs p99=  1399µs p99.9=   2493µs max=    4089µs
+gesamt   p50=   613µs p90=   878µs p99=  1401µs p99.9=   2497µs max=    4090µs
+aigw-pg     Sättigung     stream c=10  15501 req/s Fehler={} ttfb p50=612µs p90=877µs p99=1399µs gesamt p50=613µs p90=878µs p99=1401µs cpu=128 µs/Anfrage mem_peak=163.5 MiB
+== aigw-pg: Sättigung (stream, 100 Verbindungen, 40000 Anfragen)
+40000 Anfragen, 100 Verbindungen, 16364 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=  5920µs p90=  8460µs p99= 11713µs p99.9=  14765µs max=   30118µs
+gesamt   p50=  5922µs p90=  8461µs p99= 11714µs p99.9=  14766µs max=   30119µs
+aigw-pg     Sättigung     stream c=100 16364 req/s Fehler={} ttfb p50=5920µs p90=8460µs p99=11713µs gesamt p50=5922µs p90=8461µs p99=11714µs cpu=124 µs/Anfrage mem_peak=166.8 MiB
+== aigw-pg: Sättigung (stream, 500 Verbindungen, 40000 Anfragen)
+40000 Anfragen, 500 Verbindungen, 9824 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50= 28301µs p90= 53218µs p99= 75391µs p99.9=  91992µs max= 3627571µs
+gesamt   p50= 28303µs p90= 53219µs p99= 75392µs p99.9=  91995µs max= 3627576µs
+aigw-pg     Sättigung     stream c=500 9824 req/s Fehler={} ttfb p50=28301µs p90=53218µs p99=75391µs gesamt p50=28303µs p90=53219µs p99=75392µs cpu=154 µs/Anfrage mem_peak=180.2 MiB
+aigw-pg mem_nach_last=161.7 MiB
+## litellm
+litellm kaltstart_erster_start=25606 ms (mit leerer DB; LiteLLM inkl. Prisma-Migration)
+litellm kaltstart_neustart=22586 ms (DB vorhanden)
+litellm mem_leerlauf=1626.4 MiB
+== litellm: seriell (json, 1 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 1 Verbindungen, 110 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=  8205µs p90= 12335µs p99= 17329µs p99.9=  19534µs max=   19684µs
+gesamt   p50=  8206µs p90= 12336µs p99= 17329µs p99.9=  19534µs max=   19684µs
+litellm     seriell        json   c=1   110 req/s Fehler={} ttfb p50=8205µs p90=12335µs p99=17329µs gesamt p50=8206µs p90=12336µs p99=17329µs cpu=9109 µs/Anfrage
+== litellm: 200req/s (json, 10 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 10 Verbindungen, 200 req/s (Ziel Some(200.0)), stream=false, format=openai, Fehler={}
+ttfb     p50= 11262µs p90= 29176µs p99= 44332µs p99.9=  78903µs max=   83963µs
+gesamt   p50= 11263µs p90= 29177µs p99= 44332µs p99.9=  78903µs max=   83963µs
+litellm     200req/s       json   c=10  200 req/s Fehler={} ttfb p50=11262µs p90=29176µs p99=44332µs gesamt p50=11263µs p90=29177µs p99=44332µs cpu=8313 µs/Anfrage
+== litellm: seriell (stream, 1 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 1 Verbindungen, 54 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50= 10494µs p90= 17841µs p99= 22415µs p99.9=  24998µs max=   26522µs
+gesamt   p50= 17196µs p90= 25654µs p99= 31430µs p99.9=  34857µs max=   36556µs
+litellm     seriell        stream c=1   54 req/s Fehler={} ttfb p50=10494µs p90=17841µs p99=22415µs gesamt p50=17196µs p90=25654µs p99=31430µs cpu=18666 µs/Anfrage
+== litellm: 200req/s (stream, 10 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 10 Verbindungen, 124 req/s (Ziel Some(200.0)), stream=true, format=openai, Fehler={}
+ttfb     p50= 25034µs p90= 59824µs p99= 99664µs p99.9= 137097µs max=  153637µs
+gesamt   p50= 46822µs p90=129114µs p99=203434µs p99.9= 265277µs max=  307270µs
+litellm     200req/s       stream c=10  124 req/s Fehler={} ttfb p50=25034µs p90=59824µs p99=99664µs gesamt p50=46822µs p90=129114µs p99=203434µs cpu=14457 µs/Anfrage
+== litellm: Sättigung (json, 10 Verbindungen, 10000 Anfragen)
+10000 Anfragen, 10 Verbindungen, 269 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50= 28642µs p90= 41714µs p99= 84902µs p99.9= 153048µs max=  246769µs
+gesamt   p50= 28643µs p90= 41715µs p99= 84903µs p99.9= 153048µs max=  246770µs
+litellm     Sättigung     json   c=10  269 req/s Fehler={} ttfb p50=28642µs p90=41714µs p99=84902µs gesamt p50=28643µs p90=41715µs p99=84903µs cpu=6593 µs/Anfrage mem_peak=1725.5 MiB
+== litellm: Sättigung (json, 100 Verbindungen, 10000 Anfragen)
+9950 Anfragen, 100 Verbindungen, 151 req/s (Ziel None), stream=false, format=openai, Fehler={0: 50}
+ttfb     p50=749976µs p90=897213µs p99=1455085µs p99.9=2339907µs max= 2774626µs
+gesamt   p50=749977µs p90=897214µs p99=1455086µs p99.9=2339908µs max= 2774626µs
+litellm     Sättigung     json   c=100 151 req/s Fehler={0: 50} ttfb p50=749976µs p90=897213µs p99=1455085µs gesamt p50=749977µs p90=897214µs p99=1455086µs cpu=8810 µs/Anfrage mem_peak=1731.7 MiB
+== litellm: Sättigung (json, 500 Verbindungen, 10000 Anfragen)
+9653 Anfragen, 500 Verbindungen, 144 req/s (Ziel None), stream=false, format=openai, Fehler={0: 347}
+ttfb     p50=3213725µs p90=4013290µs p99=8410056µs p99.9=8544939µs max=18675428µs
+gesamt   p50=3213726µs p90=4013290µs p99=8410057µs p99.9=8544939µs max=18675429µs
+litellm     Sättigung     json   c=500 144 req/s Fehler={0: 347} ttfb p50=3213725µs p90=4013290µs p99=8410056µs gesamt p50=3213726µs p90=4013290µs p99=8410057µs cpu=11297 µs/Anfrage mem_peak=1772.8 MiB
+== litellm: Sättigung (stream, 10 Verbindungen, 10000 Anfragen)
+10000 Anfragen, 10 Verbindungen, 122 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50= 17036µs p90= 85639µs p99=136321µs p99.9= 197717µs max=  721089µs
+gesamt   p50= 31842µs p90=182645µs p99=267895µs p99.9= 410852µs max=  816501µs
+litellm     Sättigung     stream c=10  122 req/s Fehler={} ttfb p50=17036µs p90=85639µs p99=136321µs gesamt p50=31842µs p90=182645µs p99=267895µs cpu=14486 µs/Anfrage mem_peak=1857.1 MiB
+== litellm: Sättigung (stream, 100 Verbindungen, 10000 Anfragen)
+10000 Anfragen, 100 Verbindungen, 155 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50= 78724µs p90=148813µs p99=882065µs p99.9=2118753µs max= 3069389µs
+gesamt   p50=545454µs p90=994037µs p99=2223421µs p99.9=4016723µs max= 7177736µs
+litellm     Sättigung     stream c=100 155 req/s Fehler={} ttfb p50=78724µs p90=148813µs p99=882065µs gesamt p50=545454µs p90=994037µs p99=2223421µs cpu=13420 µs/Anfrage mem_peak=1893.7 MiB
+== litellm: Sättigung (stream, 500 Verbindungen, 10000 Anfragen)
+10000 Anfragen, 500 Verbindungen, 136 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50= 78754µs p90=543703µs p99=1860801µs p99.9=1902580µs max= 4167129µs
+gesamt   p50=3119515µs p90=4379757µs p99=5741328µs p99.9=7486935µs max= 8592554µs
+litellm     Sättigung     stream c=500 136 req/s Fehler={} ttfb p50=78754µs p90=543703µs p99=1860801µs gesamt p50=3119515µs p90=4379757µs p99=5741328µs cpu=16765 µs/Anfrage mem_peak=1959.4 MiB
+litellm mem_nach_last=1954.8 MiB
+## litellm-pg
+litellm-pg kaltstart_erster_start=28305 ms (mit leerer DB; LiteLLM inkl. Prisma-Migration)
+litellm-pg kaltstart_neustart=24229 ms (DB vorhanden)
+litellm-pg mem_leerlauf=1700.3 MiB
+== litellm-pg: seriell (json, 1 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 1 Verbindungen, 83 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50= 10729µs p90= 15337µs p99= 32748µs p99.9=  51094µs max=   59913µs
+gesamt   p50= 10729µs p90= 15338µs p99= 32748µs p99.9=  51094µs max=   59913µs
+litellm-pg  seriell        json   c=1   83 req/s Fehler={} ttfb p50=10729µs p90=15337µs p99=32748µs gesamt p50=10729µs p90=15338µs p99=32748µs cpu=12558 µs/Anfrage
+== litellm-pg: 200req/s (json, 10 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 10 Verbindungen, 188 req/s (Ziel Some(200.0)), stream=false, format=openai, Fehler={}
+ttfb     p50= 25227µs p90= 56105µs p99=101794µs p99.9= 132039µs max=  158533µs
+gesamt   p50= 25227µs p90= 56106µs p99=101795µs p99.9= 132039µs max=  158534µs
+litellm-pg  200req/s       json   c=10  188 req/s Fehler={} ttfb p50=25227µs p90=56105µs p99=101794µs gesamt p50=25227µs p90=56106µs p99=101795µs cpu=10106 µs/Anfrage
+== litellm-pg: seriell (stream, 1 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 1 Verbindungen, 46 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50= 11150µs p90= 18532µs p99= 27101µs p99.9=  43726µs max=   53916µs
+gesamt   p50= 20083µs p90= 29124µs p99= 44748µs p99.9=  50533µs max=   63043µs
+litellm-pg  seriell        stream c=1   46 req/s Fehler={} ttfb p50=11150µs p90=18532µs p99=27101µs gesamt p50=20083µs p90=29124µs p99=44748µs cpu=22835 µs/Anfrage
+== litellm-pg: 200req/s (stream, 10 Verbindungen, 2000 Anfragen)
+2000 Anfragen, 10 Verbindungen, 90 req/s (Ziel Some(200.0)), stream=true, format=openai, Fehler={}
+ttfb     p50= 36704µs p90= 82475µs p99=133800µs p99.9= 223407µs max=  288816µs
+gesamt   p50= 83750µs p90=171534µs p99=254768µs p99.9= 322174µs max=  335511µs
+litellm-pg  200req/s       stream c=10  90 req/s Fehler={} ttfb p50=36704µs p90=82475µs p99=133800µs gesamt p50=83750µs p90=171534µs p99=254768µs cpu=19032 µs/Anfrage
+== litellm-pg: Sättigung (json, 10 Verbindungen, 10000 Anfragen)
+10000 Anfragen, 10 Verbindungen, 206 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50= 43403µs p90= 66277µs p99=144729µs p99.9= 226290µs max=  378091µs
+gesamt   p50= 43404µs p90= 66278µs p99=144730µs p99.9= 226291µs max=  378092µs
+litellm-pg  Sättigung     json   c=10  206 req/s Fehler={} ttfb p50=43403µs p90=66277µs p99=144729µs gesamt p50=43404µs p90=66278µs p99=144730µs cpu=9702 µs/Anfrage mem_peak=1901.4 MiB
+== litellm-pg: Sättigung (json, 100 Verbindungen, 10000 Anfragen)
+10000 Anfragen, 100 Verbindungen, 157 req/s (Ziel None), stream=false, format=openai, Fehler={}
+ttfb     p50=504116µs p90=732342µs p99=1287957µs p99.9=4300916µs max= 7698899µs
+gesamt   p50=504117µs p90=732343µs p99=1287958µs p99.9=4300917µs max= 7698899µs
+litellm-pg  Sättigung     json   c=100 157 req/s Fehler={} ttfb p50=504116µs p90=732342µs p99=1287957µs gesamt p50=504117µs p90=732343µs p99=1287958µs cpu=10598 µs/Anfrage mem_peak=2008.9 MiB
+== litellm-pg: Sättigung (json, 500 Verbindungen, 10000 Anfragen)
+9544 Anfragen, 500 Verbindungen, 103 req/s (Ziel None), stream=false, format=openai, Fehler={0: 174, 503: 282}
+ttfb     p50=2329701µs p90=3980789µs p99=6061323µs p99.9=12811428µs max=12811962µs
+gesamt   p50=2329701µs p90=3980790µs p99=6061324µs p99.9=12811428µs max=12811962µs
+litellm-pg  Sättigung     json   c=500 103 req/s Fehler={0: 174, 503: 282} ttfb p50=2329701µs p90=3980789µs p99=6061323µs gesamt p50=2329701µs p90=3980790µs p99=6061324µs cpu=15129 µs/Anfrage mem_peak=2067.7 MiB
+== litellm-pg: Sättigung (stream, 10 Verbindungen, 10000 Anfragen)
+10000 Anfragen, 10 Verbindungen, 120 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50= 33076µs p90= 48859µs p99=137364µs p99.9= 493607µs max= 1039228µs
+gesamt   p50= 73743µs p90=106136µs p99=277009µs p99.9=1078180µs max= 1853610µs
+litellm-pg  Sättigung     stream c=10  120 req/s Fehler={} ttfb p50=33076µs p90=48859µs p99=137364µs gesamt p50=73743µs p90=106136µs p99=277009µs cpu=16752 µs/Anfrage mem_peak=2213.0 MiB
+== litellm-pg: Sättigung (stream, 100 Verbindungen, 10000 Anfragen)
+10000 Anfragen, 100 Verbindungen, 95 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=104894µs p90=613142µs p99=1140372µs p99.9=2004740µs max= 3652407µs
+gesamt   p50=829087µs p90=1285963µs p99=2276978µs p99.9=3580057µs max= 4222607µs
+litellm-pg  Sättigung     stream c=100 95 req/s Fehler={} ttfb p50=104894µs p90=613142µs p99=1140372µs gesamt p50=829087µs p90=1285963µs p99=2276978µs cpu=18561 µs/Anfrage mem_peak=2253.9 MiB
+== litellm-pg: Sättigung (stream, 500 Verbindungen, 10000 Anfragen)
+10000 Anfragen, 500 Verbindungen, 109 req/s (Ziel None), stream=true, format=openai, Fehler={}
+ttfb     p50=106172µs p90=715944µs p99=2721724µs p99.9=2970174µs max= 3844254µs
+gesamt   p50=4110530µs p90=5437437µs p99=7436234µs p99.9=10195854µs max=10452461µs
+litellm-pg  Sättigung     stream c=500 109 req/s Fehler={} ttfb p50=106172µs p90=715944µs p99=2721724µs gesamt p50=4110530µs p90=5437437µs p99=7436234µs cpu=21730 µs/Anfrage mem_peak=2322.6 MiB
+litellm-pg mem_nach_last=2317.8 MiB
+# Last danach: 21.75 16.39 11.71
+# Zusammenfassung: target/bench/102-litellm-summary.txt

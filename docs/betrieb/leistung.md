@@ -273,6 +273,7 @@ PROFILE=1 PARTS=profile scripts/bench-e2e.sh     # perf-Profil → target/bench/
 scripts/bench-coldstart.sh                       # Kaltstart Postgres + SQLite (≈ 5 Min.)
 KEYS=100000 MODEL_GROUPS=5000 DBS=postgres scripts/bench-coldstart.sh
 scripts/bench-latency.sh                         # nur Proxy-Kern (Beispiel-Gateway, AIGW-14/15)
+RT=1 scripts/bench-litellm.sh                    # Vergleich mit LiteLLM, Abschnitt 8 (≈ 35 Min.)
 ```
 
 Ergebnisse landen in `target/bench/`. Die Skripte sind bewusst **nicht** Teil von
@@ -306,3 +307,125 @@ Q1 (p99 < 1 ms) ist bis mittlere Last erfüllt, bei 10 000 req/s auf nur 2 Kerne
    des YAML-Parsers (`serde-saphyr`-Optionen) für GitOps anheben.
 7. **Messumgebung:** Für belastbare absolute Zahlen eine exklusive Maschine ohne fremde Last
    (die Buildbox war mit Lastdurchschnitt bis 18 geteilt).
+
+## 8. Vergleich mit LiteLLM (AIGW-102)
+
+Lastvergleich mit dem Vorbild LiteLLM-Proxy unter gleichen Bedingungen:
+`scripts/bench-litellm.sh`, Lauf vom 2026-11-15 auf der Buildbox (cpx42, 8 vCPU EPYC Genoa,
+geteilt; Lastdurchschnitt 2–22 während des Laufs). Rohdaten:
+[102-litellm.txt](messwerte/102-litellm.txt), Kurzfassung
+[102-litellm-zusammenfassung.txt](messwerte/102-litellm-zusammenfassung.txt).
+
+### 8.1 Methode und Konfiguration
+
+| Rolle | Prozess | Kerne |
+|---|---|---|
+| Fake-Upstream (OpenAI-kompatibel, antwortet sofort; Stream = 6 Chunks + Usage) | `latency upstream` | 0–1 |
+| Gateway (Container, `--network host`, `--cpuset-cpus 2,3`) | ai-gw bzw. LiteLLM | 2–3 |
+| Lastgenerator (hyper, Keep-Alive) | `latency load` | 4–6 |
+| Postgres 17 (nur `*-pg`) | `postgres:17-alpine` | 7 |
+
+Upstream, Last und alle Prozesse der Gateway-Container laufen mit `SCHED_FIFO` (`RT=1`).
+
+| Variante | Image | Store / Key-Prüfung |
+|---|---|---|
+| `aigw-sqlite` | ai-gw, lokal aus dem Dockerfile gebaut (Basis main 928d45c) | SQLite; API-Key mit Org/Team/Key-Limits, Budgets, Preis, Request-Log an (wie `bench-e2e.sh`) |
+| `aigw-pg` | dito | Postgres 17, sonst wie oben |
+| `litellm` | `ghcr.io/berriai/litellm:v1.108.8` (LTS, Digest im Rohprotokoll) | ohne DB; Prüfung gegen den Master-Key (ohne DB die einzige Key-Art) |
+| `litellm-pg` | `ghcr.io/berriai/litellm-database:v1.108.8` | Postgres 17; virtueller Key (`/key/generate`) mit `models`, `max_budget`, `rpm_limit`, `tpm_limit`; Spend-Logs an |
+
+LiteLLM nach „Best Practices for Production“ (docs.litellm.ai/docs/proxy/prod): ein Container
+mit `--num_workers 2` (= vCPU des Containers), `LITELLM_MODE=PRODUCTION`,
+`LITELLM_LOG=ERROR`, `set_verbose: false`, `json_logs: true`, `request_timeout: 600`,
+`proxy_batch_write_at: 60`, `database_connection_pool_limit: 10`, `disable_error_logs: true`;
+zusätzlich `LITELLM_LOCAL_MODEL_COST_MAP=True` (kein Nachladen der Preisliste beim Start).
+Redis (empfohlen ab mehreren Instanzen) entfällt bei einer Instanz; ai-gw nutzt ebenfalls
+Zähler `local`. Tokio nutzt im Container 2 Worker (cpuset).
+
+Gemessen: **Aufschlag** = Gateway − direkt (Perzentile voneinander abgezogen) bei 1
+Verbindung seriell (2 000 Anfragen) und bei 10 Verbindungen mit 200 req/s; **Durchsatz** bei
+Sättigung mit 10/100/500 Verbindungen (ai-gw 40 000, LiteLLM 10 000 Anfragen je Lauf,
+5 Aufwärm-Anfragen je Verbindung); **Fehler** (HTTP-Status ≠ 2xx bzw. Verbindungsfehler);
+**CPU je Anfrage** (cgroup `cpu.stat` des Containers / erfolgreiche Anfragen);
+**Speicher** wie `docker stats` (cgroup `memory.current` ohne `inactive_file`; Höchststand
+alle 0,1 s abgetastet); **Kaltstart** = `docker run` bis Readiness (ai-gw `/readyz`,
+LiteLLM `/health/readiness`), erster Start mit leerer DB und Neustart mit vorhandener DB.
+
+### 8.2 Ergebnisse
+
+**Aufschlag gegenüber direktem Upstream** (OpenAI-Eingang; json = Gesamtzeit, stream = TTFT;
+p50 / p90 / p99):
+
+| Szenario | direkt | aigw-sqlite | aigw-pg | litellm | litellm-pg |
+|---|---|---|---|---|---|
+| json, 1 Verb. seriell | 51 / 78 / 122 µs | +0,32 / +0,41 / +0,46 ms | +0,30 / +0,42 / +0,50 ms | +8,2 / +12,3 / +17,2 ms | +10,7 / +15,3 / +32,6 ms |
+| stream, 1 Verb. seriell | 85 / 127 / 248 µs | +0,33 / +0,41 / +0,45 ms | +0,32 / +0,41 / +0,43 ms | +10,4 / +17,7 / +22,2 ms | +11,1 / +18,4 / +26,9 ms |
+| json, 10 Verb., 200 req/s | 211 / 265 / 352 µs | +0,40 / +0,47 / +0,59 ms | +0,45 / +0,51 / +0,82 ms | +11,1 / +28,9 / +44,0 ms | +25,0 / +55,8 / +101 ms ¹ |
+| stream, 10 Verb., 200 req/s | 204 / 268 / 368 µs | +0,44 / +0,52 / +0,67 ms | +0,41 / +0,53 / +0,60 ms | +24,8 / +59,6 / +99,3 ms ¹ | +36,5 / +82,2 / +133 ms ¹ |
+
+¹ Zielrate nicht erreicht (litellm stream 124 req/s, litellm-pg json 188 bzw. stream
+90 req/s) – LiteLLM ist hier bereits gesättigt, die Werte enthalten Wartezeit.
+
+**Durchsatz bei Sättigung** (req/s; Fehler in Klammern, sonst 0):
+
+| Modus, Verbindungen | aigw-sqlite | aigw-pg | litellm | litellm-pg |
+|---|---|---|---|---|
+| json, 10 | 16 413 | 18 076 | 269 | 206 |
+| json, 100 | 26 313 | 20 210 | 151 (0,5 %) | 157 |
+| json, 500 | 17 734 | 24 023 | 144 (3,5 %) | 103 (4,6 %) |
+| stream, 10 | 14 087 | 15 501 | 122 | 120 |
+| stream, 100 | 15 264 | 16 364 | 155 | 95 |
+| stream, 500 | 9 562 | 9 824 | 136 | 109 |
+
+p99 der Gesamtzeit bei 500 Verbindungen: ai-gw 65–75 ms, LiteLLM 5,7–8,4 s.
+
+**Ressourcen:**
+
+| | aigw-sqlite | aigw-pg | litellm | litellm-pg |
+|---|---|---|---|---|
+| CPU je Anfrage (json, 100 Verb.) | 79 µs | 101 µs | 8 810 µs | 10 598 µs |
+| CPU je Anfrage (stream, 100 Verb.) | 134 µs | 124 µs | 13 420 µs | 18 561 µs |
+| Speicher Leerlauf (nach Start + 1 Anfrage) | 35 MiB | 29 MiB | 1 626 MiB | 1 700 MiB |
+| Speicher Höchststand unter Last | 317 MiB | 180 MiB | 1 959 MiB | 2 323 MiB |
+| Speicher nach der Last | 285 MiB | 162 MiB | 1 955 MiB | 2 318 MiB |
+| Kaltstart erster Start (leere DB) | 0,60 s | 0,36 s | 25,6 s | 28,3 s |
+| Kaltstart Neustart | 0,27 s | 0,35 s | 22,6 s | 24,2 s |
+| Image entpackt / komprimiert | 111 / 30 MiB | 111 / 30 MiB | 1 730 / 398 MiB | 1 648 / 383 MiB |
+
+### 8.3 Bewertung und Auffälligkeiten
+
+- **Größenordnungen:** Auf denselben zwei Kernen hat ai-gw einen um Faktor ≈ 25–35 kleineren
+  Aufschlag (seriell), ≈ 60–230-fachen Durchsatz und ≈ 100–150-fach weniger CPU je Anfrage;
+  Leerlaufspeicher ≈ 50-fach kleiner, Kaltstart ≈ 40–80-fach schneller, Image ≈ 13-fach
+  kleiner (komprimiert). Der Abstand ist so groß, dass Schwankungen der geteilten Box (±30 %) die
+  Aussage nicht ändern.
+- **LiteLLM unter Überlast:** ab 100 Verbindungen Verbindungsabbrüche (Status 0 im
+  Lastgenerator), mit Postgres bei 500 Verbindungen zusätzlich 282 × `503`; Latenzen im
+  Sekundenbereich. ai-gw blieb in allen Läufen fehlerfrei.
+- **LiteLLM-Streams:** TTFT steigt bei Last weniger stark als die Gesamtzeit (z. B. 500
+  Verbindungen: TTFT p50 79 ms, Gesamt p50 3,1 s) – die Worker verteilen die Chunks vieler
+  Streams nacheinander.
+- **ai-gw-Speicher unter Last:** SQLite-Variante bis 317 MiB (Request-Log-Puffer und
+  mimalloc-Seiten bleiben nach der Last reserviert); Postgres-Variante 180 MiB.
+- **ai-gw-Aufschlag höher als in §2** (seriell ≈ 0,3 ms statt ≈ 0,09 ms mit dem nativen
+  Binary): Container-cgroup, die stark geteilte Box (Lastdurchschnitt bis 22) und Aufwachkosten
+  bei geringer Rate (CPU je Anfrage seriell ≈ 300 µs gegenüber 80–130 µs unter Last). Für
+  Q1/Q4 gelten weiter die Messungen aus §2.
+
+### 8.4 Grenzen der Aussage
+
+- Fake-Upstream antwortet sofort; bei echten Anbietern (Hunderte ms bis Sekunden) ist der
+  Aufschlag beider Gateways relativ klein – relevant sind dann vor allem CPU je Anfrage,
+  Speicher, Durchsatz je Kern und das Verhalten bei vielen gleichzeitigen Streams.
+- Nur 2 Kerne je Gateway und eine Instanz. LiteLLM skaliert horizontal über Worker/Pods
+  (laut Doku 1 vCPU und ≥ 4 GiB je Worker); mehr Worker, Redis, andere ASGI-Server
+  (Gunicorn/Granian aus „Server Tuning“) und `litellm` ohne Spend-Tracking wurden nicht
+  gemessen.
+- `litellm` (ohne DB) prüft nur den Master-Key und ist damit **leichter** als die
+  ai-gw-Kette (Limits, Budgets, Preis, Request-Log); `litellm-pg` ist die funktional
+  vergleichbare Variante.
+- Nur OpenAI-Eingang; kein Anthropic-Eingang, keine Plugins/Guardrails, kein Caching.
+- Geteilte Buildbox (parallel Builds anderer Projekte); absolute Zahlen schwanken zwischen
+  Läufen, die Verhältnisse sind belastbar.
+- Der ai-gw-Container nutzt ein Image vom Arbeitsstand (Dockerfile, Release-Profil); die
+  LiteLLM-Version ist auf v1.108.8 (LTS, 2026-11-13) gepinnt (`LITELLM_TAG`).

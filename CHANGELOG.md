@@ -9,6 +9,11 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Hinzugefügt
 
+- **Lastvergleich mit LiteLLM (AIGW-102):** `scripts/bench-litellm.sh` misst ai-gw (Image,
+  SQLite/Postgres) und LiteLLM-Proxy `v1.108.8` (ohne DB/Postgres, Produktionseinstellungen)
+  gegen denselben Fake-Upstream auf denselben Kernen: Aufschlag, Durchsatz/Fehler bei
+  10/100/500 Verbindungen (json/stream), CPU je Anfrage, Speicher, Kaltstart, Image-Größe.
+  Ergebnisse in `docs/betrieb/leistung.md` §8 und `messwerte/102-*.txt`.
 - **Signierte WASM-Module (AIGW-101):** Ed25519-Signatur über
   `aigw-wasm-module-v1:<sha256>` (Schlüssel-ID + Base64). Konfiguration `wasm.trusted_keys`
   (öffentliche Schlüssel: Base64 roh/SPKI oder PEM) und `wasm.require_signature` (Standard:
