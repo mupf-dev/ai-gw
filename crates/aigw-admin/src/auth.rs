@@ -546,7 +546,11 @@ mod bootstrap_tests {
         assert_eq!(g.check(good, t0), Ok(()));
         for i in 1..=BOOTSTRAP_MAX_FAILURES + 2 {
             // Ab der Grenze werden Fehlversuche gebremst.
-            assert_eq!(g.check("falsch", t0), Err(i >= BOOTSTRAP_MAX_FAILURES), "{i}");
+            assert_eq!(
+                g.check("falsch", t0),
+                Err(i >= BOOTSTRAP_MAX_FAILURES),
+                "{i}"
+            );
         }
         assert_eq!(g.failures_total(), u64::from(BOOTSTRAP_MAX_FAILURES + 2));
         // Das richtige Token bleibt gültig (kein Aussperren des Notfallzugangs).
