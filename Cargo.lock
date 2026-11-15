@@ -141,6 +141,8 @@ name = "aigw-core"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
+ "aws-lc-rs",
+ "base64 0.22.1",
  "bytes",
  "divan",
  "http",
