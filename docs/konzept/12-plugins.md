@@ -216,7 +216,9 @@ Schlüssel mit verschiedenen Werten in beiden ist ein Fehler (`422`/Plan-Fehler)
 und Ersetzen) und GitOps-Plan (`aigw config validate|diff|apply`, `config:apply`) prüfen jede
 Bindung mit der Registry der Plugin-Kette (`Registry::for_validation`): Kettensteuerung,
 Plugin-Konfiguration (`deny_unknown_fields`, Wertebereiche) und die SSRF-Regeln von
-`webhook`/`content-safety` mit `admin.allow_insecure_upstreams` / `allow_private_upstreams`.
+`webhook`/`content-safety` mit `admin.allow_insecure_upstreams` / `allow_private_upstreams`
+(S-22: private Ziele nur auf den Ebenen `global`/`model-group`; Organisation, Team und API-Key
+nur öffentliche Ziele – auch beim Kettenaufbau und nach der Namensauflösung).
 Fehler → `422` mit der Meldung des Plugins, z. B. ``Plugin-Bindung (pii): unknown field
 `acton`, expected one of …`` bzw. `Plugin-Bindung (webhook): url: …`. Credential-Referenzen
 (`webhook.secret.credential`, `content-safety.credential`) werden erst zur Laufzeit aufgelöst;
@@ -320,7 +322,7 @@ spec:
 
 | Feld | Bedeutung |
 |---|---|
-| `url` | Ziel; **SSRF-Regeln wie Deployments** (`https`, keine privaten/lokalen Ziele, keine Zugangsdaten in der URL; Ausnahmen über `admin.allow_insecure_upstreams` / `allow_private_upstreams`). Zusätzlich prüft der Client **jede aufgelöste IP-Adresse** beim Verbindungsaufbau (Schutz vor DNS-Rebinding und Namen, die auf private Adressen zeigen); Weiterleitungen werden nicht verfolgt. |
+| `url` | Ziel; **SSRF-Regeln wie Deployments** (`https`, keine privaten/lokalen Ziele, keine Zugangsdaten in der URL; Ausnahmen über `admin.allow_insecure_upstreams` / `allow_private_upstreams` – private Ziele nur für Bindungen der Ebenen `global`/`model-group`, S-22). Zusätzlich prüft der Client **jede aufgelöste IP-Adresse** beim Verbindungsaufbau (Schutz vor DNS-Rebinding und Namen, die auf private Adressen zeigen); Weiterleitungen werden nicht verfolgt. |
 | `phases` | `request` (vor Cache/Routing) und/oder `response` (ganze Antwort). Mit `response` werden gestreamte Anfragen der Route **gepuffert** (`x-aigw-buffered: plugins`, TTFT = Gesamtdauer). Nie im Chunk-Pfad. |
 | `secret` | HMAC-Schlüssel, **nie Klartext** in der Bindung: `credential` (Feld einer `ProviderCredential`, verschlüsselt in der DB, z. B. Anbieter `openai-compatible` mit Feld `webhookSecret`; bei jedem Aufruf aus dem aktuellen Snapshot gelesen → Rotation ohne Neustart), `env` bzw. `file` (beim Laden der Bindung gelesen). Ohne `secret` unsigniert. |
 | `includeHeaders` | Client-Header, die in den Payload dürfen. `authorization`, `proxy-authorization`, `api-key`, `x-api-key`, `x-goog-api-key`, `cookie` sind gesperrt. |

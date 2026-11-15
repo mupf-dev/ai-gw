@@ -298,6 +298,68 @@ async fn gitops_plan_validates_plugin_bindings() {
     assert_eq!(v["effective"]["failMode"], "closed");
 }
 
+/// S-22: Private Ziele aus `admin.allow_private_upstreams` nur für Bindungen der Ebenen
+/// `global`/`model-group` (nur globale Admins); Organisation/Team/Key → nur öffentliche Ziele –
+/// über die Admin-API wie über GitOps.
+#[tokio::test]
+async fn private_webhook_targets_only_on_global_levels() {
+    let (app, _) = app().await;
+    let hook = json!({"url": "http://hooks.lan:8080/aigw"});
+    let org = "apiVersion: aigw/v1alpha1\nkind: Organization\nmetadata: {name: acme}\n---\n\
+               apiVersion: aigw/v1alpha1\nkind: Team\nmetadata: {name: web}\n\
+               spec: {organization: acme}\n";
+    let (s, v) = call_raw(
+        &app,
+        Method::POST,
+        "/admin/api/v1/config:apply",
+        Some(("application/yaml", org.to_owned())),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    for (level, target) in [("organization", "acme"), ("team", "web")] {
+        let body = json!({"metadata": {"name": format!("hook-{level}")},
+            "spec": {"scope": {"level": level, "target": target}, "plugin": "webhook",
+                     "order": 10, "config": hook}});
+        let (s, v) = call(&app, Method::POST, BASE, Some(body)).await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{level}: {v}");
+        let detail = v["detail"].as_str().unwrap_or_default();
+        assert!(
+            detail.contains("allow_private_upstreams"),
+            "{level}: {detail}"
+        );
+        // Öffentliches Ziel bleibt erlaubt.
+        let body = json!({"metadata": {"name": format!("pub-{level}")},
+            "spec": {"scope": {"level": level, "target": target}, "plugin": "webhook",
+                     "order": 10, "config": {"url": "https://hooks.example.org/aigw"}}});
+        let (s, v) = call(&app, Method::POST, BASE, Some(body)).await;
+        assert_eq!(s, StatusCode::CREATED, "{level}: {v}");
+    }
+    // GitOps: gleiche Regel.
+    let doc = format!(
+        "{org}---\napiVersion: aigw/v1alpha1\nkind: PluginBinding\nmetadata: {{name: gh}}\n\
+         spec:\n  scope: {{level: team, target: web}}\n  plugin: webhook\n\
+         \x20 config: {{url: \"http://hooks.lan:8080/aigw\"}}\n"
+    );
+    let (s, v) = call_raw(
+        &app,
+        Method::POST,
+        "/admin/api/v1/config:apply?dryRun=true",
+        Some(("application/yaml", doc)),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
+    assert!(v.to_string().contains("allow_private_upstreams"), "{v}");
+    // Global (nur globale Admins) darf das freigegebene private Ziel.
+    let (s, v) = call(
+        &app,
+        Method::POST,
+        BASE,
+        Some(binding("hook-global", "webhook", hook)),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+}
+
 /// F38: `If-Match` ist Pflicht – Anfragen ohne eigenen ETag schreiben hier mit `If-Match: *`
 /// (eigene Tests prüfen 428/412 ausdrücklich).
 fn with_if_match(req: axum::http::request::Builder) -> axum::http::request::Builder {

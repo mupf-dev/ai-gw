@@ -56,6 +56,11 @@ pub trait PluginHost: Send + Sync + fmt::Debug + 'static {
     /// Prüft eine Endpunkt-URL gegen die SSRF-Regeln (beim Bau der Bindung).
     fn check_endpoint(&self, url: &str) -> Result<(), String>;
 
+    /// Derselbe Host, aber nur für öffentliche Ziele (S-22): ohne die Freigaben aus
+    /// `admin.allow_private_upstreams`, bei der URL-Prüfung wie nach der Namensauflösung. Für
+    /// Bindungen auf Organisation/Team/Key (eingeschränkte Rollen).
+    fn public_only(&self) -> Arc<dyn PluginHost>;
+
     /// `POST` mit JSON an einen Endpunkt; prüft die aufgelöste Adresse erneut.
     fn post_json(&self, call: HttpCall) -> BoxFuture<'static, Result<HttpReply, PluginError>>;
 
@@ -101,6 +106,10 @@ impl PluginHost for NoHost {
 
     fn check_endpoint(&self, url: &str) -> Result<(), String> {
         self.policy.check_endpoint(url)
+    }
+
+    fn public_only(&self) -> Arc<dyn PluginHost> {
+        Arc::new(Self::with_policy(self.policy.public_only()))
     }
 
     fn post_json(&self, _call: HttpCall) -> BoxFuture<'static, Result<HttpReply, PluginError>> {

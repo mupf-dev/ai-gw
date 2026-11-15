@@ -424,7 +424,7 @@ Verfahren) in die Request-Extensions. Handler ändern sich dadurch nicht.
 |---|---|---|---|
 | 1 | `Authorization: Bearer sk-aigw-admin-…` | Admin-API-Key (§5.5) | `admin-key:<name>` |
 | 2 | `Authorization: Bearer <anderes>` | Bootstrap-Token (§5.6) | `bootstrap-admin` |
-| 3 | kein `Authorization`, Cookie `__Secure-aigw-session` | Session nach OIDC-Login (§5.2/5.3) | `user:<name>` |
+| 3 | kein `Authorization`, Cookie `__Host-aigw-session` | Session nach OIDC-Login (§5.2/5.3) | `user:<name>` |
 
 Mit `Authorization`-Header wird nie auf das Cookie zurückgefallen (eindeutige Zuordnung;
 Skripte senden keine Cookies, Browser keinen Bearer). Ein Key der Datenebene (`sk-aigw-…`) ist
@@ -451,7 +451,7 @@ blendet Schreibaktionen aus) und `bootstrap` (das Bootstrap-Token gilt derzeit: 
 
 | Schritt | Pfad | Inhalt |
 |---|---|---|
-| 1 | `GET /admin/auth/login?returnTo=/admin/keys` | erzeugt `state`, `nonce`, PKCE-Verifier (je 256 Bit); speichert sie (Tabelle `admin_login_state`, Schlüssel SHA-256 von `state`, 10 min); setzt Cookie `__Secure-aigw-login=<state>` (`HttpOnly; Secure; SameSite=Lax; Path=/admin/auth`); `303` zum IdP mit `code_challenge_method=S256` |
+| 1 | `GET /admin/auth/login?returnTo=/admin/keys` | erzeugt `state`, `nonce`, PKCE-Verifier (je 256 Bit); speichert sie (Tabelle `admin_login_state`, Schlüssel SHA-256 von `state`, 10 min); setzt Cookie `__Host-aigw-login=<state>` (`HttpOnly; Secure; SameSite=Lax; Path=/`); `303` zum IdP mit `code_challenge_method=S256` |
 | 2 | `GET /admin/auth/callback?code&state` | `state` muss zum Login-Cookie passen (Schutz vor Login-CSRF) und wird beim Lesen gelöscht (einmalig); Code-Tausch mit Verifier; ID-Token-Prüfung; Nutzerzuordnung; Session anlegen; `303` nach `returnTo` (nur Pfade unter `/admin/`, kein offener Redirect) |
 | – | Fehler | `303` nach `/admin/?auth_error=<code>` mit `idp`, `state`, `token`, `invite`, `no-access`, `internal`; Grund nur im Server-Log |
 
@@ -526,9 +526,12 @@ widerruft. Audit: Art `admin-invitation`, `create`/`delete` (ohne Token).
 
 ### 5.3 Session und CSRF
 
-- **Cookie:** `__Secure-aigw-session=<256 Bit zufällig, Base64url>; Path=/admin;
-  Max-Age=<max_age_secs>; HttpOnly; Secure; SameSite=Strict`. Der Präfix `__Host-` ist wegen
-  `Path=/admin` nicht möglich. Browser behandeln `http://localhost`/`127.0.0.1` als sicher, das
+- **Cookie:** `__Host-aigw-session=<256 Bit zufällig, Base64url>; Path=/;
+  Max-Age=<max_age_secs>; HttpOnly; Secure; SameSite=Strict` (S-23, AIGW-99): `__Host-`
+  verlangt `Path=/` und kein `Domain` – Schwester-Subdomains können das Cookie nicht setzen
+  (keine Login-CSRF/Session-Fixierung). Die früheren `__Secure-aigw-session`
+  (`Path=/admin`) bzw. `__Secure-aigw-login` (`Path=/admin/auth`) werden nicht mehr
+  angenommen und bei Login, Rücksprung und Logout gelöscht (einmalige Neuanmeldung). Browser behandeln `http://localhost`/`127.0.0.1` als sicher, das
   `Secure`-Flag stört die lokale Entwicklung daher nicht.
 - **Speicher:** Tabelle `admin_session` mit SHA-256 der Session-ID, Nutzer, IdP-Gruppen beim
   Login, `created_at`, `last_seen_at`, `expires_at`. Wer die Datenbank liest, kann keine Session
@@ -710,7 +713,7 @@ ohne Bereich in `group_roles`) verhindert den Start.
 ### 5.8 OpenAPI und UI
 
 - Sicherheitsschemata: `bearer` (HTTP Bearer: Admin-API-Key oder Bootstrap-Token) und `session`
-  (API-Key im Cookie `__Secure-aigw-session`, Beschreibung nennt `X-CSRF-Token`). Jede Operation
+  (API-Key im Cookie `__Host-aigw-session`, Beschreibung nennt `X-CSRF-Token`). Jede Operation
   mit `bearer` akzeptiert alternativ `session` (per Modifier ergänzt).
 - Neue Pfade (Tag `auth`): `/admin/auth/login`, `/admin/auth/callback`, `/admin/auth/logout`,
   `/admin/api/v1/session`, `/admin/api/v1/auth/info`; Tag `admin-api-keys`.

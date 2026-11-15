@@ -45,9 +45,13 @@ AIGW-58). Verweise `S-xx` beziehen sich auf die dortigen Befunde.
 ## Ausnahmen für private Upstreams
 
 - `admin.allow_private_upstreams` / `allow_insecure_upstreams` so eng wie möglich: einzelne
-  Hosts oder kleine CIDR-Bereiche statt `10.0.0.0/8`. Die Freigabe gilt für **alle** Rollen,
-  auch für Webhook-/content-safety-Bindungen von Team-Admins (S-22).
-- Link-Local/Metadaten nie über eine Namensregel freigeben.
+  Hosts oder kleine CIDR-Bereiche statt `10.0.0.0/8`. Die Freigabe gilt für Deployments,
+  MCP-Server und Plugin-Bindungen der Ebenen `global`/`model-group` (nur globale Admins bzw.
+  GitOps). Webhook-/content-safety-Bindungen auf Organisation, Team oder API-Key – also von
+  `org-admin`/`team-admin` – erreichen immer nur öffentliche Ziele, auch nach der
+  Namensauflösung (S-22). Interne Prüfdienste daher global oder je Modellgruppe binden.
+- Namensregeln (`hooks.internal`, `*.internal`) geben Link-Local/Metadaten (169.254.0.0/16,
+  fe80::/10) nie frei; das ginge nur mit einem ausdrücklichen IP-/CIDR-Eintrag – vermeiden.
 
 ## Master-Key und Secrets
 
@@ -73,10 +77,17 @@ AIGW-58). Verweise `S-xx` beziehen sich auf die dortigen Befunde.
   (OIDC oder Admin-Key mit Rolle `admin`) endgültig aus. Ein erzeugtes Token erscheint
   einmalig auf **stderr**, nicht im strukturierten Log (S-06); stderr-Ausgabe des ersten
   Starts nicht dauerhaft archivieren. `bootstrap: on` nur kurzzeitig; danach Prüfen, dass
-  `GET /admin/api/v1/auth/info` `bootstrap: false` meldet.
+  `GET /admin/api/v1/auth/info` `bootstrap: false` meldet. Scheitert das Speichern der
+  Abschaltung, ist das Token in diesem Prozess trotzdem aus und das Log meldet
+  `Bootstrap-Abschaltung nicht gespeichert` (`error`) – darauf alarmieren; der nächste Start
+  holt die Abschaltung nach. Mehr als 10 Fehlversuche je Minute sperren das Token bis zum
+  Fensterende (`Bootstrap-Token: zu viele Fehlversuche`, S-29).
 - **OIDC** bevorzugen; Session-`max_age` kurz halten (Gruppenrollen gelten bis Session-Ende,
-  S-24). UI nur über HTTPS (Cookies sind `Secure`). Keine fremd kontrollierten
-  Schwester-Subdomains unter dem Admin-Host (S-23).
+  S-24). UI nur über HTTPS (Cookies sind `__Host-…; Secure; Path=/`, ohne `Domain` – von
+  Schwester-Subdomains nicht setzbar, S-23). Nach dem Update auf AIGW-99 melden sich alle
+  Nutzer einmal neu an (alte `__Secure-`-Cookies gelten nicht mehr). Admin-UI nicht unter
+  demselben Host wie fremde Anwendungen betreiben (das Session-Cookie gilt für den ganzen
+  Host, wird aber nur von der Steuerebene ausgewertet).
 - **Rolle `gitops`** (S-05): schreibt standardmäßig **keine** Nutzer mit Rollen oder
   OIDC-Verknüpfung (`422`); `gitops.manage_users: true` nur setzen, wenn Nutzer wirklich per
   GitOps verwaltet werden – dann ist ein gitops-Key admin-gleichwertig. In jedem Fall: CI-Keys

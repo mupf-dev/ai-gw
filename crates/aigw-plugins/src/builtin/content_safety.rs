@@ -74,7 +74,7 @@ use crate::host::{HttpCall, NoHost, PluginHost};
 use crate::plugin::{
     CallInfo, ChunkCtx, ChunkFlow, Flow, Hook, Phases, Plugin, PluginError, ReqCtx, RespCtx,
 };
-use crate::registry::PluginFactory;
+use crate::registry::{BuildCtx, PluginFactory};
 
 const NAME: &str = "content-safety";
 /// Mindestlänge eines Satzes, bevor er einzeln geprüft wird (kurze werden zusammengefasst).
@@ -1171,6 +1171,17 @@ impl PluginFactory for Factory {
             c,
             Arc::clone(&self.host),
         )?))
+    }
+
+    /// S-22: Bindungen auf Organisation/Team/Key nur gegen öffentliche Ziele.
+    fn build_in(&self, ctx: &BuildCtx<'_>, config: &Value) -> Result<Arc<dyn Plugin>, String> {
+        let c: Config = serde_json::from_value(config.clone()).map_err(|e| e.to_string())?;
+        let host = if ctx.private_targets() {
+            Arc::clone(&self.host)
+        } else {
+            self.host.public_only()
+        };
+        Ok(Arc::new(ContentSafety::from_config(c, host)?))
     }
 
     fn default_fail_mode(&self) -> FailMode {

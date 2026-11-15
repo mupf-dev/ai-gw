@@ -18097,7 +18097,7 @@
       "session": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "__Secure-aigw-session",
+        "name": "__Host-aigw-session",
         "description": "Session-Cookie nach dem OIDC-Login (`/admin/auth/login`). Schreibende Anfragen (POST/PUT/PATCH/DELETE) brauchen zusätzlich den Header `X-CSRF-Token` mit dem Wert `csrfToken` aus `GET /admin/api/v1/session`."
       }
     }

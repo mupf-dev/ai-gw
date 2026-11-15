@@ -386,10 +386,70 @@ pub fn deployment(upstreams: &UpstreamPolicy, spec: &DeploymentSpec) -> Res {
     {
         return Err("settings.region: für AWS Bedrock Pflicht (z. B. \"eu-central-1\")".into());
     }
+    if spec.provider == ProviderKind::Vertex
+        && let Some(t) = setting_str(spec, "tokenUrl")?
+    {
+        vertex_token_url(t).map_err(|m| format!("settings.tokenUrl: {m}"))?;
+    }
     if let Some(ca) = setting_str(spec, "caFile")? {
         ca_file(upstreams, ca)?;
     }
     Ok(())
+}
+
+/// Standard-Token-Endpunkt von Google (Service-Account-JWT → Access-Token).
+pub const VERTEX_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+
+/// Token-Endpunkt eines Vertex-Service-Accounts (`settings.tokenUrl` bzw. `token_uri` der
+/// Schlüsseldatei, S-21): nur `https` zu `oauth2.googleapis.com` oder einem anderen Host unter
+/// `googleapis.com` (z. B. Private Service Connect `oauth2-<name>.p.googleapis.com`), Port 443,
+/// ohne Zugangsdaten und Fragment. Sonst könnte ein Deployment das signierte Assertion-JWT an
+/// einen beliebigen Server schicken (der Laufzeit-SSRF-Schutz prüft nur die Zieladresse).
+pub fn vertex_token_url(url: &str) -> Res {
+    let bad = || {
+        format!(
+            "{url:?} ist kein Google-Token-Endpunkt (erlaubt: {VERTEX_TOKEN_URL} oder \
+             https://<name>.googleapis.com/…)"
+        )
+    };
+    if url.len() > crate::upstream::MAX_ENDPOINT_LEN
+        || url.contains(['#', '@'])
+        || url.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        return Err(bad());
+    }
+    let uri: http::Uri = url.parse().map_err(|_| bad())?;
+    let host = uri.host().map(str::to_ascii_lowercase).ok_or_else(bad)?;
+    let host = host.strip_suffix('.').unwrap_or(&host);
+    let google = host == "googleapis.com"
+        || host
+            .strip_suffix(".googleapis.com")
+            .is_some_and(|sub| !sub.is_empty() && sub.split('.').all(|l| !l.is_empty()));
+    if !uri
+        .scheme_str()
+        .is_some_and(|s| s.eq_ignore_ascii_case("https"))
+        || !google
+        || uri.port_u16().is_some_and(|p| p != 443)
+    {
+        return Err(bad());
+    }
+    Ok(())
+}
+
+/// `serviceAccountJson`: ist der Wert eine Schlüsseldatei mit `token_uri`, muss es ein
+/// Google-Token-Endpunkt sein ([`vertex_token_url`], S-21). Kein JSON → hier keine Aussage
+/// (der Adapter meldet das beim Routenaufbau).
+fn service_account_json(value: &str) -> Res {
+    let Ok(Value::Object(o)) = serde_json::from_str::<Value>(value) else {
+        return Ok(());
+    };
+    match o.get("token_uri") {
+        None | Some(Value::Null) => Ok(()),
+        Some(Value::String(t)) => {
+            vertex_token_url(t).map_err(|m| format!("spec.data.serviceAccountJson.token_uri: {m}"))
+        }
+        Some(_) => Err("spec.data.serviceAccountJson.token_uri muss eine Zeichenkette sein".into()),
+    }
 }
 
 /// `settings.caFile` (F48, F177): PEM-Datei innerhalb von `upstream.ca_dir` (relativ =
@@ -830,6 +890,9 @@ pub fn credential_value(field: &str, value: &str) -> Res {
         return Err(format!(
             "spec.data.{field}.value: 1–{MAX_CREDENTIAL_VALUE_LEN} Byte"
         ));
+    }
+    if field == "serviceAccountJson" {
+        service_account_json(value)?;
     }
     Ok(())
 }
@@ -1403,6 +1466,56 @@ mod tests {
         assert!(credential_fields(ProviderKind::Ollama, ["anything"]).is_ok());
         assert!(credential_fields(ProviderKind::Ollama, ["1bad"]).is_err());
         assert!(credential_value("apiKey", "").is_err());
+    }
+
+    #[test]
+    fn vertex_token_endpoint_s21() {
+        for ok in [
+            VERTEX_TOKEN_URL,
+            "https://OAUTH2.googleapis.com/token",
+            "https://oauth2.googleapis.com:443/token",
+            "https://oauth2-psc.p.googleapis.com/token",
+        ] {
+            assert!(vertex_token_url(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "http://oauth2.googleapis.com/token",
+            "https://oauth2.googleapis.com.evil.example/token",
+            "https://evilgoogleapis.com/token",
+            "https://.googleapis.com/token",
+            "https://oauth2.googleapis.com:8443/token",
+            "https://user@oauth2.googleapis.com/token",
+            "https://oauth2.googleapis.com/token#x",
+            "https://169.254.169.254/token",
+            "https://localhost/token",
+            "file:///etc/passwd",
+            "oauth2.googleapis.com/token",
+        ] {
+            assert!(vertex_token_url(bad).is_err(), "{bad}");
+        }
+        let strict = UpstreamPolicy::strict();
+        let mut d = dep(
+            ProviderKind::Vertex,
+            None,
+            json!({"tokenUrl": "http://10.0.0.1/token"}),
+        );
+        let e = deployment(&strict, &d).unwrap_err();
+        assert!(e.starts_with("settings.tokenUrl:"), "{e}");
+        d.settings = json!({"tokenUrl": VERTEX_TOKEN_URL})
+            .as_object()
+            .unwrap()
+            .clone();
+        deployment(&strict, &d).unwrap();
+        // Schlüsseldatei mit fremdem `token_uri`.
+        let sa = |t: &str| json!({"type": "service_account", "token_uri": t}).to_string();
+        assert!(credential_value("serviceAccountJson", &sa(VERTEX_TOKEN_URL)).is_ok());
+        let e =
+            credential_value("serviceAccountJson", &sa("https://attacker.example/t")).unwrap_err();
+        assert!(e.contains("token_uri"), "{e}");
+        assert!(credential_value("serviceAccountJson", r#"{"token_uri": 5}"#).is_err());
+        // Andere Felder bleiben unberührt; kein JSON → Adapter meldet es später.
+        assert!(credential_value("apiKey", &sa("https://attacker.example/t")).is_ok());
+        assert!(credential_value("serviceAccountJson", "kein json").is_ok());
     }
 
     #[test]

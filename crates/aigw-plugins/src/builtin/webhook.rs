@@ -56,7 +56,7 @@ use crate::binding::FailMode;
 use crate::plugin::{
     CallInfo, Flow, Hook, Meta, MetaExt as _, Phases, Plugin, PluginError, ReqCtx, RespCtx,
 };
-use crate::registry::PluginFactory;
+use crate::registry::{BuildCtx, PluginFactory};
 
 /// Standard-Zeitlimit eines Webhook-Aufrufs.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(200);
@@ -137,6 +137,8 @@ enum Reply {
 /// Credential-Referenzen.
 struct Env {
     client: OnceLock<Result<WebhookClient, String>>,
+    /// Variante nur für öffentliche Ziele (Bindungen auf Organisation/Team/Key, S-22).
+    public: OnceLock<Result<WebhookClient, String>>,
     credentials: Option<Arc<dyn CredentialSource>>,
     /// SSRF-Regeln für einen erst bei Bedarf gebauten Client.
     policy: aigw_core::upstream::UpstreamPolicy,
@@ -147,6 +149,16 @@ impl Env {
         self.client
             .get_or_init(|| {
                 WebhookClient::new(self.policy.clone(), ClientOptions::default())
+                    .map_err(|e| format!("Webhook-Client: {e}"))
+            })
+            .clone()
+    }
+
+    fn public_client(&self) -> Result<WebhookClient, String> {
+        self.public
+            .get_or_init(|| {
+                self.client()?
+                    .public_only()
                     .map_err(|e| format!("Webhook-Client: {e}"))
             })
             .clone()
@@ -183,6 +195,7 @@ impl Factory {
         Self {
             env: Arc::new(Env {
                 client: OnceLock::new(),
+                public: OnceLock::new(),
                 credentials: None,
                 policy,
             }),
@@ -196,6 +209,7 @@ impl Factory {
         Self {
             env: Arc::new(Env {
                 client: cell,
+                public: OnceLock::new(),
                 credentials,
                 policy: aigw_core::upstream::UpstreamPolicy::strict(),
             }),
@@ -203,14 +217,9 @@ impl Factory {
     }
 }
 
-impl PluginFactory for Factory {
-    fn name(&self) -> &'static str {
-        "webhook"
-    }
-
-    fn build(&self, config: &Value) -> Result<Arc<dyn Plugin>, String> {
+impl Factory {
+    fn build_with(&self, config: &Value, client: WebhookClient) -> Result<Arc<dyn Plugin>, String> {
         let c: Config = serde_json::from_value(config.clone()).map_err(|e| e.to_string())?;
-        let client = self.env.client()?;
         let uri = client.check_url(&c.url).map_err(|e| format!("url: {e}"))?;
         let secret = SecretResolver::from_config(c.secret.as_ref(), self.env.credentials.clone())?;
         if c.phases.is_empty() {
@@ -248,6 +257,27 @@ impl PluginFactory for Factory {
             max_payload: c.max_payload_bytes,
             max_response: c.max_response_bytes,
         }))
+    }
+}
+
+impl PluginFactory for Factory {
+    fn name(&self) -> &'static str {
+        "webhook"
+    }
+
+    fn build(&self, config: &Value) -> Result<Arc<dyn Plugin>, String> {
+        self.build_with(config, self.env.client()?)
+    }
+
+    /// S-22: Bindungen auf Organisation/Team/Key nur gegen öffentliche Ziele – auch nach der
+    /// Namensauflösung (eigener Client ohne `admin.allow_private_upstreams`).
+    fn build_in(&self, ctx: &BuildCtx<'_>, config: &Value) -> Result<Arc<dyn Plugin>, String> {
+        let client = if ctx.private_targets() {
+            self.env.client()?
+        } else {
+            self.env.public_client()?
+        };
+        self.build_with(config, client)
     }
 
     fn default_timeout(&self) -> Duration {

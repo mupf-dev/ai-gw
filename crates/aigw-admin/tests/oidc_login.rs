@@ -583,7 +583,7 @@ impl Gw {
         body: Option<Value>,
         csrf: bool,
     ) -> Resp {
-        let cookie = format!("__Secure-aigw-session={}", s.cookie);
+        let cookie = format!("__Host-aigw-session={}", s.cookie);
         let mut h = vec![("cookie", cookie.as_str())];
         if csrf {
             h.push(("x-csrf-token", s.csrf.as_str()));
@@ -629,8 +629,8 @@ impl Gw {
         if let Some(code) = r.location().strip_prefix("/admin/?auth_error=") {
             return Err(code.to_owned());
         }
-        let (login_cookie, full) = r.cookie("__Secure-aigw-login").expect("Login-Cookie");
-        for part in ["HttpOnly", "Secure", "SameSite=Lax", "Path=/admin/auth"] {
+        let (login_cookie, full) = r.cookie("__Host-aigw-login").expect("Login-Cookie");
+        for part in ["HttpOnly", "Secure", "SameSite=Lax", "Path=/;"] {
             assert!(full.contains(part), "{full}");
         }
         let to_idp = r.location();
@@ -645,29 +645,29 @@ impl Gw {
         let cb = send(
             Method::GET,
             &back,
-            &[("cookie", &format!("__Secure-aigw-login={login_cookie}"))],
+            &[("cookie", &format!("__Host-aigw-login={login_cookie}"))],
             None,
         )
         .await
         .expect(StatusCode::SEE_OTHER);
         // Login-Cookie wird immer gelöscht
         assert!(
-            cb.cookie("__Secure-aigw-login")
+            cb.cookie("__Host-aigw-login")
                 .unwrap()
                 .1
                 .contains("Max-Age=0")
         );
         let loc = cb.location();
         if let Some(code) = loc.strip_prefix("/admin/?auth_error=") {
-            assert!(cb.cookie("__Secure-aigw-session").is_none());
+            assert!(cb.cookie("__Host-aigw-session").is_none());
             return Err(code.to_owned());
         }
-        let (sid, full) = cb.cookie("__Secure-aigw-session").expect("Session-Cookie");
+        let (sid, full) = cb.cookie("__Host-aigw-session").expect("Session-Cookie");
         for part in [
             "HttpOnly",
             "Secure",
             "SameSite=Strict",
-            "Path=/admin;",
+            "Path=/;",
             "Max-Age=28800",
         ] {
             assert!(full.contains(part), "{full}");
@@ -827,7 +827,7 @@ async fn scenario(store: Store, db_url: &str) {
     let info = send(
         Method::GET,
         &gw.url("/admin/api/v1/auth/info"),
-        &[("cookie", &format!("__Secure-aigw-session={}", tina.cookie))],
+        &[("cookie", &format!("__Host-aigw-session={}", tina.cookie))],
         None,
     )
     .await
@@ -883,7 +883,7 @@ async fn scenario(store: Store, db_url: &str) {
     )
     .await
     .expect(StatusCode::FORBIDDEN);
-    let cookie = format!("__Secure-aigw-session={}", tina.cookie);
+    let cookie = format!("__Host-aigw-session={}", tina.cookie);
     for extra in [
         ("origin", "http://evil.example"),
         ("sec-fetch-site", "cross-site"),
@@ -1367,8 +1367,21 @@ async fn scenario(store: Store, db_url: &str) {
         .await
         .expect(StatusCode::UNAUTHORIZED);
 
+    // --- S-23: Alte `__Secure-`-Cookies gelten nicht mehr --------------------------------------
+    send(
+        Method::GET,
+        &gw.url("/admin/api/v1/session"),
+        &[("cookie", &format!("__Secure-aigw-session={}", adam.cookie))],
+        None,
+    )
+    .await
+    .expect(StatusCode::UNAUTHORIZED);
+
     // --- Abmeldung (lokal + RP-initiated) -------------------------------------------------------
-    let adam_cookie = format!("__Secure-aigw-session={}", adam.cookie);
+    let adam_cookie = format!(
+        "__Host-aigw-session={}; __Secure-aigw-session=alt",
+        adam.cookie
+    );
     send(
         Method::POST,
         &gw.url("/admin/auth/logout"),
@@ -1386,10 +1399,18 @@ async fn scenario(store: Store, db_url: &str) {
     .await
     .expect(StatusCode::OK);
     assert!(
-        r.cookie("__Secure-aigw-session")
+        r.cookie("__Host-aigw-session")
             .unwrap()
             .1
             .contains("Max-Age=0")
+    );
+    // S-23: das alte Cookie wird mit seinem früheren Pfad gelöscht.
+    let (_, old) = r
+        .cookie("__Secure-aigw-session")
+        .expect("altes Cookie löschen");
+    assert!(
+        old.contains("Max-Age=0") && old.contains("Path=/admin;"),
+        "{old}"
     );
     let redirect = r.json()["redirectUrl"].as_str().unwrap().to_owned();
     assert!(
@@ -1423,9 +1444,9 @@ async fn scenario(store: Store, db_url: &str) {
     // state: ohne bzw. mit fremdem Login-Cookie, Wiederholung des Rücksprungs
     idp.set_user(user("adam", &["aigw-admins"]));
     let r = send(Method::GET, &gw.url("/admin/auth/login"), &[], None).await;
-    let (lc, _) = r.cookie("__Secure-aigw-login").unwrap();
+    let (lc, _) = r.cookie("__Host-aigw-login").unwrap();
     let back = send(Method::GET, &r.location(), &[], None).await.location();
-    for cookie in [String::new(), "__Secure-aigw-login=fremd".to_owned()] {
+    for cookie in [String::new(), "__Host-aigw-login=fremd".to_owned()] {
         let h: Vec<(&str, &str)> = if cookie.is_empty() {
             vec![]
         } else {
@@ -1436,7 +1457,7 @@ async fn scenario(store: Store, db_url: &str) {
             .expect(StatusCode::SEE_OTHER);
         assert_eq!(cb.location(), "/admin/?auth_error=state");
     }
-    let good_cookie = format!("__Secure-aigw-login={lc}");
+    let good_cookie = format!("__Host-aigw-login={lc}");
     let cb = send(Method::GET, &back, &[("cookie", &good_cookie)], None).await;
     assert_eq!(cb.location(), "/admin/", "Standardziel");
     let cb = send(Method::GET, &back, &[("cookie", &good_cookie)], None).await;
@@ -1735,7 +1756,7 @@ async fn identity_scenario(store: Store, db_url: &str) {
         .await
         .expect(StatusCode::CREATED);
         let frank = gw.login(&idp, user("frank-sub", &[])).await.unwrap();
-        frank_cookie = (format!("__Secure-aigw-session={}", frank.cookie), frank);
+        frank_cookie = (format!("__Host-aigw-session={}", frank.cookie), frank);
     }
     let sessions_before = gw.count("SELECT COUNT(*) FROM admin_session").await;
     gw.sql("ALTER TABLE audit_log RENAME TO audit_log_weg")

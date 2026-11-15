@@ -151,7 +151,7 @@ impl Env {
 
     /// Admin-API mit Session-Cookie.
     async fn sess(&self, sid: &str, method: Method, path: &str) -> Resp {
-        let cookie = format!("__Secure-aigw-session={sid}");
+        let cookie = format!("__Host-aigw-session={sid}");
         self.send(
             method,
             &format!("/admin/api/v1{path}"),
@@ -621,7 +621,7 @@ async fn scenario(store: Store) {
         .expect(StatusCode::OK);
     let me = env.sess(&s3, Method::GET, "/session").await.json();
     let csrf = me["csrfToken"].as_str().unwrap().to_owned();
-    let cookie = format!("__Secure-aigw-session={s3}");
+    let cookie = format!("__Host-aigw-session={s3}");
     env.send(
         Method::POST,
         "/admin/auth/logout",

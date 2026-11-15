@@ -6,7 +6,8 @@
 //! - **Prüfung beim Schreiben (F118/F165):** `config` wird mit der Registry der Plugin-Kette
 //!   geprüft – Kettensteuerung (`inherit`, `locked`, `failMode`, `timeoutMs`,
 //!   `outputRejectMode`) und Plugin-Konfiguration (`deny_unknown_fields`, Wertebereiche,
-//!   SSRF-Regeln für `webhook`/`content-safety` aus `admin.allow_*_upstreams`). Ungültig →
+//!   SSRF-Regeln für `webhook`/`content-safety` aus `admin.allow_*_upstreams`; private Ziele
+//!   nur auf den Ebenen `global`/`model-group`, S-22). Ungültig →
 //!   `422` mit der Meldung des Plugins. Dieselbe Prüfung läuft im GitOps-Plan
 //!   ([`check`] als `ApplyOptions::plugin_bindings`).
 //! - **Wirksame Steuerung (F148):** Die gelesene Darstellung enthält `effective` – den
@@ -50,8 +51,13 @@ use crate::resources::{
 /// Prüft eine Bindung mit der Registry der Plugin-Kette und den SSRF-Regeln `policy`
 /// (`admin.*`). Auch als `ApplyOptions::plugin_bindings` für GitOps
 /// (`aigw config validate|diff|apply`, `config:apply`).
+///
+/// S-22: Private Ziele (`admin.allow_private_upstreams`) gelten nur für Bindungen der Ebenen
+/// `global`/`model-group` (nur globale Admins); Bindungen auf Organisation, Team und API-Key
+/// werden mit [`UpstreamPolicy::for_binding_level`] nur gegen öffentliche Ziele geprüft – wie
+/// später beim Verbindungsaufbau.
 pub fn check(policy: &UpstreamPolicy, spec: &PluginBindingSpec) -> Result<(), String> {
-    Registry::for_validation(policy)
+    Registry::for_validation(&policy.for_binding_level(spec.scope.level))
         .validate_spec(spec)
         .map_err(|e| format!("Plugin-Bindung ({}): {e}", spec.plugin))
 }

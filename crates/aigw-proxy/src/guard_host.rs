@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use aigw_core::ir::{ChatRequest, ChatResponse};
 use aigw_core::observe::{PluginCall, PluginCalls};
@@ -44,6 +44,8 @@ struct Inner {
     entra_env: Option<EntraEnv>,
     /// Token-Quellen je `ProviderCredential` (Name → Snapshot-Version, Quelle).
     entra: Mutex<HashMap<String, (i64, Arc<EntraTokenSource>)>>,
+    /// Variante nur für öffentliche Ziele (S-22), einmal gebaut.
+    public: OnceLock<Arc<dyn PluginHost>>,
 }
 
 /// Dienste des Gateways für Plugins (günstig klonbar).
@@ -77,6 +79,7 @@ impl GatewayHost {
             client,
             entra_env: None,
             entra: Mutex::new(HashMap::new()),
+            public: OnceLock::new(),
         }))
     }
 
@@ -92,6 +95,7 @@ impl GatewayHost {
             client: i.client.clone(),
             entra_env: Some(env),
             entra: Mutex::new(HashMap::new()),
+            public: OnceLock::new(),
         }))
     }
 }
@@ -200,6 +204,30 @@ impl PluginHost for GatewayHost {
 
     fn check_endpoint(&self, url: &str) -> Result<(), String> {
         self.0.policy.check_endpoint(url)
+    }
+
+    fn public_only(&self) -> Arc<dyn PluginHost> {
+        let i = &self.0;
+        Arc::clone(i.public.get_or_init(|| {
+            let policy = i.policy.public_only();
+            match i.client.public_only() {
+                Ok(client) => Arc::new(GatewayHost(Arc::new(Inner {
+                    routes: Arc::clone(&i.routes),
+                    counters: Arc::clone(&i.counters),
+                    snapshot: i.snapshot.clone(),
+                    policy,
+                    client,
+                    entra_env: i.entra_env.clone(),
+                    entra: Mutex::new(HashMap::new()),
+                    public: OnceLock::new(),
+                }))) as Arc<dyn PluginHost>,
+                Err(e) => {
+                    // Ohne eigenen Client keine Aufrufe (nie auf die privaten Regeln ausweichen).
+                    tracing::error!(error = %e, "Plugin-Host nur für öffentliche Ziele nicht baubar");
+                    Arc::new(aigw_plugins::NoHost::with_policy(policy))
+                }
+            }
+        }))
     }
 
     fn post_json(&self, call: HttpCall) -> BoxFuture<'static, Result<HttpReply, PluginError>> {

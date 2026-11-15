@@ -158,6 +158,35 @@ impl UpstreamPolicy {
         self.ca_dir.as_deref()
     }
 
+    /// Dieselben Regeln ohne die Freigaben aus `admin.allow_private_upstreams` (S-22): nur
+    /// öffentliche Ziele. `allow_insecure_upstreams` bleibt (betrifft nur das Schema).
+    #[must_use]
+    pub fn public_only(&self) -> Self {
+        Self {
+            private: Vec::new(),
+            ..self.clone()
+        }
+    }
+
+    /// `true`, wenn diese Regeln private Ziele freigeben (`admin.allow_private_upstreams`).
+    pub fn has_private_exceptions(&self) -> bool {
+        !self.private.is_empty()
+    }
+
+    /// Regeln für eine Plugin-Bindung der Ebene `level` (S-22): Private Ziele aus
+    /// `admin.allow_private_upstreams` gelten nur für die Ebenen `global` und `model-group`,
+    /// die ausschließlich ein globaler `admin` (bzw. GitOps) schreibt. Bindungen von
+    /// Organisationen, Teams und API-Keys – also auch von `org-admin`/`team-admin` – erreichen
+    /// nur öffentliche Ziele, beim Schreiben wie beim Verbindungsaufbau.
+    #[must_use]
+    pub fn for_binding_level(&self, level: crate::resource::ScopeLevel) -> Self {
+        if binding_level_allows_private(level) {
+            self.clone()
+        } else {
+            self.public_only()
+        }
+    }
+
     /// Sind Deployments mit `provider: mock` erlaubt (`admin.allow_mock`, F85)?
     pub fn allows_mock(&self) -> bool {
         !self.deny_mock
@@ -265,12 +294,15 @@ impl UpstreamPolicy {
         if always_forbidden(ip) {
             return false;
         }
-        // Namensregeln nie auf IP-Literale anwenden (`*.0.1` darf `10.0.0.1` nicht freigeben).
-        if host
-            .trim_start_matches('[')
-            .trim_end_matches(']')
-            .parse::<IpAddr>()
-            .is_err()
+        // Namensregeln nie auf IP-Literale anwenden (`*.0.1` darf `10.0.0.1` nicht freigeben)
+        // und nie Link-Local/Cloud-Metadaten (169.254.0.0/16, fe80::/10) freigeben (S-22) –
+        // dafür braucht es einen ausdrücklichen IP-/CIDR-Eintrag.
+        if !is_link_local(ip)
+            && host
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .parse::<IpAddr>()
+                .is_err()
             && let Some(name) = normalize_name(host)
             && self
                 .private
@@ -367,6 +399,25 @@ fn always_forbidden(ip: IpAddr) -> bool {
     match canonical(ip) {
         IpAddr::V4(v4) => v4.is_unspecified() || v4.is_broadcast() || v4.is_multicast(),
         IpAddr::V6(v6) => v6.is_unspecified() || v6.is_multicast(),
+    }
+}
+
+/// Dürfen Plugin-Bindungen der Ebene `level` private Ziele erreichen (S-22)? Nur `global` und
+/// `model-group` (Schreibrecht nur für globale Admins).
+pub fn binding_level_allows_private(level: crate::resource::ScopeLevel) -> bool {
+    use crate::resource::ScopeLevel;
+    matches!(level, ScopeLevel::Global | ScopeLevel::ModelGroup)
+}
+
+/// Link-Local inkl. Cloud-Metadaten (`169.254.169.254`, `fe80::/10`).
+fn is_link_local(ip: IpAddr) -> bool {
+    match canonical(ip) {
+        IpAddr::V4(v4) => v4.is_link_local(),
+        IpAddr::V6(v6) => in_net(
+            IpAddr::V6(v6),
+            IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0)),
+            10,
+        ),
     }
 }
 
@@ -549,6 +600,28 @@ mod tests {
         assert!(!named.resolved_ip_allowed("evil.example", "10.1.2.3".parse().unwrap()));
         assert!(named.resolved_ip_allowed("evil.example", "1.1.1.1".parse().unwrap()));
         assert!(!named.resolved_ip_allowed("mcp.internal", "0.0.0.0".parse().unwrap()));
+        // S-22: Namensregeln geben nie Link-Local/Metadaten frei, ein CIDR-Eintrag schon.
+        for ll in [
+            "169.254.169.254",
+            "169.254.0.1",
+            "fe80::1",
+            "::ffff:169.254.169.254",
+        ] {
+            assert!(
+                !named.resolved_ip_allowed("mcp.internal", ll.parse().unwrap()),
+                "{ll}"
+            );
+        }
+        let wild = UpstreamPolicy::from_config(&AdminConfig {
+            allow_private_upstreams: vec!["*.internal".into(), "169.254.10.0/24".into()],
+            ..AdminConfig::default()
+        })
+        .unwrap();
+        assert!(!wild.resolved_ip_allowed(
+            "metadata.google.internal",
+            "169.254.169.254".parse().unwrap()
+        ));
+        assert!(wild.resolved_ip_allowed("x.example", "169.254.10.5".parse().unwrap()));
         // AIGW-58: Übergangsformate nach der Auflösung
         for bad in [
             "::7f00:1",
@@ -567,6 +640,31 @@ mod tests {
         })
         .unwrap();
         assert!(!suffix.resolved_ip_allowed("10.0.0.1", "10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn private_targets_only_for_global_bindings_s22() {
+        use crate::resource::ScopeLevel;
+        let p = policy(&["hooks.internal"], &["hooks.internal", "10.0.0.0/8"]);
+        assert!(p.has_private_exceptions());
+        for level in [ScopeLevel::Global, ScopeLevel::ModelGroup] {
+            let q = p.for_binding_level(level);
+            assert!(q.check_endpoint("http://hooks.internal/x").is_ok());
+            assert!(q.resolved_ip_allowed("pub.example", "10.1.2.3".parse().unwrap()));
+        }
+        for level in [
+            ScopeLevel::Organization,
+            ScopeLevel::Team,
+            ScopeLevel::ApiKey,
+        ] {
+            let q = p.for_binding_level(level);
+            assert!(!q.has_private_exceptions());
+            assert!(q.check_endpoint("http://hooks.internal/x").is_err());
+            assert!(q.check_endpoint("https://10.0.0.5/x").is_err());
+            // Auch ein öffentlicher Name, der auf das freigegebene Netz zeigt, scheitert.
+            assert!(!q.resolved_ip_allowed("pub.example", "10.1.2.3".parse().unwrap()));
+            assert!(q.check_endpoint("https://hooks.example.org/x").is_ok());
+        }
     }
 
     #[test]

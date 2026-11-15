@@ -149,6 +149,30 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Geändert
 
+- **Admin-Cookies `__Host-` (S-23, AIGW-99, inkompatibel):** Session- und Login-Cookie heißen
+  `__Host-aigw-session` bzw. `__Host-aigw-login` (`Path=/`, ohne `Domain`) – Schwester-
+  Subdomains können sie nicht mehr setzen (Login-CSRF/Session-Fixierung). Alte
+  `__Secure-`-Cookies werden nicht mehr angenommen und bei Login/Logout gelöscht: **alle
+  Nutzer melden sich nach dem Update einmal neu an.** OpenAPI-Schema `session` entsprechend.
+- **Private Upstreams nur für globale Bindungen (S-22, AIGW-99, inkompatibel):**
+  `admin.allow_private_upstreams` gilt für Plugin-Bindungen (`webhook`, `content-safety`) nur
+  noch auf den Ebenen `global`/`model-group`; Bindungen auf Organisation/Team/API-Key
+  erreichen nur öffentliche Ziele (Prüfung beim Schreiben und nach der Namensauflösung).
+  Bestehende Org-/Team-/Key-Bindungen mit privatem Ziel werden beim Kettenaufbau ungültig
+  (Log `Plugin-Bindung ungültig`, je `failMode` übersprungen bzw. gesperrt) – auf eine globale
+  bzw. Modellgruppen-Bindung umstellen. Namensregeln geben Link-Local (169.254.0.0/16,
+  fe80::/10) nie mehr frei. `PluginHost::public_only`, `BuildCtx::level`,
+  `OutboundClient::public_only`, `WebhookClient::public_only` neu.
+- **Vertex-Token-Endpunkt geprüft (S-21, AIGW-99):** `settings.tokenUrl` und `token_uri` in
+  `serviceAccountJson` nur noch `https://oauth2.googleapis.com/token` bzw. `https` unter
+  `*.googleapis.com` – sonst `422` (Admin-API) bzw. `issues` (GitOps).
+- **Plugins können Anfragen nicht mehr verteuern (S-30, AIGW-99):** Nach den Pre-Plugins
+  werden `n` und `max_tokens` auf die bei der Admission zugelassenen Werte begrenzt (Webhook
+  `modify`, WASM, `request-transform`); Begrenzung mit `warn`-Log.
+- **Bootstrap-Token (S-29, AIGW-99):** Fehlversuche werden gezählt, mehr als 10 je Minute
+  sperren das Token bis zum Fensterende. Die automatische Abschaltung gilt sofort im Prozess,
+  auch wenn das Speichern scheitert (`error`-Log, Wiederholung); der Start holt einen
+  fehlenden Abschaltvermerk nach (`aigw_admin::reconcile_bootstrap`).
 - **MCP-Grenzen (S-28, AIGW-100, verhaltensändernd):** `initialize`, `tools/list`,
   `resources/*` und `prompts/*` zählen gegen die Limits des Keys (`requests`, `concurrency`;
   `ping` nicht) – Keys mit knappem RPM-Limit brauchen ggf. mehr Spielraum. Neu

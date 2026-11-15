@@ -67,6 +67,17 @@ pub struct BuildCtx<'a> {
     pub snapshot: &'a aigw_core::snapshot::Snapshot,
     /// Wirksames Zeitlimit der Bindung (`timeoutMs` bzw. Standard der Plugin-Art).
     pub timeout: Duration,
+    /// Ebene der Bindung. Plugins mit ausgehenden Aufrufen (`webhook`, `content-safety`)
+    /// erreichen private Ziele nur auf `global`/`model-group` (S-22,
+    /// [`aigw_core::upstream::binding_level_allows_private`]).
+    pub level: aigw_core::resource::ScopeLevel,
+}
+
+impl BuildCtx<'_> {
+    /// Darf die Bindung private Ziele aus `admin.allow_private_upstreams` erreichen (S-22)?
+    pub fn private_targets(&self) -> bool {
+        aigw_core::upstream::binding_level_allows_private(self.level)
+    }
 }
 
 /// Wirksame Kettensteuerung einer Bindung (für Admin-API/UI, F148).

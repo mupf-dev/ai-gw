@@ -20,8 +20,12 @@
 //! Login und Logout schreiben ihren Audit-Eintrag mit `admin.auth.audit_required` (Standard)
 //! in derselben Transaktion wie die Session (F113): scheitert er, scheitert die Anmeldung.
 //!
-//! Session-Cookie: `__Secure-aigw-session=<256 Bit zufällig>; HttpOnly; Secure;
-//! SameSite=Strict; Path=/admin`. Gespeichert wird nur SHA-256 der Session-ID; das CSRF-Token
+//! Session-Cookie: `__Host-aigw-session=<256 Bit zufällig>; HttpOnly; Secure;
+//! SameSite=Strict; Path=/` (S-23: `__Host-` = ohne `Domain`, nur vom eigenen Host setzbar –
+//! keine Login-CSRF/Session-Fixierung über Schwester-Subdomains; dafür muss der Pfad `/` sein).
+//! Die früheren `__Secure-`-Cookies (Pfad `/admin` bzw. `/admin/auth`) werden **nicht** mehr
+//! angenommen (sie wären weiter von Subdomains setzbar) und bei Login/Logout gelöscht: bestehende
+//! Sessions melden sich nach dem Update einmal neu an. Gespeichert wird nur SHA-256 der Session-ID; das CSRF-Token
 //! ist SHA-256 über die Session-ID mit eigenem Kontext (aus dem Hash in der Datenbank nicht
 //! ableitbar, daher keine eigene Spalte).
 
@@ -55,10 +59,16 @@ use crate::oidc::{IdClaims, OidcClient, b64url, pkce_challenge};
 use crate::problem::Problem;
 use crate::rbac;
 
-/// Name des Session-Cookies.
-pub const SESSION_COOKIE: &str = "__Secure-aigw-session";
+/// Name des Session-Cookies (S-23: `__Host-`, `Path=/`, ohne `Domain`).
+pub const SESSION_COOKIE: &str = "__Host-aigw-session";
 /// Name des Cookies für einen laufenden Login.
-pub const LOGIN_COOKIE: &str = "__Secure-aigw-login";
+pub const LOGIN_COOKIE: &str = "__Host-aigw-login";
+/// Frühere Cookies (bis AIGW-99), werden nur noch gelöscht (`Set-Cookie` mit `Max-Age=0` und
+/// dem alten Pfad).
+const LEGACY_COOKIES: [(&str, &str, &str); 2] = [
+    ("__Secure-aigw-session", "/admin", "Strict"),
+    ("__Secure-aigw-login", "/admin/auth", "Lax"),
+];
 /// Gültigkeit eines begonnenen Logins.
 const LOGIN_TTL_SECS: i64 = 600;
 /// Aktivität wird höchstens so oft in die Datenbank geschrieben.
@@ -110,23 +120,33 @@ fn set_cookie(res: &mut Response, value: String) {
 }
 
 fn session_cookie(sid: &str, max_age: u64) -> String {
-    format!(
-        "{SESSION_COOKIE}={sid}; Path=/admin; Max-Age={max_age}; HttpOnly; Secure; SameSite=Strict"
-    )
+    format!("{SESSION_COOKIE}={sid}; Path=/; Max-Age={max_age}; HttpOnly; Secure; SameSite=Strict")
 }
 
 fn clear_session_cookie() -> String {
-    format!("{SESSION_COOKIE}=; Path=/admin; Max-Age=0; HttpOnly; Secure; SameSite=Strict")
+    format!("{SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict")
 }
 
 fn login_cookie(state: &str) -> String {
     format!(
-        "{LOGIN_COOKIE}={state}; Path=/admin/auth; Max-Age={LOGIN_TTL_SECS}; HttpOnly; Secure; SameSite=Lax"
+        "{LOGIN_COOKIE}={state}; Path=/; Max-Age={LOGIN_TTL_SECS}; HttpOnly; Secure; SameSite=Lax"
     )
 }
 
 fn clear_login_cookie() -> String {
-    format!("{LOGIN_COOKIE}=; Path=/admin/auth; Max-Age=0; HttpOnly; Secure; SameSite=Lax")
+    format!("{LOGIN_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax")
+}
+
+/// Löscht die früheren `__Secure-`-Cookies (S-23), falls der Browser sie mitschickt.
+fn clear_legacy_cookies(res: &mut Response, headers: &HeaderMap) {
+    for (name, path, same_site) in LEGACY_COOKIES {
+        if cookie(headers, name).is_some() {
+            set_cookie(
+                res,
+                format!("{name}=; Path={path}; Max-Age=0; HttpOnly; Secure; SameSite={same_site}"),
+            );
+        }
+    }
 }
 
 fn redirect(location: &str) -> Response {
@@ -326,6 +346,7 @@ pub(crate) struct LoginQuery {
 )]
 pub(crate) async fn login(
     State(st): State<AdminState>,
+    headers: HeaderMap,
     q: Result<Query<LoginQuery>, QueryRejection>,
 ) -> Result<Response, Problem> {
     let Some(svc) = st.login.as_ref() else {
@@ -376,6 +397,7 @@ pub(crate) async fn login(
         .await?;
     let mut res = redirect(&url);
     set_cookie(&mut res, login_cookie(&state));
+    clear_legacy_cookies(&mut res, &headers);
     Ok(res)
 }
 
@@ -474,6 +496,7 @@ pub(crate) async fn callback(
         }
     };
     set_cookie(&mut res, clear_login_cookie());
+    clear_legacy_cookies(&mut res, &headers);
     res
 }
 
@@ -562,18 +585,7 @@ async fn complete_login(
         });
     }
     if rbac::is_global_admin(&roles) {
-        match st
-            .store
-            .disable_bootstrap(&format!("oidc-admin:{}", user.metadata.name))
-            .await
-        {
-            Ok(true) => tracing::info!(
-                user = %user.metadata.name,
-                "Erster OIDC-Admin angemeldet – Bootstrap-Token (auto) dauerhaft abgeschaltet"
-            ),
-            Ok(false) => {}
-            Err(e) => tracing::warn!(error = %e, "Bootstrap-Abschaltung nicht gespeichert"),
-        }
+        crate::auth::latch_bootstrap(st, &format!("oidc-admin:{}", user.metadata.name)).await;
     }
 
     let sid = random_token()?;
@@ -852,6 +864,7 @@ pub(crate) async fn logout(
     }
     let mut res = Json(LogoutResult { redirect_url }).into_response();
     set_cookie(&mut res, clear_session_cookie());
+    clear_legacy_cookies(&mut res, &headers);
     res.headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(res)
@@ -1206,21 +1219,47 @@ mod tests {
         let mut h = HeaderMap::new();
         h.insert(
             header::COOKIE,
-            HeaderValue::from_static("a=1; __Secure-aigw-session=abc ; b=2"),
+            HeaderValue::from_static("a=1; __Host-aigw-session=abc ; b=2"),
         );
         assert_eq!(cookie(&h, SESSION_COOKIE), Some("abc"));
         assert_eq!(cookie(&h, LOGIN_COOKIE), None);
+        // S-23: alte `__Secure-`-Cookies gelten nicht mehr.
+        let mut old = HeaderMap::new();
+        old.insert(
+            header::COOKIE,
+            HeaderValue::from_static("__Secure-aigw-session=abc"),
+        );
+        assert_eq!(cookie(&old, SESSION_COOKIE), None);
         let c = session_cookie("x", 10);
         for part in [
+            "__Host-aigw-session=x;",
             "HttpOnly",
             "Secure",
             "SameSite=Strict",
-            "Path=/admin",
+            "Path=/;",
             "Max-Age=10",
         ] {
             assert!(c.contains(part), "{c}");
         }
-        assert!(login_cookie("s").contains("SameSite=Lax"));
+        assert!(!c.contains("Domain"), "{c}");
+        let l = login_cookie("s");
+        assert!(
+            l.starts_with("__Host-aigw-login=s;") && l.contains("Path=/;"),
+            "{l}"
+        );
+        assert!(l.contains("SameSite=Lax"));
+        let mut res = StatusCode::OK.into_response();
+        clear_legacy_cookies(&mut res, &old);
+        let set: Vec<_> = res
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|v| v.to_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            set,
+            ["__Secure-aigw-session=; Path=/admin; Max-Age=0; HttpOnly; Secure; SameSite=Strict"]
+        );
         assert_ne!(csrf_for("a").0, csrf_for("b").0);
         assert_ne!(csrf_for("a").0, session_hash("a").to_hex());
     }

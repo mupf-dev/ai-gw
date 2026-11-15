@@ -142,6 +142,14 @@ impl WebhookClient {
         })
     }
 
+    /// Variante nur für öffentliche Ziele (S-22): ohne `admin.allow_private_upstreams`,
+    /// eigener Pool. Für Webhooks aus Bindungen auf Organisation/Team/Key.
+    pub fn public_only(&self) -> Result<Self, OutboundError> {
+        Ok(Self {
+            inner: self.inner.public_only()?,
+        })
+    }
+
     /// Client mit strengen SSRF-Regeln und Standardeinstellungen.
     pub fn strict() -> Result<Self, OutboundError> {
         Self::new(UpstreamPolicy::strict(), ClientOptions::default())

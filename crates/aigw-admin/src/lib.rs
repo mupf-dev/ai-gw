@@ -72,6 +72,7 @@ use aigw_core::config::AdminAuthConfig;
 pub use api::ApiDoc;
 pub use auth::{
     AdminAuthenticator, AuthChain, BootstrapGate, BootstrapToken, Permission, Principal,
+    reconcile_bootstrap,
 };
 pub use problem::Problem;
 pub use rbac::Target;

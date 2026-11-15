@@ -20,8 +20,9 @@
 use std::fmt::{self, Write as _};
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use aigw_core::config::BootstrapMode;
 use aigw_core::resource::{Role, RoleBinding};
@@ -270,12 +271,49 @@ impl AdminAuthenticator for BootstrapToken {
 /// (gesetzt beim ersten OIDC-Login eines globalen Admins bzw. beim Anlegen eines Admin-API-Keys
 /// mit Rolle `admin`, auch von anderen Instanzen). Der Vermerk ist endgültig; ist er einmal
 /// gesehen, fragt diese Instanz die Datenbank nicht mehr.
-#[derive(Debug)]
 pub struct BootstrapGate {
     token: BootstrapToken,
     mode: BootstrapMode,
     store: Store,
     disabled: AtomicBool,
+    /// Abschaltung, die (noch) nicht gespeichert werden konnte (S-29): Grund für den nächsten
+    /// Versuch. Bis dahin gilt das Token in diesem Prozess schon als abgeschaltet.
+    pending: Mutex<Option<String>>,
+    failures: Mutex<Failures>,
+    /// Fehlversuche insgesamt (seit Prozessstart).
+    failures_total: AtomicU64,
+}
+
+/// Höchstzahl Fehlversuche mit dem Bootstrap-Token je [`BOOTSTRAP_FAILURE_WINDOW`] (S-29).
+/// Danach lehnt das Gate bis zum Ende des Fensters **jedes** Bootstrap-Token ab (auch das
+/// richtige) – das Token ist 256 Bit stark, die Sperre bremst nur Raten und macht es im Log
+/// sichtbar.
+pub const BOOTSTRAP_MAX_FAILURES: u32 = 10;
+/// Zeitfenster der Drosselung.
+pub const BOOTSTRAP_FAILURE_WINDOW: Duration = Duration::from_secs(60);
+/// Präfix der Admin-API-Keys: deren Fehlversuche zählen hier nicht (eigene Prüfung).
+const ADMIN_KEY_PREFIX: &str = "sk-aigw-admin-";
+
+/// Fehlversuche im aktuellen Fenster.
+#[derive(Debug, Default)]
+struct Failures {
+    window_start: Option<Instant>,
+    count: u32,
+    /// Sperre schon gemeldet (einmal je Fenster loggen).
+    reported: bool,
+}
+
+impl fmt::Debug for BootstrapGate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BootstrapGate")
+            .field("mode", &self.mode)
+            .field("disabled", &self.disabled.load(Ordering::Relaxed))
+            .field(
+                "failures_total",
+                &self.failures_total.load(Ordering::Relaxed),
+            )
+            .finish_non_exhaustive()
+    }
 }
 
 impl BootstrapGate {
@@ -286,7 +324,15 @@ impl BootstrapGate {
             disabled: AtomicBool::new(mode == BootstrapMode::Off),
             mode,
             store,
+            pending: Mutex::new(None),
+            failures: Mutex::new(Failures::default()),
+            failures_total: AtomicU64::new(0),
         }
+    }
+
+    /// Fehlversuche seit Prozessstart (S-29).
+    pub fn failures_total(&self) -> u64 {
+        self.failures_total.load(Ordering::Relaxed)
     }
 
     /// Gilt das Token derzeit (Modus und Abschaltvermerk; für `GET /auth/info`, F56)?
@@ -296,6 +342,7 @@ impl BootstrapGate {
             BootstrapMode::On => true,
             BootstrapMode::Auto => {
                 if self.disabled.load(Ordering::Relaxed) {
+                    self.retry_pending().await;
                     return false;
                 }
                 match self.store.bootstrap_disabled().await {
@@ -316,11 +363,106 @@ impl BootstrapGate {
             }
         }
     }
+
+    /// Vermerkt die dauerhafte Abschaltung (wirksam bei `admin.auth.bootstrap: auto`; erster
+    /// globaler Admin, F56). S-29: Die Abschaltung gilt **sofort** in diesem Prozess, auch
+    /// wenn das Speichern scheitert; dann wird sie laut geloggt (`error`) und bei jeder
+    /// weiteren Prüfung erneut versucht. Beim nächsten Start holt [`reconcile_bootstrap`] sie
+    /// nach (scheitert auch das, bleibt das Token aus).
+    pub async fn disable(&self, reason: &str) {
+        // Der Vermerk wird in jedem Modus gespeichert (ein späterer Wechsel auf `auto` sieht
+        // ihn); im Prozess wirkt er nur bei `auto`.
+        if self.mode == BootstrapMode::Auto {
+            self.disabled.store(true, Ordering::Relaxed);
+        }
+        if let Err(e) = self.persist(reason).await {
+            tracing::error!(
+                error = %e,
+                reason,
+                "Bootstrap-Abschaltung nicht gespeichert – Token in diesem Prozess gesperrt, \
+                 Speichern wird wiederholt (andere Instanzen akzeptieren es bis dahin noch)"
+            );
+            *self.pending.lock().unwrap_or_else(PoisonError::into_inner) = Some(reason.to_owned());
+        }
+    }
+
+    async fn persist(&self, reason: &str) -> Result<(), aigw_store::StoreError> {
+        if self.store.disable_bootstrap(reason).await? {
+            tracing::info!(reason, "Bootstrap-Token (auto) dauerhaft abgeschaltet");
+        }
+        Ok(())
+    }
+
+    async fn retry_pending(&self) {
+        let reason = self
+            .pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let Some(reason) = reason else { return };
+        match self.persist(&reason).await {
+            Ok(()) => {
+                *self.pending.lock().unwrap_or_else(PoisonError::into_inner) = None;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Bootstrap-Abschaltung weiterhin nicht gespeichert");
+            }
+        }
+    }
+
+    /// Ist das Gate wegen zu vieler Fehlversuche gesperrt (zum Zeitpunkt `now`)?
+    fn locked(&self, now: Instant) -> bool {
+        let f = self.failures.lock().unwrap_or_else(PoisonError::into_inner);
+        f.count >= BOOTSTRAP_MAX_FAILURES
+            && f.window_start
+                .is_some_and(|t| now.duration_since(t) < BOOTSTRAP_FAILURE_WINDOW)
+    }
+
+    /// Zählt einen Fehlversuch (S-29).
+    fn record_failure(&self, now: Instant) {
+        let total = self.failures_total.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut f = self.failures.lock().unwrap_or_else(PoisonError::into_inner);
+        if f.window_start
+            .is_none_or(|t| now.duration_since(t) >= BOOTSTRAP_FAILURE_WINDOW)
+        {
+            *f = Failures {
+                window_start: Some(now),
+                count: 0,
+                reported: false,
+            };
+        }
+        f.count = f.count.saturating_add(1);
+        if f.count >= BOOTSTRAP_MAX_FAILURES && !f.reported {
+            f.reported = true;
+            tracing::warn!(
+                failures = f.count,
+                total,
+                window_secs = BOOTSTRAP_FAILURE_WINDOW.as_secs(),
+                "Bootstrap-Token: zu viele Fehlversuche – bis zum Ende des Fensters gesperrt"
+            );
+        } else {
+            tracing::debug!(total, "Bootstrap-Token: Fehlversuch");
+        }
+    }
+
+    /// Prüft ein vorgelegtes Token (ohne Modus/Abschaltung) mit Drosselung.
+    fn check(&self, presented: &str, now: Instant) -> bool {
+        if self.locked(now) {
+            return false;
+        }
+        if self.token.matches(presented) {
+            return true;
+        }
+        if !presented.starts_with(ADMIN_KEY_PREFIX) {
+            self.record_failure(now);
+        }
+        false
+    }
 }
 
 impl AdminAuthenticator for BootstrapGate {
     fn authenticate<'a>(&'a self, headers: &'a HeaderMap) -> BoxFuture<'a, Option<Principal>> {
-        let ok = bearer_token(headers).is_some_and(|t| self.token.matches(t));
+        let ok = bearer_token(headers).is_some_and(|t| self.check(t, Instant::now()));
         Box::pin(async move {
             if ok && self.active().await {
                 Some(BootstrapToken::principal())
@@ -328,6 +470,146 @@ impl AdminAuthenticator for BootstrapGate {
                 None
             }
         })
+    }
+}
+
+/// Schaltet das Bootstrap-Token (Modus `auto`) nach dem ersten globalen Admin ab (F56): über
+/// das Gate dieser Instanz (sofort wirksam, Wiederholung bei Speicherfehler, S-29), ohne Gate
+/// (Token hier nicht aktiv) direkt in der Datenbank – ein Fehler wird laut geloggt und beim
+/// nächsten Start von [`reconcile_bootstrap`] nachgeholt.
+pub(crate) async fn latch_bootstrap(st: &crate::AdminState, reason: &str) {
+    if let Some(g) = &st.bootstrap {
+        g.disable(reason).await;
+        return;
+    }
+    match st.store.disable_bootstrap(reason).await {
+        Ok(true) => tracing::info!(reason, "Bootstrap-Token (auto) dauerhaft abgeschaltet"),
+        Ok(false) => {}
+        Err(e) => tracing::error!(
+            error = %e,
+            reason,
+            "Bootstrap-Abschaltung nicht gespeichert (wird beim nächsten Start nachgeholt)"
+        ),
+    }
+}
+
+/// Holt beim Start eine verlorene Bootstrap-Abschaltung nach (S-29): Gibt es schon einen
+/// Admin-API-Key mit globaler Rolle `admin`, ist das Token (Modus `auto`) dauerhaft
+/// abzuschalten. Liefert `true`, wenn es abgeschaltet ist (bzw. jetzt wurde). Ein Fehler beim
+/// Lesen oder Speichern ist ein Fehler (der Aufrufer bricht den Start ab).
+pub async fn reconcile_bootstrap(store: &Store) -> Result<bool, aigw_store::StoreError> {
+    if store.bootstrap_disabled().await? {
+        return Ok(true);
+    }
+    let keys = store.list_admin_api_keys().await?;
+    let Some(k) = keys
+        .iter()
+        .find(|k| crate::rbac::is_global_admin(&k.spec.roles))
+    else {
+        return Ok(false);
+    };
+    store
+        .disable_bootstrap(&format!("admin-api-key:{} (beim Start nachgeholt)", k.name))
+        .await?;
+    tracing::warn!(
+        key = %k.name,
+        "Bootstrap-Abschaltung beim Start nachgeholt (Admin-API-Key mit Rolle admin vorhanden)"
+    );
+    Ok(true)
+}
+
+#[cfg(test)]
+mod bootstrap_tests {
+    use super::*;
+
+    async fn gate() -> BootstrapGate {
+        let store = Store::connect("sqlite::memory:").await.unwrap();
+        store.migrate().await.unwrap();
+        BootstrapGate::new(
+            BootstrapToken::new("t0123456789-0123456789-0123456789").unwrap(),
+            BootstrapMode::Auto,
+            store,
+        )
+    }
+
+    #[tokio::test]
+    async fn failures_are_counted_and_throttled() {
+        let g = gate().await;
+        let good = "t0123456789-0123456789-0123456789";
+        let t0 = Instant::now();
+        assert!(g.check(good, t0));
+        for _ in 0..BOOTSTRAP_MAX_FAILURES {
+            assert!(!g.check("falsch", t0));
+        }
+        assert_eq!(g.failures_total(), u64::from(BOOTSTRAP_MAX_FAILURES));
+        // Gesperrt – auch das richtige Token, bis das Fenster vorbei ist.
+        assert!(!g.check(good, t0 + Duration::from_secs(1)));
+        assert!(g.check(good, t0 + BOOTSTRAP_FAILURE_WINDOW));
+        // Admin-API-Keys zählen nicht.
+        let t1 = t0 + BOOTSTRAP_FAILURE_WINDOW * 3;
+        for _ in 0..BOOTSTRAP_MAX_FAILURES * 2 {
+            assert!(!g.check("sk-aigw-admin-abc-def", t1));
+        }
+        assert!(g.check(good, t1));
+    }
+
+    #[tokio::test]
+    async fn disable_applies_immediately_and_is_stored() {
+        let g = gate().await;
+        assert!(g.active().await);
+        g.disable("test").await;
+        assert!(!g.active().await);
+        assert!(g.store.bootstrap_disabled().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn disable_fails_closed_without_database() {
+        let g = gate().await;
+        g.store.close().await;
+        g.disable("test").await;
+        // Speichern scheitert, das Token gilt hier trotzdem nicht mehr.
+        assert!(!g.active().await);
+        assert!(g.pending.lock().unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn reconcile_latches_when_admin_key_exists() {
+        let g = gate().await;
+        assert!(!reconcile_bootstrap(&g.store).await.unwrap());
+        assert!(g.active().await);
+        // Ein Team-Admin-Key schaltet nicht ab, ein globaler Admin-Key schon.
+        let spec = |roles| aigw_store::admin_auth::AdminApiKeySpec {
+            description: None,
+            roles,
+            expires_at: None,
+        };
+        g.store
+            .create_admin_api_key(
+                "t",
+                "team",
+                spec(vec![RoleBinding {
+                    role: Role::TeamAdmin,
+                    organization: Some("o".into()),
+                    team: Some("t".into()),
+                }]),
+            )
+            .await
+            .unwrap();
+        assert!(!reconcile_bootstrap(&g.store).await.unwrap());
+        g.store
+            .create_admin_api_key(
+                "t",
+                "ci",
+                spec(vec![RoleBinding {
+                    role: Role::Admin,
+                    organization: None,
+                    team: None,
+                }]),
+            )
+            .await
+            .unwrap();
+        assert!(reconcile_bootstrap(&g.store).await.unwrap());
+        assert!(!g.active().await);
     }
 }
 

@@ -529,6 +529,15 @@ async fn credentials(env: &Env) {
                    "data": {"apiKey": {"value": ""}}}}),
             StatusCode::UNPROCESSABLE_ENTITY,
         ),
+        // S-21: Schlüsseldatei mit fremdem `token_uri`
+        (
+            json!({"metadata": {"name": "x"}, "spec": {"provider": "vertex",
+                   "data": {"serviceAccountJson": {"value": json!({
+                       "type": "service_account", "client_email": "a@b",
+                       "private_key": SECRET2,
+                       "token_uri": "http://169.254.169.254/token"}).to_string()}}}}),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
     ] {
         let r = env
             .admin(Method::POST, "/provider-credentials", Some(body))
@@ -764,6 +773,12 @@ async fn deployments(env: &Env) {
             json!({"modelGroup": "gpt-4o", "provider": "openai", "providerModel": "m",
                    "credential": "nope"}),
             "nope",
+        ),
+        // S-21: Vertex-Token-Endpunkt nur bei Google
+        (
+            json!({"modelGroup": "gpt-4o", "provider": "vertex", "providerModel": "gemini",
+                   "settings": {"project": "p", "tokenUrl": "https://attacker.example/token"}}),
+            "settings.tokenUrl",
         ),
         // Gewicht/Kapazität
         (

@@ -145,6 +145,21 @@ impl AddressGuard {
         }
     }
 
+    /// Dieselben Regeln ohne Freigaben für private Ziele (S-22,
+    /// [`UpstreamPolicy::public_only`]); `Trusted` bleibt unverändert (nur Betreiber-Ziele und
+    /// Tests), Ausnahmen aus dem Code (`Exempt`, z. B. IMDS) bleiben erhalten.
+    #[must_use]
+    pub fn public_only(&self) -> Self {
+        match self {
+            Self::Policy(p) => Self::Policy(Arc::new(p.public_only())),
+            Self::Trusted => Self::Trusted,
+            Self::Exempt { base, hosts } => Self::Exempt {
+                base: Box::new(base.public_only()),
+                hosts: Arc::clone(hosts),
+            },
+        }
+    }
+
     /// Diese Regeln plus die Ausnahme für genau `host` (siehe [`AddressGuard::Exempt`]).
     #[must_use]
     pub fn exempt(&self, host: &str) -> Self {

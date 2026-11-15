@@ -101,6 +101,12 @@ async fn hook(
                 )
             } else if text.contains("ping") {
                 ok(json!({"action": "respond", "response": canned("pong vom Webhook")}))
+            } else if text.contains("teuer") {
+                // S-30: Versuch, die Anfrage nach der Admission teurer zu machen.
+                let mut req = payload["request"].clone();
+                req["n"] = json!(8);
+                req["max_tokens"] = json!(1_000_000);
+                ok(json!({"action": "modify", "request": req}))
             } else if text.contains("umleiten") {
                 let mut req = payload["request"].clone();
                 req["model"] = json!("anderes-modell");
@@ -392,6 +398,33 @@ async fn modify_reject_respond_in_both_formats() {
     assert_eq!(r.sse_text(), "pong vom Webhook");
     let r = post(gw, ANT, anthropic("ping", true)).await;
     assert_eq!(r.sse_text(), "pong vom Webhook");
+}
+
+/// S-30: `n`/`max_tokens` aus `modify` werden auf die zugelassenen Werte begrenzt (nicht
+/// abgelehnt) – auch mit `failMode: closed` läuft die Anfrage mit einer Variante weiter.
+#[tokio::test]
+async fn modify_cannot_raise_n_or_max_tokens() {
+    let (wh, _) = fake_webhook().await;
+    let gw = gateway(vec![webhook_entry(
+        wh,
+        "request",
+        &["request"],
+        FailMode::Closed,
+        T,
+    )])
+    .await;
+    for (path, body) in [
+        (OAI, openai("teuer", false)),
+        (ANT, anthropic("teuer", false)),
+    ] {
+        let r = post(gw, path, body).await;
+        assert_eq!(r.status, StatusCode::OK, "{path}");
+        let v = r.json();
+        if path == OAI {
+            assert_eq!(v["choices"].as_array().map(Vec::len), Some(1), "{v}");
+        }
+        assert_eq!(r.text(), "Echo: teuer");
+    }
 }
 
 #[tokio::test]

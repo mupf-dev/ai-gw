@@ -408,7 +408,7 @@ Eine Anbieterart `vertex`, zwei APIs (gleiches Format `generateContent`), ohne G
 | Pfad | `/models/{model}:generateContent` | `/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent` (`providerModel` mit `publishers/…` oder `projects/…` wird übernommen) |
 | Stream | `:streamGenerateContent?alt=sse` | dto. |
 | Auth | `x-goog-api-key` (Zugangsdaten `apiKey`) | OAuth-Bearer aus Service-Account (`serviceAccountJson` = Schlüsseldatei, oder `clientEmail` + `privateKey` [+ `privateKeyId`]); alternativ festes `accessToken` |
-| Einstellungen | – | `project` (Standard `project_id` der Schlüsseldatei), `location` (Standard `global`), `tokenUrl` (Standard `token_uri` der Schlüsseldatei bzw. `https://oauth2.googleapis.com/token`) |
+| Einstellungen | – | `project` (Standard `project_id` der Schlüsseldatei), `location` (Standard `global`), `tokenUrl` (Standard `token_uri` der Schlüsseldatei bzw. `https://oauth2.googleapis.com/token`; beides nur `https` unter `googleapis.com`, S-21) |
 
 `api` ist optional: nur `apiKey` → Gemini API, sonst Vertex. Gemeinsam: `safetySettings`
 (Liste, unverändert übernommen), `timeouts`; `spec.endpoint` ersetzt die Basis-URL (Tests,

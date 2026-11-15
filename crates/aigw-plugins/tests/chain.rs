@@ -1269,3 +1269,78 @@ fn validation_registry_uses_upstream_policy() {
     lax.validate("webhook", &cfg).unwrap();
     lax.validate("content-safety", &cs).unwrap();
 }
+
+/// S-22: Beim Aufbau der Ketten erreichen nur Bindungen der Ebenen `global`/`model-group`
+/// private Ziele aus `admin.allow_private_upstreams`; Team-/Org-/Key-Bindungen mit demselben
+/// Ziel sind ungültig (übersprungen) – auch wenn sie z. B. per Datenbank am Admin-API vorbei
+/// geschrieben wurden.
+#[test]
+fn private_targets_only_for_global_bindings_at_runtime() {
+    use aigw_core::upstream::UpstreamPolicy;
+    use aigw_plugins::NoHost;
+    let admin = aigw_core::config::AdminConfig {
+        allow_insecure_upstreams: vec!["hooks.internal".into(), "cs.internal".into()],
+        allow_private_upstreams: vec!["hooks.internal".into(), "cs.internal".into()],
+        ..Default::default()
+    };
+    let lax = UpstreamPolicy::from_config(&admin).unwrap();
+    let mut reg = Registry::with_builtin_host(Arc::new(NoHost::with_policy(lax.clone())));
+    reg.register(Arc::new(
+        aigw_plugins::builtin::webhook::Factory::with_policy(lax),
+    ));
+    let hook = json!({"url": "http://hooks.internal:8080/x"});
+    let cs = json!({"provider": "azure", "endpoint": "http://cs.internal:8080",
+                    "credential": "c"});
+    let k = key("k", Some("platform"));
+    let snap = snapshot(
+        1,
+        &[&k],
+        vec![
+            binding(
+                "g-hook",
+                ScopeLevel::Global,
+                None,
+                "webhook",
+                0,
+                hook.clone(),
+            ),
+            binding(
+                "g-cs",
+                ScopeLevel::Global,
+                None,
+                "content-safety",
+                1,
+                cs.clone(),
+            ),
+            binding(
+                "t-hook",
+                ScopeLevel::Team,
+                Some("platform"),
+                "webhook",
+                2,
+                hook,
+            ),
+            binding(
+                "t-cs",
+                ScopeLevel::Team,
+                Some("platform"),
+                "content-safety",
+                3,
+                cs,
+            ),
+            binding(
+                "t-pub",
+                ScopeLevel::Team,
+                Some("platform"),
+                "webhook",
+                4,
+                json!({"url": "https://hooks.example.org/x"}),
+            ),
+        ],
+    );
+    let idx = PluginIndex::build(&snap, &reg, IndexOptions::default());
+    assert_eq!(
+        idx.chain(Some(&k), None).bindings().collect::<Vec<_>>(),
+        ["g-hook", "g-cs", "t-pub"]
+    );
+}

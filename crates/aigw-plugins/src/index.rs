@@ -322,7 +322,12 @@ fn build_binding(
         .timeout
         .unwrap_or_else(|| factory.default_timeout())
         .min(Duration::from_secs(60));
-    let fingerprint = factory.fingerprint(snap, &split.plugin_config);
+    // Die Ebene gehört zum Fingerabdruck: sie entscheidet über private Ziele (S-22).
+    let fingerprint = format!(
+        "{}|{}",
+        b.spec.scope.level.as_str(),
+        factory.fingerprint(snap, &split.plugin_config)
+    );
     let instance = match prev.get(name) {
         Some((p, c, f, inst)) if p == plugin && *c == b.spec.config && *f == fingerprint => {
             Arc::clone(inst)
@@ -331,6 +336,7 @@ fn build_binding(
             &BuildCtx {
                 snapshot: snap,
                 timeout,
+                level: b.spec.scope.level,
             },
             &split.plugin_config,
         ) {

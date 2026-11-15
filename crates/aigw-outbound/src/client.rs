@@ -357,6 +357,33 @@ impl OutboundClient {
         })
     }
 
+    /// Variante nur für öffentliche Ziele (S-22): dieselben SSRF-Regeln ohne die Freigaben aus
+    /// `admin.allow_private_upstreams` ([`AddressGuard::public_only`]); eigener Pool und eigene
+    /// Varianten (abgeleitete Varianten erben die strengeren Regeln). Für Ziele, die
+    /// eingeschränkte Rollen konfigurieren (Plugin-Bindungen auf Organisation/Team/Key).
+    pub fn public_only(&self) -> Result<Self, OutboundError> {
+        let guard = self.guard.public_only();
+        let (_, cfg) = self.tls.resolve()?;
+        let options = OutboundOptions {
+            connect_timeout: self.connect,
+            ..self.base.options.clone()
+        };
+        let inner = build_inner(&options, &guard, &self.base.resolver, (*cfg).clone());
+        Ok(Self {
+            inner: inner.clone(),
+            guard,
+            tls: self.tls.clone(),
+            connect: self.connect,
+            base: Arc::new(Base {
+                options,
+                resolver: Arc::clone(&self.base.resolver),
+                tls: self.tls.clone(),
+                inner,
+                variants: Mutex::new(HashMap::new()),
+            }),
+        })
+    }
+
     /// Variante mit einer zusätzlichen CA-Datei (z. B. `settings.caFile` eines Deployments).
     pub fn with_ca_file(&self, path: &std::path::Path) -> Result<Self, OutboundError> {
         self.variant(self.base.tls.clone().with_ca_file(path), self.connect)

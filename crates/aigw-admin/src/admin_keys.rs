@@ -232,19 +232,9 @@ fn admin_key_etag(k: &AdminApiKeyRecord) -> String {
     ))
 }
 
-async fn latch_bootstrap(store: &Store, name: &str, roles: &[RoleBinding]) {
+async fn latch_bootstrap(st: &AdminState, name: &str, roles: &[RoleBinding]) {
     if rbac::is_global_admin(roles) {
-        match store
-            .disable_bootstrap(&format!("admin-api-key:{name}"))
-            .await
-        {
-            Ok(true) => tracing::info!(
-                key = name,
-                "Admin-API-Key mit Rolle admin angelegt – Bootstrap-Token (auto) dauerhaft abgeschaltet"
-            ),
-            Ok(false) => {}
-            Err(e) => tracing::warn!(error = %e, "Bootstrap-Abschaltung nicht gespeichert"),
-        }
+        crate::auth::latch_bootstrap(st, &format!("admin-api-key:{name}")).await;
     }
 }
 
@@ -313,7 +303,7 @@ pub(crate) async fn create_admin_api_key(
         .store
         .create_admin_api_key(p.actor(), &input.name, spec)
         .await?;
-    latch_bootstrap(&st.store, &created.key.name, &created.key.spec.roles).await;
+    latch_bootstrap(&st, &created.key.name, &created.key.spec.roles).await;
     let location = format!("/admin/api/v1/admin-api-keys/{}", created.key.name);
     let tag = admin_key_etag(&created.key);
     let mut res = (
@@ -403,7 +393,7 @@ pub(crate) async fn put_admin_api_key(
         .store
         .update_admin_api_key(p.actor(), &name, spec, expect)
         .await?;
-    latch_bootstrap(&st.store, &k.name, &k.spec.roles).await;
+    latch_bootstrap(&st, &k.name, &k.spec.roles).await;
     let tag = admin_key_etag(&k);
     Ok(json_with(StatusCode::OK, Some(tag), &AdminApiKey::from(k)))
 }

@@ -57,6 +57,8 @@ pub(crate) struct PluginRun {
     chain: Arc<Chain>,
     info: Option<Arc<CallInfo>>,
     meta: Meta,
+    /// `limits.default_max_tokens` (Grundlage der Admission ohne `max_tokens`, S-30).
+    default_max_tokens: u64,
 }
 
 impl PluginRun {
@@ -88,6 +90,7 @@ impl PluginRun {
             chain,
             info,
             meta: Meta::new(),
+            default_max_tokens: st.limits.default_max_tokens(),
         }
     }
 
@@ -101,6 +104,7 @@ impl PluginRun {
         let Some(info) = self.info.as_ref().filter(|_| self.chain.has_request()) else {
             return Ok(Pre::Continue(req));
         };
+        let admitted = (req.choices(), req.max_tokens);
         let mut ctx = ReqCtx {
             info,
             request: req,
@@ -126,6 +130,14 @@ impl PluginRun {
                     .upstream_headers
                     .push((name.as_str().to_owned(), v.to_owned()));
             }
+        }
+        if matches!(flow, Flow::Continue) {
+            keep_admitted(
+                &mut request,
+                admitted,
+                self.default_max_tokens,
+                &info.request_id,
+            );
         }
         match flow {
             Flow::Continue => Ok(Pre::Continue(request)),
@@ -257,4 +269,98 @@ pub(crate) fn response_stream(resp: &ChatResponse) -> EventStream {
     Box::pin(futures_util::stream::iter(crate::choices::response_events(
         resp,
     )))
+}
+
+/// S-30: Limits und Budgets wurden **vor** den Pre-Plugins mit `n` und `max_tokens` der
+/// Client-Anfrage reserviert (Admission). Ein Plugin (z. B. Webhook `modify`, WASM,
+/// `request-transform`) darf die Anfrage danach nicht teurer machen: `n` wird höchstens auf den
+/// zugelassenen Wert begrenzt, `max_tokens` je Variante höchstens auf den zugelassenen Wert
+/// (`max_tokens` des Clients bzw. `limits.default_max_tokens`). Verringern ist erlaubt.
+///
+/// Begrenzen statt ablehnen: Die Anfrage bleibt so innerhalb der Reservierung, andere
+/// Änderungen des Plugins (z. B. Schwärzungen) bleiben wirksam, und ein falsch konfigurierter
+/// Webhook legt nicht den ganzen Verkehr lahm. Die Begrenzung wird geloggt (`warn`).
+pub(crate) fn keep_admitted(
+    req: &mut ChatRequest,
+    (n, max_tokens): (u32, Option<u64>),
+    default_max_tokens: u64,
+    request_id: &str,
+) {
+    if req.choices() > n {
+        tracing::warn!(
+            request_id,
+            requested = req.choices(),
+            admitted = n,
+            "Plugin hat n erhöht – auf den zugelassenen Wert begrenzt (S-30)"
+        );
+        req.n = (n > 1).then_some(n);
+    }
+    let allowed = max_tokens.unwrap_or(default_max_tokens);
+    match (max_tokens, req.max_tokens) {
+        (_, Some(m)) if m > allowed => {
+            tracing::warn!(
+                request_id,
+                requested = m,
+                admitted = allowed,
+                "Plugin hat max_tokens erhöht – auf den zugelassenen Wert begrenzt (S-30)"
+            );
+            req.max_tokens = Some(allowed);
+        }
+        // Das Plugin hat die Grenze des Clients entfernt: wieder setzen.
+        (Some(orig), None) => {
+            tracing::warn!(
+                request_id,
+                admitted = orig,
+                "Plugin hat max_tokens entfernt – zugelassener Wert wieder gesetzt (S-30)"
+            );
+            req.max_tokens = Some(orig);
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn req(n: Option<u32>, max_tokens: Option<u64>) -> ChatRequest {
+        ChatRequest {
+            model: "m".into(),
+            n,
+            max_tokens,
+            ..ChatRequest::default()
+        }
+    }
+
+    /// S-30: Plugins dürfen `n`/`max_tokens` nach der Admission nicht erhöhen.
+    #[test]
+    fn plugin_changes_stay_within_admission() {
+        let cases = [
+            // (Client n/max, nach Plugin n/max, erwartet n/max)
+            (
+                (None, Some(100)),
+                (Some(4), Some(100_000)),
+                (None, Some(100)),
+            ),
+            (
+                (Some(2), Some(100)),
+                (Some(3), Some(50)),
+                (Some(2), Some(50)),
+            ),
+            ((None, Some(100)), (None, None), (None, Some(100))),
+            ((None, None), (None, Some(9_999)), (None, Some(4096))),
+            ((None, None), (None, Some(10)), (None, Some(10))),
+            ((Some(3), None), (Some(1), None), (Some(1), None)),
+        ];
+        for ((cn, cm), (pn, pm), (wn, wm)) in cases {
+            let client = req(cn, cm);
+            let mut r = req(pn, pm);
+            keep_admitted(&mut r, (client.choices(), client.max_tokens), 4096, "rid");
+            assert_eq!(
+                (r.n, r.max_tokens),
+                (wn, wm),
+                "{cn:?}/{cm:?} → {pn:?}/{pm:?}"
+            );
+        }
+    }
 }

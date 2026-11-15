@@ -598,12 +598,20 @@ async fn bootstrap_token(
             return Ok(None);
         }
         // Kaltstart aus dem Snapshot-Cache (F14): Datenbank nicht erreichbar → sicherheitshalber
-        // kein Bootstrap-Token.
+        // kein Bootstrap-Token. S-29: Eine verlorene Abschaltung (Admin-API-Key mit Rolle
+        // admin vorhanden, Vermerk fehlt) wird hier nachgeholt; scheitert das, bleibt das Token
+        // aus und der Fehler steht im Log.
         BootstrapMode::Auto
-            if store.bootstrap_disabled().await.unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "Bootstrap-Zustand nicht lesbar – Token abgeschaltet");
-                true
-            }) =>
+            if aigw_admin::reconcile_bootstrap(store)
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::error!(
+                        error = %e,
+                        "Bootstrap-Zustand nicht lesbar bzw. Abschaltung nicht speicherbar – \
+                         Token abgeschaltet"
+                    );
+                    true
+                }) =>
         {
             tracing::info!(
                 "Admin-API: Bootstrap-Token abgeschaltet (OIDC-Admin bzw. Admin-API-Key vorhanden)"
