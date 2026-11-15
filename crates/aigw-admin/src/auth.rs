@@ -285,12 +285,15 @@ pub struct BootstrapGate {
 }
 
 /// Höchstzahl Fehlversuche mit dem Bootstrap-Token je [`BOOTSTRAP_FAILURE_WINDOW`] (S-29).
-/// Danach lehnt das Gate bis zum Ende des Fensters **jedes** Bootstrap-Token ab (auch das
-/// richtige) – das Token ist 256 Bit stark, die Sperre bremst nur Raten und macht es im Log
-/// sichtbar.
+/// Darüber wird jeder weitere Fehlversuch bis zum Ende des Fensters um
+/// [`BOOTSTRAP_FAILURE_DELAY`] verzögert und einmal je Fenster gewarnt. Das richtige Token
+/// wird nie gesperrt (sonst könnte jeder den Notfallzugang per Falscheingaben blockieren);
+/// es ist mindestens 32 Zeichen lang (erzeugt: 256 Bit), Raten bleibt aussichtslos.
 pub const BOOTSTRAP_MAX_FAILURES: u32 = 10;
 /// Zeitfenster der Drosselung.
 pub const BOOTSTRAP_FAILURE_WINDOW: Duration = Duration::from_secs(60);
+/// Verzögerung eines Fehlversuchs über der Grenze.
+pub const BOOTSTRAP_FAILURE_DELAY: Duration = Duration::from_secs(1);
 /// Präfix der Admin-API-Keys: deren Fehlversuche zählen hier nicht (eigene Prüfung).
 const ADMIN_KEY_PREFIX: &str = "sk-aigw-admin-";
 
@@ -438,36 +441,39 @@ impl BootstrapGate {
                 failures = f.count,
                 total,
                 window_secs = BOOTSTRAP_FAILURE_WINDOW.as_secs(),
-                "Bootstrap-Token: zu viele Fehlversuche – bis zum Ende des Fensters gesperrt"
+                "Bootstrap-Token: zu viele Fehlversuche – weitere werden bis zum Fensterende gebremst"
             );
         } else {
             tracing::debug!(total, "Bootstrap-Token: Fehlversuch");
         }
     }
 
-    /// Prüft ein vorgelegtes Token (ohne Modus/Abschaltung) mit Drosselung.
-    fn check(&self, presented: &str, now: Instant) -> bool {
-        if self.locked(now) {
-            return false;
-        }
+    /// Prüft ein vorgelegtes Token (ohne Modus/Abschaltung): `Ok(())` bei Treffer, sonst
+    /// `Err(true)`, wenn der Fehlversuch gebremst werden soll (Grenze im Fenster erreicht).
+    fn check(&self, presented: &str, now: Instant) -> Result<(), bool> {
         if self.token.matches(presented) {
-            return true;
+            return Ok(());
         }
-        if !presented.starts_with(ADMIN_KEY_PREFIX) {
-            self.record_failure(now);
+        if presented.starts_with(ADMIN_KEY_PREFIX) {
+            return Err(false);
         }
-        false
+        self.record_failure(now);
+        Err(self.locked(now))
     }
 }
 
 impl AdminAuthenticator for BootstrapGate {
     fn authenticate<'a>(&'a self, headers: &'a HeaderMap) -> BoxFuture<'a, Option<Principal>> {
-        let ok = bearer_token(headers).is_some_and(|t| self.check(t, Instant::now()));
+        let checked = bearer_token(headers).map(|t| self.check(t, Instant::now()));
         Box::pin(async move {
-            if ok && self.active().await {
-                Some(BootstrapToken::principal())
-            } else {
-                None
+            match checked {
+                Some(Ok(())) if self.active().await => Some(BootstrapToken::principal()),
+                Some(Err(true)) => {
+                    // Über der Grenze: Fehlversuche bremsen (das richtige Token nie).
+                    tokio::time::sleep(BOOTSTRAP_FAILURE_DELAY).await;
+                    None
+                }
+                _ => None,
             }
         })
     }
@@ -537,20 +543,22 @@ mod bootstrap_tests {
         let g = gate().await;
         let good = "t0123456789-0123456789-0123456789";
         let t0 = Instant::now();
-        assert!(g.check(good, t0));
-        for _ in 0..BOOTSTRAP_MAX_FAILURES {
-            assert!(!g.check("falsch", t0));
+        assert_eq!(g.check(good, t0), Ok(()));
+        for i in 1..=BOOTSTRAP_MAX_FAILURES + 2 {
+            // Ab der Grenze werden Fehlversuche gebremst.
+            assert_eq!(g.check("falsch", t0), Err(i >= BOOTSTRAP_MAX_FAILURES), "{i}");
         }
-        assert_eq!(g.failures_total(), u64::from(BOOTSTRAP_MAX_FAILURES));
-        // Gesperrt – auch das richtige Token, bis das Fenster vorbei ist.
-        assert!(!g.check(good, t0 + Duration::from_secs(1)));
-        assert!(g.check(good, t0 + BOOTSTRAP_FAILURE_WINDOW));
+        assert_eq!(g.failures_total(), u64::from(BOOTSTRAP_MAX_FAILURES + 2));
+        // Das richtige Token bleibt gültig (kein Aussperren des Notfallzugangs).
+        assert_eq!(g.check(good, t0 + Duration::from_secs(1)), Ok(()));
+        // Neues Fenster: wieder ungebremst.
+        assert_eq!(g.check("falsch", t0 + BOOTSTRAP_FAILURE_WINDOW), Err(false));
         // Admin-API-Keys zählen nicht.
         let t1 = t0 + BOOTSTRAP_FAILURE_WINDOW * 3;
         for _ in 0..BOOTSTRAP_MAX_FAILURES * 2 {
-            assert!(!g.check("sk-aigw-admin-abc-def", t1));
+            assert_eq!(g.check("sk-aigw-admin-abc-def", t1), Err(false));
         }
-        assert!(g.check(good, t1));
+        assert_eq!(g.failures_total(), u64::from(BOOTSTRAP_MAX_FAILURES + 3));
     }
 
     #[tokio::test]

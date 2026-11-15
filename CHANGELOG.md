@@ -169,8 +169,8 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 - **Plugins können Anfragen nicht mehr verteuern (S-30, AIGW-99):** Nach den Pre-Plugins
   werden `n` und `max_tokens` auf die bei der Admission zugelassenen Werte begrenzt (Webhook
   `modify`, WASM, `request-transform`); Begrenzung mit `warn`-Log.
-- **Bootstrap-Token (S-29, AIGW-99):** Fehlversuche werden gezählt, mehr als 10 je Minute
-  sperren das Token bis zum Fensterende. Die automatische Abschaltung gilt sofort im Prozess,
+- **Bootstrap-Token (S-29, AIGW-99):** Fehlversuche werden gezählt, ab 10 je Minute wird
+  jeder weitere um 1 s gebremst (das richtige Token bleibt gültig). Die automatische Abschaltung gilt sofort im Prozess,
   auch wenn das Speichern scheitert (`error`-Log, Wiederholung); der Start holt einen
   fehlenden Abschaltvermerk nach (`aigw_admin::reconcile_bootstrap`).
 - **MCP-Grenzen (S-28, AIGW-100, verhaltensändernd):** `initialize`, `tools/list`,

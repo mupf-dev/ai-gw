@@ -80,8 +80,8 @@ AIGW-58). Verweise `S-xx` beziehen sich auf die dortigen Befunde.
   `GET /admin/api/v1/auth/info` `bootstrap: false` meldet. Scheitert das Speichern der
   Abschaltung, ist das Token in diesem Prozess trotzdem aus und das Log meldet
   `Bootstrap-Abschaltung nicht gespeichert` (`error`) – darauf alarmieren; der nächste Start
-  holt die Abschaltung nach. Mehr als 10 Fehlversuche je Minute sperren das Token bis zum
-  Fensterende (`Bootstrap-Token: zu viele Fehlversuche`, S-29).
+  holt die Abschaltung nach. Ab 10 Fehlversuchen je Minute wird jeder weitere um 1 s gebremst
+  (`Bootstrap-Token: zu viele Fehlversuche`, S-29); das richtige Token wird nie gesperrt.
 - **OIDC** bevorzugen; Session-`max_age` kurz halten (Gruppenrollen gelten bis Session-Ende,
   S-24). UI nur über HTTPS (Cookies sind `__Host-…; Secure; Path=/`, ohne `Domain` – von
   Schwester-Subdomains nicht setzbar, S-23). Nach dem Update auf AIGW-99 melden sich alle
