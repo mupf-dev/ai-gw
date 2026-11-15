@@ -9,6 +9,16 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Hinzugefügt
 
+- **Signierte WASM-Module (AIGW-101):** Ed25519-Signatur über
+  `aigw-wasm-module-v1:<sha256>` (Schlüssel-ID + Base64). Konfiguration `wasm.trusted_keys`
+  (öffentliche Schlüssel: Base64 roh/SPKI oder PEM) und `wasm.require_signature` (Standard:
+  Pflicht, sobald Schlüssel gesetzt sind). Prüfung beim Upload (`PUT
+  /admin/api/v1/wasm-modules/{name}?keyId=…&signature=…`, `422`), beim Import aus
+  `wasm.modules` (`key_id`/`signature`) und vor dem Kompilieren in der Laufzeit (SHA-256 neu
+  berechnet). Liste/Abfrage zeigen `signature {keyId, status, loadable}` sowie
+  `signatureRequired`/`trustedKeys`; Admin-UI mit Spalte „Signatur“ und Feldern im
+  Upload-Dialog. CLI `aigw wasm keygen|pubkey|sign|verify`. Migration 0011 (beide Dialekte),
+  Metrik `aigw_wasm_signature_rejected_total`. Doku `17-wasm-plugins.md` §3a, S-37.
 - **WASM-Plugins (AIGW-63):** Plugin-Art `wasm` führt hochgeladene WebAssembly-Komponenten
   (Component Model, WIT-Welt `aigw:plugin/plugin` in `crates/aigw-wasm/wit/plugin.wit`) in der
   Plugin-Kette aus – Anfrage, Antwort und Stream, Ergebnis weiter/ändern/blockieren/ablehnen,

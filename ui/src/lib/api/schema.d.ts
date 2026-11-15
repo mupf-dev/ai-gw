@@ -3192,6 +3192,23 @@ export interface components {
             /** @description Kennung im Audit-Log (`user:<name>`, `admin-key:<name>`, `bootstrap-admin`). */
             subject: string;
         };
+        /** @description Signatur eines Moduls (AIGW-101). */
+        SignatureInfo: {
+            /** @description Schlüssel-ID der Signatur (fehlt = unsigniert). */
+            keyId?: string | null;
+            /**
+             * @description Darf das Modul unter der aktuellen Richtlinie geladen werden? (`false`: Bindungen
+             *     darauf sind ungültig → `failMode`.)
+             */
+            loadable: boolean;
+            /** @description Prüfergebnis. */
+            status: components["schemas"]["SignatureStatus"];
+        };
+        /**
+         * @description Prüfstatus der Signatur eines Moduls.
+         * @enum {string}
+         */
+        SignatureStatus: "valid" | "invalid" | "unknown-key" | "unsigned" | "unchecked";
         /** @description Zustand des aktiven Konfigurations-Snapshots (F15). */
         SnapshotInfo: {
             /**
@@ -3646,6 +3663,8 @@ export interface components {
             name: string;
             /** @description SHA-256 des Inhalts (hex). */
             sha256: string;
+            /** @description Signatur und Prüfergebnis gegen die aktuelle Richtlinie (AIGW-101). */
+            signature: components["schemas"]["SignatureInfo"];
             /**
              * Format: int64
              * @description Größe in Byte.
@@ -3660,6 +3679,10 @@ export interface components {
         WasmModuleList: {
             /** @description Module (nach Name sortiert). */
             items: components["schemas"]["WasmModule"][];
+            /** @description Signatur Pflicht (`wasm.require_signature`, Standard: sobald Schlüssel konfiguriert). */
+            signatureRequired: boolean;
+            /** @description IDs der vertrauenswürdigen Schlüssel (`wasm.trusted_keys`). */
+            trustedKeys: string[];
         };
     };
     responses: never;
@@ -11269,6 +11292,13 @@ export interface operations {
                 sha256: string;
                 /** @description Beschreibung (höchstens 1024 Zeichen). */
                 description?: string;
+                /** @description Schlüssel-ID der Signatur (aus `wasm.trusted_keys`; nur zusammen mit `signature`). */
+                keyId?: string;
+                /**
+                 * @description Ed25519-Signatur (Base64, Standard- oder URL-Alphabet) über
+                 *     `aigw-wasm-module-v1:<sha256>` (`aigw wasm sign`).
+                 */
+                signature?: string;
             };
             header?: never;
             path: {
@@ -11338,7 +11368,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Kein gültiges Modul oder SHA-256 passt nicht */
+            /** @description Kein gültiges Modul, SHA-256 passt nicht oder Signatur fehlt/ungültig (wasm.trusted_keys) */
             422: {
                 headers: {
                     [name: string]: unknown;

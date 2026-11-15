@@ -42,7 +42,7 @@
   function openUpload(name: string | null) {
     replace = name;
     const cur = list.data?.items.find((m) => m.name === name);
-    f = { name: name ?? '', description: cur?.description ?? '', sha256: '', keyId: cur?.signature.keyId ?? list.data?.trustedKeys[0] ?? '', signature: '' };
+    f = { name: name ?? '', description: cur?.description ?? '', sha256: '', keyId: cur?.signature.keyId ?? list.data?.trustedKeys?.[0] ?? '', signature: '' };
     file = null;
     formError = null;
     errors = {};
@@ -100,7 +100,7 @@
   <AsyncState loader={list} rows={2}>
     {#snippet children(data)}
       {@const items = data.items}
-      {#if data.trustedKeys.length}
+      {#if data.trustedKeys?.length}
         <p class="border-b border-line px-4 py-2 text-sm text-fg-muted" data-testid="wasm-trust">
           Signaturprüfung aktiv · vertrauenswürdige Schlüssel: {#each data.trustedKeys as k (k)}<Badge mono>{k}</Badge> {/each}· {data.signatureRequired ? 'Signatur Pflicht' : 'unsignierte Module erlaubt'}
         </p>

@@ -84,16 +84,117 @@ blockieren in wasmtime-wasi intern auf Tokio und dürfen nicht im asynchronen Ko
   Gateway-Prozess und sieht Anfragen aller Mandanten, die es binden. Org-/Team-Admins dürfen
   freigegebene Module **binden** (auf ihrer Ebene), aber keine hochladen. Eine kryptografische
   Signatur der Module (z. B. Sigstore) ist nicht umgesetzt – der Upload durch einen globalen
-  Admin *ist* die Freigabe; der SHA-256 in der Bindung pinnt die freigegebene Version.
+  Admin ist die Freigabe; der SHA-256 in der Bindung pinnt die freigegebene Version. Mit
+  `wasm.trusted_keys` kommt eine Ed25519-Signatur hinzu (§3a, AIGW-101).
 - **Datei aus der Startkonfiguration** (`wasm.modules: [{name, path, sha256}]`): beim Start
   in die Datenbank übernommen (Akteur `startup-config`; unverändert = kein Schreibvorgang).
-  Abweichender SHA-256 bricht den Start ab. Weg für den Modus „nur YAML“, in dem die Admin-API
+  Abweichender SHA-256 bricht den Start ab, ebenso eine fehlende/ungültige Signatur (`key_id`,
+  `signature`; §3a). Weg für den Modus „nur YAML“, in dem die Admin-API
   nicht schreibt.
 - **GitOps**: Bindungen verweisen per Name und optional SHA-256
   (`config: {module: keyword-guard, sha256: …}`); Module selbst sind nicht Teil des YAML.
   Ein Verweis auf ein (noch) fehlendes Modul ist beim Apply erlaubt (das Modul kann danach
   kommen) und macht die Bindung bis dahin ungültig (Log, `failMode`). Die Admin-API prüft beim
   Anlegen/Ändern einer Bindung dagegen, dass Modul und SHA passen (`422`).
+
+## 3a. Signaturen (AIGW-101)
+
+Der Upload durch einen globalen Admin schützt nicht gegen Schreibzugriff auf Datenbank oder
+Snapshot-Cache und nicht gegen ein übernommenes Admin-Konto. Signaturen binden ein Modul an
+einen Schlüssel, der außerhalb des Gateways liegt (Build-System, offline).
+
+**Format.** Ed25519 (RFC 8032) über die ASCII-Nachricht
+
+```text
+aigw-wasm-module-v1:<sha256 des Moduls, 64 Hex-Zeichen, klein>
+```
+
+ohne Zeilenumbruch. Das Präfix trennt die Domäne (eine Signatur gilt für nichts anderes) und
+versioniert das Format; signiert wird der Hash, damit Werkzeuge große Module nicht zweimal lesen
+müssen (SHA-256 ist kollisionsresistent, die Signatur bindet also den Inhalt). Übertragen wird
+eine **abgesetzte Signatur**: Schlüssel-ID + 64 Byte Signatur als Base64 (Standard- oder
+URL-Alphabet, mit/ohne `=`; gespeichert normalisiert im Standard-Alphabet).
+
+| Weg | Angabe |
+|---|---|
+| Admin-API | `PUT /admin/api/v1/wasm-modules/{name}?sha256=…&keyId=…&signature=…` (Base64 prozentkodiert; `aigw wasm sign --format query` liefert die Parameter) |
+| Startkonfiguration | `wasm.modules[]: {name, path, sha256, key_id, signature}` |
+| Admin-UI | Upload-Dialog: Felder „Schlüssel-ID“ und „Signatur“ |
+
+**Konfiguration.**
+
+```yaml
+wasm:
+  trusted_keys:
+    - id: release-2026
+      public_key: |            # PEM, Base64 (32 Byte roh) oder Base64 SubjectPublicKeyInfo
+        -----BEGIN PUBLIC KEY-----
+        MCowBQYDK2VwAyEA…
+        -----END PUBLIC KEY-----
+  require_signature: null      # Standard: Pflicht, sobald trusted_keys gesetzt sind
+```
+
+| `trusted_keys` | `require_signature` | unsigniert | Signatur vorhanden |
+|---|---|---|---|
+| leer | `null`/`false` | erlaubt (wie vor AIGW-101) | nur gespeichert, nicht geprüft (`unchecked`) |
+| leer | `true` | Konfigurationsfehler (Start bricht ab) | – |
+| gesetzt | `null` (Standard) / `true` | **abgelehnt** | muss gültig sein |
+| gesetzt | `false` (Übergang) | erlaubt (`unsigned`) | muss gültig sein |
+
+Warum Pflicht als Standard: Wer Schlüssel hinterlegt, will signierte Module. Wäre ein
+unsigniertes Modul weiterhin erlaubt, könnte genau der Angreifer, gegen den die Signatur
+schützen soll, sie durch Weglassen umgehen. `false` ist nur für die Umstellung gedacht. Eine
+**vorhandene** Signatur muss immer gültig sein (unbekannter Schlüssel oder falsche Signatur =
+abgelehnt) – sonst wäre ein entfernter (zurückgezogener) Schlüssel wirkungslos.
+
+**Prüfpunkte.**
+
+1. **Upload** (Admin-API): gegen den SHA-256 des empfangenen Inhalts; Fehler `422`
+   („Signatur fehlt“, „unbekannter Schlüssel“, „ungültig“).
+2. **Startkonfiguration** (`wasm.modules`): Fehler bricht den Start ab.
+3. **Laufzeit**, vor jedem Kompilieren (`Factory::build_in`): bei aktiver Prüfung wird der
+   SHA-256 des Inhalts **neu berechnet** und die Signatur erneut geprüft. Ein Modul, das an
+   der Admin-API vorbei in Datenbank oder Snapshot-Cache gelangt ist (oder dessen Schlüssel
+   inzwischen entfernt wurde), macht die Bindung ungültig (Log, `failMode`; Standard
+   `closed` → `500 plugin_config_invalid`). Metrik
+   `aigw_wasm_signature_rejected_total{reason}` (`missing`, `unknown-key`, `invalid`,
+   `digest`). Der Fingerabdruck der Bindung enthält die Signatur: neu signieren baut neu.
+
+**Anzeige.** `GET /wasm-modules` und `GET /wasm-modules/{name}` liefern je Modul
+`signature: {keyId?, status, loadable}` mit `status` = `valid` | `invalid` | `unknown-key` |
+`unsigned` | `unchecked` (gegen die aktuelle Richtlinie), die Liste zusätzlich
+`signatureRequired` und `trustedKeys` (IDs). Die UI zeigt das als Spalte „Signatur“
+(„wird nicht geladen“, wenn `loadable: false`).
+
+**Werkzeuge.**
+
+```sh
+aigw wasm keygen --out release.pem            # privat (PKCS#8-PEM, 0600); öffentlich → stdout
+aigw wasm pubkey --key release.pem            # öffentlichen Schlüssel erneut ausgeben
+aigw wasm sign --key release.pem --key-id release-2026 keyword-guard.wasm            # Base64
+aigw wasm sign … --format query               # sha256=…&keyId=…&signature=… (für curl)
+aigw wasm sign … --format json                # {sha256, keyId, signature}
+aigw wasm verify --public-key release.pub --key-id release-2026 --signature … modul.wasm
+```
+
+Ohne `aigw`, mit OpenSSL ≥ 3 (Schlüssel aus `openssl genpkey -algorithm ed25519` funktionieren
+auch mit `aigw wasm sign`):
+
+```sh
+SHA=$(sha256sum modul.wasm | cut -d' ' -f1)
+printf 'aigw-wasm-module-v1:%s' "$SHA" > msg
+openssl pkeyutl -sign -inkey release.pem -rawin -in msg | base64 -w0
+```
+
+`scripts/build-wasm-plugins.sh` signiert die gebauten Module, wenn `AIGW_WASM_SIGN_KEY` (Pfad
+zum privaten Schlüssel) und `AIGW_WASM_SIGN_KEY_ID` gesetzt sind (Dateien `*.wasm.sig`).
+
+**Schlüsselwechsel.** (1) Neuen Schlüssel zusätzlich in `trusted_keys` eintragen, neu starten;
+(2) alle Module mit dem neuen Schlüssel signieren und erneut hochladen (gleicher Inhalt +
+neue Signatur = neue Version, `If-Match` wie beim Ersetzen); (3) alten Schlüssel entfernen.
+Die Liste zeigt danach für noch alt signierte Module `unknown-key` / `loadable: false`.
+Schlüssel stehen bewusst **nur in der Startkonfiguration** (nicht per Admin-API änderbar):
+ein Admin-Konto allein kann sich so keinen eigenen Schlüssel freigeben.
 
 ## 4. Bindung
 
@@ -148,6 +249,7 @@ jedem Stream-Ereignis.
 | `aigw_wasm_call_duration_seconds` (Histogramm) | `module`, `phase` |
 | `aigw_wasm_fuel_consumed_total` | `module` |
 | `aigw_wasm_compile_total` | `outcome` (`ok`, `error`, `cached`) |
+| `aigw_wasm_signature_rejected_total` | `reason` (`missing`, `unknown-key`, `invalid`, `digest`; AIGW-101) |
 
 Dazu wie bei allen Plugins `aigw_plugin_failmode_triggered_total{plugin="wasm"}`.
 
@@ -177,7 +279,8 @@ Bauzeit).
 
 ## 10. Offen / später
 
-- Signierte Module (Sigstore/cosign) und eine Freigabe im Vier-Augen-Prinzip.
+- Sigstore/cosign (keyless, Transparenz-Log) zusätzlich zu den eigenen Ed25519-Schlüsseln
+  (§3a) und eine Freigabe im Vier-Augen-Prinzip.
 - Weitere Host-Funktionen (z. B. Zähler, Modellaufrufe über `PluginHost`) – bewusst nicht im
   ersten Schnitt, damit Module keine Seiteneffekte haben.
 - Wiederverwendung von Instanzen je Anfrage (Zustand zwischen Phasen ohne `meta`).

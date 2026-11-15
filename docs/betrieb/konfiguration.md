@@ -279,7 +279,17 @@ wasm:
     - name: keyword-guard
       path: /etc/aigw/plugins/keyword-guard.wasm
       sha256: 9c1e…           # Abweichung bricht den Start ab
+      key_id: release-2026    # Signatur (AIGW-101): aigw wasm sign …
+      signature: 3q2+7w…
+  trusted_keys:               # öffentliche Ed25519-Schlüssel (PEM/Base64); leer = keine Prüfung
+    - id: release-2026
+      public_key: MCowBQYDK2VwAyEA…
+  require_signature: null     # Standard: Pflicht, sobald trusted_keys gesetzt; false = Übergang
 ```
+
+Signaturen (AIGW-101): Mit `trusted_keys` müssen Module beim Upload, beim Import aus
+`wasm.modules` und vor dem Laden eine gültige Ed25519-Signatur tragen (Format, Werkzeuge
+`aigw wasm keygen|sign` und Schlüsselwechsel: [Konzept §3a](../konzept/17-wasm-plugins.md)).
 
 `wasm.enabled: false` (bzw. ein Build ohne Feature `wasm`) lässt Bindungen der Art `wasm`
 prüfbar, Aufrufe schlagen aber fehl (→ `failMode`). Kann das System den Adressraum des

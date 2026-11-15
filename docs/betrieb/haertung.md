@@ -131,6 +131,12 @@ AIGW-58). Verweise `S-xx` beziehen sich auf die dortigen Befunde.
   Speichergrenze je Aufruf (`wasm.*`, Bindung `fuel`/`maxMemoryMb`/`timeoutMs`), frische
   Instanz je Aufruf. Fehler und Grenzüberschreitungen greifen über `failMode` (Standard
   `closed`). Überwachen: `aigw_wasm_errors_total`, `aigw_wasm_call_duration_seconds`.
+- **Signaturen (AIGW-101, empfohlen):** `aigw wasm keygen --out release.pem` (privaten Schlüssel
+  offline/im Build-System halten), den ausgegebenen öffentlichen Schlüssel in
+  `wasm.trusted_keys` eintragen. Damit ist die Signatur Pflicht: unsignierte, falsch signierte
+  oder nachträglich veränderte Module werden weder angenommen noch geladen (auch nicht aus
+  Datenbank oder Snapshot-Cache). Signieren: `aigw wasm sign --key release.pem --key-id … modul.wasm`.
+  Überwachen: `aigw_wasm_signature_rejected_total`.
 - Wer keine WASM-Plugins braucht: `wasm.enabled: false` oder ein Build ohne Feature `wasm`.
 
 ## Audit

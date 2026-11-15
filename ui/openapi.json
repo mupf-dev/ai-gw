@@ -11479,6 +11479,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "keyId",
+            "in": "query",
+            "description": "Schlüssel-ID der Signatur (aus `wasm.trusted_keys`; nur zusammen mit `signature`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "signature",
+            "in": "query",
+            "description": "Ed25519-Signatur (Base64, Standard- oder URL-Alphabet) über\n`aigw-wasm-module-v1:<sha256>` (`aigw wasm sign`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -11554,7 +11572,7 @@
             }
           },
           "422": {
-            "description": "Kein gültiges Modul oder SHA-256 passt nicht",
+            "description": "Kein gültiges Modul, SHA-256 passt nicht oder Signatur fehlt/ungültig (wasm.trusted_keys)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -16793,6 +16811,42 @@
           }
         }
       },
+      "SignatureInfo": {
+        "type": "object",
+        "description": "Signatur eines Moduls (AIGW-101).",
+        "required": [
+          "status",
+          "loadable"
+        ],
+        "properties": {
+          "keyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Schlüssel-ID der Signatur (fehlt = unsigniert)."
+          },
+          "loadable": {
+            "type": "boolean",
+            "description": "Darf das Modul unter der aktuellen Richtlinie geladen werden? (`false`: Bindungen\ndarauf sind ungültig → `failMode`.)"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SignatureStatus",
+            "description": "Prüfergebnis."
+          }
+        }
+      },
+      "SignatureStatus": {
+        "type": "string",
+        "description": "Prüfstatus der Signatur eines Moduls.",
+        "enum": [
+          "valid",
+          "invalid",
+          "unknown-key",
+          "unsigned",
+          "unchecked"
+        ]
+      },
       "SnapshotInfo": {
         "type": "object",
         "description": "Zustand des aktiven Konfigurations-Snapshots (F15).",
@@ -17949,7 +18003,8 @@
           "createdBy",
           "createdAt",
           "updatedAt",
-          "usedBy"
+          "usedBy",
+          "signature"
         ],
         "properties": {
           "createdAt": {
@@ -17980,6 +18035,10 @@
             "type": "string",
             "description": "SHA-256 des Inhalts (hex)."
           },
+          "signature": {
+            "$ref": "#/components/schemas/SignatureInfo",
+            "description": "Signatur und Prüfergebnis gegen die aktuelle Richtlinie (AIGW-101)."
+          },
           "size": {
             "type": "integer",
             "format": "int64",
@@ -18003,7 +18062,9 @@
         "type": "object",
         "description": "Liste der Module.",
         "required": [
-          "items"
+          "items",
+          "signatureRequired",
+          "trustedKeys"
         ],
         "properties": {
           "items": {
@@ -18012,6 +18073,17 @@
               "$ref": "#/components/schemas/WasmModule"
             },
             "description": "Module (nach Name sortiert)."
+          },
+          "signatureRequired": {
+            "type": "boolean",
+            "description": "Signatur Pflicht (`wasm.require_signature`, Standard: sobald Schlüssel konfiguriert)."
+          },
+          "trustedKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IDs der vertrauenswürdigen Schlüssel (`wasm.trusted_keys`)."
           }
         }
       }
