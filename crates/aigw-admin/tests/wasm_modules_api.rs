@@ -380,7 +380,15 @@ async fn upload_signed(
     if let Some(m) = if_match {
         h.push(("if-match", m));
     }
-    call(app, "admin", Method::PUT, &url, &h, Body::from(content.to_vec())).await
+    call(
+        app,
+        "admin",
+        Method::PUT,
+        &url,
+        &h,
+        Body::from(content.to_vec()),
+    )
+    .await
 }
 
 #[tokio::test]
@@ -448,9 +456,25 @@ async fn signatures_upload_list_and_rotation() {
     assert_eq!(store.config_version().await.unwrap(), 2);
     // Nach dem Wechsel (nur k2) gültig; mit nur k1 wäre das Modul nicht mehr ladbar.
     let only2 = router_trust(&store, &[("k2", &k2)], None);
-    let r = call(&only2, "viewer", Method::GET, &format!("{BASE}/guard"), &[], Body::empty()).await;
+    let r = call(
+        &only2,
+        "viewer",
+        Method::GET,
+        &format!("{BASE}/guard"),
+        &[],
+        Body::empty(),
+    )
+    .await;
     assert_eq!(r.body["signature"]["status"], "valid");
-    let r = call(&app, "viewer", Method::GET, &format!("{BASE}/guard"), &[], Body::empty()).await;
+    let r = call(
+        &app,
+        "viewer",
+        Method::GET,
+        &format!("{BASE}/guard"),
+        &[],
+        Body::empty(),
+    )
+    .await;
     assert_eq!(
         r.body["signature"],
         json!({"keyId": "k2", "status": "unknown-key", "loadable": false})
@@ -465,7 +489,14 @@ async fn signatures_upload_list_and_rotation() {
         r.body["signature"],
         json!({"status": "unsigned", "loadable": true})
     );
-    let r = upload_signed(&lax, "bad", &v2, Some(("k1", &sign(&k2, &sha256_hex(&v2)))), None).await;
+    let r = upload_signed(
+        &lax,
+        "bad",
+        &v2,
+        Some(("k1", &sign(&k2, &sha256_hex(&v2)))),
+        None,
+    )
+    .await;
     assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
     // Ohne Schlüssel: Signatur nur gespeichert, nicht geprüft.
     let (off, _) = self::app().await;

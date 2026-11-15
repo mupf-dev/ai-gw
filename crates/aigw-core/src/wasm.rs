@@ -372,10 +372,9 @@ pub fn public_key_of(pkcs8_der: &[u8]) -> Result<[u8; PUBLIC_KEY_LEN], String> {
 
 /// Neuer privater Ed25519-Schlüssel (PKCS#8 v2, DER).
 pub fn generate_pkcs8() -> Result<Vec<u8>, String> {
-    let doc = aws_lc_rs::signature::Ed25519KeyPair::generate_pkcs8(
-        &aws_lc_rs::rand::SystemRandom::new(),
-    )
-    .map_err(|e| format!("Schlüssel erzeugen: {e}"))?;
+    let doc =
+        aws_lc_rs::signature::Ed25519KeyPair::generate_pkcs8(&aws_lc_rs::rand::SystemRandom::new())
+            .map_err(|e| format!("Schlüssel erzeugen: {e}"))?;
     Ok(doc.as_ref().to_vec())
 }
 
@@ -489,8 +488,8 @@ mod tests {
         let s_old = signed(&old, "k2026", &sha);
         let s_new = signed(&new, "k2027", &sha);
         // Übergang: beide Schlüssel vertraut.
-        let both = TrustPolicy::new(&[key("k2026", TEST_PUB), key("k2027", &new_pub)], None)
-            .unwrap();
+        let both =
+            TrustPolicy::new(&[key("k2026", TEST_PUB), key("k2027", &new_pub)], None).unwrap();
         assert!(both.verify(&sha, Some(&s_old)).is_ok());
         assert!(both.verify(&sha, Some(&s_new)).is_ok());
         // Alter Schlüssel entfernt: alte Signaturen laden nicht mehr.

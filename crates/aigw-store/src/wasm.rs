@@ -112,7 +112,10 @@ fn info_from_row(row: &DbRow) -> Result<WasmModuleInfo, StoreError> {
         created_by: row.text("created_by")?,
         created_at: row.time("created_at")?,
         updated_at: row.time("updated_at")?,
-        signature: match (row.opt_text("signature_key_id")?, row.opt_text("signature")?) {
+        signature: match (
+            row.opt_text("signature_key_id")?,
+            row.opt_text("signature")?,
+        ) {
             (Some(key_id), Some(signature)) => Some(ModuleSignature { key_id, signature }),
             _ => None,
         },

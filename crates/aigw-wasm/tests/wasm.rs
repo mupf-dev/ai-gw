@@ -619,7 +619,10 @@ fn signature_checked_before_loading() {
     assert!(loads(&lax, real("testkit")));
     assert!(!loads(&lax, signed(real("testkit"), "k1", &k2)));
     // Ohne Schlüssel: keine Prüfung (Verhalten wie vor AIGW-101).
-    assert!(loads(&WasmConfig::default(), signed(real("testkit"), "k1", &k2)));
+    assert!(loads(
+        &WasmConfig::default(),
+        signed(real("testkit"), "k1", &k2)
+    ));
 
     // Metrik der Ablehnungen.
     let (reg, rt) = registry(&cfg);

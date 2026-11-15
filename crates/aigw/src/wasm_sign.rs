@@ -210,7 +210,8 @@ mod tests {
         );
         let der = private_key(&key).unwrap();
         let (sha, sig) = sign(&der, b"\0asm\x0d\0\x01\0inhalt").unwrap();
-        let public = aigw_core::wasm::public_key_pem(&aigw_core::wasm::public_key_of(&der).unwrap());
+        let public =
+            aigw_core::wasm::public_key_pem(&aigw_core::wasm::public_key_of(&der).unwrap());
         let pub_file = dir.join("signing.pub");
         std::fs::write(&pub_file, &public).unwrap();
         let verify = |sig: &str, id: &str| {
@@ -222,11 +223,8 @@ mod tests {
             }))
         };
         assert!(verify(&sig, "release").is_ok(), "{sha}");
-        let other = aigw_core::wasm::sign_sha256(
-            &aigw_core::wasm::generate_pkcs8().unwrap(),
-            &sha,
-        )
-        .unwrap();
+        let other = aigw_core::wasm::sign_sha256(&aigw_core::wasm::generate_pkcs8().unwrap(), &sha)
+            .unwrap();
         assert!(verify(&other, "release").is_err());
         // Signatur-Ausgabe als Query ist prozentkodiert.
         assert_eq!(query("k", "a+b/c="), "keyId=k&signature=a%2Bb%2Fc%3D");

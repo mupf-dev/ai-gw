@@ -263,7 +263,11 @@ pub(crate) async fn get_wasm_module(
         .ok_or_else(|| not_found(&name))?;
     let users = st.store.wasm_module_users(&name).await?;
     let tag = etag(&info.sha256);
-    Ok(json_with(StatusCode::OK, Some(tag), &view(&st.wasm_trust, info, users)))
+    Ok(json_with(
+        StatusCode::OK,
+        Some(tag),
+        &view(&st.wasm_trust, info, users),
+    ))
 }
 
 /// Inhalt eines Moduls (Komponente).

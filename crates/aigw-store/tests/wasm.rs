@@ -217,7 +217,12 @@ async fn run(store: Store) {
     assert_eq!(*s4, load_snapshot(&store, &ring).await.unwrap());
     assert_eq!(s4.wasm_modules["guard"].signature.as_ref(), Some(&sig));
     assert_eq!(
-        store.wasm_module_info("guard").await.unwrap().unwrap().signature,
+        store
+            .wasm_module_info("guard")
+            .await
+            .unwrap()
+            .unwrap()
+            .signature,
         Some(sig)
     );
     // Signatur entfernen (unsigniert ersetzen) = neue Version.
@@ -228,7 +233,15 @@ async fn run(store: Store) {
             .unwrap(),
         PutOutcome::Replaced(_)
     ));
-    assert!(store.wasm_module("guard").await.unwrap().unwrap().signature.is_none());
+    assert!(
+        store
+            .wasm_module("guard")
+            .await
+            .unwrap()
+            .unwrap()
+            .signature
+            .is_none()
+    );
     store.close().await;
 }
 
