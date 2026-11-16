@@ -14,6 +14,21 @@ Binary für Gateway, Admin-API und Admin-UI.
 Entscheidungen: [docs/konzept/00-entscheidungen.md](docs/konzept/00-entscheidungen.md) ·
 Betriebshandbuch: [docs/betrieb/](docs/betrieb/README.md) · Änderungen: [CHANGELOG.md](CHANGELOG.md)
 
+## Screenshots
+
+Admin-Oberfläche (Svelte 5), Aufnahmen der echten UI. Weitere Bilder unter [docs/konzept/ux](docs/konzept/ux).
+
+| | |
+|---|---|
+| <a href="docs/konzept/ux/echt-uebersicht-hell-desktop.png"><img src="docs/konzept/ux/echt-uebersicht-hell-desktop.png" alt="Übersicht" width="420"></a><br>Übersicht | <a href="docs/konzept/ux/echt-modelle-dunkel-desktop.png"><img src="docs/konzept/ux/echt-modelle-dunkel-desktop.png" alt="Modelle (dunkel)" width="420"></a><br>Modelle (dunkel) |
+| <a href="docs/konzept/ux/echt-deployment-detail-hell-desktop.png"><img src="docs/konzept/ux/echt-deployment-detail-hell-desktop.png" alt="Deployment-Detail" width="420"></a><br>Deployment-Detail | <a href="docs/konzept/ux/echt-routing-einstellungen-hell-desktop.png"><img src="docs/konzept/ux/echt-routing-einstellungen-hell-desktop.png" alt="Routing-Einstellungen" width="420"></a><br>Routing-Einstellungen |
+| <a href="docs/konzept/ux/echt-keys-hell-desktop.png"><img src="docs/konzept/ux/echt-keys-hell-desktop.png" alt="API-Keys" width="420"></a><br>API-Keys | <a href="docs/konzept/ux/echt-teams-hell-desktop.png"><img src="docs/konzept/ux/echt-teams-hell-desktop.png" alt="Teams" width="420"></a><br>Teams |
+| <a href="docs/konzept/ux/echt-plugin-kette-hell-desktop.png"><img src="docs/konzept/ux/echt-plugin-kette-hell-desktop.png" alt="Plugin-Kette" width="420"></a><br>Plugin-Kette | <a href="docs/konzept/ux/echt-guardrails-pii-hell-desktop.png"><img src="docs/konzept/ux/echt-guardrails-pii-hell-desktop.png" alt="Guardrails / PII" width="420"></a><br>Guardrails / PII |
+| <a href="docs/konzept/ux/echt-guardrail-profil-diff-hell-desktop.png"><img src="docs/konzept/ux/echt-guardrail-profil-diff-hell-desktop.png" alt="Guardrail-Profil (Diff)" width="420"></a><br>Guardrail-Profil (Diff) | <a href="docs/konzept/ux/echt-mcp-freigaben-hell-desktop.png"><img src="docs/konzept/ux/echt-mcp-freigaben-hell-desktop.png" alt="MCP-Freigaben" width="420"></a><br>MCP-Freigaben |
+| <a href="docs/konzept/ux/echt-playground-hell-desktop.png"><img src="docs/konzept/ux/echt-playground-hell-desktop.png" alt="Playground" width="420"></a><br>Playground | <a href="docs/konzept/ux/echt-preise-hell-desktop.png"><img src="docs/konzept/ux/echt-preise-hell-desktop.png" alt="Preise" width="420"></a><br>Preise |
+| <a href="docs/konzept/ux/echt-audit-hell-desktop.png"><img src="docs/konzept/ux/echt-audit-hell-desktop.png" alt="Audit-Log" width="420"></a><br>Audit-Log | <a href="docs/konzept/ux/echt-gitops-trockenlauf-hell-desktop.png"><img src="docs/konzept/ux/echt-gitops-trockenlauf-hell-desktop.png" alt="GitOps-Trockenlauf" width="420"></a><br>GitOps-Trockenlauf |
+| <a href="docs/konzept/ux/echt-yaml-import-hell-desktop.png"><img src="docs/konzept/ux/echt-yaml-import-hell-desktop.png" alt="YAML-Import" width="420"></a><br>YAML-Import | <a href="docs/konzept/ux/befehlspalette-hell-desktop.png"><img src="docs/konzept/ux/befehlspalette-hell-desktop.png" alt="Befehlspalette" width="420"></a><br>Befehlspalette |
+
 ## Schnellstart mit Docker
 
 ```bash
