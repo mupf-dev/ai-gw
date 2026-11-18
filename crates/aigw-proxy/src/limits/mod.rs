@@ -488,7 +488,11 @@ impl Admission {
     /// Eingabe-Limits sowie (bei harten Budgets) als Kosten nachreserviert – alle oder keine.
     /// Reicht ein Limit oder Budget nicht, wird die Anfrage abgelehnt wie bei der Admission.
     /// Kleinere oder gleiche Eingaben ändern nichts (der Abgleich korrigiert ohnehin).
-    pub(crate) async fn grow_input(&mut self, input: u64, now: SystemTime) -> Result<(), Box<Denied>> {
+    pub(crate) async fn grow_input(
+        &mut self,
+        input: u64,
+        now: SystemTime,
+    ) -> Result<(), Box<Denied>> {
         let base = self.estimate.input;
         if input <= base || self.growth.is_some() {
             return Ok(());
@@ -499,7 +503,10 @@ impl Admission {
         if let (Some(budgets), Some(k)) = (&self.budgets, &self.key) {
             let targets = budget_targets(k);
             if targets.iter().any(|t| t.budget.hard_limit) {
-                let est = TokenEstimate { input: delta, output: 0 };
+                let est = TokenEstimate {
+                    input: delta,
+                    output: 0,
+                };
                 let cost = estimate_cost(self.snapshot.as_deref(), self.group.as_deref(), est, now);
                 match budgets.reserve(&targets, cost, now_ms).await {
                     Ok(h) => budget_hold = (!h.is_empty()).then_some(h),
@@ -519,9 +526,17 @@ impl Admission {
                 Err(rej) => return Err(Box::new(Denied::limit(&self.input_plan, &rej))),
             }
         }
-        tracing::debug!(admitted = base, input, "Eingabe durch Plugins gewachsen – nachreserviert (S-38)");
+        tracing::debug!(
+            admitted = base,
+            input,
+            "Eingabe durch Plugins gewachsen – nachreserviert (S-38)"
+        );
         self.estimate.input = input;
-        self.growth = Some(Growth { delta, parts, budget_hold });
+        self.growth = Some(Growth {
+            delta,
+            parts,
+            budget_hold,
+        });
         Ok(())
     }
 

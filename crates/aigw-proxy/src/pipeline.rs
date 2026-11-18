@@ -21,8 +21,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use aigw_core::ir::{ApiError, ChatRequest, ErrorKind, UpstreamError};
-use aigw_core::snapshot::ModelGroupCtx;
 use aigw_core::observe::error_type;
+use aigw_core::snapshot::ModelGroupCtx;
 use aigw_core::wire::WireFormat;
 use axum::body::Body;
 use axum::extract::rejection::BytesRejection;

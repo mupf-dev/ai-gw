@@ -368,7 +368,10 @@ async fn plugin_grown_input_is_reserved_or_denied() {
         .await
         .unwrap();
     let denied = b.grow_input(150, SystemTime::now()).await.unwrap_err();
-    assert_eq!(denied.error.error.code.as_deref(), Some("rate_limit_exceeded"));
+    assert_eq!(
+        denied.error.error.code.as_deref(),
+        Some("rate_limit_exceeded")
+    );
     assert_eq!(cur("input-tokens"), 250, "abgelehnt: nichts nachgebucht");
     drop(b);
 
