@@ -283,6 +283,11 @@ impl Recorder {
         self.admission = Some(admission);
     }
 
+    /// Zugelassene Anfrage (Nachreservierung nach den Pre-Plugins, S-38).
+    pub(crate) fn admission_mut(&mut self) -> Option<&mut crate::limits::Admission> {
+        self.admission.as_mut()
+    }
+
     pub(crate) fn set_request(&mut self, req: &ChatRequest) {
         self.input_bytes = request_bytes(req);
         if req.is_stream() && self.payload.is_some() {

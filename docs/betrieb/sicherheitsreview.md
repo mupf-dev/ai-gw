@@ -112,6 +112,12 @@ Schweregrade: **hoch** – ausnutzbar mit geringen Rechten, deutlicher Schaden;
 |---|---|---|
 | S-37 | **WASM-Module ohne kryptografische Herkunft:** Freigabe war allein der Upload durch einen globalen `admin` (Restrisiko AIGW-63). Wer Schreibzugriff auf die Datenbank, den Snapshot-Cache oder ein Admin-Konto bekam, konnte ein beliebiges Modul in den Gateway-Prozess bringen, das Anfragen aller bindenden Mandanten sieht. | **umgesetzt (AIGW-101):** Ed25519-Signaturen über `aigw-wasm-module-v1:<sha256>` gegen `wasm.trusted_keys` (öffentliche Schlüssel nur in der Startkonfiguration, nicht per Admin-API änderbar). Mit Schlüsseln ist die Signatur standardmäßig **Pflicht** (`wasm.require_signature`); geprüft beim Upload (`422`), beim Import aus `wasm.modules` (Startabbruch) **und vor jedem Kompilieren** (SHA-256 des Inhalts neu berechnet → auch an der Admin-API vorbei eingeschleuste Module laden nicht; Metrik `aigw_wasm_signature_rejected_total`). Schlüsselwechsel: neuen Schlüssel ergänzen, neu signieren, alten entfernen. Ohne `trusted_keys` unverändert (Prüfung aus). Tests `verify_cases`, `key_rotation`, `signature_checked_before_loading`, `signatures_upload_list_and_rotation`, e2e `aigw101.spec.js`. Restrisiko: wer die Startkonfiguration ändern kann, kann Schlüssel tauschen; Signierschlüssel offline halten. |
 
+### Nachträge (AIGW-103)
+
+| ID | Befund | Status |
+|---|---|---|
+| S-38 | **Plugins vergrößern den Prompt nach der Admission** (Folgepunkt S-30): Limits und harte Budgets wurden nur mit der Eingabe der Client-Anfrage reserviert; ein Pre-Plugin (`request-transform`, Webhook `modify`, WASM) konnte die Eingabe danach beliebig vergrößern, die Vorabprüfung sah das nicht (der Abgleich bucht erst nachträglich). | **behoben (AIGW-103):** Nach den Pre-Plugins wird die Eingabe mit dem Tokenizer der Modellgruppe neu geschätzt; ist sie gewachsen, wird die Differenz auf allen Token-/Eingabe-Limits und (harte Budgets) als Kosten nachreserviert – alle oder keine. Reicht ein Limit nicht, wird die Anfrage mit `429`/Budget-Fehler abgelehnt wie bei der Admission. Beim Abschluss zählt die Nachreservierung genau die Differenz, zusammen ergibt sich der tatsächliche Verbrauch. Gilt für Chat und Responses; Endpunkte ohne Chat-Ausgabe (Embeddings u. a.) unverändert. Test `plugin_grown_input_is_reserved_or_denied`. |
+
 ### Info
 
 - Kein `zeroize`: `SecretString`, Klartext-Keys und entschlüsselte Credentials bleiben nach

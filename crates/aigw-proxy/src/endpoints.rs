@@ -583,7 +583,13 @@ async fn responses_inner(
         .await
         .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?;
     let mut req = match pre {
-        Pre::Continue(req) => req,
+        Pre::Continue(req) => {
+            // S-38: von Plugins vergrößerte Eingabe nachreservieren.
+            if plugins.hooks(PluginPhase::Request) > 0 {
+                p.grow_input(&req, group.as_ref()).await?;
+            }
+            req
+        }
         Pre::Respond(resp) => {
             p.rec.set_plugin_response(&resp);
             if req_stream {

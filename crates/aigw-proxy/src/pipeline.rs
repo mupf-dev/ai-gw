@@ -20,7 +20,8 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use aigw_core::ir::{ApiError, ErrorKind, UpstreamError};
+use aigw_core::ir::{ApiError, ChatRequest, ErrorKind, UpstreamError};
+use aigw_core::snapshot::ModelGroupCtx;
 use aigw_core::observe::error_type;
 use aigw_core::wire::WireFormat;
 use axum::body::Body;
@@ -217,6 +218,27 @@ impl<'a> Pipeline<'a> {
         }
         self.est = est;
         Ok(route)
+    }
+
+    /// S-38: Nach den Pre-Plugins die Eingabe neu schätzen; ist sie gewachsen, die Differenz
+    /// nachreservieren (siehe [`Admission::grow_input`](crate::limits::Admission::grow_input)).
+    /// Abgelehnt wird mit derselben Meldung wie bei der Admission.
+    pub(crate) async fn grow_input(
+        &mut self,
+        req: &ChatRequest,
+        group: Option<&Arc<ModelGroupCtx>>,
+    ) -> Result<(), UpstreamError> {
+        let Some(admission) = self.rec.admission_mut() else {
+            return Ok(());
+        };
+        let est = self.st.limits.estimate(req, group);
+        if let Err(denied) = admission.grow_input(est.input, SystemTime::now()).await {
+            let denied = *denied;
+            self.info.ratelimit = (!denied.headers.is_empty()).then_some(denied.headers);
+            return Err(denied.error);
+        }
+        self.est.input = self.est.input.max(est.input);
+        Ok(())
     }
 
     /// Anfrage-Haken der Plugin-Kette auf den Eingabetexten eines Endpunkts ohne Chat-Ausgabe

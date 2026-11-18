@@ -322,6 +322,75 @@ async fn admit_is_atomic_across_levels_and_settles_parts() {
     assert_eq!(rec.cost, None, "ohne Snapshot kein Preis");
 }
 
+/// S-38: Pre-Plugins vergrößern die Eingabe – Differenz wird nachreserviert, abgelehnt,
+/// wenn das Limit nicht reicht, und beim Abschluss zählt genau der tatsächliche Verbrauch.
+#[tokio::test]
+async fn plugin_grown_input_is_reserved_or_denied() {
+    use LimitMetric as M;
+    use LimitWindow as W;
+    let counters = Arc::new(LocalCounters::new());
+    let limiter = Limiter::new(counters.clone(), None, &LimitsConfig::default());
+    let k = key(
+        vec![
+            limit(M::Tokens, 1000, W::Minute, None),
+            limit(M::InputTokens, 300, W::Minute, None),
+        ],
+        vec![],
+        vec![],
+    );
+    let id = k.key.id;
+    let auth = AuthContext {
+        key_id: None,
+        key: Some(k),
+        snapshot: None,
+    };
+    let est = TokenEstimate {
+        input: 50,
+        output: 100,
+    };
+    let cur = |m: &str| counters.current(&format!("key:{id}:{m}"), Window::Minute);
+    let mut a = limiter
+        .admit(&auth, None, est, SystemTime::now())
+        .await
+        .unwrap();
+    // Kleiner oder gleich: nichts zu tun.
+    a.grow_input(40, SystemTime::now()).await.unwrap();
+    assert_eq!(cur("input-tokens"), 50);
+    // Gewachsen auf 200: +150 nachreserviert.
+    a.grow_input(200, SystemTime::now()).await.unwrap();
+    assert_eq!(cur("input-tokens"), 200);
+    assert_eq!(cur("tokens"), 300);
+    assert_eq!(a.input_estimate(), 200);
+
+    // Zweite Anfrage: 50 passt noch, Wachstum auf 150 (+100) nicht mehr (200+50+100 > 300).
+    let mut b = limiter
+        .admit(&auth, None, est, SystemTime::now())
+        .await
+        .unwrap();
+    let denied = b.grow_input(150, SystemTime::now()).await.unwrap_err();
+    assert_eq!(denied.error.error.code.as_deref(), Some("rate_limit_exceeded"));
+    assert_eq!(cur("input-tokens"), 250, "abgelehnt: nichts nachgebucht");
+    drop(b);
+
+    // Abschluss von a: tatsächlich 180 Eingabe + 10 Ausgabe.
+    let mut rec = RequestRecord::new("r", aigw_core::wire::WireFormat::OpenAiChat, 200);
+    rec.usage = Usage {
+        input_tokens: 180,
+        output_tokens: 10,
+        ..Usage::default()
+    };
+    a.complete(&mut rec, &[]);
+    // b (verworfen) bleibt konservativ mit 50/150 gebucht.
+    for _ in 0..100 {
+        if cur("input-tokens") == 230 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(cur("input-tokens"), 230);
+    assert_eq!(cur("tokens"), 190 + 150);
+}
+
 #[tokio::test]
 async fn too_large_request_has_no_retry_after() {
     let limiter = Limiter::local();

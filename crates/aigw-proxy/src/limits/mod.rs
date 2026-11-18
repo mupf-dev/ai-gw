@@ -311,6 +311,12 @@ impl Limiter {
             estimate: est,
             tokenizer: self.tokenizer(group.map(Arc::as_ref)),
             slots,
+            input_plan: planned
+                .into_iter()
+                .filter(|p| matches!(p.metric, Metric::Tokens | Metric::InputTokens))
+                .collect(),
+            group: group.cloned(),
+            growth: None,
         })
     }
 }
@@ -433,6 +439,21 @@ pub struct Admission {
     tokenizer: Tokenizer,
     /// Belegte Gleichzeitigkeits-Plätze (S-12); frei mit dem Ende der `Admission`.
     slots: Option<SlotLease>,
+    /// Token-/Eingabe-Limits der Admission (für die Nachreservierung, S-38).
+    input_plan: Vec<Planned>,
+    /// Modellgruppe (Preis der Nachreservierung, S-38).
+    group: Option<Arc<ModelGroupCtx>>,
+    /// Nachreservierung, weil Pre-Plugins die Eingabe vergrößert haben (S-38).
+    growth: Option<Growth>,
+}
+
+/// Nachreservierte Eingabe-Tokens (S-38): getrennte Reservierung, beim Abgleich zählt sie
+/// genau `delta` (die ursprüngliche Reservierung wird mit `tatsächlich − delta` abgeglichen).
+#[derive(Debug)]
+struct Growth {
+    delta: u64,
+    parts: Parts,
+    budget_hold: Option<BudgetHold>,
 }
 
 impl fmt::Debug for Admission {
@@ -461,6 +482,49 @@ impl Admission {
         &self.tokenizer
     }
 
+    /// S-38: Pre-Plugins (z. B. `request-transform`, Webhook `modify`, WASM) dürfen den Prompt
+    /// vergrößern. Die Admission hat aber nur die Eingabe der Client-Anfrage reserviert.
+    /// Liegt die neue Schätzung `input` darüber, wird die Differenz auf allen Token- und
+    /// Eingabe-Limits sowie (bei harten Budgets) als Kosten nachreserviert – alle oder keine.
+    /// Reicht ein Limit oder Budget nicht, wird die Anfrage abgelehnt wie bei der Admission.
+    /// Kleinere oder gleiche Eingaben ändern nichts (der Abgleich korrigiert ohnehin).
+    pub(crate) async fn grow_input(&mut self, input: u64, now: SystemTime) -> Result<(), Box<Denied>> {
+        let base = self.estimate.input;
+        if input <= base || self.growth.is_some() {
+            return Ok(());
+        }
+        let delta = input - base;
+        let now_ms = unix_ms(now);
+        let mut budget_hold = None;
+        if let (Some(budgets), Some(k)) = (&self.budgets, &self.key) {
+            let targets = budget_targets(k);
+            if targets.iter().any(|t| t.budget.hard_limit) {
+                let est = TokenEstimate { input: delta, output: 0 };
+                let cost = estimate_cost(self.snapshot.as_deref(), self.group.as_deref(), est, now);
+                match budgets.reserve(&targets, cost, now_ms).await {
+                    Ok(h) => budget_hold = (!h.is_empty()).then_some(h),
+                    Err(e) => return Err(Box::new(Denied::budget(&e, now_ms))),
+                }
+            }
+        }
+        let mut parts = Parts::default();
+        if !self.input_plan.is_empty() {
+            let checks: Vec<LimitCheck<'_>> = self
+                .input_plan
+                .iter()
+                .map(|p| LimitCheck::new(&p.key, p.window, p.limit, delta))
+                .collect();
+            match self.counters.reserve(&checks).await {
+                Ok(res) => parts = Parts::split(res, &self.input_plan),
+                Err(rej) => return Err(Box::new(Denied::limit(&self.input_plan, &rej))),
+            }
+        }
+        tracing::debug!(admitted = base, input, "Eingabe durch Plugins gewachsen – nachreserviert (S-38)");
+        self.estimate.input = input;
+        self.growth = Some(Growth { delta, parts, budget_hold });
+        Ok(())
+    }
+
     /// Schließt die Anfrage ab (synchron, ohne I/O im Aufrufer): Kosten aus der Preistabelle
     /// zum Anfragezeitpunkt in `record.cost`, Kosten auf die Budgets buchen, Reservierungen
     /// mit der tatsächlichen Usage abgleichen (bei entfernten Backends im Hintergrund).
@@ -485,6 +549,10 @@ impl Admission {
             let targets = budget_targets(k);
             let at = unix_ms(record.started_at);
             let c = cost.unwrap_or(Amount::ZERO);
+            // Nachreservierung (S-38) freigeben, die tatsächlichen Kosten bucht die Hauptbuchung.
+            if let Some(hold) = self.growth.as_mut().and_then(|g| g.budget_hold.take()) {
+                budgets.settle(hold, &targets, Amount::ZERO, at);
+            }
             match self.budget_hold.take() {
                 // Reservierung gegen die tatsächlichen Kosten tauschen (auch 0 = Freigabe).
                 Some(hold) => budgets.settle(hold, &targets, c, at),
@@ -495,7 +563,22 @@ impl Admission {
         for c in plugin_calls {
             usage.add(&c.usage);
         }
-        settle(self.counters, self.parts, &usage);
+        match self.growth.take() {
+            // S-38: Nachreservierung zählt genau `delta` (höchstens die tatsächliche Eingabe),
+            // die Hauptreservierung den Rest – zusammen der tatsächliche Verbrauch.
+            Some(g) => {
+                let d = g.delta.min(usage.input_tokens);
+                let mut main = usage.clone();
+                main.input_tokens -= d;
+                let grown = Usage {
+                    input_tokens: d,
+                    ..Usage::default()
+                };
+                settle(Arc::clone(&self.counters), self.parts, &main);
+                settle(self.counters, g.parts, &grown);
+            }
+            None => settle(self.counters, self.parts, &usage),
+        }
     }
 
     /// Summe der Kosten der Plugin-Modellaufrufe (`None` ohne Preis für alle).

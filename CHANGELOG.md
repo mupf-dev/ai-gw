@@ -219,6 +219,9 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Behoben
 
+- **Plugins vergrößern den Prompt nach der Admission (S-38, AIGW-103):** Nach den Pre-Plugins
+  wird die Eingabe neu geschätzt; Wachstum wird auf Token-/Eingabe-Limits und harten Budgets
+  nachreserviert oder die Anfrage abgelehnt (`429` bzw. Budget-Fehler).
 - **Redis-Ausfalltests stabil unter Last (AIGW-94):** `falls_back_and_recovers` und
   `deferred_settles_replayed_after_outage` hingen an Wanduhrzeit: feste `CLIENT PAUSE`-Dauer
   (600/700 ms), 100 ms Zeitlimit und ein 300-ms-Zeitraum. Unter Last (Load > 30, nachgestellt)

@@ -424,7 +424,13 @@ async fn chat_inner(
         .await
         .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?
     {
-        Pre::Continue(req) => req,
+        Pre::Continue(req) => {
+            // S-38: von Plugins vergrößerte Eingabe nachreservieren.
+            if plugins.hooks(PluginPhase::Request) > 0 {
+                p.grow_input(&req, group.as_ref()).await?;
+            }
+            req
+        }
         Pre::Respond(resp) => {
             p.info_mut().model = Some(resp.model.clone());
             return plugin_reply(resp, req_stream, format, p, include_usage);
