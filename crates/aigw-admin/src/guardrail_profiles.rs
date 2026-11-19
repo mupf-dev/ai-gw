@@ -764,7 +764,13 @@ mod tests {
         assert_eq!(plugins("basis"), ["prompt-filter", "pii"]);
         assert_eq!(
             plugins("streng"),
-            ["prompt-filter", "pii", "link-guard", "prompt-leak", "content-safety"]
+            [
+                "prompt-filter",
+                "pii",
+                "link-guard",
+                "prompt-leak",
+                "content-safety"
+            ]
         );
         assert_eq!(plugins("offen"), ["prompt-filter"]);
         assert!(get("basis").logging.is_none());
