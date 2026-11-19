@@ -67,9 +67,8 @@ const PREFIX: &str = "aigw-ref-";
 const MAX_NGRAMS: usize = 20_000;
 
 /// Jedes Canary-Token (mit optionalem Kommentar-Rahmen), ohne Groß-/Kleinschreibung.
-static CANARY_RE: LazyLock<Option<Regex>> = LazyLock::new(|| {
-    Regex::new(r"(?i)(?:<!--\s*)?aigw-ref-[0-9a-f]{20}(?:\s*-->)?").ok()
-});
+static CANARY_RE: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"(?i)(?:<!--\s*)?aigw-ref-[0-9a-f]{20}(?:\s*-->)?").ok());
 
 fn find_canary(text: &str) -> bool {
     text.len() >= PREFIX.len() + 20 && CANARY_RE.as_ref().is_some_and(|re| re.is_match(text))
@@ -349,8 +348,7 @@ impl PromptLeak {
     }
 
     fn leaked(&self, v: &Verbatim, matched: usize, total: usize) -> bool {
-        matched > 0
-            && (matched >= v.min || (total > 0 && matched as f64 >= v.ratio * total as f64))
+        matched > 0 && (matched >= v.min || (total > 0 && matched as f64 >= v.ratio * total as f64))
     }
 
     fn error() -> ApiError {
@@ -609,7 +607,9 @@ impl Plugin for PromptLeak {
             ev,
             self.window,
             &mut |e| emitted.push(e),
-            &mut |block: StreamBlock, buf: &mut String| scan_canary(info, c, canary_seen, block, buf),
+            &mut |block: StreamBlock, buf: &mut String, last| {
+                scan_canary(info, c, canary_seen, block, buf, last)
+            },
         );
         for e in emitted {
             ctx.emit(e);
@@ -626,8 +626,8 @@ impl Plugin for PromptLeak {
         let StreamState {
             hold, canary_seen, ..
         } = st;
-        match hold.flush(&mut |block: StreamBlock, buf: &mut String| {
-            scan_canary(info, c, canary_seen, block, buf)
+        match hold.flush(&mut |block: StreamBlock, buf: &mut String, last| {
+            scan_canary(info, c, canary_seen, block, buf, last)
         }) {
             Ok(Some(e)) => {
                 ctx.emit(e);
@@ -646,8 +646,25 @@ fn scan_canary(
     seen: &mut bool,
     block: StreamBlock,
     buf: &mut String,
+    last: bool,
 ) -> Result<(), ApiError> {
     if !find_canary(buf) {
+        return Ok(());
+    }
+    // Flag: erst entfernen, wenn ein möglicher Kommentar-Abschluss ` -->` angekommen ist.
+    if !last
+        && c.action == LeakAction::Flag
+        && !block.is_reasoning()
+        && CANARY_RE
+            .as_ref()
+            .and_then(|re| re.find_iter(buf).last())
+            .is_some_and(|m| {
+                let tail = buf[m.end()..].trim_start();
+                m.as_str().starts_with("<!--")
+                    && !m.as_str().ends_with("-->")
+                    && "-->".starts_with(tail)
+            })
+    {
         return Ok(());
     }
     let action = if block.is_reasoning() {

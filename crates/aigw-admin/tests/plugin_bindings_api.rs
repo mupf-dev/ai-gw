@@ -299,7 +299,11 @@ async fn gitops_plan_validates_plugin_bindings() {
 
     // AIGW-109/111/112: neue Felder bzw. Plugin-Art, Wertebereiche geprüft.
     for (plugin, config, ok) in [
-        ("prompt-filter", "{invisible: {action: strip}, direction: both, words: {terms: [x]}}", true),
+        (
+            "prompt-filter",
+            "{invisible: {action: strip}, direction: both, words: {terms: [x]}}",
+            true,
+        ),
         ("prompt-filter", "{invisible: {action: drop}}", false),
         ("prompt-leak", "{canary: {rotation: stable}}", true),
         ("prompt-leak", "{verbatim: {ngram: 2}}", false),

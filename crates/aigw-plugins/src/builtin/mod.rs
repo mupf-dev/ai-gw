@@ -6,8 +6,8 @@
 pub mod cache;
 pub mod content_safety;
 mod guard;
-mod invisible;
 pub mod header;
+mod invisible;
 pub mod pii;
 pub mod prompt_filter;
 pub mod prompt_leak;

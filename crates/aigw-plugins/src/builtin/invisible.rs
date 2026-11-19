@@ -295,8 +295,8 @@ mod tests {
             "👩\u{200D}💻 Entwicklerin",
             "❤\u{FE0F}\u{200D}🔥",
             "👨\u{200D}👩\u{200D}👧",
-            "می\u{200C}خواهم",                // Persisch (ZWNJ)
-            "क्\u{200D}ष",                     // Devanagari (ZWJ nach Virama)
+            "می\u{200C}خواهم", // Persisch (ZWNJ)
+            "क्\u{200D}ष",      // Devanagari (ZWJ nach Virama)
         ] {
             assert!(scan(t, true).is_empty(), "{t:?}");
         }

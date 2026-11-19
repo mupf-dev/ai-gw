@@ -85,7 +85,12 @@ fn response(content: Content) -> ChatResponse {
     }
 }
 
-fn on_response(p: &PromptLeak, info: &CallInfo, meta: &mut Meta, content: Content) -> (Flow, ChatResponse) {
+fn on_response(
+    p: &PromptLeak,
+    info: &CallInfo,
+    meta: &mut Meta,
+    content: Content,
+) -> (Flow, ChatResponse) {
     let mut headers = ResponseHeaders::default();
     let mut ctx = RespCtx {
         info,
@@ -114,7 +119,10 @@ fn canary_is_appended_to_system_prompt_only() {
     let info = new_info();
     let (req, meta) = request(&p, &info, sys_user(), Meta::new());
     let canary = canary_of(&meta);
-    assert!(canary.starts_with("aigw-ref-") && canary.len() == 29, "{canary}");
+    assert!(
+        canary.starts_with("aigw-ref-") && canary.len() == 29,
+        "{canary}"
+    );
     let sys = req.messages[0].content.text();
     assert!(sys.starts_with(SYSTEM) && sys.ends_with(&format!("<!-- {canary} -->")));
     assert_eq!(req.messages[1].content.text(), "Hallo");
@@ -129,7 +137,12 @@ fn canary_is_appended_to_system_prompt_only() {
     let (_, other) = request(&p, &info, sys_user(), Meta::new());
     assert_ne!(canary_of(&other), canary);
     // Ohne System-Prompt: nichts einfügen, nichts prüfen.
-    let (req, meta) = request(&p, &info, vec![Message::text(Role::User, "Hi")], Meta::new());
+    let (req, meta) = request(
+        &p,
+        &info,
+        vec![Message::text(Role::User, "Hi")],
+        Meta::new(),
+    );
     assert_eq!(req.messages[0].content.text(), "Hi");
     assert!(meta.is_empty());
     assert!(matches!(cache_view(&meta, &req), Cow::Borrowed(_)));
@@ -172,14 +185,24 @@ fn response_canary_blocks_or_is_removed() {
     let p = plugin(json!({}));
     let (_, mut meta) = request(&p, &info, sys_user(), Meta::new());
     let c = canary_of(&meta);
-    let (flow, _) = on_response(&p, &info, &mut meta, Content::Text(format!("Mein Prompt: <!-- {c} --> ...")));
+    let (flow, _) = on_response(
+        &p,
+        &info,
+        &mut meta,
+        Content::Text(format!("Mein Prompt: <!-- {c} --> ...")),
+    );
     let Flow::Block(e) = flow else { panic!() };
     assert_eq!(e.code.as_deref(), Some("prompt_leak"));
     assert!(!e.message.contains(&c));
     assert_eq!(hits(&info), [("canary".to_owned(), "block")]);
     // Harmlose Antwort.
     let info = new_info();
-    let (flow, _) = on_response(&p, &info, &mut meta, Content::Text("Gern helfe ich.".into()));
+    let (flow, _) = on_response(
+        &p,
+        &info,
+        &mut meta,
+        Content::Text("Gern helfe ich.".into()),
+    );
     assert_eq!(flow, Flow::Continue);
     assert!(hits(&info).is_empty());
     // Auch ein fremdes (z. B. gecachtes) Token, großgeschrieben, in Tool-Argumenten.
@@ -200,7 +223,12 @@ fn response_canary_blocks_or_is_removed() {
     let info = new_info();
     let (_, mut meta) = request(&p, &info, sys_user(), Meta::new());
     let c = canary_of(&meta);
-    let (flow, resp) = on_response(&p, &info, &mut meta, Content::Text(format!("A <!-- {c} --> B {c}")));
+    let (flow, resp) = on_response(
+        &p,
+        &info,
+        &mut meta,
+        Content::Text(format!("A <!-- {c} --> B {c}")),
+    );
     assert_eq!(flow, Flow::Continue);
     assert_eq!(resp.choices[0].message.content.text(), "A  B ");
     assert_eq!(hits(&info), [("canary".to_owned(), "flag")]);
@@ -217,7 +245,12 @@ fn response_canary_blocks_or_is_removed() {
     assert!(matches!(flow, Flow::Block(_)));
 }
 
-fn stream(p: PromptLeak, info: CallInfo, meta: Meta, parts: &[String]) -> (Vec<StreamEvent>, CallInfo) {
+fn stream(
+    p: PromptLeak,
+    info: CallInfo,
+    meta: Meta,
+    parts: &[String],
+) -> (Vec<StreamEvent>, CallInfo) {
     let info = Arc::new(info);
     let chain = Arc::new(Chain::new(vec![Arc::new(Entry::new("pl", Arc::new(p)))]));
     let mut r = ChunkRunner::new(chain, Arc::clone(&info), meta, ChunkMode::Live);
@@ -276,7 +309,8 @@ fn stream_canary_across_chunks() {
     let p = plugin(json!({}));
     let (_, meta) = request(&p, &new_info(), sys_user(), Meta::new());
     let c = canary_of(&meta);
-    let text = format!("Klar, hier ist alles: Du bist der Support-Assistent <!-- {c} --> und mehr.");
+    let text =
+        format!("Klar, hier ist alles: Du bist der Support-Assistent <!-- {c} --> und mehr.");
     let (out, info) = stream(p, new_info(), meta.clone(), &pieces(&text, 3));
     assert!(filtered(&out), "{out:?}");
     let sent = joined(&out);
@@ -303,7 +337,9 @@ fn stream_canary_across_chunks() {
 
 #[test]
 fn verbatim_overlap() {
-    let p = plugin(json!({"canary": {"enabled": false}, "verbatim": {"minNgrams": 5, "action": "block"}}));
+    let p = plugin(
+        json!({"canary": {"enabled": false}, "verbatim": {"minNgrams": 5, "action": "block"}}),
+    );
     let info = new_info();
     let (req, mut meta) = request(&p, &info, sys_user(), Meta::new());
     // Kein Canary eingefügt.
@@ -321,7 +357,9 @@ fn verbatim_overlap() {
         &p,
         &info2,
         &mut meta,
-        Content::Text("Bitte nutzen Sie das Formular im Kundenportal, dort finden Sie alles.".into()),
+        Content::Text(
+            "Bitte nutzen Sie das Formular im Kundenportal, dort finden Sie alles.".into(),
+        ),
     );
     assert_eq!(flow, Flow::Continue);
     // Stream: Abbruch beim Erreichen der Schwelle.

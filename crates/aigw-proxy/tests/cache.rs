@@ -734,7 +734,10 @@ async fn exact_cache_works_with_prompt_leak_canary() {
         vec![pl],
     )
     .await;
-    for q in [openai("Hallo Cache", false), anthropic("Hallo Cache", false)] {
+    for q in [
+        openai("Hallo Cache", false),
+        anthropic("Hallo Cache", false),
+    ] {
         let path = if q.get("system").is_some() {
             "/v1/messages"
         } else {

@@ -165,7 +165,7 @@ impl StreamBlock {
 /// (`prompt-filter` mit `direction: response|both`, `prompt-leak`): Die letzten `window`
 /// Bytes eines Blocks bleiben zurück; jede Fundstelle bis zu `window` Bytes Länge liegt
 /// damit vollständig im Puffer, bevor ein Teil davon hinausgeht. `scan` sieht jeweils den
-/// ganzen Puffer (darf ihn verändern, z. B. schwärzen) und kann die Ausgabe ablehnen.
+/// ganzen Puffer (darf ihn verändern, z. B. schwärzen; `true` = letzter Aufruf des Blocks) und kann die Ausgabe ablehnen.
 #[derive(Debug, Default)]
 pub(crate) struct HoldBack {
     block: Option<StreamBlock>,
@@ -180,7 +180,7 @@ impl HoldBack {
         ev: &mut StreamEvent,
         window: usize,
         emit: &mut impl FnMut(StreamEvent),
-        scan: &mut impl FnMut(StreamBlock, &mut String) -> Result<(), E>,
+        scan: &mut impl FnMut(StreamBlock, &mut String, bool) -> Result<(), E>,
     ) -> Result<crate::plugin::ChunkFlow, E> {
         let (block, text) = match ev {
             StreamEvent::TextDelta { index, text } => (StreamBlock::Text(*index), text),
@@ -202,7 +202,7 @@ impl HoldBack {
             self.block = Some(block);
         }
         self.buf.push_str(text);
-        scan(block, &mut self.buf)?;
+        scan(block, &mut self.buf, false)?;
         let limit = floor_boundary(&self.buf, self.buf.len().saturating_sub(window));
         let cut = match self.buf[..limit].rfind(char::is_whitespace) {
             // Leerzeichen sind meist ASCII; auf Zeichengrenze nach dem Leerzeichen schneiden.
@@ -219,7 +219,7 @@ impl HoldBack {
     /// Gibt den ganzen Puffer aus (nach einer letzten Prüfung).
     pub(crate) fn flush<E>(
         &mut self,
-        scan: &mut impl FnMut(StreamBlock, &mut String) -> Result<(), E>,
+        scan: &mut impl FnMut(StreamBlock, &mut String, bool) -> Result<(), E>,
     ) -> Result<Option<StreamEvent>, E> {
         let Some(block) = self.block.take() else {
             return Ok(None);
@@ -227,7 +227,7 @@ impl HoldBack {
         if self.buf.is_empty() {
             return Ok(None);
         }
-        scan(block, &mut self.buf)?;
+        scan(block, &mut self.buf, true)?;
         Ok(Some(block.event(std::mem::take(&mut self.buf))))
     }
 }
