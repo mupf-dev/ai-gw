@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts" module>
   /** Plugins mit strukturiertem Formular (F214: Felder nach dem Konfigurationsschema der Plugins, 12/13-*.md). */
-  export const STRUCTURED = new Set(['pii', 'prompt-filter', 'content-safety', 'webhook', 'wasm']);
+  export const STRUCTURED = new Set(['pii', 'prompt-filter', 'prompt-leak', 'content-safety', 'webhook', 'wasm']);
 </script>
 
 <script lang="ts">
@@ -89,6 +89,17 @@
   const DIRECTION: SelectItem[] = [STD, { value: 'input', label: 'Eingabe' }, { value: 'output', label: 'Ausgabe' }, { value: 'both', label: 'beides' }];
   const FILTER_ACTION: SelectItem[] = [STD, { value: 'reject', label: 'reject – ablehnen' }, { value: 'flag', label: 'flag – nur zählen' }];
   const ROLES = ['system', 'developer', 'user', 'assistant', 'tool'];
+  /** AIGW-111: Richtung der Wort-/Regex-Regeln (Standard: nur Anfrage). */
+  const RULE_DIRECTION: SelectItem[] = [STD, { value: 'request', label: 'Anfrage' }, { value: 'response', label: 'Antwort' }, { value: 'both', label: 'beides' }];
+  /** AIGW-109: unsichtbare Unicode-Zeichen (Abschnitt fehlt = aus). */
+  const INVISIBLE_ACTION: SelectItem[] = [
+    { value: '', label: 'aus (bzw. strip, wenn konfiguriert)' },
+    { value: 'strip', label: 'strip – entfernen' },
+    { value: 'reject', label: 'reject – ablehnen' },
+    { value: 'flag', label: 'flag – nur zählen' },
+  ];
+  /** AIGW-112: prompt-leak. */
+  const LEAK_ACTION: SelectItem[] = [STD, { value: 'block', label: 'block – Antwort blockieren (content_filter)' }, { value: 'flag', label: 'flag – zählen, Canary entfernen' }];
 
   // ------------------------------------------------------------ pii
   const PII_ACTIONS: SelectItem[] = [
@@ -273,6 +284,7 @@
     {@render text('Stream-Fenster (Bytes)', ['streamWindowBytes'], { numeric: true, hint: '16–4096' })}
   {:else if plugin === 'prompt-filter'}
     {@render choice('Aktion (Standard je Regel)', ['action'], FILTER_ACTION)}
+    {@render choice('Richtung der Wort-/Regex-Regeln', ['direction'], RULE_DIRECTION, 'Standard: Anfrage; Antwort/Stream wie pii (Stream mit Puffer)')}
     <fieldset class="flex flex-col gap-1.5">
       <legend class="text-sm font-medium">Geprüfte Rollen</legend>
       <div class="flex flex-wrap gap-3 pt-1.5">
@@ -288,6 +300,7 @@
     {@render flag('Groß-/Kleinschreibung beachten', ['words', 'caseSensitive'])}
     {@render flag('Nur ganze Wörter', ['words', 'wholeWords'], 'Standard: an')}
     {@render choice('Aktion der Wortliste', ['words', 'action'], FILTER_ACTION)}
+    {@render choice('Richtung der Wortliste', ['words', 'direction'], RULE_DIRECTION)}
     {@render section('Reguläre Ausdrücke')}
     <div class="flex flex-col gap-2 sm:col-span-2" data-testid="regex-rules">
       {#each regex as r, i (i)}
@@ -309,6 +322,23 @@
     {@render text('Höchstzahl Zeichen', ['limits', 'maxChars'], { numeric: true })}
     {@render text('Zeichen je Nachricht', ['limits', 'maxMessageChars'], { numeric: true })}
     {@render choice('Aktion der Grenzen', ['limits', 'action'], FILTER_ACTION)}
+    {@render section('Unsichtbare Unicode-Zeichen')}
+    {@render choice('Aktion', ['invisible', 'action'], INVISIBLE_ACTION, 'Tag-, Zero-Width-, Bidi- und Formatzeichen; Tag-Zeichen zählen zusätzlich als Injection-Signal')}
+    {@render flag('Verbinder erlauben (ZWJ/ZWNJ)', ['invisible', 'allowJoiners'], 'Standard: an – Emoji-Sequenzen, Persisch, indische Schriften')}
+    {@render text('Stream-Fenster (Bytes)', ['streamWindowBytes'], { numeric: true, hint: 'nur Ausgabe-Regeln, 16–4096' })}
+  {:else if plugin === 'prompt-leak'}
+    {@render choice('Aktion (Standard)', ['action'], LEAK_ACTION)}
+    {@render section('Canary-Token im System-Prompt')}
+    {@render flag('Canary', ['canary', 'enabled'], 'Standard: an (nur Anfragen mit System-Prompt)')}
+    {@render choice('Aktion', ['canary', 'action'], LEAK_ACTION)}
+    {@render choice('Erzeugung', ['canary', 'rotation'], [STD, { value: 'request', label: 'request – je Anfrage zufällig' }, { value: 'stable', label: 'stable – je Key und System-Prompt (Prompt-Caching)' }])}
+    {@render section('Wörtliche Auszüge (N-Gramme)')}
+    {@render flag('Erkennung', ['verbatim', 'enabled'], 'ohne Angaben aus; aktiv, sobald ein Feld gesetzt ist')}
+    {@render text('Wörter je N-Gramm', ['verbatim', 'ngram'], { numeric: true, hint: '4–32, Standard 8' })}
+    {@render text('Mindestzahl N-Gramme', ['verbatim', 'minNgrams'], { numeric: true, hint: 'Standard 12' })}
+    {@render text('Anteil am System-Prompt', ['verbatim', 'ratio'], { numeric: true, hint: '0–1, Standard 0,5' })}
+    {@render choice('Aktion', ['verbatim', 'action'], LEAK_ACTION)}
+    {@render text('Stream-Fenster (Bytes)', ['streamWindowBytes'], { numeric: true, hint: '32–4096, Standard 64' })}
   {:else if plugin === 'content-safety'}
     {@render choice('Anbieter', ['provider'], [
       { value: 'azure', label: 'Azure AI Content Safety' },

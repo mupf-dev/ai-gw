@@ -451,13 +451,15 @@ async fn chat_inner(
     // Mehrere Varianten (`n > 1`) werden nicht gecacht.
     let mut cache = match st.cache.as_ref().filter(|_| choices <= 1) {
         Some(c) => {
+            // AIGW-112: Schlüssel ohne Canary von `prompt-leak` (sonst je Anfrage ein anderer).
+            let key_req = plugins.cache_view(&req);
             crate::cache::CacheStep::begin(
                 Some(c),
                 plugins.cache_policy(),
                 &auth,
                 &rid,
                 &model_group,
-                &req,
+                &key_req,
                 headers,
             )
             .await

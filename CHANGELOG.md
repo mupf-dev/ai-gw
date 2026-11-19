@@ -9,6 +9,26 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Hinzugefügt
 
+- **Unsichtbare Unicode-Zeichen im `prompt-filter` (AIGW-109):** `invisible: {action:
+  strip|reject|flag, allowJoiners}` erkennt Tag-Zeichen (ASCII-Schmuggel), Zero-Width-, Bidi-,
+  Formatzeichen und Folgen von Variantenselektoren auf den geprüften Rollen; legitime Fälle
+  (Emoji-ZWJ, ZWNJ/ZWJ in persischer und indischen Schriften, Flaggen-Sequenzen, BOM am
+  Anfang, einzelne Variantenselektoren) bleiben. Tag-Zeichen sind zusätzlich das
+  Injection-Signal `unicode_tags` (auch im Tool-Inventar); Wörter, Regex und Signale prüfen den
+  Text ohne unsichtbare Zeichen. Metrik-Kategorien `invisible_<art>`.
+- **Wort-/Regex-Regeln auf der Ausgabe (AIGW-111):** `direction: request|response|both`
+  (Standard `request`) im `prompt-filter` und je Regel; Antwort und Live-Stream (Puffer
+  `streamWindowBytes` über Chunk-Grenzen), Ablehnung wie F160 (`content_filter`/`refusal`,
+  `x-aigw-guardrail: prompt-filter`).
+- **Plugin `prompt-leak` (AIGW-112):** Canary-Token im System-Prompt (`rotation: request`
+  zufällig je Anfrage oder `stable` für Prompt-Caching), Erkennung in Antwort, Stream,
+  Tool-Argumenten und Reasoning → blockieren (F160) oder zählen und entfernen; das Token
+  erreicht nie Client oder Payload-Log, der Antwort-Cache rechnet ohne Token. Optional
+  wörtliche Auszüge des System-Prompts über Wort-N-Gramme (`verbatim`). UI-Formular,
+  Admin-/GitOps-Prüfung über die Registry, Beispiel in `config/examples/guardrails/`.
+- **Guardrail-Profile v2:** „Basis“ entfernt unsichtbare Zeichen, „Streng“ lehnt sie ab und
+  bindet `prompt-leak` (Canary, gesperrt, Order 90).
+
 - **Lastvergleich mit LiteLLM (AIGW-102):** `scripts/bench-litellm.sh` misst ai-gw (Image,
   SQLite/Postgres) und LiteLLM-Proxy `v1.108.8` (ohne DB/Postgres, Produktionseinstellungen)
   gegen denselben Fake-Upstream auf denselben Kernen: Aufschlag, Durchsatz/Fehler bei

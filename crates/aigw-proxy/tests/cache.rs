@@ -719,3 +719,32 @@ async fn exact_cache_works_with_pii_and_prompt_filter() {
     assert_eq!(s.calls(), 1);
     assert!(!openai_text(&b.json()).contains("max.mustermann"));
 }
+
+/// AIGW-112: `prompt-leak` fügt je Anfrage ein zufälliges Canary-Token in den System-Prompt
+/// ein; der Cache-Schlüssel entsteht ohne Token – zwei identische Anfragen treffen trotzdem.
+#[tokio::test]
+async fn exact_cache_works_with_prompt_leak_canary() {
+    let pl = Arc::new(Entry::new(
+        "prompt-leak",
+        builtin::prompt_leak::Factory.build(&json!({})).unwrap(),
+    ));
+    let s = setup_with(
+        Some(json!({"mode": "exact", "scope": "team", "ttlSecs": 600})),
+        false,
+        vec![pl],
+    )
+    .await;
+    for q in [openai("Hallo Cache", false), anthropic("Hallo Cache", false)] {
+        let path = if q.get("system").is_some() {
+            "/v1/messages"
+        } else {
+            "/v1/chat/completions"
+        };
+        let a = post(s.addr, path, &[], q.clone()).await;
+        assert_eq!(a.status, StatusCode::OK);
+        settle().await;
+        let b = post(s.addr, path, &[], q).await;
+        assert_eq!(b.cache(), Some("hit-exact"), "{path}");
+        assert!(!String::from_utf8_lossy(&b.body).contains("aigw-ref-"));
+    }
+}

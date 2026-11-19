@@ -195,6 +195,11 @@ impl PluginRun {
         aigw_plugins::builtin::cache::policy_of(&self.chain)
     }
 
+    /// Anfrage für den Cache-Schlüssel: ohne das Canary-Token von `prompt-leak` (AIGW-112).
+    pub(crate) fn cache_view<'a>(&self, req: &'a ChatRequest) -> std::borrow::Cow<'a, ChatRequest> {
+        aigw_plugins::builtin::prompt_leak::cache_view(&self.meta, req)
+    }
+
     /// Sammelstellen der Guardrail-Erkennungen und der Plugin-Modellaufrufe (nur wenn die
     /// Anfrage Plugins hat).
     pub(crate) fn plugin_sinks(

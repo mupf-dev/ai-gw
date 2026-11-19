@@ -1228,6 +1228,7 @@ fn default_fail_modes_and_effective_control() {
     for p in [
         "pii",
         "prompt-filter",
+        "prompt-leak",
         "header",
         "request-transform",
         "cache",

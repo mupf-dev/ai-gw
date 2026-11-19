@@ -296,6 +296,31 @@ async fn gitops_plan_validates_plugin_bindings() {
     assert_eq!(s, StatusCode::OK, "{v}");
     let (_, v) = call(&app, Method::GET, &format!("{BASE}/pf"), None).await;
     assert_eq!(v["effective"]["failMode"], "closed");
+
+    // AIGW-109/111/112: neue Felder bzw. Plugin-Art, Wertebereiche geprüft.
+    for (plugin, config, ok) in [
+        ("prompt-filter", "{invisible: {action: strip}, direction: both, words: {terms: [x]}}", true),
+        ("prompt-filter", "{invisible: {action: drop}}", false),
+        ("prompt-leak", "{canary: {rotation: stable}}", true),
+        ("prompt-leak", "{verbatim: {ngram: 2}}", false),
+    ] {
+        let yaml = format!(
+            "apiVersion: aigw/v1alpha1\nkind: PluginBinding\nmetadata: {{name: neu}}\nspec:\n  scope: {{level: global}}\n  plugin: {plugin}\n  config: {config}\n"
+        );
+        let (s, v) = call_raw(
+            &app,
+            Method::POST,
+            "/admin/api/v1/config:apply?dryRun=true",
+            Some(("application/yaml", yaml)),
+        )
+        .await;
+        let want = if ok {
+            StatusCode::OK
+        } else {
+            StatusCode::UNPROCESSABLE_ENTITY
+        };
+        assert_eq!(s, want, "{plugin} {config}: {v}");
+    }
 }
 
 /// S-22: Private Ziele aus `admin.allow_private_upstreams` nur für Bindungen der Ebenen

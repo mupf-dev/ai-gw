@@ -1,6 +1,6 @@
-# ai-gw – Guardrails: PII, Prompt-Filter, externe Inhaltsprüfung (AIGW-37/38)
+# ai-gw – Guardrails: PII, Prompt-Filter, externe Inhaltsprüfung (AIGW-37/38, 109/111/112)
 
-Stand: 2026-11-13 · Status: umgesetzt (Entwurf zur Durchsicht),
+Stand: 2026-11-19 · Status: umgesetzt (Entwurf zur Durchsicht),
 Grundlage: [01-architektur.md](01-architektur.md) §9, [12-plugins.md](12-plugins.md),
 [07-beobachtung.md](07-beobachtung.md) §5 · Code: `crates/aigw-pii`,
 `crates/aigw-plugins/src/builtin/{pii,prompt_filter,content_safety}.rs`,
@@ -11,13 +11,16 @@ Grundlage: [01-architektur.md](01-architektur.md) §9, [12-plugins.md](12-plugin
 | Plugin | Phase | Zweck |
 |---|---|---|
 | `pii` | Anfrage, Antwort, Stream | personenbezogene Daten/Geheimnisse erkennen; maskieren, entfernen, ablehnen, pseudonymisieren (mit Rückübersetzung) oder nur zählen |
-| `prompt-filter` | Anfrage | Wort-/Phrasenlisten, Regex-Regeln, Prompt-Injection-Heuristik, Längen-/Anzahl-Grenzen |
+| `prompt-filter` | Anfrage; Wort-/Regex-Regeln wahlweise Antwort, Stream (AIGW-111) | Wort-/Phrasenlisten, Regex-Regeln, Prompt-Injection-Heuristik, Längen-/Anzahl-Grenzen, unsichtbare Unicode-Zeichen (AIGW-109) |
+| `prompt-leak` | Anfrage, Antwort, Stream (AIGW-112) | System-Prompt-Leck: Canary-Token im System-Prompt, optional wörtliche Auszüge (N-Gramme) |
 | `content-safety` | Anfrage, Antwort (gepuffert), Stream (satzweise) | externe Prüfung: Azure AI Content Safety, OpenAI Moderation, Prüfmodell (Llama Guard o. ä.) über eine Modellgruppe des Gateways |
 
 Alle drei sind normale Plugins der Kette (Bindungen, Vererbung, `order`, `failMode`,
 `timeoutMs` wie in [12-plugins.md](12-plugins.md) §4). Typische Reihenfolge über `order`:
 `prompt-filter` (billig, lehnt früh ab) → `pii` (maskiert) → `content-safety` (externer Aufruf
-auf dem bereits maskierten Text).
+auf dem bereits maskierten Text) → `prompt-leak` (Order 90: fügt das Canary als Letztes ein und
+ist damit die **innerste** Ausgabeschicht – das Token ist entfernt bzw. die Antwort blockiert,
+bevor andere Ausgabe-Plugins oder externe Dienste sie sehen).
 
 Die Log-Maskierung (`observe.payload: masked`) nutzt **dieselbe Engine** (§6.3).
 
@@ -202,10 +205,109 @@ config:
   Prüfmodell (z. B. Prompt Guard) kombinieren.
 - **Grenzen:** Nachrichtenanzahl (alle Rollen), Zeichen gesamt und je Nachricht (geprüfte
   Rollen, Unicode-Zeichen).
+- **Unsichtbare Unicode-Zeichen (AIGW-109):** `invisible: {action: strip|reject|flag,
+  allowJoiners: true}` auf den geprüften Rollen (Standard `user`, `tool`); ohne Abschnitt aus
+  (abwärtskompatibel), `invisible: {}` = `strip`. Arten (Metrik-Kategorie
+  `invisible_<art>`, Regel `invisible:<art>`):
+
+  | Art | Zeichen | Legitime Ausnahme |
+  |---|---|---|
+  | `tags` | U+E0000–U+E007F (ASCII-Schmuggel) | Flaggen-Sequenzen 🏴 + 1–7 Tag-Ziffern/-Kleinbuchstaben + U+E007F (🏴󠁧󠁢󠁳󠁣󠁴󠁿) |
+  | `zero_width` | U+200B, U+200C (ZWNJ), U+200D (ZWJ), U+2060, U+180E, U+FEFF | U+FEFF am Textanfang (BOM); ZWJ/ZWNJ zwischen zwei sichtbaren Nicht-ASCII-Zeichen (👩‍💻, Persisch „می‌خواهم“, Devanagari) bei `allowJoiners: true` |
+  | `bidi` | U+202A–U+202E, U+2066–U+2069 („Trojan Source“) | – (LRM/RLM/ALM U+200E/U+200F/U+061C werden nicht erfasst) |
+  | `format` | U+2061–U+2064, U+206A–U+206F, U+FFF9–U+FFFB, U+1D173–U+1D17A, Hangul-Füller U+3164/U+FFA0 | – |
+  | `variation` | Variantenselektoren U+FE00–U+FE0F, U+E0100–U+E01EF | genau ein Selektor nach einem sichtbaren Zeichen (Emoji-Darstellung, CJK-Varianten); Folgen ab zwei („Emoji-Schmuggel“) sind verdächtig |
+
+  **Voreinstellung `allowJoiners: true`:** ZWJ/ZWNJ sind in Emoji-Sequenzen und in
+  arabischer/persischer und indischen Schriften Teil der Schreibung; sie zu entfernen verändert
+  Bedeutung bzw. Darstellung. Zwischen ASCII-Buchstaben („ig‍nore“) haben sie keinen legitimen
+  Zweck und werden erfasst. Weiche Trennstriche (U+00AD) bleiben bewusst unberücksichtigt
+  (häufig in kopiertem Text).
+  **Zusätzlich, unabhängig von `invisible`:** Wörter, Regex und Injection-Signale prüfen den Text
+  **ohne** verdächtige unsichtbare Zeichen – Zero-Width-Zeichen zwischen Buchstaben umgehen die
+  Regeln nicht mehr. Verdächtige Tag-Zeichen sind ein eigenes **Injection-Signal
+  `unicode_tags` (Gewicht 1,0** – allein über der Standardschwelle), der darin geschmuggelte
+  ASCII-Text wird zusätzlich mit den Signalen geprüft. Beides gilt auch für
+  `prompt_filter::injection_signals` (Tool-Beschreibungen im Tool-Inventar, AIGW-87).
+- **Ausgabe (AIGW-111):** `direction: request|response|both` (oben als Standard, je
+  `words`/`regex[]` überschreibbar; Standard `request` wie bisher). Antwort (JSON, gepuffert):
+  Text, Ablehnungstext, Tool-Argumente und Reasoning der Antwort. Live-Stream: die letzten
+  `streamWindowBytes` (Standard 256, 16–4096) je Block bleiben zurück (Schnitt an Leerzeichen);
+  jeder Treffer bis zu dieser Länge liegt damit vollständig im Puffer, bevor ein Teil davon
+  hinausgeht. `reject` auf der Ausgabe = Guardrail-Blockade wie F160 (`content_filter` /
+  `refusal`, Header `x-aigw-guardrail: prompt-filter`; mit `outputRejectMode: error` Code
+  `response_rejected`), `flag` zählt einmal je Antwort und Regel. Injection-Heuristik,
+  Grenzen und unsichtbare Zeichen bleiben nur Eingabe.
 - **Antwort:** `reject` → `400` (Eingabe-Ablehnung, Header `x-aigw-guardrail: prompt-filter`),
   Code `prompt_rejected`, Meldung nennt die Regel
   (`words`, `regex:<name>`, `injection`, `limits:<feld>`), nie die Fundstelle. `flag` → nur
   Zähler und Log-Zeile (Info, mit Request-ID und Regel).
+
+## 4a. Plugin `prompt-leak` (AIGW-112)
+
+```yaml
+plugin: prompt-leak
+order: 90
+config:
+  action: block                  # block (Standard) | flag
+  canary:
+    enabled: true                # Standard: an
+    action: block
+    rotation: request            # request (Standard) | stable
+  verbatim:                      # optional, Standard aus
+    ngram: 8                     # Wörter je N-Gramm (4–32)
+    minNgrams: 12                # Leck ab so vielen übereinstimmenden N-Grammen …
+    ratio: 0.5                   # … oder ab diesem Anteil der N-Gramme des System-Prompts
+    action: flag
+  streamWindowBytes: 64          # 32–4096
+```
+
+**Eigene Plugin-Art statt Option im `prompt-filter`:** Das Canary **verändert** die Anfrage
+und braucht Zustand je Anfrage (Meta) sowie eine **andere Position in der Kette** als der
+Filter: `prompt-filter` soll früh ablehnen (Order 10, damit äußere Ausgabeschicht), das Canary
+muss als Letztes eingefügt werden (nach `request-transform`, das ggf. den System-Prompt setzt)
+und auf der Ausgabe als **innerste** Schicht entfernt werden, bevor `content-safety` oder
+Webhooks die Antwort an externe Dienste schicken (Zwiebelprinzip, F167b). Eine eigene Bindung
+bringt eigene `order`, `locked` und Fehlermodus (`closed`) mit.
+
+- **Canary:** Nur Anfragen mit System-/Developer-Nachricht (ohne System-Prompt gibt es nichts
+  zu schützen). An die **letzte führende** System-/Developer-Nachricht (bei Anthropic der `system`-Block) wird `\n\n<!-- aigw-ref-<20 Hex> -->`
+  angehängt (Text) bzw. ein Textteil ergänzt (Teile, z. B. Anthropic-`system`-Blöcke mit
+  `cache_control` – der Cache-Breakpoint davor bleibt gültig). 80 Bit aus `aws-lc-rs`
+  (`rand::fill`). Erbt eine Anfrage mehrere `prompt-leak`-Bindungen, fügt nur die erste ein.
+- **Erkennung:** Regex auf **jedes** Token der Form `aigw-ref-[0-9a-f]{20}` (ohne
+  Groß-/Kleinschreibung, samt Kommentar-Rahmen) in Text, Ablehnungstext, Tool-Argumenten und
+  Reasoning – damit auch Tokens aus gecachten Antworten früherer Anfragen. `block`:
+  `Flow::Block`/`ChunkFlow::Block` mit Code `prompt_leak` (F160-Form, Header
+  `x-aigw-guardrail: prompt-leak`). `flag`: zählen und das Token entfernen. Im Reasoning wird
+  immer blockiert (nicht veränderbar, Signaturen). Live-Stream: die letzten
+  `streamWindowBytes` (≥ Länge des Markers) bleiben zurück, kein Fragment des Tokens geht
+  hinaus.
+- **Nie zum Client:** Token nur in der Upstream-Anfrage und in Meta `aigw.prompt-leak`
+  (interner Schlüssel, nie an Webhook/WASM). Request-Payload-Logging speichert die
+  Client-Anfrage (vor den Plugins), Antwort/Stream-Payload und `output_text` entstehen nach den
+  Plugins; Fehlermeldungen nennen das Token nicht. Test:
+  `prompt_leak_canary_never_reaches_client` (volles Payload-Logging).
+- **Antwort-Cache:** Der Schlüssel entsteht aus der Anfrage **ohne** Token
+  (`prompt_leak::cache_view`, in `handlers.rs` vor `CacheStep::begin`); gespeichert wird die rohe
+  Upstream-Antwort – ein darin enthaltenes (altes) Token erkennt die Regex beim Treffer.
+- **`rotation`:** `request` (Standard) erzeugt je Anfrage ein neues Token. Weil es im
+  System-Prompt steht, ändert sich damit der Präfix jeder Anfrage: **Prompt-Caching der
+  Anbieter** (OpenAI automatisch, Anthropic `cache_control`) greift nur noch bis zum
+  System-Prompt, nicht für den Gesprächsverlauf. `stable` bildet das Token als HMAC-SHA256
+  (Geheimnis je Prozess, zufällig beim Start) über Key-ID und System-Prompt: gleich für gleiche
+  Prompts desselben Keys, für Clients ebenso unvorhersagbar; mehrere Instanzen haben
+  verschiedene Tokens (die Erkennung ist davon unabhängig).
+- **Verbatim (optional):** Wort-N-Gramme (Kleinschreibung, nur Buchstaben/Ziffern, höchstens
+  20 000 je System-Prompt) als Hashes im Meta; die Ausgabe zählt verschiedene übereinstimmende
+  N-Gramme. Leck, wenn `≥ minNgrams` oder `≥ ratio × N-Gramme des System-Prompts`. Standard
+  aus: System-Prompts mit Wissensinhalten (RAG, Produktdaten) werden legitim zitiert. Im
+  Live-Stream wird beim Erreichen der Schwelle abgebrochen; bis dahin ausgegebener Text ist
+  beim Client.
+- **Grenzen:** Ein Canary ist ein Stolperdraht, kein Schutz: Umformulierte, übersetzte oder
+  gezielt ohne das Token ausgegebene Prompts erkennt es nicht. Upstream-Fehlermeldungen, die
+  den Prompt zitieren, laufen nicht durch die Ausgabe-Plugins (Anbieter tun das nach
+  bisheriger Erfahrung nicht).
 
 ## 5. Plugin `content-safety` (AIGW-38)
 
@@ -419,7 +521,12 @@ betroffenen Texte.
 - `aigw-plugins` (Einheiten): `pii` – Konfiguration, alle Modi, Tool-Argumente, Allowlist,
   Pseudonymisierung JSON und Stream über Chunk-Grenzen (Text und Tool-Argumente), Ausgabe-
   Erkennung über Chunk-Grenzen, Ablehnung im Stream; `prompt-filter` – Wörter, Regex,
-  Grenzen, Injection (Angriffe/harmlose Texte), reject/flag; `content-safety` –
+  Grenzen, Injection (Angriffe/harmlose Texte), reject/flag, unsichtbare Zeichen
+  (strip/reject/flag, Emoji-ZWJ, Persisch, Devanagari, Flaggen, BOM, Variantenselektoren,
+  Tag-Schmuggel als Injection-Signal auch für `injection_signals`), Ausgabe-Regeln (Antwort,
+  Stream über Chunk-Grenzen); `prompt-leak` – Einfügen (Text/Teile, ohne System-Prompt nicht,
+  einmal bei Vererbung), `cache_view`, `stable`, Block/Flag in Antwort und Stream (über
+  Chunk-Grenzen), Reasoning, fremde Tokens, Verbatim (Antwort, Stream); `content-safety` –
   Kategorienamen, Antworten des Prüfmodells, Satzgrenzen, Konfiguration inkl. SSRF.
 - `aigw-proxy/tests/guardrails.rs` (Hot Path): `pii` in allen Modi in beiden
   Eingangsformaten, JSON und Stream (Anbieter streamt in 3-Byte-Stücken), Zähler im
@@ -428,7 +535,10 @@ betroffenen Texte.
   `content-safety` gegen lokale Fake-Dienste (Azure mit Schwellen, OpenAI mit/ohne
   Score-Schwelle, Prüfmodell über eine Modellgruppe, gepufferte Ausgabe, Satzmodus im
   Live-Stream, Zeitlimit mit fail-open/closed, fehlende Zugangsdaten, SSRF auch nach
-  Namensauflösung); AIGW-89: Tool-Argumente im Live-Stream (OpenAI und Anthropic, harmlos
+  Namensauflösung); AIGW-109/111/112: unsichtbare Zeichen (strip bis zum Upstream, Tag-Schmuggel
+  abgelehnt), Ausgabe-Regeln (JSON, Live-Stream, beide Formate, flag), Canary (beide Formate,
+  JSON/Stream, kein Token in Antwort und Payload-Log, flag entfernt es); `tests/cache.rs`:
+  exakter Cache trifft trotz Canary; AIGW-89: Tool-Argumente im Live-Stream (OpenAI und Anthropic, harmlos
   vollständig, schädlich ohne ein Fragment), `maxChecks` im Stream (`sentenceOnError`) und in
   Anfrage/Antwort (`failMode`), Entra ID gegen Fake-Token-Endpunkt (Client Credentials, ein
   Abruf für mehrere Anfragen) und Fake-IMDS (Managed Identity), Credential ohne
@@ -454,8 +564,8 @@ optionale Payload-Logging-Obergrenze. Inhaltliche Änderungen erhöhen `version`
 
 | Profil | Bindungen | Payload-Logging |
 |---|---|---|
-| **Basis** | `prompt-filter` (Order 10): Injection-Heuristik Schwelle 1,0 → reject, Grenzen 200 Nachrichten / 400 000 Zeichen / 100 000 je Nachricht. `pii` (Order 20): `mask`, `both` für `email`, `phone`, `iban`, `creditCard`, `apiKey`, `urlCredentials` | unverändert |
-| **Streng** | `prompt-filter` (gesperrt): Schwelle 0,8, Grenzen 100 / 200 000 / 50 000. `pii` (gesperrt): `creditCard`, `apiKey`, `urlCredentials` → **reject**; `email`, `phone`, `iban`, `taxIdDe`, `socialSecurityDe`, `idCardDe`, `passportDe` → mask. Optional `content-safety` (Order 30, `direction: both`, `outputMode: buffered`, `failMode: closed`, 3000 ms) – nur mit Angaben beim Anwenden | `payloadModeMax: masked` |
+| **Basis** (v2) | `prompt-filter` (Order 10): Injection-Heuristik Schwelle 1,0 → reject, Grenzen 200 Nachrichten / 400 000 Zeichen / 100 000 je Nachricht, unsichtbare Zeichen → **strip**. `pii` (Order 20): `mask`, `both` für `email`, `phone`, `iban`, `creditCard`, `apiKey`, `urlCredentials` | unverändert |
+| **Streng** (v2) | `prompt-filter` (gesperrt): Schwelle 0,8, Grenzen 100 / 200 000 / 50 000, unsichtbare Zeichen → **reject**. `prompt-leak` (Order 90, gesperrt): Canary `block`, `rotation: stable` (Prompt-Caching der Anbieter bleibt wirksam). `pii` (gesperrt): `creditCard`, `apiKey`, `urlCredentials` → **reject**; `email`, `phone`, `iban`, `taxIdDe`, `socialSecurityDe`, `idCardDe`, `passportDe` → mask. Optional `content-safety` (Order 30, `direction: both`, `outputMode: buffered`, `failMode: closed`, 3000 ms) – nur mit Angaben beim Anwenden | `payloadModeMax: masked` |
 | **Offen** | `prompt-filter`: nur Grenzen 500 / 1 000 000 / 400 000 | `payloadModeMax: metadata` (kein Inhalt) |
 
 **Admin-API:**

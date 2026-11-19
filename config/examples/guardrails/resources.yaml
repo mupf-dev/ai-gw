@@ -49,10 +49,23 @@ spec:
     words:
       terms: ["streng geheim"]
       action: flag
+      direction: both          # AIGW-111: auch die Antwort prüfen (Standard: request)
     injection:
       threshold: 1.0
       action: reject
     limits: {maxMessages: 100, maxChars: 200000}
+    invisible: {action: strip} # AIGW-109: unsichtbare Unicode-Zeichen entfernen
+---
+apiVersion: aigw/v1alpha1
+kind: PluginBinding
+metadata: {name: support-prompt-leak}
+spec:
+  scope: {level: team, target: support}
+  plugin: prompt-leak          # AIGW-112: Canary im System-Prompt, Antwort blockieren
+  order: 90                    # spät = innerste Schicht der Ausgabe
+  config:
+    action: block
+    canary: {rotation: request}
 ---
 apiVersion: aigw/v1alpha1
 kind: ProviderCredential

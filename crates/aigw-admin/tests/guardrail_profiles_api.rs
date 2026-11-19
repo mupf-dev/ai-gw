@@ -203,7 +203,7 @@ async fn profiles_list_dry_run_apply_idempotent_and_switch() {
     );
     assert_eq!(
         b["metadata"]["labels"]["aigw.io/guardrail-profile-version"],
-        "1"
+        "2"
     );
     assert_eq!(b["spec"]["scope"], team("support"));
     // Audit je Objekt.
@@ -264,6 +264,7 @@ async fn profiles_list_dry_run_apply_idempotent_and_switch() {
             ("basis-prompt-filter-team-support".into(), "delete".into()),
             ("streng-pii-team-support".into(), "create".into()),
             ("streng-prompt-filter-team-support".into(), "create".into()),
+            ("streng-prompt-leak-team-support".into(), "create".into()),
             ("support".into(), "update".into()),
         ]
     );
@@ -279,7 +280,8 @@ async fn profiles_list_dry_run_apply_idempotent_and_switch() {
         [
             "eigene",
             "streng-pii-team-support",
-            "streng-prompt-filter-team-support"
+            "streng-prompt-filter-team-support",
+            "streng-prompt-leak-team-support"
         ]
     );
     let t = ok(&app, BOOT, Method::GET, "/teams/support", None).await;

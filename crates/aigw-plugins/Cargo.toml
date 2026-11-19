@@ -16,6 +16,7 @@ aho-corasick.workspace = true
 aigw-core.workspace = true
 aigw-pii.workspace = true
 aigw-webhook.workspace = true
+aws-lc-rs.workspace = true
 arc-swap.workspace = true
 bytes.workspace = true
 futures-util.workspace = true

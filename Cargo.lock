@@ -259,6 +259,7 @@ dependencies = [
  "aigw-pii",
  "aigw-webhook",
  "arc-swap",
+ "aws-lc-rs",
  "bytes",
  "divan",
  "futures-util",

@@ -4,7 +4,7 @@
 # Guardrail-Profil „Basis“ (AIGW-86). Im Binary eingebettet; Änderungen am Inhalt erhöhen
 # `version` (die angewendete Version steht im Label aigw.io/guardrail-profile-version).
 name: basis
-version: 1
+version: 2
 title: Basis
 summary: Personenbezogene Daten und Geheimnisse maskieren, offensichtliche Prompt-Injection ablehnen, Größen begrenzen.
 description: |
@@ -14,10 +14,13 @@ description: |
   sehen die Werte nicht, die Antwort ebenso wenig (Maskierung, keine Rückübersetzung).
   Anfragen mit typischen Prompt-Injection-Mustern („ignoriere alle vorherigen Anweisungen“,
   Chat-Template-Tokens …) werden mit 400 abgelehnt; die Heuristik ist ein Signal, kein
-  vollständiger Schutz. Größenlimits begrenzen Nachrichtenanzahl und Textmenge je Anfrage.
+  vollständiger Schutz. Unsichtbare Unicode-Zeichen (Tag-Zeichen, Zero-Width-, Bidi- und
+  Formatzeichen), mit denen sich Anweisungen verstecken lassen, werden aus Nutzer- und
+  Tool-Nachrichten entfernt; legitime Verbinder in Emoji und Schriften wie Persisch oder
+  Devanagari bleiben. Größenlimits begrenzen Nachrichtenanzahl und Textmenge je Anfrage.
   Payload-Logging bleibt unverändert.
 bindings:
-  - note: Prompt-Injection-Heuristik (Schwelle 1,0) und Größenlimits; Ablehnung mit 400 prompt_rejected.
+  - note: Prompt-Injection-Heuristik (Schwelle 1,0) und Größenlimits, Ablehnung mit 400 prompt_rejected; unsichtbare Unicode-Zeichen entfernen.
     spec:
       scope: {level: global}
       plugin: prompt-filter
@@ -27,6 +30,7 @@ bindings:
         roles: [user, tool]
         injection: {threshold: 1.0, action: reject}
         limits: {maxMessages: 200, maxChars: 400000, maxMessageChars: 100000, action: reject}
+        invisible: {action: strip}
   - note: PII und Geheimnisse in Ein- und Ausgabe maskieren ([EMAIL_1], [IBAN_1], [API_KEY_1] …).
     spec:
       scope: {level: global}

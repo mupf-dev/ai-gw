@@ -58,7 +58,7 @@ Unter [config/examples/](../../config/examples/) liegt je Thema eine Startkonfig
 | `minimal/` | SQLite, ein OpenAI-Zugang, eine Modellgruppe |
 | `providers/` | alle Anbieter: OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Gemini API, Vertex AI, Mistral, Ollama, vLLM; Fallbacks, Gewichte, Prioritäten, Preise |
 | `teams-budgets/` | Organisation, Teams, API-Key mit Modellfreigaben, Limits, Budgets (strikt/weich), Budget-Webhook |
-| `guardrails/` | PII (global, gesperrt), Prompt-Filter (Team), Azure Content Safety (Organisation) |
+| `guardrails/` | PII (global, gesperrt), Prompt-Filter mit unsichtbaren Zeichen und Ausgabe-Regeln (Team), Prompt-Leck/Canary (Team), Azure Content Safety (Organisation) |
 | `cache/` | exakter + semantischer Cache mit Redis-Ebene und Embedding-Modellgruppe |
 | `mcp/` | MCP-Gateway mit Server und Werkzeugfreigaben je Team |
 | `ha-postgres-redis/` | mehrere Instanzen: Postgres, Redis-Zähler, Snapshot-Cache, OTLP |
@@ -262,6 +262,38 @@ ENV z. B. `AIGW_SERVER__DATA__MAX_CONNECTIONS=20000`,
 Lese-Timeouts nicht ab. `idle_timeout_secs` größer wählen als das Leerlauf-Timeout eines
 vorgeschalteten Load Balancers. Limits **je Client-IP** und TLS bleiben Aufgabe des Reverse
 Proxys. Wirkung, Metriken (`aigw_server_*`) und Hinweise: [haertung.md](haertung.md).
+
+### Prompt-Filter und Prompt-Leck (AIGW-109/111/112)
+
+Plugin-Bindungen (Admin-API, GitOps, UI „Guardrails & Plugins“) – Details:
+[13-guardrails.md](../konzept/13-guardrails.md) §4 und §4a.
+
+```yaml
+plugin: prompt-filter
+config:
+  direction: request            # Wort-/Regex-Regeln: request (Standard) | response | both
+  words: {terms: ["Projekt Falke"], direction: both}   # je Regel überschreibbar
+  regex: [{name: ticket, pattern: "INC-\\d{6}", action: flag, direction: response}]
+  invisible:                    # unsichtbare Unicode-Zeichen (fehlt = aus)
+    action: strip               # strip (Standard) | reject | flag
+    allowJoiners: true          # ZWJ/ZWNJ zwischen sichtbaren Nicht-ASCII-Zeichen erlauben
+  streamWindowBytes: 256        # Ausgabe-Regeln im Stream: zurückgehaltene Bytes (16–4096)
+---
+plugin: prompt-leak             # eigene Plugin-Art, empfohlen order 90 (innerste Ausgabeschicht)
+config:
+  action: block                 # block (200 content_filter/refusal, F160) | flag (zählen, Token entfernen)
+  canary: {rotation: request}   # request (Standard, je Anfrage zufällig) | stable (Prompt-Caching)
+  verbatim: {ngram: 8, minNgrams: 12, ratio: 0.5, action: flag}   # optional, Standard aus
+```
+
+- Injection-Heuristik und Grenzen gelten nur für die Eingabe; Ausgabe-Ablehnungen folgen
+  `outputRejectMode` der Bindung (Standard `finish`).
+- `prompt-leak` wirkt nur auf Anfragen mit System-/Developer-Prompt. Das Canary-Token steht
+  nie in Antworten, Fehlermeldungen oder dem Payload-Log; der Antwort-Cache rechnet den
+  Schlüssel ohne Token. `rotation: request` macht Prompt-Caching der Anbieter ab dem
+  System-Prompt wirkungslos – deshalb nutzt das Profil „Streng“ `stable`.
+- Metrik `aigw_guardrail_hits_total{plugin="prompt-filter",category="invisible_tags|invisible_zero_width|invisible_bidi|invisible_format|invisible_variation",action="strip|reject|flag"}`,
+  `{plugin="prompt-leak",category="canary|verbatim",action="block|flag"}`.
 
 ### WASM-Plugins
 

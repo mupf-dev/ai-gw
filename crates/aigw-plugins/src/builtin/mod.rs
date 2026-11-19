@@ -6,9 +6,11 @@
 pub mod cache;
 pub mod content_safety;
 mod guard;
+mod invisible;
 pub mod header;
 pub mod pii;
 pub mod prompt_filter;
+pub mod prompt_leak;
 pub mod request_transform;
 pub mod wasm;
 pub mod webhook;
