@@ -710,7 +710,7 @@ config:
 ```
 
 - **Erkennung:** Crate `whatlang` 0.16 (MIT, Trigramme + Schrifterkennung, 69 Sprachen, keine
-  Modelle/Dateien, keine neuen transitiven Abhängigkeiten im Lockfile). Abgewogen gegen eine
+  Modelle/Dateien; neu im Lockfile nur `ahash`/`zerocopy` über `hashbrown` 0.14, MIT/Apache/BSD). Abgewogen gegen eine
   eigene Implementierung: gleicher Ansatz, aber `whatlang` bringt gepflegte Trigramm-Profile für
   69 Sprachen mit; eine eigene Variante hätte nur wenige Sprachen in schlechterer Qualität
   abgedeckt. Codes werden auf ISO 639-1 abgebildet (`zh` = Mandarin, `fa` = Persisch,

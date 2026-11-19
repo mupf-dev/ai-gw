@@ -121,7 +121,7 @@ regex = { version = "1.12", default-features = false, features = ["std", "perf",
 regex-syntax = { version = "0.8.11", default-features = false, features = ["std", "unicode-gencat", "unicode-perl"] }
 # Guardrails (AIGW-37): Wort-/Phrasenlisten des Prompt-Filters (ohnehin Abhängigkeit von regex).
 aho-corasick = { version = "1.1", default-features = false, features = ["std", "perf-literal"] }
-# Spracherkennung für das Plugin `language` (AIGW-114), MIT, ohne neue transitive Versionen.
+# Spracherkennung für das Plugin `language` (AIGW-114), MIT; zieht nur ahash/zerocopy (MIT/Apache/BSD) nach.
 whatlang = { version = "0.16.4", default-features = false }
 serde = { version = "1.0.220", features = ["derive"] }
 serde_json = "1.0.140"
