@@ -613,9 +613,8 @@ struct Found {
 static REF_DEF: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r"(?m)^ {0,3}\[[^\]\n]{1,999}\]:[ \t]*(?:\n[ \t]*)?(<[^>\n]*>?|[^\s]+)").ok()
 });
-static REF_DEF_OPEN: LazyLock<Option<Regex>> = LazyLock::new(|| {
-    Regex::new(r"(?:^|\n) {0,3}\[[^\]\n]{1,999}\]:[ \t]*(?:\n[ \t]*)?\z").ok()
-});
+static REF_DEF_OPEN: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"(?:^|\n) {0,3}\[[^\]\n]{1,999}\]:[ \t]*(?:\n[ \t]*)?\z").ok());
 static BARE: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r#"(?i)(?:https?|ftp)://[^\s<>"'`]*|\bwww\.[^\s<>"'`]+|\(//[^\s<>"'`()]+"#).ok()
 });
@@ -793,7 +792,9 @@ fn scan_refdefs(text: &str, out: &mut Vec<Found>) {
             }
         }
         let complete = d.end() < text.len();
-        let end = text[d.end()..].find('\n').map_or(text.len(), |p| d.end() + p);
+        let end = text[d.end()..]
+            .find('\n')
+            .map_or(text.len(), |p| d.end() + p);
         out.push(Found {
             shape: Shape::RefDef,
             span: m.start()..end,
@@ -990,7 +991,8 @@ fn trim_url_end(text: &str, start: usize, mut end: usize) -> usize {
             return end;
         };
         let unbalanced = |o: char, c: char| {
-            last == c && u.chars().filter(|&x| x == o).count() < u.chars().filter(|&x| x == c).count()
+            last == c
+                && u.chars().filter(|&x| x == o).count() < u.chars().filter(|&x| x == c).count()
         };
         if matches!(last, '.' | ',' | ':' | ';' | '!' | '?' | '*' | '_' | '~')
             || unbalanced('(', ')')
@@ -1050,10 +1052,10 @@ fn pending_start(text: &str) -> Option<usize> {
     let lo = floor_boundary(text, n.saturating_sub(8));
     for (k, _) in text[lo..].char_indices() {
         let rest = &text[lo + k..];
-        if URL_STARTS
-            .iter()
-            .any(|u| u.len() >= rest.len() && u.as_bytes()[..rest.len()].eq_ignore_ascii_case(rest.as_bytes()))
-        {
+        if URL_STARTS.iter().any(|u| {
+            u.len() >= rest.len()
+                && u.as_bytes()[..rest.len()].eq_ignore_ascii_case(rest.as_bytes())
+        }) {
             p = p.min(lo + k);
             break;
         }

@@ -45,12 +45,14 @@ fn config_validation() {
     let f = Factory;
     assert!(f.build(&json!({})).is_ok());
     assert!(
-        f.build(&json!({"allowDomains": ["example.com", "*.example.org", "Docs.Acme.example."],
+        f.build(
+            &json!({"allowDomains": ["example.com", "*.example.org", "Docs.Acme.example."],
                         "images": "allow", "links": "block", "action": "defang",
                         "blockQueryParams": true, "maxPathLength": 64,
                         "direction": "both", "roles": ["tool", "user"],
-                        "streamMaxHoldBytes": 1024}))
-            .is_ok()
+                        "streamMaxHoldBytes": 1024})
+        )
+        .is_ok()
     );
     for bad in [
         json!({"allowDomains": ["*"]}),
@@ -94,13 +96,22 @@ fn default_strips_foreign_images_only() {
 fn links_queries_and_paths() {
     let g = guard(json!({"links": "block", "allowDomains": ["example.com"]}));
     assert_eq!(
-        run(&g, "Mehr [hier](https://evil.test/x \"T\") und [da](https://example.com)."),
+        run(
+            &g,
+            "Mehr [hier](https://evil.test/x \"T\") und [da](https://example.com)."
+        ),
         "Mehr hier und [da](https://example.com)."
     );
-    assert_eq!(run(&g, "Siehe https://evil.test/a, bitte."), "Siehe , bitte.");
+    assert_eq!(
+        run(&g, "Siehe https://evil.test/a, bitte."),
+        "Siehe , bitte."
+    );
     assert_eq!(run(&g, "oder www.evil.test/x"), "oder ");
     let g = guard(json!({"blockQueryParams": true, "maxPathLength": 20}));
-    assert_eq!(run(&g, "[a](https://evil.test/x)"), "[a](https://evil.test/x)");
+    assert_eq!(
+        run(&g, "[a](https://evil.test/x)"),
+        "[a](https://evil.test/x)"
+    );
     assert_eq!(run(&g, "[a](https://evil.test/x?d=1)"), "a");
     assert_eq!(run(&g, "[a](https://user:pw@evil.test/x)"), "a");
     assert_eq!(
@@ -120,10 +131,7 @@ fn reference_definitions_and_nesting() {
         "[](https://evil.test/x)"
     );
     // Ziel mit Klammern.
-    assert_eq!(
-        run(&g, "![w](https://evil.test/wiki/A_(b)) Rest"),
-        " Rest"
-    );
+    assert_eq!(run(&g, "![w](https://evil.test/wiki/A_(b)) Rest"), " Rest");
     assert_eq!(run(&g, "![w](<https://evil.test/a b.png>)"), "");
 }
 
@@ -133,7 +141,10 @@ fn html_tags() {
     assert_eq!(run(&g, "a<img src=\"https://evil.test/p\">b"), "ab");
     assert_eq!(run(&g, "a<IMG alt='x>y' SRC=https://evil.test/p>b"), "ab");
     assert_eq!(
-        run(&g, "<a href=\"https://evil.test\">Klick</a> <a href=\"https://example.com\">ok</a>"),
+        run(
+            &g,
+            "<a href=\"https://evil.test\">Klick</a> <a href=\"https://example.com\">ok</a>"
+        ),
         "Klick</a> <a href=\"https://example.com\">ok</a>"
     );
     assert_eq!(
@@ -141,7 +152,10 @@ fn html_tags() {
         ""
     );
     assert_eq!(
-        run(&g, "<div style=\"background:url('https://evil.test/x')\">t</div>"),
+        run(
+            &g,
+            "<div style=\"background:url('https://evil.test/x')\">t</div>"
+        ),
         "t</div>"
     );
     // Entities im Attribut.
@@ -180,7 +194,10 @@ fn tricky_urls() {
 fn defang_reject_flag() {
     let g = guard(json!({"action": "defang", "links": "block"}));
     assert_eq!(
-        run(&g, "![x](https://evil.test/p.png) [t](https://a.evil.test/x) https://b.test/y"),
+        run(
+            &g,
+            "![x](https://evil.test/p.png) [t](https://a.evil.test/x) https://b.test/y"
+        ),
         "[blocked image: evil[.]test] t [blocked link: a[.]evil[.]test] [blocked link: b[.]test]"
     );
     let g = guard(json!({"action": "reject"}));
@@ -196,7 +213,10 @@ fn defang_reject_flag() {
     assert_eq!(g.process(text, false, &i), Ok(None));
     assert_eq!(
         hits(&i),
-        [("image".to_owned(), "flag", 1), ("link".to_owned(), "flag", 1)]
+        [
+            ("image".to_owned(), "flag", 1),
+            ("link".to_owned(), "flag", 1)
+        ]
     );
 }
 
@@ -204,7 +224,10 @@ fn defang_reject_flag() {
 fn removal_cannot_form_new_constructs() {
     let g = guard(json!({}));
     // Entfernen des inneren Tags würde `<img src=…>` bilden.
-    let out = run(&g, "<im<img src=https://evil.test/a>g src=https://evil.test/b>");
+    let out = run(
+        &g,
+        "<im<img src=https://evil.test/a>g src=https://evil.test/b>",
+    );
     assert!(!out.contains("<img"), "{out}");
     // `!` + entferntes Tag + Link → würde ein Bild.
     let out = run(&g, "!<img src=https://evil.test/a>[x](https://evil.test/b)");
@@ -378,7 +401,9 @@ fn stream_passes_tool_calls_and_flushes_before() {
     let out = stream(g, info(), evs);
     // Unvollständiges Bild am Blockende wird geprüft (bis zum Ende) und entfernt.
     assert_eq!(joined(&out), "Suche ");
-    assert!(out.iter().any(|e| matches!(e, StreamEvent::ToolCallDelta { arguments, .. } if arguments.contains("evil"))));
+    assert!(out.iter().any(
+        |e| matches!(e, StreamEvent::ToolCallDelta { arguments, .. } if arguments.contains("evil"))
+    ));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -463,6 +488,9 @@ fn response_and_tool_results() {
 #[test]
 fn phases_follow_direction() {
     assert_eq!(guard(json!({})).phases(), Phases::OUTPUT);
-    assert_eq!(guard(json!({"direction": "input"})).phases(), Phases::REQUEST);
+    assert_eq!(
+        guard(json!({"direction": "input"})).phases(),
+        Phases::REQUEST
+    );
     assert_eq!(guard(json!({"direction": "both"})).phases(), Phases::ALL);
 }

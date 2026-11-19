@@ -207,10 +207,7 @@ impl Language {
             return Err("language: allow oder deny angeben".into());
         }
         if let Some(l) = allow.iter().find(|l| deny.contains(l)) {
-            return Err(format!(
-                "language: {} steht in allow und deny",
-                iso1(*l)
-            ));
+            return Err(format!("language: {} steht in allow und deny", iso1(*l)));
         }
         let min_chars = c.min_chars.unwrap_or(20);
         if !(1..=10_000).contains(&min_chars) {
@@ -380,10 +377,13 @@ impl Plugin for Language {
                 st.held.push(ev.clone());
                 return Ok(ChunkFlow::Drop);
             }
-        } else if matches!(
-            ev,
-            StreamEvent::ReasoningDelta { .. } | StreamEvent::ReasoningSignature { .. }
-        ) {
+        } else if st.held.is_empty()
+            || matches!(
+                ev,
+                StreamEvent::ReasoningDelta { .. } | StreamEvent::ReasoningSignature { .. }
+            )
+        {
+            // Noch kein Text (z. B. `Start`) bzw. Reasoning: durchlassen, später entscheiden.
             return Ok(ChunkFlow::Continue);
         }
         // Genug Text oder ein anderes Ereignis (Tool-Aufruf, Ende): jetzt entscheiden.
@@ -451,7 +451,8 @@ mod tests {
     const DE: &str = "Bitte fasse mir den folgenden Bericht über die Quartalszahlen kurz zusammen.";
     const EN: &str = "Please summarize the following report about the quarterly figures briefly.";
     const RU: &str = "Пожалуйста, кратко изложите следующий отчёт о квартальных показателях.";
-    const FR: &str = "Veuillez résumer brièvement le rapport suivant sur les chiffres trimestriels.";
+    const FR: &str =
+        "Veuillez résumer brièvement le rapport suivant sur les chiffres trimestriels.";
 
     fn plugin(cfg: Value) -> Language {
         Language::from_config(serde_json::from_value(cfg).unwrap()).unwrap()
@@ -502,7 +503,10 @@ mod tests {
         assert!(f.build(&json!({})).is_err());
         assert!(f.build(&json!({"allow": ["xx"]})).is_err());
         assert!(f.build(&json!({"allow": ["de"], "deny": ["de"]})).is_err());
-        assert!(f.build(&json!({"deny": ["ru"], "minConfidence": 2})).is_err());
+        assert!(
+            f.build(&json!({"deny": ["ru"], "minConfidence": 2}))
+                .is_err()
+        );
         assert!(f.build(&json!({"deny": ["ru"], "minChars": 0})).is_err());
         assert!(f.build(&json!({"deny": ["ru"], "roles": []})).is_err());
         assert!(f.build(&json!({"deny": ["ru"], "bogus": 1})).is_err());
@@ -531,7 +535,11 @@ mod tests {
         let p = plugin(json!({"allow": ["de", "en"]}));
         let i = info();
         assert_eq!(
-            request(&p, &i, vec![Message::text(Role::User, DE), Message::text(Role::User, EN)]),
+            request(
+                &p,
+                &i,
+                vec![Message::text(Role::User, DE), Message::text(Role::User, EN)]
+            ),
             Flow::Continue
         );
         // Systemnachricht wird standardmäßig nicht geprüft; kurze Texte auch nicht.
@@ -539,7 +547,10 @@ mod tests {
             request(
                 &p,
                 &i,
-                vec![Message::text(Role::System, FR), Message::text(Role::User, "ok")]
+                vec![
+                    Message::text(Role::System, FR),
+                    Message::text(Role::User, "ok")
+                ]
             ),
             Flow::Continue
         );

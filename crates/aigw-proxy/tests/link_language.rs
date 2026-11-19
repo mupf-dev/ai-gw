@@ -19,7 +19,9 @@ use aigw_core::ir::{
 use aigw_core::observe::{RequestObserver, RequestRecord};
 use aigw_core::wire::sse::SseParser;
 use aigw_plugins::{Chain, Entry, PluginChains, PluginFactory, builtin};
-use aigw_proxy::{BoxFuture, ChatProvider, Describe, EventStream, ModelRoutes, ProxyState, StaticRoutes};
+use aigw_proxy::{
+    BoxFuture, ChatProvider, Describe, EventStream, ModelRoutes, ProxyState, StaticRoutes,
+};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::{Method, Request, StatusCode};
@@ -31,6 +33,7 @@ const OPENAI: &str = "/v1/chat/completions";
 const ANTHROPIC: &str = "/v1/messages";
 
 /// Anbieter: antwortet mit der letzten Nutzernachricht, im Stream in 3-Byte-Stücken.
+#[derive(Debug)]
 struct Echo;
 
 fn last_user(req: &ChatRequest) -> String {
@@ -119,7 +122,7 @@ impl ChatProvider for Echo {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Records(Mutex<Vec<RequestRecord>>);
 
 impl RequestObserver for Records {
@@ -180,7 +183,10 @@ impl Resp {
             if let Some(t) = v["choices"][0]["message"]["content"].as_str() {
                 return t.to_owned();
             }
-            return v["content"][0]["text"].as_str().unwrap_or_default().to_owned();
+            return v["content"][0]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
         }
         let mut out = String::new();
         for f in SseParser::new().push(&self.body) {
@@ -254,8 +260,7 @@ async fn link_guard_strips_foreign_images_in_both_formats_and_streams() {
             assert_eq!(r.status, StatusCode::OK, "{path} {stream}: {}", r.raw());
             let text = r.text();
             assert_eq!(
-                text,
-                "Gern!  Fertig. Doku: [Handbuch](https://docs.example.com/a) und .",
+                text, "Gern!  Fertig. Doku: [Handbuch](https://docs.example.com/a) und .",
                 "{path} {stream}"
             );
             // Kein Bruchstück der fremden URL im Rohstrom.
@@ -266,7 +271,11 @@ async fn link_guard_strips_foreign_images_in_both_formats_and_streams() {
                 .iter()
                 .map(|h| (h.plugin, h.category.as_str(), h.action, h.count))
                 .collect();
-            assert_eq!(hits, [("link-guard", "image", "strip", 2)], "{path} {stream}");
+            assert_eq!(
+                hits,
+                [("link-guard", "image", "strip", 2)],
+                "{path} {stream}"
+            );
             records.0.lock().unwrap().clear();
         }
     }
