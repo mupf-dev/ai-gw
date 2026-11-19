@@ -385,3 +385,37 @@ aigw config apply  -c aigw.yaml bestand.yaml [--prune] [--dry-run]
   gezielt über die Admin-API/-UI entfernen.
 - `gitops.read_only_admin: true` sperrt die Schreibrouten der Admin-API (Modus „nur YAML“).
 - API-Keys werden ohne `--api-keys include` weder exportiert noch angewendet (F4).
+
+### Guardrails: Link-Schutz und Sprachen
+
+Plugin-Bindungen sind Ressourcen (Admin-API/-UI oder GitOps); Admin-API und `aigw config
+validate|apply` prüfen die Konfiguration (unbekannte Felder, Domains, Sprachcodes → `422`).
+Beispiel in `config/examples/guardrails/resources.yaml`, Details in
+[13-guardrails.md](../konzept/13-guardrails.md) §11/§12.
+
+```yaml
+# AIGW-110: Datenabfluss über Links/Bilder in Antworten verhindern
+plugin: link-guard
+config:
+  allowDomains: [example.com, "*.example.com"]  # "*." = nur Subdomains
+  images: block            # Standard: Bilder zu fremden Domains entfernen
+  links: allow             # block = auch Links zu fremden Domains
+  blockQueryParams: false  # true = fremde URLs mit ?… oder user@host blockieren
+  maxPathLength: 100       # optional
+  action: strip            # strip | defang | reject | flag
+  direction: output        # output | input (Tool-Ergebnisse) | both
+---
+# AIGW-114: erlaubte/gesperrte Sprachen (ISO 639-1)
+plugin: language
+config:
+  allow: [de, en]          # und/oder deny: [..]
+  action: reject           # reject (400 language_not_allowed) | flag
+  direction: input         # input | output | both
+  roles: [user]
+  minChars: 20
+  minConfidence: 0.5
+```
+
+Das Profil „Streng“ enthält ab Version 2 eine gesperrte `link-guard`-Bindung (Bilder zu fremden
+Domains entfernen); `language` ist in keinem Profil.
+

@@ -262,6 +262,7 @@ async fn profiles_list_dry_run_apply_idempotent_and_switch() {
         [
             ("basis-pii-team-support".into(), "delete".into()),
             ("basis-prompt-filter-team-support".into(), "delete".into()),
+            ("streng-link-guard-team-support".into(), "create".into()),
             ("streng-pii-team-support".into(), "create".into()),
             ("streng-prompt-filter-team-support".into(), "create".into()),
             ("streng-prompt-leak-team-support".into(), "create".into()),
@@ -279,6 +280,7 @@ async fn profiles_list_dry_run_apply_idempotent_and_switch() {
         binding_names(&app).await,
         [
             "eigene",
+            "streng-link-guard-team-support",
             "streng-pii-team-support",
             "streng-prompt-filter-team-support",
             "streng-prompt-leak-team-support"

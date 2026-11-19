@@ -764,7 +764,7 @@ mod tests {
         assert_eq!(plugins("basis"), ["prompt-filter", "pii"]);
         assert_eq!(
             plugins("streng"),
-            ["prompt-filter", "pii", "prompt-leak", "content-safety"]
+            ["prompt-filter", "pii", "link-guard", "prompt-leak", "content-safety"]
         );
         assert_eq!(plugins("offen"), ["prompt-filter"]);
         assert!(get("basis").logging.is_none());
@@ -815,15 +815,15 @@ mod tests {
         let streng = profiles().iter().find(|p| p.name == "streng").unwrap();
         let mut w = Vec::new();
         let d = desired_bindings(streng, &Scope::global(), None, &mut w).unwrap();
-        assert_eq!(d.len(), 3);
+        assert_eq!(d.len(), 4);
         assert_eq!(w.len(), 1, "{w:?}");
         let mut w = Vec::new();
         let cs = json!({"provider": "model", "modelGroup": "guard"});
         let d = desired_bindings(streng, &Scope::global(), cs.as_object(), &mut w).unwrap();
-        assert_eq!(d.len(), 4);
-        assert_eq!(d[3].1.config["modelGroup"], "guard");
-        assert_eq!(d[3].1.config["direction"], "both");
-        assert_eq!(d[3].0.labels[PROFILE_LABEL], "streng");
+        assert_eq!(d.len(), 5);
+        assert_eq!(d[4].1.config["modelGroup"], "guard");
+        assert_eq!(d[4].1.config["direction"], "both");
+        assert_eq!(d[4].0.labels[PROFILE_LABEL], "streng");
         assert!(w.is_empty());
         let bad = json!({"action": "flag"});
         assert!(desired_bindings(streng, &Scope::global(), bad.as_object(), &mut w).is_err());

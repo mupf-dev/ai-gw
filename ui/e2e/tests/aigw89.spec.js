@@ -47,7 +47,7 @@ test('Profil „Streng“: content-safety mit Entra ID anwenden', async ({ page,
   expect(b.body.spec.config.secret).toBeUndefined();
 
   // Aufräumen: Bindungen des Profils entfernen.
-  for (const p of ['pii', 'prompt-filter', 'content-safety']) {
+  for (const p of ['pii', 'prompt-filter', 'link-guard', 'prompt-leak', 'content-safety']) {
     await api(request, 'DELETE', `plugin-bindings/streng-${p}-team-${TEAM}`, undefined, TOKEN, { 'If-Match': '*' });
   }
   clean(page);

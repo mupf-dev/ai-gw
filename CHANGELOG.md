@@ -28,6 +28,21 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   Admin-/GitOps-Prüfung über die Registry, Beispiel in `config/examples/guardrails/`.
 - **Guardrail-Profile v2:** „Basis“ entfernt unsichtbare Zeichen, „Streng“ lehnt sie ab und
   bindet `prompt-leak` (Canary, gesperrt, Order 90).
+- **Guardrail `link-guard` (AIGW-110):** verhindert Datenabfluss über Links in Antworten
+  (Prompt-Injection-Exfiltration). Erkennt Markdown-Bilder/-Links (auch verschachtelt),
+  Referenz-Definitionen, HTML-Tags mit URL-Attributen (`img src/srcset`, `a href`, CSS `url()`,
+  Meta-Refresh …) und nackte URLs; URL-Analyse wie im Browser (Entities, `\`, `user@host`,
+  Prozent-Kodierung). Konfiguration `allowDomains` (mit `*.`-Wildcards), `images: block|allow`
+  (Standard: fremde Bilder blockieren), `links`, `blockQueryParams`, `maxPathLength`, Aktion
+  `strip|defang|reject|flag`, `direction` (Eingabe: Tool-Ergebnisse). Stream mit Puffer für
+  über Chunk-Grenzen geteilte Links (`streamMaxHoldBytes`), Ablehnung wie F160. Im Profil
+  „Streng“ (Version 3) als gesperrte Bindung.
+- **Guardrail `language` (AIGW-114):** erlaubte/gesperrte Sprachen (`allow`/`deny`, ISO
+  639-1) auf der Eingabe (Rollen wählbar), optional Ausgabe (Stream mit Stichprobe);
+  `minChars`, `minConfidence`, Aktion `reject` (`400 language_not_allowed`) oder `flag`.
+  Erkennung mit der Crate `whatlang` 0.16 (MIT, 69 Sprachen). Nicht in den Profilen.
+- Beide Plugins: Registry, Prüfung in Admin-API/GitOps, Testlauf (`plugin-bindings:test`),
+  strukturierte Formulare in der Admin-UI, Zähler/Metrik `aigw_guardrail_hits_total`.
 
 - **Lastvergleich mit LiteLLM (AIGW-102):** `scripts/bench-litellm.sh` misst ai-gw (Image,
   SQLite/Postgres) und LiteLLM-Proxy `v1.108.8` (ohne DB/Postgres, Produktionseinstellungen)

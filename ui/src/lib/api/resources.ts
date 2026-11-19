@@ -274,7 +274,7 @@ export const guardrailProfiles = async () => (await unwrap<S['GuardrailProfileLi
 export const applyGuardrailProfile = (name: string, body: S['GuardrailProfileApply']) =>
   unwrap<GuardrailProfileApplyResult>(api.POST('/admin/api/v1/guardrail-profiles/{name}:apply', { params: { path: { name } }, body }));
 /** Plugins, die als Guardrail zählen (Hinweis „keine Guardrails aktiv“). */
-export const GUARDRAIL_PLUGINS = ['pii', 'prompt-filter', 'prompt-leak', 'content-safety'];
+export const GUARDRAIL_PLUGINS = ['pii', 'prompt-filter', 'prompt-leak', 'content-safety', 'link-guard', 'language'];
 
 // Preisvorschläge (AIGW-85): Azure Retail Prices + Preiskatalog, Übernahme als neue Preisversionen.
 export type PriceSuggestionReport = S['PriceSuggestionReport'];

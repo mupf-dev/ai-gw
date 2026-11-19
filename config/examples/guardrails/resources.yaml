@@ -93,3 +93,31 @@ spec:
     thresholds: {hate: 2, violence: 4}
     direction: input
     action: reject
+---
+# Datenabfluss über Links verhindern (AIGW-110): Bilder zu fremden Domains aus Antworten
+# entfernen, Links zu fremden Domains mit Query-Parametern ebenfalls.
+apiVersion: aigw/v1alpha1
+kind: PluginBinding
+metadata: {name: link-guard-default}
+spec:
+  scope: {level: global}
+  plugin: link-guard
+  order: 25
+  config:
+    allowDomains: [example.com, "*.example.com"]
+    images: block
+    links: allow
+    blockQueryParams: true
+    action: strip
+---
+# Nur deutsche und englische Anfragen im Team support (AIGW-114).
+apiVersion: aigw/v1alpha1
+kind: PluginBinding
+metadata: {name: language-support}
+spec:
+  scope: {level: team, target: support}
+  plugin: language
+  order: 5
+  config:
+    allow: [de, en]
+    action: reject

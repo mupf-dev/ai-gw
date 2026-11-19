@@ -2,11 +2,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts" module>
   /** Plugins mit strukturiertem Formular (F214: Felder nach dem Konfigurationsschema der Plugins, 12/13-*.md). */
-  export const STRUCTURED = new Set(['pii', 'prompt-filter', 'prompt-leak', 'content-safety', 'webhook', 'wasm']);
+  export const STRUCTURED = new Set(['pii', 'prompt-filter', 'prompt-leak', 'content-safety', 'webhook', 'wasm', 'link-guard', 'language']);
 </script>
 
 <script lang="ts">
-  // Strukturierte Konfiguration der Guardrail-Plugins (pii, prompt-filter, content-safety) und des Webhooks.
+  // Strukturierte Konfiguration der Guardrail-Plugins (pii, prompt-filter, content-safety, link-guard, language)
+  // und des Webhooks.
   // Arbeitet direkt auf dem Konfigurationsobjekt: unbekannte/weitere Schlüssel bleiben erhalten (JSON-Ansicht
   // zeigt alles). Leere Felder entfernen den Schlüssel – es gilt dann der Standard des Plugins.
   // Geheimnisse nur als Verweis (Secret bzw. Anbieter-Zugangsdaten, F149) – nie Klartext.
@@ -246,6 +247,18 @@
   </div>
 {/snippet}
 {#snippet section(title: string)}<h3 class="label-caps text-fg-subtle sm:col-span-2">{title}</h3>{/snippet}
+{#snippet roleSet(std: string)}
+  <fieldset class="flex flex-col gap-1.5">
+    <legend class="text-sm font-medium">Geprüfte Rollen</legend>
+    <div class="flex flex-wrap gap-3 pt-1.5">
+      {#each ROLES as r (r)}
+        {@const sel = (get(['roles']) as string[] | undefined) ?? []}
+        <label class="flex items-center gap-1.5 text-sm"><input type="checkbox" class="accent-accent" checked={sel.includes(r)} onchange={(e) => toggleRole(r, e.currentTarget.checked)} /> {r}</label>
+      {/each}
+    </div>
+    <span class="text-xs text-fg-muted">keine Auswahl = Standard ({std})</span>
+  </fieldset>
+{/snippet}
 
 <div class="grid gap-5 sm:col-span-2 sm:grid-cols-2" data-testid="plugin-config-form">
   {#if plugin === 'pii'}
@@ -474,5 +487,30 @@
     {@render text('Fuel je Aufruf', ['fuel'], { numeric: true, hint: 'CPU-Grenze; Standard wasm.default_fuel' })}
     {@render text('Speicher (MiB)', ['maxMemoryMb'], { numeric: true, hint: 'Standard wasm.default_memory_mb' })}
     {@render list('Client-Header für das Modul', ['includeHeaders'], 'Allowlist, ein Header je Zeile; Auth-Header sind gesperrt', 'x-client-app')}
+  {:else if plugin === 'link-guard'}
+    {@render list('Erlaubte Domains', ['allowDomains'], 'Eine je Zeile; *.example.com = alle Subdomains (ohne example.com selbst)', 'docs.example.com')}
+    {@render choice('Bilder zu fremden Domains', ['images'], [STD, { value: 'block', label: 'block – blockieren' }, { value: 'allow', label: 'allow – erlauben' }], 'Standard: block')}
+    {@render choice('Links zu fremden Domains', ['links'], [STD, { value: 'allow', label: 'allow – erlauben' }, { value: 'block', label: 'block – blockieren' }], 'Standard: allow')}
+    {@render choice('Aktion', ['action'], [
+      STD,
+      { value: 'strip', label: 'strip – entfernen' },
+      { value: 'defang', label: 'defang – Platzhalter' },
+      { value: 'reject', label: 'reject – ablehnen' },
+      { value: 'flag', label: 'flag – nur zählen' },
+    ], 'Standard: strip')}
+    {@render flag('Fremde URLs mit Query-Parametern blockieren', ['blockQueryParams'], 'auch Zugangsdaten user@host; Standard: aus')}
+    {@render text('Max. Pfadlänge fremder URLs', ['maxPathLength'], { numeric: true, hint: 'leer = keine Grenze' })}
+    {@render choice('Richtung', ['direction'], DIRECTION, 'Standard: Ausgabe')}
+    {@render roleSet('tool – Tool-Ergebnisse, nur bei Eingabe')}
+    {@render text('Stream: max. Zurückhalten (Bytes)', ['streamMaxHoldBytes'], { numeric: true, hint: '256–65536, Standard 8192' })}
+  {:else if plugin === 'language'}
+    {@render list('Erlaubte Sprachen', ['allow'], 'ISO 639-1, ein Code je Zeile (leer = alle außer gesperrten)', 'de')}
+    {@render list('Gesperrte Sprachen', ['deny'], 'ISO 639-1, ein Code je Zeile', 'ru')}
+    {@render choice('Aktion', ['action'], FILTER_ACTION, 'Standard: reject')}
+    {@render choice('Richtung', ['direction'], DIRECTION, 'Standard: Eingabe')}
+    {@render roleSet('user')}
+    {@render text('Mindestlänge (Buchstaben)', ['minChars'], { numeric: true, hint: 'kürzere Texte nicht prüfen; Standard 20' })}
+    {@render text('Mindest-Konfidenz', ['minConfidence'], { numeric: true, hint: '0–1, z. B. 0.5 (Standard)' })}
+    {@render text('Stream: Stichprobe (Zeichen)', ['streamSampleChars'], { numeric: true, hint: 'Ausgabe: so viel zurückhalten, dann entscheiden; Standard 200' })}
   {/if}
 </div>

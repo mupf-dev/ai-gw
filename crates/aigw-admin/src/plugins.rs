@@ -9,9 +9,9 @@
 //! - `POST /admin/api/v1/plugin-bindings:test` – führt eine (ungespeicherte)
 //!   Plugin-Konfiguration auf einem Beispieltext aus und liefert die Vorschau: unverändert,
 //!   verändert (z. B. maskierte PII) oder abgelehnt, dazu die Guardrail-Treffer (nur Zähler).
-//!   **Nur lokale Plugins** (`pii`, `prompt-filter`): Plugins mit ausgehenden Aufrufen
-//!   (`webhook`, `content-safety`) werden nicht ausgeführt (`422`), damit der Testlauf keine
-//!   externen Dienste anspricht. Nichts wird gespeichert (kein Audit-Eintrag); im Modus
+//!   **Nur lokale Plugins** (`pii`, `prompt-filter`, `link-guard`, `language`): Plugins mit
+//!   ausgehenden Aufrufen (`webhook`, `content-safety`) werden nicht ausgeführt (`422`), damit
+//!   der Testlauf keine externen Dienste anspricht. Nichts wird gespeichert (kein Audit-Eintrag); im Modus
 //!   „nur YAML“ erlaubt.
 
 use std::sync::Arc;
@@ -38,7 +38,7 @@ pub const CATALOG_PATH: &str = "/admin/api/v1/plugins";
 pub const TEST_PATH: &str = "/admin/api/v1/plugin-bindings:test";
 
 /// Plugins, die der Testlauf ausführt (ohne ausgehende Aufrufe).
-const TESTABLE: &[&str] = &["pii", "prompt-filter"];
+const TESTABLE: &[&str] = &["pii", "prompt-filter", "link-guard", "language"];
 /// Höchstlänge des Beispieltexts (Bytes).
 const MAX_TEXT: usize = 32 * 1024;
 
@@ -436,6 +436,37 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r.outcome, PluginTestOutcome::Rejected, "{r:?}");
+    }
+
+    #[tokio::test]
+    async fn link_guard_and_language_are_testable() {
+        let p = UpstreamPolicy::strict();
+        let r = run(
+            &p,
+            "link-guard",
+            &obj(json!({"allowDomains": ["example.com"]})),
+            PluginTestPhase::Response,
+            "Bild ![x](https://evil.test/p.png?d=1) und ![y](https://example.com/y.png)",
+        )
+        .await
+        .unwrap();
+        assert_eq!(r.outcome, PluginTestOutcome::Modified, "{r:?}");
+        assert_eq!(
+            r.text.as_deref(),
+            Some("Bild  und ![y](https://example.com/y.png)")
+        );
+        assert_eq!(r.hits.len(), 1);
+        let r = run(
+            &p,
+            "language",
+            &obj(json!({"allow": ["de"]})),
+            PluginTestPhase::Request,
+            "Please summarize the following report about the quarterly figures briefly.",
+        )
+        .await
+        .unwrap();
+        assert_eq!(r.outcome, PluginTestOutcome::Rejected, "{r:?}");
+        assert_eq!(r.code.as_deref(), Some("language_not_allowed"));
     }
 
     #[tokio::test]

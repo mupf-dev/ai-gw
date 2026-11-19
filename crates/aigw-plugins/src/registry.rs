@@ -113,7 +113,7 @@ impl Registry {
     }
 
     /// Registry mit den eingebauten Plugins (`header`, `request-transform`, `webhook`, `cache`,
-    /// `pii`, `prompt-filter`, `prompt-leak`, `content-safety`). `content-safety` hat hier keinen Gateway-Host
+    /// `pii`, `prompt-filter`, `prompt-leak`, `link-guard`, `language`, `content-safety`). `content-safety` hat hier keinen Gateway-Host
     /// (Konfiguration prüfbar, Aufrufe schlagen fehl) – im Betrieb
     /// [`Registry::with_builtin_host`].
     pub fn with_builtin() -> Self {
@@ -131,6 +131,8 @@ impl Registry {
         r.register(Arc::new(builtin::pii::Factory));
         r.register(Arc::new(builtin::prompt_filter::Factory));
         r.register(Arc::new(builtin::prompt_leak::Factory));
+        r.register(Arc::new(builtin::link_guard::Factory));
+        r.register(Arc::new(builtin::language::Factory));
         r.register(Arc::new(builtin::content_safety::Factory::new(host)));
         // Nur Konfigurationsprüfung; die Laufzeit (`aigw-wasm`) ersetzt die Fabrik im Server.
         r.register(Arc::new(builtin::wasm::Factory));

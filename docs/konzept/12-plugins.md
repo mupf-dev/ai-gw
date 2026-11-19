@@ -81,7 +81,7 @@ enum ChunkFlow { Continue, Drop, Reject(ApiError), Block(ApiError) }
 
 `Reject` ist eine Ablehnung aus Richtlinie oder Protokoll (z. B. Webhook `reject`,
 `request-transform` über dem Deckel); `Block` ist eine **Guardrail-Ablehnung des Inhalts**
-(`pii` mit `reject`, `prompt-filter`, `prompt-leak`, `content-safety`), die die Kette nach F160 behandelt
+(`pii` mit `reject`, `prompt-filter`, `prompt-leak`, `content-safety`, `link-guard`, `language`), die die Kette nach F160 behandelt
 (§3a).
 
 - **Asynchron ohne Zwangs-Allokation:** Synchrone Plugins geben `Hook::Ready` zurück (keine
@@ -146,7 +146,7 @@ soll die Route entsprechend kennzeichnen (Latenzkosten).
 |---|---|---|---|
 | `content-safety` | `closed` | 3000 | Sicherheitsprüfung: ohne Ergebnis keine Freigabe |
 | `webhook` | `open` | 200 | meist Zusatzlogik/Audit; ein ausgefallener Dienst soll den Verkehr nicht stoppen. Policy-Webhooks setzen `failMode: closed` |
-| alle anderen (`pii`, `prompt-filter`, `prompt-leak`, `header`, `request-transform`, `cache`) | `closed` | 1000 | lokal, können zur Laufzeit praktisch nicht fehlschlagen |
+| alle anderen (`pii`, `prompt-filter`, `prompt-leak`, `link-guard`, `language`, `header`, `request-transform`, `cache`) | `closed` | 1000 | lokal, können zur Laufzeit praktisch nicht fehlschlagen |
 
 Für **ungültige** Bindungen ohne eigenes `failMode` gilt `IndexOptions::invalid_binding`
 (Standard `open` = überspringen); seit AIGW-69 werden Bindungen aber schon beim Schreiben

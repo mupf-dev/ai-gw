@@ -4,7 +4,7 @@
 # Guardrail-Profil „Streng“ (AIGW-86). Im Binary eingebettet; Änderungen am Inhalt erhöhen
 # `version`.
 name: streng
-version: 2
+version: 3
 title: Streng
 summary: Wie Basis, aber Kreditkarten und Geheimnisse werden abgelehnt, externe Inhaltsprüfung, Payload-Logging höchstens maskiert.
 description: |
@@ -19,7 +19,9 @@ description: |
   Bindungen sind gesperrt (locked): untere Ebenen können sie nicht abschalten. Optional prüft content-safety Ein- und Ausgabe extern (Azure AI Content
   Safety, OpenAI Moderation oder ein Prüfmodell über eine Modellgruppe des Gateways) – dafür
   beim Anwenden Anbieter und Endpunkt bzw. Modellgruppe angeben. Payload-Logging wird auf
-  höchstens „masked“ begrenzt (Organisation/Team: payloadModeMax).
+  höchstens „masked“ begrenzt (Organisation/Team: payloadModeMax). Bilder in Antworten, die
+  auf fremde Domains zeigen, werden entfernt (link-guard): eingeschleuste Anweisungen können so
+  keine Daten über automatisch geladene Bild-URLs abfließen lassen.
 logging:
   payloadModeMax: masked
 bindings:
@@ -55,6 +57,16 @@ bindings:
           creditCard: reject
           apiKey: reject
           urlCredentials: reject
+  - note: Bilder zu fremden Domains aus Antworten entfernen (Schutz vor Datenabfluss über Links, AIGW-110); gesperrt.
+    spec:
+      scope: {level: global}
+      plugin: link-guard
+      order: 25
+      locked: true
+      config:
+        images: block
+        links: allow
+        action: strip
   - note: System-Prompt-Leck erkennen (Canary-Token, stabil je Key und System-Prompt, damit Prompt-Caching der Anbieter greift) und die Antwort blockieren; gesperrt.
     spec:
       scope: {level: global}
