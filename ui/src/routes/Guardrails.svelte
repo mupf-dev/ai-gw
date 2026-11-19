@@ -63,7 +63,7 @@
   ];
   // Plugin-Katalog (Standard-Fehlermodus je Plugin-Art, F148); ohne Antwort die bekannten eingebauten Plugins.
   const plugins = new Loader(() => pluginCatalog());
-  const FALLBACK = ['cache', 'content-safety', 'header', 'language', 'link-guard', 'pii', 'prompt-filter', 'prompt-leak', 'request-transform', 'wasm', 'webhook'];
+  const FALLBACK = ['cache', 'content-safety', 'header', 'language', 'link-guard', 'pii', 'prompt-filter', 'prompt-leak', 'request-transform', 'schema-guard', 'wasm', 'webhook'];
   const PLUGINS = $derived(plugins.data?.map((p) => p.name) ?? FALLBACK);
   const infoOf = (name: string) => plugins.data?.find((p) => p.name === name);
   const testable = (name: string) => infoOf(name)?.testable ?? ['pii', 'prompt-filter', 'link-guard', 'language'].includes(name);

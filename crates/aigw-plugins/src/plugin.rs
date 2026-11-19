@@ -34,6 +34,13 @@ pub type Meta = serde_json::Map<String, serde_json::Value>;
 /// Pseudonym-Zuordnung mit Originalwerten). Solche Schlüssel verlassen **nie** das Gateway.
 pub const INTERNAL_META_PREFIX: &str = "aigw.";
 
+/// [`Meta`]-Schlüssel, unter dem die Pipeline die **endgültige** Anfrage (nach allen
+/// Anfrage-Plugins, so wie sie an den Upstream geht) als IR-JSON ablegt – nur wenn ein Plugin
+/// in der Anfrage-Phase diesen Schlüssel (mit beliebigem Wert, z. B. `null`) gesetzt hat
+/// (AIGW-113, `schema-guard` mit `action: retry`). Intern ([`INTERNAL_META_PREFIX`]): verlässt
+/// das Gateway nie.
+pub const FINAL_REQUEST_META: &str = "aigw.final-request";
+
 /// Sicht auf [`Meta`] für externe Plugins und Dienste (Webhook, später WASM): alle
 /// Schlüssel außer den internen (`aigw.*`, [`INTERNAL_META_PREFIX`]). Einzige Stelle, über die
 /// Meta nach außen gehen darf.
@@ -356,6 +363,15 @@ pub trait Plugin: Any + Send + Sync + 'static {
     /// [`Plugin::on_response`] auf der ganzen Antwort, danach als Stream an den Client
     /// (Latenzkosten: TTFT = Gesamtdauer; Header `x-aigw-buffered`).
     fn needs_buffered_output(&self) -> bool {
+        false
+    }
+
+    /// Antwort-Phase: Soll eine Ersetzung der Antwort durch dieses Plugin
+    /// ([`Flow::Respond`]) die Antwort-Haken der **inneren** Plugins (die vor ihm gelaufen
+    /// sind) noch einmal durchlaufen? Für Plugins, die eine neue Modellantwort beschaffen
+    /// (`schema-guard` mit `retry`): Ausgabe-Guardrails weiter innen prüfen dann auch die neue
+    /// Antwort. Standard: `false` (Ersetzung läuft nur nach außen weiter).
+    fn rerun_inner_on_respond(&self) -> bool {
         false
     }
 

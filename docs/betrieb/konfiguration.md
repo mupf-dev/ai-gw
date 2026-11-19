@@ -378,6 +378,39 @@ prüfbar, Aufrufe schlagen aber fehl (→ `failMode`). Kann das System den Adres
 Pooling-Allocators nicht reservieren, fällt die Laufzeit mit Warnung auf Instanzen bei Bedarf
 zurück (`wasm.pooling: false` erzwingt das).
 
+### Structured Output prüfen (`schema-guard`)
+
+Die Plugin-Art `schema-guard` (AIGW-113, [Konzept §13](../konzept/13-guardrails.md)) prüft
+Modellantworten gegen das JSON-Schema der Anfrage (OpenAI `response_format` `json_schema`/
+`json_object`, Anthropic `output_config.format`, erzwungene Tools). Es ist eine Bindung wie
+jede andere (Admin-API `plugin-bindings`, GitOps, UI „Guardrails & Plugins“); die
+Konfiguration wird beim Schreiben geprüft (`422` bzw. `aigw config validate`):
+
+```yaml
+apiVersion: aigw/v1alpha1
+kind: PluginBinding
+metadata: {name: structured-output}
+spec:
+  plugin: schema-guard
+  scope: {level: model-group, target: gpt-4o}
+  outputRejectMode: error    # 502 schema_validation_failed statt 200 + content_filter
+  config:
+    action: retry            # flag | reject (Standard) | retry
+    maxRetries: 1            # 1–3, nur mit retry
+    tools: forced            # off | forced (Standard) | all
+    stream: live             # live (Standard: Prüfung am Ende) | buffer (puffern, auch retry)
+    invalidSchema: reject    # ungeeignetes Schema der Anfrage: reject (400) | skip
+    limits: {maxSchemaBytes: 65536, maxSchemaDepth: 32, maxOutputBytes: 1048576}
+```
+
+Hinweise: Wiederholungen (`retry`) sind eigene Modellaufrufe derselben Modellgruppe und werden
+wie Plugin-Modellaufrufe abgerechnet (Kosten, Budgets, Token-Limits; `plugin_usage` im
+Request-Log), die `usage` der Antwort bleibt die des ersten Aufrufs. `stream: buffer` puffert
+**alle** gestreamten Anfragen der betroffenen Kette – Bindung eng fassen. Externe `$ref`
+werden nie aufgelöst; Schemas mit externen Verweisen, Rückverweisen in `pattern` oder über den
+Grenzen lehnt das Gateway mit `400 response_schema_rejected` ab. Standard-Zeitlimit der
+Bindung 60 s (`timeoutMs`), Fehlermodus `closed`.
+
 ## 2. Master-Key
 
 Zugangsdaten der Anbieter und `Secret`-Ressourcen liegen AES-256-GCM-verschlüsselt in der

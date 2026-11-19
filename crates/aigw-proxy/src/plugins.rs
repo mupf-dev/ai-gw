@@ -138,6 +138,19 @@ impl PluginRun {
                 self.default_max_tokens,
                 &info.request_id,
             );
+            // AIGW-113: Endgültige Anfrage für Plugins, die selbst neu anfragen (`schema-guard`
+            // mit `retry`) – nur auf deren Wunsch (Schlüssel gesetzt), sonst kostenlos.
+            if self.meta.contains_key(aigw_plugins::FINAL_REQUEST_META) {
+                match serde_json::to_value(&request) {
+                    Ok(v) => {
+                        self.meta
+                            .insert(aigw_plugins::FINAL_REQUEST_META.to_owned(), v);
+                    }
+                    Err(_) => {
+                        self.meta.remove(aigw_plugins::FINAL_REQUEST_META);
+                    }
+                }
+            }
         }
         match flow {
             Flow::Continue => Ok(Pre::Continue(request)),

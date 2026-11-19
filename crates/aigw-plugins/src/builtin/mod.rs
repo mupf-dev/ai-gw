@@ -14,6 +14,7 @@ pub mod pii;
 pub mod prompt_filter;
 pub mod prompt_leak;
 pub mod request_transform;
+pub mod schema_guard;
 pub mod wasm;
 pub mod webhook;
 

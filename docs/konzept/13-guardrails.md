@@ -3,7 +3,7 @@
 Stand: 2026-11-19 · Status: umgesetzt (Entwurf zur Durchsicht),
 Grundlage: [01-architektur.md](01-architektur.md) §9, [12-plugins.md](12-plugins.md),
 [07-beobachtung.md](07-beobachtung.md) §5 · Code: `crates/aigw-pii`,
-`crates/aigw-plugins/src/builtin/{pii,prompt_filter,content_safety,link_guard,language}.rs`,
+`crates/aigw-plugins/src/builtin/{pii,prompt_filter,content_safety,link_guard,language,schema_guard}.rs`,
 `crates/aigw-proxy/src/guard_host.rs`
 
 ## 1. Überblick
@@ -16,6 +16,7 @@ Grundlage: [01-architektur.md](01-architektur.md) §9, [12-plugins.md](12-plugin
 | `content-safety` | Anfrage, Antwort (gepuffert), Stream (satzweise) | externe Prüfung: Azure AI Content Safety, OpenAI Moderation, Prüfmodell (Llama Guard o. ä.) über eine Modellgruppe des Gateways |
 | `link-guard` (§11) | Antwort, Stream (optional Anfrage) | Datenabfluss über Links/Bilder verhindern (Prompt-Injection-Exfiltration): fremde Bilder entfernen, Links/Query-Parameter/lange Pfade je Konfiguration |
 | `language` (§12) | Anfrage (optional Antwort, Stream) | erlaubte/gesperrte Sprachen (ISO 639-1), Erkennung mit `whatlang` |
+| `schema-guard` (§13) | Anfrage (Schema prüfen), Antwort, Stream (am Ende) | strukturierte Ausgabe (`json_schema`, `json_object`, erzwungene Tools) gegen das Schema prüfen; flag, reject oder retry (§13, AIGW-113) |
 
 Alle drei sind normale Plugins der Kette (Bindungen, Vererbung, `order`, `failMode`,
 `timeoutMs` wie in [12-plugins.md](12-plugins.md) §4). Typische Reihenfolge über `order`:
@@ -736,3 +737,130 @@ Fixpunkt, Stream mit Stückgrößen 1–7 gleich dem Ganztext, Zurückhalten/erz
 Ablehnung im Stream; Sprachtabelle gegen `whatlang`, Erkennung, allow/deny, Stream-Stichprobe),
 `aigw-proxy/tests/link_language.rs` (beide Eingangsformate, JSON und Stream in 3-Byte-Stücken,
 Zähler im Record, F160), `aigw-admin` (Testlauf, Profil „Streng“), UI-e2e `aigw110.spec.js`.
+
+## 13. Structured Output prüfen: Plugin `schema-guard` (AIGW-113)
+
+Code: `crates/aigw-plugins/src/builtin/schema_guard.rs`, Tests dort (`schema_guard/tests.rs`)
+und `crates/aigw-proxy/tests/schema_guard.rs`.
+
+**Wann aktiv:** nur für Anfragen, die strukturierte Ausgabe verlangen – so, wie die IR sie
+abbildet ([03-ir-und-formate.md](03-ir-und-formate.md)):
+
+| Anfrage | Prüfung |
+|---|---|
+| OpenAI `response_format: {type: json_schema, json_schema: {schema, strict}}`, Anthropic `output_config.format: {type: json_schema, schema}` (IR `ResponseFormat::JsonSchema`) | Antworttext ist gültiges JSON nach dem Schema |
+| OpenAI `response_format: {type: json_object}` (`jsonObject: true`, Standard) | Antworttext ist ein JSON-Objekt (nur Gültigkeit) |
+| Tool-Erzwingung: `tool_choice` mit bestimmtem Tool bzw. `required`/Anthropic `any` (`tools: forced`, Standard; `all` = jeder Aufruf, `off` = keiner) | Argumente des Tool-Aufrufs gegen `parameters`/`input_schema` des Tools |
+
+`strict` ändert nichts: auch bei Anbietern mit Schema-Garantie wird geprüft (billig; bei
+Übersetzung zwischen Formaten gehen Name/`strict` ggf. verloren). Antworten mit Ablehnung
+(`refusal`-Teil, `content_filter`/`refusal` als Ende) werden nicht geprüft; besteht die Antwort
+nur aus Tool-Aufrufen, gilt das Text-Schema nicht.
+
+```yaml
+plugin: schema-guard
+config:
+  action: retry          # flag | reject (Standard) | retry
+  maxRetries: 1          # nur mit retry; 1–3
+  jsonObject: true
+  tools: forced          # off | forced | all
+  stream: live           # live (Standard) | buffer
+  invalidSchema: reject  # reject (Standard) | skip
+  limits: {maxSchemaBytes: 65536, maxSchemaDepth: 32, maxOutputBytes: 1048576}
+```
+
+### 13.1 Aktionen und Ablehnung
+
+- `flag`: Antwort unverändert, Treffer gezählt, Header `x-aigw-schema-guard: invalid`.
+- `reject`: Guardrail-Ausgabe-Ablehnung wie F160 (`Flow::Block`): Standard `200` mit leerem
+  Inhalt und `finish_reason: content_filter` bzw. `stop_reason: refusal`, Header
+  `x-aigw-guardrail: schema-guard`; mit `outputRejectMode: error` **`502`
+  `schema_validation_failed`** (das Modell, nicht der Client hat den Fehler verursacht – daher
+  kein `400`). Die Meldung nennt Schlüsselwort und JSON-Pointer (`required bei /`), nie Inhalte.
+  Für Clients, die JSON erwarten, ist `outputRejectMode: error` meist die bessere Wahl;
+  Standard bleibt F160 für alle Guardrails einheitlich.
+- `retry`: siehe §13.2; nach erfolglosen Versuchen wie `reject`.
+
+Kategorien (`aigw_guardrail_hits_total{plugin="schema-guard"}`, Request-Record):
+`invalid-json`, `schema-mismatch`, `tool-arguments`, `unknown-tool` (nur Retry),
+`output-too-large`, `schema-rejected` (Anfrage); Aktionen `flag`, `reject`, `retry` (je
+Versuch), `skip`.
+
+### 13.2 Retry: Zusammenspiel mit Limits, Budgets, Abrechnung
+
+Ein Plugin kann den Upstream der Pipeline nicht noch einmal ausführen. `schema-guard` fragt
+deshalb über den Gateway-Host (`PluginHost::chat`, wie das Prüfmodell von `content-safety`,
+§5.1) **dieselbe Modellgruppe** neu an:
+
+1. **Endgültige Anfrage:** In der Anfrage-Phase setzt das Plugin den Meta-Schlüssel
+   `aigw.final-request`; die Pipeline legt dort nach allen Anfrage-Plugins (und der
+   S-30-Begrenzung) die Anfrage ab, so wie sie an den Upstream ging. Die Wiederholung enthält
+   also z. B. maskierte PII, Header-/Transform-Änderungen und nur die nach den
+   Tool-Richtlinien erlaubten Tools – nie die Originaldaten (Test
+   `retry_uses_final_request_after_inner_plugins`). Der Schlüssel ist intern (`aigw.*`) und
+   verlässt das Gateway nie; ohne `retry` kostet das nichts.
+2. **Korrektur:** angehängt werden die fehlerhafte Antwort (Assistent) und eine
+   Korrektur-Nachricht mit der Fehlerbeschreibung (Nutzer) bzw. bei Tool-Aufrufen je Aufruf
+   ein Tool-Ergebnis mit `is_error`. Nicht gestreamt, `n` = 1.
+3. **Abrechnung:** Jeder Versuch ist ein Plugin-Modellaufruf (`PluginCalls`, AIGW-89/S-13):
+   Kosten in `cost` (Anteil `plugin_cost`), Budgets und Token-Limits des Keys/Teams,
+   `plugin_usage` im Request-Log; die Deployment-Kapazität (RPM/TPM) zählt im Routing. Die
+   `usage` der Antwort an den Client bleibt die des **ersten** Aufrufs – der Recorder bucht sie
+   als Hauptverbrauch, die Wiederholung käme sonst doppelt. Request-Limits (RPM des Keys)
+   zählen weiter eine Anfrage. Obergrenze `maxRetries` ≤ 3 je Bindung und Anfrage
+   (`PluginCalls::try_reserve`). Wie bei `content-safety` wird nicht vorab gegen ein hartes
+   Budget reserviert; die Überschreitung ist durch `maxRetries` × `max_tokens` (S-30-begrenzt)
+   beschränkt.
+4. **Ersatz-Antwort durch die inneren Plugins:** `Flow::Respond` in der Antwort-Phase läuft
+   sonst nur nach außen weiter. `schema-guard` meldet `rerun_inner_on_respond()`: die Kette
+   lässt die neue Antwort zuerst noch einmal durch die Antwort-Haken der inneren Plugins
+   laufen (z. B. `pii` mit Ausgabe-Maskierung, `content-safety`), deren eigene Ersetzungen
+   laufen nicht zurück (keine Schleife). Tool-Aufrufe der Wiederholung müssen Tools der
+   endgültigen Anfrage betreffen (`unknown-tool`), da die Tool-Richtlinien-Prüfung der Antwort
+   (AIGW-87) vor der Kette liegt.
+5. Gültig nach `n` Versuchen: Header `x-aigw-schema-guard: retried=<n>`. Fehler des
+   Wiederholungsaufrufs → Ablehnung (die erste Antwort war ungültig). Zeitlimit der Bindung:
+   Standard 60 s (Höchstwert) für alle Versuche zusammen; Überschreitung → `failMode`.
+6. Kein Retry bei `n` > 1 (Ablehnung) und im Live-Stream.
+
+### 13.3 Stream
+
+JSON lässt sich erst am Ende sicher prüfen. Zwei Modi:
+
+- `stream: live` (Standard): Der Stream läuft unverzögert; Text und Tool-Argumente werden je
+  Variante mitgeschrieben (höchstens `maxOutputBytes`) und beim `Stop`-Ereignis geprüft.
+  `flag` zählt nur; `reject` und `retry` ersetzen das Ende durch `content_filter`/`refusal`
+  (bzw. Fehlerereignis mit `outputRejectMode: error`). Der Text ist dann schon beim Client –
+  das Ende signalisiert „ungültig“. Kein Retry möglich.
+- `stream: buffer`: Die Bindung schaltet den gepufferten Modus der Kette ein (Upstream nicht
+  gestreamt, `x-aigw-buffered`, TTFT = Gesamtdauer) – für **alle** gestreamten Anfragen dieser
+  Kette, auch ohne `response_format`, da die Kette pro Snapshot und nicht pro Anfrage über das
+  Puffern entscheidet. Danach wie nicht gestreamt, inklusive `retry`. Bindung daher eng
+  fassen (z. B. Modellgruppe/Team).
+
+Begründung des Standards: Puffern kostet bei breiten Bindungen allen Streams die Latenz; der
+Live-Modus erkennt Fehler ohne Kosten und kennzeichnet sie zuverlässig.
+
+### 13.4 Schutz gegen teure oder bösartige Schemas
+
+Das Schema kommt vom Client. Vor dem Upstream-Aufruf (Anfrage-Phase) wird es geprüft und
+übersetzt – ein ungeeignetes Schema kostet keinen Modellaufruf:
+
+- Größe (serialisiert, ohne Kopie gezählt) ≤ `maxSchemaBytes` (Standard 64 KiB, höchstens
+  1 MiB), Tiefe ≤ `maxSchemaDepth` (Standard 32, höchstens 64).
+- `$ref`, `$dynamicRef`, `$recursiveRef` nur dokumentintern (`#…`); zusätzlich übersetzt der
+  Validator **offline** (kein Nachladen, auch nicht für unbekannte `$schema`/`$id`). Die
+  Crate ist ohne `resolve-http`/`resolve-file` gebaut – es gibt keinen HTTP- oder
+  Datei-Zugriff (kein SSRF, kein Lesen lokaler Dateien).
+- `pattern`/`patternProperties` mit der linearen `regex`-Engine (Größengrenzen 1 MiB) statt
+  Backtracking (`fancy-regex`): kein ReDoS; Rückverweise/Lookaround sind damit nicht
+  übersetzbar → Schema abgelehnt.
+- Geprüfte Ausgabe ≤ `maxOutputBytes` (Standard 1 MiB), sonst `output-too-large`.
+- Ungeeignetes Schema: `invalidSchema: reject` → `400 response_schema_rejected` (Standard,
+  Header `x-aigw-guardrail`), `skip` → ohne Prüfung weiter (gezählt `schema-rejected`/`skip`).
+
+Validator: Crate `jsonschema` 0.60 (MIT, Drafts 4–2020-12) mit `default-features = false`
+(neue Abhängigkeiten u. a. `referencing`, `fancy-regex` (nur übersetzt, nicht genutzt),
+`fraction`, `email_address`, `uuid-simd`, alle MIT/Apache-2.0; cargo-deny grün). Das Schema
+wird je Phase neu übersetzt (Anfrage: Prüfung, Antwort: Validierung); bei den üblichen
+kleinen Schemas sind das Mikrosekunden.

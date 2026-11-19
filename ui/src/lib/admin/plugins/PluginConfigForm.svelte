@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <script lang="ts" module>
   /** Plugins mit strukturiertem Formular (F214: Felder nach dem Konfigurationsschema der Plugins, 12/13-*.md). */
-  export const STRUCTURED = new Set(['pii', 'prompt-filter', 'prompt-leak', 'content-safety', 'webhook', 'wasm', 'link-guard', 'language']);
+  export const STRUCTURED = new Set(['pii', 'prompt-filter', 'prompt-leak', 'content-safety', 'webhook', 'wasm', 'link-guard', 'language', 'schema-guard']);
 </script>
 
 <script lang="ts">
@@ -101,6 +101,29 @@
   ];
   /** AIGW-112: prompt-leak. */
   const LEAK_ACTION: SelectItem[] = [STD, { value: 'block', label: 'block – Antwort blockieren (content_filter)' }, { value: 'flag', label: 'flag – zählen, Canary entfernen' }];
+  // AIGW-113: schema-guard (strukturierte Ausgabe gegen das JSON-Schema der Anfrage prüfen).
+  const SCHEMA_ACTION: SelectItem[] = [
+    STD,
+    { value: 'flag', label: 'flag – nur zählen (Header)' },
+    { value: 'reject', label: 'reject – ablehnen' },
+    { value: 'retry', label: 'retry – neu anfragen, dann ablehnen' },
+  ];
+  const SCHEMA_TOOLS: SelectItem[] = [
+    STD,
+    { value: 'forced', label: 'forced – nur erzwungene Tools' },
+    { value: 'all', label: 'all – alle Tool-Aufrufe' },
+    { value: 'off', label: 'off – keine' },
+  ];
+  const SCHEMA_STREAM: SelectItem[] = [
+    STD,
+    { value: 'live', label: 'live – am Ende prüfen (kein Retry)' },
+    { value: 'buffer', label: 'buffer – puffern (alle Aktionen)' },
+  ];
+  const SCHEMA_INVALID: SelectItem[] = [
+    STD,
+    { value: 'reject', label: 'reject – Anfrage ablehnen (400)' },
+    { value: 'skip', label: 'skip – ohne Prüfung durchlassen' },
+  ];
 
   // ------------------------------------------------------------ pii
   const PII_ACTIONS: SelectItem[] = [
@@ -454,6 +477,17 @@
     {@render list('Client-Header im Payload', ['includeHeaders'], 'Allowlist, ein Header je Zeile; Auth-Header sind gesperrt', 'x-client-app')}
     {@render text('Max. Payload (Bytes)', ['maxPayloadBytes'], { numeric: true, hint: 'Standard 1 MiB' })}
     {@render text('Max. Antwort (Bytes)', ['maxResponseBytes'], { numeric: true, hint: 'Standard 1 MiB' })}
+  {:else if plugin === 'schema-guard'}
+    {@render choice('Aktion', ['action'], SCHEMA_ACTION)}
+    {#if get(['action']) === 'retry'}{@render text('Wiederholungen', ['maxRetries'], { numeric: true, hint: '1–3, Standard 1' })}{/if}
+    {@render flag('json_object prüfen', ['jsonObject'], 'nur JSON-Gültigkeit; Standard: an')}
+    {@render choice('Tool-Argumente', ['tools'], SCHEMA_TOOLS)}
+    {@render choice('Stream', ['stream'], SCHEMA_STREAM)}
+    {@render choice('Ungeeignetes Schema', ['invalidSchema'], SCHEMA_INVALID)}
+    {@render section('Grenzen')}
+    {@render text('Schema-Größe (Bytes)', ['limits', 'maxSchemaBytes'], { numeric: true, hint: 'Standard 65536' })}
+    {@render text('Schema-Tiefe', ['limits', 'maxSchemaDepth'], { numeric: true, hint: 'Standard 32' })}
+    {@render text('Ausgabe-Größe (Bytes)', ['limits', 'maxOutputBytes'], { numeric: true, hint: 'Standard 1048576' })}
   {:else if plugin === 'wasm'}
     <Field label="Modul" required hint="hochgeladene WASM-Komponente (Reiter „WASM-Module“)">
       {#snippet children({ id })}<Select {id} value={str(['module'])} onchange={(v) => set(['module'], v || undefined)} items={wasmItems} />{/snippet}

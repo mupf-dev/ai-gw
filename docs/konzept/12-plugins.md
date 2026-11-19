@@ -146,6 +146,7 @@ soll die Route entsprechend kennzeichnen (Latenzkosten).
 |---|---|---|---|
 | `content-safety` | `closed` | 3000 | Sicherheitsprüfung: ohne Ergebnis keine Freigabe |
 | `webhook` | `open` | 200 | meist Zusatzlogik/Audit; ein ausgefallener Dienst soll den Verkehr nicht stoppen. Policy-Webhooks setzen `failMode: closed` |
+| `schema-guard` | `closed` | 60000 | `retry` ist ein ganzer Modellaufruf (Zeitlimit für alle Versuche zusammen); ohne Retry lokal (AIGW-113, [13-guardrails.md](13-guardrails.md) §13) |
 | alle anderen (`pii`, `prompt-filter`, `prompt-leak`, `link-guard`, `language`, `header`, `request-transform`, `cache`) | `closed` | 1000 | lokal, können zur Laufzeit praktisch nicht fehlschlagen |
 
 Für **ungültige** Bindungen ohne eigenes `failMode` gilt `IndexOptions::invalid_binding`

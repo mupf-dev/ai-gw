@@ -54,7 +54,18 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   Erkennung mit der Crate `whatlang` 0.16 (MIT, 69 Sprachen). Nicht in den Profilen.
 - Beide Plugins: Registry, Prüfung in Admin-API/GitOps, Testlauf (`plugin-bindings:test`),
   strukturierte Formulare in der Admin-UI, Zähler/Metrik `aigw_guardrail_hits_total`.
-
+- **Structured Output prüfen (AIGW-113):** neue Plugin-Art `schema-guard` prüft Antworten auf
+  `response_format` `json_schema` (OpenAI) bzw. `output_config.format` (Anthropic) gegen das
+  Schema, `json_object` auf JSON-Gültigkeit und Argumente erzwungener Tools gegen deren
+  Parameterschema. Aktionen `flag` (Header `x-aigw-schema-guard: invalid`), `reject`
+  (F160: `content_filter`/`refusal` bzw. `502 schema_validation_failed`) und `retry`
+  (`maxRetries` 1–3; Wiederholung über das Gateway mit der endgültigen Anfrage nach allen
+  Plugins, abgerechnet als Plugin-Modellaufruf; Ersatz-Antwort durchläuft innere
+  Ausgabe-Plugins erneut). Stream: Prüfung am Ende (`live`) oder gepuffert (`buffer`).
+  Schema-Schutz: Größe/Tiefe begrenzt, nur interne `$ref`, offline, lineare Regex;
+  ungeeignete Schemas `400 response_schema_rejected`. Validator `jsonschema` (MIT) ohne
+  Netz-/Dateizugriff. Admin-API/GitOps-Prüfung, UI-Formular, Metrik
+  `aigw_guardrail_hits_total{plugin="schema-guard"}`. Doku `13-guardrails.md` §13.
 - **Lastvergleich mit LiteLLM (AIGW-102):** `scripts/bench-litellm.sh` misst ai-gw (Image,
   SQLite/Postgres) und LiteLLM-Proxy `v1.108.8` (ohne DB/Postgres, Produktionseinstellungen)
   gegen denselben Fake-Upstream auf denselben Kernen: Aufschlag, Durchsatz/Fehler bei

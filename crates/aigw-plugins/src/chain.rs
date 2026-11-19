@@ -369,39 +369,73 @@ impl Chain {
     }
 
     /// Antwort-Phase, in **umgekehrter** Kettenreihenfolge (Zwiebelprinzip). [`Flow::Respond`]
-    /// ersetzt die Antwort und läuft weiter; [`Flow::Reject`] bricht ab; [`Flow::Block`]
-    /// beendet die Kette je `outputRejectMode` mit gefilterter Antwort (`Continue` mit
-    /// [`content_filtered`] in `ctx.response`) oder als `Reject`.
+    /// ersetzt die Antwort und läuft weiter (bei [`Plugin::rerun_inner_on_respond`] zuerst
+    /// noch einmal durch die inneren Plugins, AIGW-113); [`Flow::Reject`] bricht ab;
+    /// [`Flow::Block`] beendet die Kette je `outputRejectMode` mit gefilterter Antwort
+    /// (`Continue` mit [`content_filtered`] in `ctx.response`) oder als `Reject`.
     pub async fn run_response(&self, ctx: &mut RespCtx<'_>) -> Flow {
-        for &i in &self.response {
+        for (pos, &i) in self.response.iter().enumerate() {
             let e = &self.entries[i];
-            let res = match e.plugin.on_response(ctx) {
-                Hook::Ready(r) => r,
-                Hook::Pending(fut) => timed(e.timeout, fut).await,
-            };
-            match res {
-                Ok(Flow::Continue) => {}
-                Ok(Flow::Respond(resp)) => ctx.response = *resp,
-                Ok(Flow::Reject(err)) => return Flow::Reject(err),
-                Ok(Flow::Block(err)) => {
-                    e.blocked(ctx.info, "response", Some(ctx.response_headers));
-                    return match e.output_reject {
-                        OutputRejectMode::Finish => {
-                            content_filtered(&mut ctx.response);
-                            Flow::Continue
+            match Self::response_step(e, ctx).await {
+                Step::Next => {}
+                Step::Replaced => {
+                    if e.plugin.rerun_inner_on_respond() {
+                        // Neue Antwort: die inneren Plugins (schon gelaufen) prüfen sie erneut;
+                        // deren Ersetzungen laufen nicht noch einmal zurück (keine Schleife).
+                        for &j in &self.response[..pos] {
+                            if let Step::Done(flow) =
+                                Self::response_step(&self.entries[j], ctx).await
+                            {
+                                return flow;
+                            }
                         }
-                        OutputRejectMode::Error => Flow::Reject(err),
-                    };
-                }
-                Err(err) => {
-                    if let Some(api) = e.error(&err, ctx.info, "response") {
-                        return Flow::Reject(api);
                     }
                 }
+                Step::Done(flow) => return flow,
             }
         }
         Flow::Continue
     }
+
+    /// Ein Antwort-Haken.
+    async fn response_step(e: &Entry, ctx: &mut RespCtx<'_>) -> Step {
+        let res = match e.plugin.on_response(ctx) {
+            Hook::Ready(r) => r,
+            Hook::Pending(fut) => timed(e.timeout, fut).await,
+        };
+        match res {
+            Ok(Flow::Continue) => Step::Next,
+            Ok(Flow::Respond(resp)) => {
+                ctx.response = *resp;
+                Step::Replaced
+            }
+            Ok(Flow::Reject(err)) => Step::Done(Flow::Reject(err)),
+            Ok(Flow::Block(err)) => {
+                e.blocked(ctx.info, "response", Some(ctx.response_headers));
+                Step::Done(match e.output_reject {
+                    OutputRejectMode::Finish => {
+                        content_filtered(&mut ctx.response);
+                        Flow::Continue
+                    }
+                    OutputRejectMode::Error => Flow::Reject(err),
+                })
+            }
+            Err(err) => match e.error(&err, ctx.info, "response") {
+                Some(api) => Step::Done(Flow::Reject(api)),
+                None => Step::Next,
+            },
+        }
+    }
+}
+
+/// Ergebnis eines Antwort-Hakens in [`Chain::run_response`].
+enum Step {
+    /// Weiter.
+    Next,
+    /// Antwort ersetzt ([`Flow::Respond`]), weiter.
+    Replaced,
+    /// Kette endet mit diesem Ergebnis.
+    Done(Flow),
 }
 
 /// Entfernt den Inhalt aller Varianten und setzt `stop_reason: content_filter` (OpenAI

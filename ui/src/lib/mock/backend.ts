@@ -604,10 +604,10 @@ function extra(method: string, parts: string[], q: URLSearchParams): Response | 
   if (a === 'usage' && b === 'limit-warnings') return json(200, { counterBackend: 'local', warnings: [] });
   if (a === 'plugins' && !b && method === 'GET')
     return json(200, {
-      items: ['cache', 'content-safety', 'header', 'language', 'link-guard', 'pii', 'prompt-filter', 'prompt-leak', 'request-transform', 'wasm', 'webhook'].map((name) => ({
+      items: ['cache', 'content-safety', 'header', 'language', 'link-guard', 'pii', 'prompt-filter', 'prompt-leak', 'request-transform', 'schema-guard', 'wasm', 'webhook'].map((name) => ({
         name,
         defaultFailMode: name === 'webhook' ? 'open' : 'closed',
-        defaultTimeoutMs: name === 'webhook' ? 200 : name === 'content-safety' ? 3000 : name === 'wasm' ? 100 : 1000,
+        defaultTimeoutMs: name === 'webhook' ? 200 : name === 'content-safety' ? 3000 : name === 'wasm' ? 100 : name === 'schema-guard' ? 60000 : 1000,
         testable: ['pii', 'prompt-filter', 'link-guard', 'language'].includes(name),
       })),
     });

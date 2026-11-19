@@ -113,14 +113,15 @@ impl Registry {
     }
 
     /// Registry mit den eingebauten Plugins (`header`, `request-transform`, `webhook`, `cache`,
-    /// `pii`, `prompt-filter`, `prompt-leak`, `link-guard`, `language`, `content-safety`). `content-safety` hat hier keinen Gateway-Host
+    /// `pii`, `prompt-filter`, `prompt-leak`, `link-guard`, `language`, `content-safety`, `schema-guard`). `content-safety` und
+    /// `schema-guard` (`retry`) haben hier keinen Gateway-Host
     /// (Konfiguration prüfbar, Aufrufe schlagen fehl) – im Betrieb
     /// [`Registry::with_builtin_host`].
     pub fn with_builtin() -> Self {
         Self::with_builtin_host(Arc::new(NoHost::default()))
     }
 
-    /// Wie [`Registry::with_builtin`], `content-safety` mit den Diensten des Gateways
+    /// Wie [`Registry::with_builtin`], `content-safety` und `schema-guard` mit den Diensten des Gateways
     /// (Zugangsdaten, HTTP mit SSRF-Regeln, Modellgruppen).
     pub fn with_builtin_host(host: Arc<dyn PluginHost>) -> Self {
         let mut r = Self::new();
@@ -133,6 +134,7 @@ impl Registry {
         r.register(Arc::new(builtin::prompt_leak::Factory));
         r.register(Arc::new(builtin::link_guard::Factory));
         r.register(Arc::new(builtin::language::Factory));
+        r.register(Arc::new(builtin::schema_guard::Factory::new(Arc::clone(&host))));
         r.register(Arc::new(builtin::content_safety::Factory::new(host)));
         // Nur Konfigurationsprüfung; die Laufzeit (`aigw-wasm`) ersetzt die Fabrik im Server.
         r.register(Arc::new(builtin::wasm::Factory));
