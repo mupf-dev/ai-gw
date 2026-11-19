@@ -254,6 +254,9 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Behoben
 
+- Sicherheit: wasmtime 50.0.1 → 50.0.2 (RUSTSEC-2026-0566 bis -0573); `rust-version` auf 1.97 angehoben (Mindestversion von wasmtime 50.0.2).
+
+
 - **Plugins vergrößern den Prompt nach der Admission (S-38, AIGW-103):** Nach den Pre-Plugins
   wird die Eingabe neu geschätzt; Wachstum wird auf Token-/Eingabe-Limits und harten Budgets
   nachreserviert oder die Anfrage abgelehnt (`429` bzw. Budget-Fehler).

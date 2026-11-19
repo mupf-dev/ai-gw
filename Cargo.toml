@@ -31,7 +31,7 @@ exclude = ["plugins"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.97"
 license = "AGPL-3.0-or-later"
 authors = ["ai-gw contributors"]
 repository = "https://github.com/mupf-dev/ai-gw"
