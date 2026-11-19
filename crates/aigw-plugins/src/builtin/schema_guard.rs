@@ -307,14 +307,24 @@ fn scan(v: &Value, depth: usize, max_depth: usize) -> Result<(), String> {
         Value::Object(o) => {
             for (k, x) in o {
                 if matches!(k.as_str(), "$ref" | "$dynamicRef" | "$recursiveRef") {
+                    // Kein Text = Eigenschaftsname in `properties` o. ä. (kein Verweis).
                     match x.as_str() {
                         Some(r) if r.starts_with('#') => {}
-                        _ => {
+                        None => {}
+                        Some(_) => {
                             return Err(format!(
                                 "{k}: nur dokumentinterne Verweise (#…) erlaubt, externe werden nie aufgelöst"
                             ));
                         }
                     }
+                }
+                if k == "$schema"
+                    && x.as_str().is_some_and(|u| {
+                        !(u.starts_with("https://json-schema.org/")
+                            || u.starts_with("http://json-schema.org/"))
+                    })
+                {
+                    return Err("$schema: nur die Meta-Schemas von json-schema.org".into());
                 }
                 scan(x, depth + 1, max_depth)?;
             }
@@ -509,7 +519,7 @@ impl SchemaGuard {
                 return Some(f);
             }
             if let Some(check) = c.tools.get(*name) {
-                let args = if args.trim().is_empty() { "{}" } else { args };
+                let args: &str = if args.trim().is_empty() { "{}" } else { *args };
                 if let Some(mut f) = self.check_json(check, args) {
                     if f.category != "output-too-large" {
                         f.category = "tool-arguments";
@@ -601,10 +611,13 @@ impl SchemaGuard {
                 None => {
                     failure = Failure::new(
                         "schema-mismatch",
-                        "Wiederholung mit mehreren Varianten",
+                        "Wiederholung ohne genau eine Variante",
                         "Return exactly one answer.",
                     );
-                    last = resp.choices[0].message.clone();
+                    let Some(ch) = resp.choices.into_iter().next() else {
+                        break;
+                    };
+                    last = ch.message;
                 }
                 Some(f) => {
                     failure = f;
@@ -769,7 +782,9 @@ impl Plugin for SchemaGuard {
         let mut dropped = Vec::new();
         for (name, s) in &spec.tools {
             if let Err(e) = self.compile(s) {
-                bad.get_or_insert(format!("Tool {name:?}: {e}"));
+                if bad.is_none() {
+                    bad = Some(format!("Tool {name:?}: {e}"));
+                }
                 dropped.push(name.clone());
             }
         }
@@ -879,14 +894,16 @@ impl Plugin for SchemaGuard {
         };
         match ev {
             StreamEvent::Choice { .. } => st.reset(),
-            StreamEvent::TextDelta { text, .. } => push(&mut st.text, text, &mut st.too_large),
+            StreamEvent::TextDelta { text, .. } => {
+                push(&mut st.text, text.as_str(), &mut st.too_large);
+            }
             StreamEvent::ToolCallStart(s) => {
                 st.tools
                     .insert(s.index, (s.id.clone(), s.name.clone(), String::new()));
             }
             StreamEvent::ToolCallDelta { index, arguments } => {
-                if let Some(t) = st.tools.get_mut(index) {
-                    push(&mut t.2, arguments, &mut st.too_large);
+                if let Some(t) = st.tools.get_mut(&*index) {
+                    push(&mut t.2, arguments.as_str(), &mut st.too_large);
                 }
             }
             StreamEvent::Stop { reason, .. } => {

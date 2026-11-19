@@ -3,11 +3,13 @@
 
 #![allow(clippy::unwrap_used, clippy::panic)]
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use aigw_core::ir::{
-    ChatResponse, Choice, FunctionTool, Tool, ToolCallStart, Usage,
+    ChatRequest, ChatResponse, Choice, Content, ErrorKind, FunctionTool, Message, Part, PartKind,
+    ResponseFormat, Role, StopReason, StreamEvent, Tool, ToolCallStart, ToolChoice, ToolKind,
+    Usage,
 };
 use aigw_core::observe::PluginCalls;
 use aigw_core::resource::CredentialData;
@@ -15,7 +17,12 @@ use aigw_core::wire::WireFormat;
 use http::HeaderMap;
 use serde_json::json;
 
+use serde_json::Value;
+
 use super::*;
+use crate::host::PluginHost;
+use crate::plugin::{CallInfo, FINAL_REQUEST_META, Flow, Hook, Meta, Phases, Plugin, PluginError, ReqCtx, RespCtx};
+use crate::registry::PluginFactory;
 use crate::NoHost;
 use crate::chain::{Chain, ChunkMode, ChunkRunner, Entry};
 use crate::host::{HttpCall, HttpReply};
@@ -236,11 +243,13 @@ fn schema_limits_and_external_refs() {
         json!({"$ref": "https://example.com/schema.json"}),
         json!({"properties": {"a": {"$ref": "file:///etc/passwd"}}}),
         json!({"$defs": {"x": {"$dynamicRef": "other.json#meta"}}}),
-        json!({"$ref": 5}),
     ] {
         let e = compile(&r, &l).unwrap_err();
         assert!(e.contains("dokumentintern"), "{e}");
     }
+    // Eigenschaften namens `$ref`/`$schema` sind keine Verweise.
+    let props = json!({"type": "object", "properties": {"$ref": {"type": "string"}, "$schema": {"type": "string"}}});
+    assert!(compile(&props, &l).is_ok());
     // Interne Verweise sind erlaubt.
     let local = json!({"$defs": {"n": {"type": "integer"}}, "type": "object",
                        "properties": {"a": {"$ref": "#/$defs/n"}}});
@@ -305,12 +314,12 @@ fn bad_request_schema_rejected_or_skipped() {
     };
     assert_eq!(e.kind, ErrorKind::InvalidRequest);
     assert_eq!(e.code.as_deref(), Some("response_schema_rejected"));
-    assert_eq!(hits(&i), [("schema-rejected".into(), "reject", 1)]);
+    assert_eq!(hits(&i), [("schema-rejected".to_owned(), "reject", 1)]);
     let i = info(false);
     let (flow, meta) = run_request(&guard(json!({"invalidSchema": "skip"})), &i, request(bad));
     assert_eq!(flow, Flow::Continue);
     assert!(meta.is_empty());
-    assert_eq!(hits(&i), [("schema-rejected".into(), "skip", 1)]);
+    assert_eq!(hits(&i), [("schema-rejected".to_owned(), "skip", 1)]);
 }
 
 #[test]
@@ -417,7 +426,7 @@ async fn invalid_output_rejected_with_category() {
         assert_eq!(e.code.as_deref(), Some("schema_validation_failed"));
         // Fehlermeldung ohne Inhalte der Ausgabe.
         assert!(!e.message.contains("Ada"), "{}", e.message);
-        assert_eq!(hits(&i), [(cat.into(), "reject", 1)], "{text}");
+        assert_eq!(hits(&i), [(cat.to_owned(), "reject", 1)], "{text}");
     }
 }
 
@@ -443,7 +452,7 @@ async fn flag_counts_and_sets_header() {
     assert_eq!(flow, Flow::Continue);
     assert_eq!(resp.choices[0].message.content.text(), "nope");
     assert_eq!(h.set.get(HEADER).unwrap(), "invalid");
-    assert_eq!(hits(&i), [("invalid-json".into(), "flag", 1)]);
+    assert_eq!(hits(&i), [("invalid-json".to_owned(), "flag", 1)]);
 }
 
 #[tokio::test]
@@ -476,7 +485,7 @@ async fn forced_tool_arguments_checked() {
     let bad = tool_response("person", "{\"name\": 5}");
     let (flow, _, _, i) = check(json!({}), forced(), bad).await;
     assert!(matches!(flow, Flow::Block(_)), "{flow:?}");
-    assert_eq!(hits(&i), [("tool-arguments".into(), "reject", 1)]);
+    assert_eq!(hits(&i), [("tool-arguments".to_owned(), "reject", 1)]);
     let (flow, ..) = check(json!({}), forced(), tool_response("person", "{kaputt")).await;
     assert!(matches!(flow, Flow::Block(_)));
 }
@@ -491,7 +500,7 @@ async fn output_size_limit() {
     )
     .await;
     assert!(matches!(flow, Flow::Block(_)));
-    assert_eq!(hits(&i), [("output-too-large".into(), "reject", 1)]);
+    assert_eq!(hits(&i), [("output-too-large".to_owned(), "reject", 1)]);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -532,7 +541,7 @@ async fn retry_succeeds_and_keeps_first_usage() {
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].usage.input_tokens, 99);
     assert_eq!(h.set.get(HEADER).unwrap(), "retried=1");
-    assert_eq!(hits(&i), [("schema-mismatch".into(), "retry", 1)]);
+    assert_eq!(hits(&i), [("schema-mismatch".to_owned(), "retry", 1)]);
     // Wiederholung: gleiche Modellgruppe, nicht gestreamt, mit Antwort + Korrektur.
     let seen = host.seen.lock().unwrap();
     let (group, req) = &seen[0];
@@ -562,8 +571,8 @@ async fn retry_exhausted_rejects() {
     assert_eq!(
         hits(&i),
         [
-            ("invalid-json".into(), "retry", 2),
-            ("invalid-json".into(), "reject", 1)
+            ("invalid-json".to_owned(), "retry", 2),
+            ("invalid-json".to_owned(), "reject", 1)
         ]
     );
     // Die zweite Wiederholung enthält beide Fehlversuche.
@@ -616,7 +625,7 @@ async fn retry_tool_call_sends_tool_results_and_rejects_unknown_tools() {
     let mut meta = retry_meta(&g, &i, req);
     let (flow, ..) = run_response(&g, &i, &mut meta, tool_response("person", "{}")).await;
     assert!(matches!(flow, Flow::Block(_)), "{flow:?}");
-    assert!(hits(&i).contains(&("unknown-tool".into(), "reject", 1)));
+    assert!(hits(&i).contains(&("unknown-tool".to_owned(), "reject", 1)));
 }
 
 /// Inneres Ausgabe-Plugin: zählt Aufrufe und merkt sich den zuletzt gesehenen Text.
@@ -747,11 +756,11 @@ fn live_stream_checked_at_stop() {
     assert!(hits(&i).is_empty());
     let (out, i) = stream_run(json!({}), req(), text_stream(&["{\"name\":", " 5}"]));
     assert_eq!(stop_reason(&out), Some(StopReason::ContentFilter));
-    assert_eq!(hits(&i), [("schema-mismatch".into(), "reject", 1)]);
+    assert_eq!(hits(&i), [("schema-mismatch".to_owned(), "reject", 1)]);
     // flag: Stream unverändert, nur gezählt.
     let (out, i) = stream_run(json!({"action": "flag"}), req(), text_stream(&["x"]));
     assert_eq!(stop_reason(&out), Some(StopReason::EndTurn));
-    assert_eq!(hits(&i), [("invalid-json".into(), "flag", 1)]);
+    assert_eq!(hits(&i), [("invalid-json".to_owned(), "flag", 1)]);
     // Ohne strukturierte Ausgabe: nichts zu tun.
     let (out, i) = stream_run(json!({}), request(None), text_stream(&["x"]));
     assert_eq!(stop_reason(&out), Some(StopReason::EndTurn));
@@ -785,7 +794,7 @@ fn live_stream_tool_arguments() {
     assert_eq!(stop_reason(&out), Some(StopReason::ToolUse));
     let (out, i) = stream_run(json!({}), req, events(&["{\"age\":", "\"x\"}"]));
     assert_eq!(stop_reason(&out), Some(StopReason::ContentFilter));
-    assert_eq!(hits(&i), [("tool-arguments".into(), "reject", 1)]);
+    assert_eq!(hits(&i), [("tool-arguments".to_owned(), "reject", 1)]);
 }
 
 #[test]

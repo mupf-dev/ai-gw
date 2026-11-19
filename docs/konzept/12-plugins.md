@@ -70,6 +70,7 @@ pub trait Plugin: Send + Sync + 'static {
     fn name(&self) -> &'static str;
     fn phases(&self) -> Phases;                                   // request / response / chunk
     fn needs_buffered_output(&self) -> bool { false }             // ganze Antwort nötig?
+    fn rerun_inner_on_respond(&self) -> bool { false }            // Respond in der Antwort-Phase: innere Plugins erneut (AIGW-113)
     fn on_request<'a>(&'a self, ctx: &'a mut ReqCtx<'_>) -> Hook<'a, Flow>;   // Continue | Respond | Reject | Block
     fn on_response<'a>(&'a self, ctx: &'a mut RespCtx<'_>) -> Hook<'a, Flow>; // Continue | Respond (ersetzen) | Reject | Block
     fn on_chunk(&self, ctx: &mut ChunkCtx<'_>, ev: &mut StreamEvent) -> Result<ChunkFlow, PluginError>; // synchron
@@ -94,6 +95,16 @@ enum ChunkFlow { Continue, Drop, Reject(ApiError), Block(ApiError) }
 - **`Meta`** (`serde_json::Map`) wandert von der Anfrage- in die Antwort-/Stream-Phase (z. B.
   Zuordnungstabelle einer Pseudonymisierung, AIGW-37). JSON, damit Webhook- und spätere
   WASM-Plugins sie ohne Umbau lesen und schreiben können.
+- **Endgültige Anfrage (AIGW-113):** Setzt ein Plugin in der Anfrage-Phase den Meta-Schlüssel
+  `aigw.final-request` (`FINAL_REQUEST_META`), legt die Pipeline dort nach **allen**
+  Anfrage-Plugins die Anfrage ab, wie sie an den Upstream geht (IR-JSON). Für Plugins, die
+  selbst neu anfragen (`schema-guard` mit `retry`): so sehen sie maskierte/veränderte Inhalte
+  statt des Stands an ihrer Kettenposition. Intern (`aigw.*`), ohne Anforderung kostenlos.
+- **Ersetzen mit erneuter Prüfung:** `Flow::Respond` in der Antwort-Phase läuft normalerweise
+  nur nach außen weiter. Mit `rerun_inner_on_respond() == true` lässt die Kette die neue
+  Antwort zuerst noch einmal durch die Antwort-Haken der **inneren** Plugins laufen (deren
+  Ersetzungen laufen nicht zurück) – eine neu beschaffte Modellantwort umgeht so keine
+  Ausgabe-Guardrails.
 - **Phasen werden vorab aufgelöst:** Die Kette hält je Phase eine Indexliste; ein Plugin ohne
   Stream-Phase kostet im Stream nichts.
 - **Modell-Umleitung gesperrt:** `model` und `stream` der Anfrage darf kein Plugin ändern
