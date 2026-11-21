@@ -11,6 +11,7 @@
 import { api, onUnauthorized, setBearer, setCsrfToken } from './api/client';
 import type { components } from './api/schema';
 import { toast } from './toast.svelte';
+import { setCurrency } from './format';
 
 export type SessionInfo = components['schemas']['SessionInfo'];
 type RoleBinding = components['schemas']['RoleBinding'];
@@ -38,6 +39,8 @@ export const auth = $state<{
   traceUrl: string | null;
   /** JWT-Aussteller der Datenebene (`auth.jwt.issuers`, AIGW-115) für Workload-Identitäten am Key. */
   workloadIssuers: string[];
+  /** Abrechnungswährung (`billing.currency`, AIGW-117) für Geldformate. */
+  currency: string;
 }>({
   loaded: false,
   oidc: false,
@@ -51,6 +54,7 @@ export const auth = $state<{
   maxAdminKeyLifetimeSecs: null,
   traceUrl: null,
   workloadIssuers: [],
+  currency: 'USD',
 });
 
 const AUTH_ERRORS: Record<string, string> = {
@@ -154,6 +158,8 @@ async function fetchInfo(): Promise<boolean> {
   auth.maxAdminKeyLifetimeSecs = data.maxAdminKeyLifetimeSecs ?? null;
   auth.traceUrl = data.traceUrl ?? null;
   auth.workloadIssuers = data.workloadIssuers ?? [];
+  auth.currency = data.currency ?? 'USD';
+  setCurrency(auth.currency);
   setCsrfToken(data.session?.csrfToken ?? null);
   return true;
 }

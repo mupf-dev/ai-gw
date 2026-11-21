@@ -106,6 +106,8 @@ pub struct AdminState {
     pub(crate) ui_mock: bool,
     /// Link-Vorlage zum Tracing-System (`admin.ui.trace_url`, für `GET /auth/info`).
     pub(crate) trace_url: Option<String>,
+    /// Abrechnungswährung (`billing.currency`, für `GET /auth/info`, AIGW-117).
+    pub(crate) currency: Arc<str>,
     /// Preisvorschläge (AIGW-85; ohne: `404` auf `/price-suggestions`).
     pub(crate) price_suggester: Option<Arc<aigw_billing::suggest::Suggester>>,
     /// Höchstgröße hochgeladener WASM-Module (`wasm.max_module_bytes`, AIGW-63).
@@ -154,6 +156,7 @@ impl AdminState {
             bootstrap: None,
             ui_mock: true,
             trace_url: None,
+            currency: Arc::from("USD"),
             price_suggester: None,
             wasm_max_bytes: aigw_core::config::WasmConfig::default().max_module_bytes,
             wasm_trust: Arc::default(),
@@ -189,6 +192,13 @@ impl AdminState {
     #[must_use]
     pub fn with_trace_url(mut self, trace_url: Option<String>) -> Self {
         self.trace_url = trace_url.filter(|u| !u.trim().is_empty());
+        self
+    }
+
+    /// Abrechnungswährung für die UI (`billing.currency`, AIGW-117).
+    #[must_use]
+    pub fn with_currency(mut self, currency: &str) -> Self {
+        self.currency = Arc::from(currency);
         self
     }
 

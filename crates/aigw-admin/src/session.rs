@@ -961,6 +961,8 @@ pub struct AuthInfo {
     /// AIGW-115) – Auswahl für Workload-Identitäten am Key; nur für Angemeldete.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workload_issuers: Vec<String>,
+    /// Abrechnungswährung (`billing.currency`, ISO 4217, AIGW-117) für die Geldformate der UI.
+    pub currency: String,
 }
 
 /// Liefert die Anmeldeverfahren und den angemeldeten Principal (für die UI).
@@ -996,6 +998,7 @@ pub(crate) async fn auth_info(State(st): State<AdminState>, headers: HeaderMap) 
         max_admin_key_lifetime_secs,
         trace_url,
         workload_issuers,
+        currency: st.currency.to_string(),
     })
     .into_response();
     res.headers_mut()

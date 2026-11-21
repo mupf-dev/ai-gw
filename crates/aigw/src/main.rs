@@ -397,6 +397,7 @@ fn serve(
                 .with_read_only(config.gitops.read_only_admin)
                 .with_ui_mock(config.admin.ui.mock)
                 .with_trace_url(config.admin.ui.trace_url.clone())
+                .with_currency(&config.billing.currency)
                 .with_workload_issuers(
                     config.auth.jwt.issuers.iter().map(|i| i.name.clone()).collect(),
                 ),
