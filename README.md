@@ -106,43 +106,37 @@ Steuerebene (`server.control.listen`, Standard `127.0.0.1:4001`; gleiche Adresse
 
 ## Entwicklung
 
-Der Entwicklungsserver ist klein und hat keine Rust-/Node-Toolchain. Gebaut und getestet wird
-auf der Buildbox (siehe `/opt/buildfarm/README.md`). Ergebnisse, die eingecheckt werden
-(`Cargo.lock`, `ui/pnpm-lock.yaml`, generierte Dateien), immer per `--fetch` zurückholen –
-die Box wird vom Watchdog gelöscht.
+Voraussetzungen: Rust-Toolchain aus `rust-toolchain.toml` (über rustup), Node.js mit pnpm,
+Docker für die Postgres-/Redis-Tests und Container-Builds. Rechenintensive Schritte lassen sich
+auch auf einer entfernten Build-Maschine ausführen; generierte Dateien (`Cargo.lock`,
+`ui/pnpm-lock.yaml`, `ui/openapi.json`, `ui/src/lib/api/schema.d.ts`) danach einchecken.
 
 ```bash
-export BUILDBOX_OWNER=ai-gw
-buildbox status                       # läuft schon eine Box? Dann mitbenutzen
-buildbox up                           # sonst starten (≈ 2–5 Min.)
-
-# einmalig pro Box: rustup + Toolchain aus rust-toolchain.toml, cargo-deny, reuse
-buildbox run --no-git ~/ai-gw "scripts/setup-tools.sh"
+# einmalig: Toolchain aus rust-toolchain.toml, cargo-deny, reuse
+scripts/setup-tools.sh
 
 # alle Prüfungen: fmt, clippy -D warnings, Tests, cargo-deny, OpenAPI-Abgleich,
 # UI (pnpm install, Typen, svelte-check, build), REUSE
-buildbox run --no-git ~/ai-gw \
-  "set -e; . ~/.cargo/env; export PATH=\$HOME/.local/bin:\$PATH; AIGW_STRICT=1 scripts/check.sh" \
-  --fetch Cargo.lock --fetch ui/pnpm-lock.yaml
+AIGW_STRICT=1 scripts/check.sh
+# zusätzlich gegen echte Postgres-/Redis-Container testen
+AIGW_STRICT=1 AIGW_TEST_POSTGRES=docker AIGW_TEST_REDIS=docker scripts/check.sh
 
 # Release-Binary mit eingebetteter UI bauen, starten, /healthz, Admin-API und /admin/ prüfen
-buildbox run --no-git ~/ai-gw "set -e; . ~/.cargo/env; scripts/runtime-smoke.sh"
+scripts/runtime-smoke.sh
+
+# UI-Ende-zu-Ende-Tests (Playwright)
+cd ui/e2e && bash run.sh
 
 # Admin-API geändert → OpenAPI-Spezifikation und TS-Typen neu erzeugen und einchecken
-buildbox run --no-git ~/ai-gw "set -e; . ~/.cargo/env; scripts/gen-api.sh" \
-  --fetch ui/openapi.json --fetch ui/src/lib/api/schema.d.ts
+scripts/gen-api.sh
 
-# Container-Image (amd64) auf der Box bauen und testen (dort mit BuildKit; der lokale
-# Docker-Client über `--context buildbox` nutzt den Legacy-Builder ohne `RUN --mount`):
-# Image, Start mit SQLite (schreibgeschützt), Healthcheck, Compose mit Postgres + Redis + OTel
-buildbox run --no-git ~/ai-gw "scripts/container-smoke.sh"
+# Container-Image bauen und testen: Start mit SQLite (schreibgeschützt), Healthcheck,
+# Compose mit Postgres + Redis + OTel
+scripts/container-smoke.sh
 
 # Lizenzübersicht THIRD-PARTY.md neu erzeugen (nach Änderungen an Abhängigkeiten)
-buildbox run --no-git ~/ai-gw "set -e; . ~/.cargo/env; scripts/third-party.sh" --fetch THIRD-PARTY.md
+scripts/third-party.sh
 ```
-
-`target/` steht in `.buildboxignore` und bleibt als Cache auf der Box; `ui/dist` und
-`ui/node_modules` ebenso. `--no-git` ist nötig, wenn aus einem Git-Worktree gearbeitet wird.
 
 Hinweise:
 
@@ -159,9 +153,8 @@ Hinweise:
 `.github/workflows/ci.yml` führt `scripts/check.sh` und `scripts/third-party.sh --check`
 (THIRD-PARTY.md aktuell) aus, prüft die Kubernetes-Manifeste (`scripts/k8s-check.sh`) und baut
 bei Release-Tags oder manuell die Container-Images für amd64 und arm64
-(`scripts/build-images.sh`, arm64 quer kompiliert, Smoke unter QEMU). Weil das Repo privat ist
-und Actions-Minuten kostet, läuft der Workflow **nur bei Pull Requests, Tags `v*` und manuell**
-(`workflow_dispatch`), nicht bei jedem Push.
+(`scripts/build-images.sh`, arm64 quer kompiliert, Smoke unter QEMU). Der Workflow läuft bei Pushes
+auf `main`, bei Pull Requests, bei Tags `v*` und manuell (`workflow_dispatch`).
 
 ## Lizenz
 
