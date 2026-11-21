@@ -198,6 +198,10 @@ pub struct Snapshot {
     /// [`Snapshot::from_parts`] und [`Snapshot::apply_patch`]; von Hand gebaute Snapshots
     /// (Tests) brauchen ihn nicht.
     pub key_ids: HashMap<Id, KeyHash>,
+    /// Workload-/Agent-Identität → Hash des aktiven Keys (AIGW-115). Identitäten, die mehreren
+    /// aktiven Keys zugeordnet sind, fehlen (mehrdeutig → keine Anmeldung). Gepflegt von
+    /// [`Snapshot::from_parts`] und [`Snapshot::apply_patch`].
+    pub workloads: HashMap<crate::workload::WorkloadKey, KeyHash>,
     /// Name **und** Alias → Modellgruppe.
     pub model_groups: HashMap<String, Arc<ModelGroupCtx>>,
     /// Organisationen nach ID.
@@ -237,6 +241,35 @@ impl Snapshot {
     /// Schlägt einen Key über seinen Hash nach.
     pub fn key(&self, hash: &KeyHash) -> Option<&Arc<KeyCtx>> {
         self.keys.get(hash)
+    }
+
+    /// Schlägt den Key einer Workload-/Agent-Identität nach (AIGW-115).
+    pub fn workload_key(&self, id: &crate::workload::WorkloadKey) -> Option<&Arc<KeyCtx>> {
+        self.keys.get(self.workloads.get(id)?)
+    }
+
+    /// Baut den Index der Workload-Identitäten aus den aktiven Keys neu. Mehrfach zugeordnete
+    /// Identitäten werden ausgelassen (deterministisch, unabhängig von der Reihenfolge);
+    /// Admin-API und GitOps verhindern solche Doppelungen beim Schreiben.
+    pub fn rebuild_workload_index(&mut self) {
+        let mut index: HashMap<crate::workload::WorkloadKey, KeyHash> = HashMap::new();
+        let mut ambiguous = std::collections::HashSet::new();
+        for (hash, ctx) in &self.keys {
+            for w in &ctx.key.spec.workload_identities {
+                let k = w.key();
+                if ambiguous.contains(&k) {
+                    continue;
+                }
+                if index
+                    .insert(k.clone(), *hash)
+                    .is_some_and(|prev| prev != *hash)
+                {
+                    index.remove(&k);
+                    ambiguous.insert(k);
+                }
+            }
+        }
+        self.workloads = index;
     }
 
     /// Löst einen Modellnamen (Name oder Alias) auf.

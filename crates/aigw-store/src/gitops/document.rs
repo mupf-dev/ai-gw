@@ -152,6 +152,29 @@ pub fn parse_documents(text: &str) -> Result<Vec<Document>, GitopsError> {
         }
     }
 
+    // AIGW-115: Workload-Identitäten höchstens einem Key zuordnen (innerhalb der Datei; gegen
+    // die Datenbank prüft das Repository beim Anwenden).
+    let mut identities: BTreeMap<aigw_core::workload::WorkloadKey, String> = BTreeMap::new();
+    for d in &docs {
+        if let ResourceSpec::ApiKey(k) = &d.manifest.spec {
+            for w in &k.workload_identities {
+                if let Some(first) = identities.insert(w.key(), d.name().to_owned())
+                    && first != d.name()
+                {
+                    issues.push(Issue::at(
+                        Some(d.index),
+                        d.kind(),
+                        d.name(),
+                        format!(
+                            "workloadIdentities: {}/{} ist bereits dem Key {first:?} zugeordnet",
+                            w.issuer, w.subject
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
     if issues.is_empty() {
         Ok(docs)
     } else {

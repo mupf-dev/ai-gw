@@ -10,13 +10,25 @@
 //! [`SnapshotAuthenticator`] prüft gegen den Konfigurations-Snapshot; das Ergebnis
 //! ([`AuthContext`]) trägt den [`KeyCtx`] und prüft Modellfreigaben
 //! ([`AuthContext::authorize_model`], [`AuthContext::visible_models`]).
+//!
+//! AIGW-115: Mit `auth.jwt` nimmt [`SnapshotAuthenticator`] als `Authorization: Bearer` auch
+//! Access-Tokens (JWT) von Workload-/Agent-Identitäten an (z. B. Microsoft Entra Agent ID).
+//! Unterscheidung nach Format (`eyJ…` mit zwei Punkten; virtuelle Keys enthalten keine
+//! Punkte). Ein gültiges Token wird über `workloadIdentities` einem aktiven Key zugeordnet –
+//! danach gilt alles wie beim Key. Ungültiges Token → `401`, gültiges Token ohne Zuordnung
+//! oder ohne geforderte Rolle → `403`. Das Token wird nie geloggt und nie an Upstreams
+//! weitergereicht (Upstreams erhalten ausschließlich die Zugangsdaten des Deployments).
 
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use aigw_core::ir::{ApiError, ErrorKind, ModelInfo};
 use aigw_core::resource::Id;
 use aigw_core::snapshot::{KeyCtx, KeyHash, ModelGroupCtx, Snapshot, SnapshotHandle};
+use aigw_core::workload::WorkloadPrincipal;
+use aigw_jwt::{TokenError, WorkloadVerifier};
 use aws_lc_rs::digest;
 use axum::http::HeaderMap;
 use axum::http::header::AUTHORIZATION;
@@ -96,6 +108,9 @@ pub struct AuthContext {
     pub key: Option<Arc<KeyCtx>>,
     /// Snapshot dieser Anfrage.
     pub snapshot: Option<Arc<Snapshot>>,
+    /// Geprüfte Workload-/Agent-Identität, falls mit Access-Token statt Key angemeldet
+    /// (AIGW-115; Attribution in Request-Log und Trace).
+    pub workload: Option<Arc<WorkloadPrincipal>>,
 }
 
 impl AuthContext {
@@ -191,11 +206,21 @@ impl AuthContext {
     }
 }
 
+/// Zukunft von [`Authenticator::prepare`].
+pub type PrepareFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+
 /// Schlüsselprüfung. Synchron: die Prüfung läuft im RAM (Hash-Lookup, Q7).
 pub trait Authenticator: Send + Sync + 'static {
     /// Prüft den (optionalen) Schlüssel; Fehler sind üblicherweise
     /// [`ErrorKind::Authentication`].
     fn authenticate(&self, key: Option<&ApiKey>) -> Result<AuthContext, ApiError>;
+
+    /// Asynchrone Vorbereitung vor [`Authenticator::authenticate`] (einmal je Anfrage in der
+    /// Auth-Middleware): lädt z. B. das JWKS eines Token-Ausstellers nach (AIGW-115).
+    /// Standard: nichts.
+    fn prepare<'a>(&'a self, _key: Option<&'a ApiKey>) -> PrepareFuture<'a> {
+        Box::pin(std::future::ready(()))
+    }
 }
 
 /// Platzhalter: lässt jede Anfrage zu (mit oder ohne Schlüssel).
@@ -217,12 +242,61 @@ impl Authenticator for AllowAll {
 #[derive(Debug, Clone)]
 pub struct SnapshotAuthenticator {
     snapshot: SnapshotHandle,
+    jwt: Option<Arc<WorkloadVerifier>>,
 }
 
 impl SnapshotAuthenticator {
     /// Prüft gegen den jeweils aktuellen Snapshot von `snapshot`.
     pub fn new(snapshot: SnapshotHandle) -> Self {
-        Self { snapshot }
+        Self {
+            snapshot,
+            jwt: None,
+        }
+    }
+
+    /// Nimmt zusätzlich Access-Tokens von Workload-/Agent-Identitäten an (AIGW-115).
+    #[must_use]
+    pub fn with_jwt(mut self, verifier: Option<Arc<WorkloadVerifier>>) -> Self {
+        self.jwt = verifier;
+        self
+    }
+
+    /// Anmeldung mit Access-Token: prüfen, Identität einem aktiven Key zuordnen.
+    fn authenticate_token(
+        &self,
+        verifier: &WorkloadVerifier,
+        token: &str,
+        now: OffsetDateTime,
+    ) -> Result<AuthContext, ApiError> {
+        let principal = match verifier.verify(token, now.unix_timestamp()) {
+            Ok(p) => p,
+            Err(TokenError::Invalid(reason)) => {
+                tracing::debug!(%reason, "Access-Token abgewiesen");
+                return Err(unauthorized("Access-Token ungültig"));
+            }
+            Err(TokenError::Forbidden(reason)) => {
+                tracing::debug!(%reason, "Access-Token ohne Berechtigung");
+                return Err(forbidden());
+            }
+        };
+        let snap = self.snapshot.load();
+        let Some(ctx) = snap.workload_key(&principal.key()).cloned() else {
+            tracing::debug!(
+                issuer = %principal.issuer,
+                subject = %principal.subject,
+                "Workload-Identität keinem aktiven Key zugeordnet"
+            );
+            return Err(forbidden());
+        };
+        if !ctx.is_valid_at(now) {
+            return Err(unauthorized("zugeordneter Key abgelaufen"));
+        }
+        Ok(AuthContext {
+            key_id: Some(ctx.key.id.to_string()),
+            key: Some(ctx),
+            snapshot: Some(snap),
+            workload: Some(principal),
+        })
     }
 
     /// Wie [`Authenticator::authenticate`], aber mit vorgegebener Uhrzeit.
@@ -234,6 +308,12 @@ impl SnapshotAuthenticator {
         let Some(key) = key else {
             return Err(unauthorized("kein API-Key übergeben"));
         };
+        if key.source == KeySource::Bearer
+            && let Some(v) = &self.jwt
+            && v.is_candidate(&key.secret)
+        {
+            return self.authenticate_token(v, &key.secret, now);
+        }
         let hash = hash_key(&key.secret);
         let snap = self.snapshot.load();
         let Some(ctx) = snap.key(&hash).cloned() else {
@@ -246,6 +326,7 @@ impl SnapshotAuthenticator {
             key_id: Some(ctx.key.id.to_string()),
             key: Some(ctx),
             snapshot: Some(snap),
+            workload: None,
         })
     }
 }
@@ -253,6 +334,16 @@ impl SnapshotAuthenticator {
 impl Authenticator for SnapshotAuthenticator {
     fn authenticate(&self, key: Option<&ApiKey>) -> Result<AuthContext, ApiError> {
         self.authenticate_at(key, OffsetDateTime::now_utc())
+    }
+
+    fn prepare<'a>(&'a self, key: Option<&'a ApiKey>) -> PrepareFuture<'a> {
+        Box::pin(async move {
+            if let (Some(v), Some(k)) = (&self.jwt, key)
+                && k.source == KeySource::Bearer
+            {
+                v.prepare(&k.secret).await;
+            }
+        })
     }
 }
 
@@ -262,6 +353,15 @@ pub fn hash_key(secret: &str) -> KeyHash {
     let mut out = [0u8; 32];
     out.copy_from_slice(d.as_ref());
     KeyHash(out)
+}
+
+/// Gültiges Access-Token, aber Identität nicht freigegeben (`403`, ohne Details).
+fn forbidden() -> ApiError {
+    ApiError::new(
+        ErrorKind::PermissionDenied,
+        "Diese Identität ist für das Gateway nicht freigegeben",
+    )
+    .with_code("identity_not_allowed")
 }
 
 fn unauthorized(reason: &'static str) -> ApiError {

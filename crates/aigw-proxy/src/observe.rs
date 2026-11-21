@@ -268,6 +268,7 @@ impl Recorder {
             r.api_key_id = auth.api_key_id();
             r.team_id = auth.team_id();
             r.organization_id = auth.organization_id();
+            r.workload.clone_from(&auth.workload);
         }
     }
 

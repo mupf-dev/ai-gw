@@ -375,7 +375,14 @@ fn build_snapshot(fake: SocketAddr) -> Snapshot {
             ..TeamSpec::default()
         },
     ));
-    let a = key("key-a", None, vec![]);
+    let mut a = (*key("key-a", None, vec![])).clone();
+    // AIGW-115: key-a darf sich auch mit dem Access-Token einer Agent-Identität anmelden.
+    a.key.spec.workload_identities = vec![aigw_core::workload::WorkloadIdentity {
+        issuer: "entra".into(),
+        subject: AGENT_ID.into(),
+        description: None,
+    }];
+    let a = Arc::new(a);
     let b = key("key-b", Some(&team), vec![]);
     let limited = key(
         "key-limited",
@@ -396,6 +403,7 @@ fn build_snapshot(fake: SocketAddr) -> Snapshot {
     ] {
         snap.keys.insert(hash_key(secret), k);
     }
+    snap.rebuild_workload_index();
     let base = format!("http://{fake}");
     for (n, s) in [
         server("gh", format!("{base}/mcp"), McpTransport::StreamableHttp),
@@ -431,11 +439,18 @@ async fn start() -> Env {
 }
 
 async fn start_with(cfg: McpConfig) -> Env {
+    start_full(cfg, None).await
+}
+
+const TENANT: &str = "aaaabbbb-0000-cccc-1111-dddd2222eeee";
+const AGENT_ID: &str = "11112222-bbbb-3333-cccc-4444dddd5555";
+
+async fn start_full(cfg: McpConfig, jwt: Option<Arc<aigw_proxy::WorkloadVerifier>>) -> Env {
     let (fake_addr, fake) = start_fake().await;
     let snapshot = SnapshotHandle::new(build_snapshot(fake_addr));
     let records = Arc::new(Capture::default());
     let state = ProxyState {
-        auth: Arc::new(SnapshotAuthenticator::new(snapshot.clone())),
+        auth: Arc::new(SnapshotAuthenticator::new(snapshot.clone()).with_jwt(jwt)),
         observer: Arc::clone(&records) as Arc<dyn RequestObserver>,
         ..ProxyState::mock()
     };
@@ -1185,4 +1200,83 @@ async fn sessions_limited_per_key_and_team() {
         StatusCode::NO_CONTENT
     );
     a3.initialize().await;
+}
+
+/// AIGW-115: Das MCP-Gateway nimmt Access-Tokens von Agent-Identitäten an; Freigaben des
+/// zugeordneten Keys gelten, das Token erreicht den Upstream nie, das Request-Log trägt die
+/// Identität.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn agent_token_on_mcp_gateway() {
+    use aigw_jwt::testkit::{JwksServer, TestIssuer, entra_agent_claims};
+    let issuer = TestIssuer::rsa("k");
+    let jwks = JwksServer::start(issuer.jwks()).await;
+    let verifier = aigw_proxy::WorkloadVerifier::new(&aigw_core::workload::JwtAuthConfig {
+        issuers: vec![aigw_core::workload::JwtIssuerConfig {
+            name: "entra".into(),
+            profile: aigw_core::workload::JwtProfile::Entra,
+            tenant_id: Some(TENANT.into()),
+            jwks_uri: Some(jwks.jwks_uri()),
+            audiences: vec!["api://ai-gw".into()],
+            ..Default::default()
+        }],
+        ..Default::default()
+    })
+    .unwrap()
+    .map(Arc::new);
+    let env = start_full(
+        McpConfig {
+            call_timeout_secs: 20,
+            ..McpConfig::default()
+        },
+        verifier,
+    )
+    .await;
+    let token = issuer.sign(&entra_agent_claims(TENANT, AGENT_ID, "api://ai-gw"));
+    let mut c = McpClient::new(&env, "/mcp", Some(&token));
+    c.initialize().await;
+    let names = c.tool_names().await;
+    assert!(names.contains(&"gh__echo".to_owned()), "{names:?}");
+    let r = c
+        .call(
+            "tools/call",
+            json!({"name": "gh__echo", "arguments": {"text": "hallo"}}),
+        )
+        .await;
+    assert_eq!(r["result"]["content"][0]["text"], "hallo");
+    // Upstream sieht nur seine eigenen Zugangsdaten, nie das Token.
+    let seen = env.fake.auth.lock().unwrap().clone();
+    assert!(!seen.is_empty());
+    assert!(
+        seen.iter()
+            .all(|a| !a.contains(&token) && a.contains("up-secret"))
+    );
+    let rec = env
+        .records
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|r| r.ingress == WireFormat::Mcp)
+        .cloned()
+        .unwrap();
+    assert_eq!(rec.workload.as_ref().unwrap().subject, AGENT_ID);
+
+    // Unbekannte Agent-Identität → 403, ungültiges Token → 401.
+    let other = issuer.sign(&entra_agent_claims(
+        TENANT,
+        "99998888-bbbb-3333-cccc-4444dddd5555",
+        "api://ai-gw",
+    ));
+    let mut c = McpClient::new(&env, "/mcp", Some(&other));
+    assert_eq!(
+        c.initialize_with("2025-06-18").await.status,
+        StatusCode::FORBIDDEN
+    );
+    let forged = TestIssuer::rsa("k").sign(&entra_agent_claims(TENANT, AGENT_ID, "api://ai-gw"));
+    let mut c = McpClient::new(&env, "/mcp", Some(&forged));
+    assert_eq!(
+        c.initialize_with("2025-06-18").await.status,
+        StatusCode::UNAUTHORIZED
+    );
 }

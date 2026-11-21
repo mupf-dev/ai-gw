@@ -59,6 +59,12 @@ Je Endpunkt:
 Anmeldung wie auf `/v1/*` (`Authorization: Bearer`, `api-key`, `x-api-key`); ohne gültigen Key
 `401` mit `WWW-Authenticate: Bearer` und JSON-RPC-Fehler `-32001`.
 
+AIGW-115: Mit `auth.jwt` gilt als `Bearer` auch ein Access-Token einer Workload-/Agent-Identität
+(z. B. Microsoft Entra Agent ID, [18-workload-identitaeten.md](18-workload-identitaeten.md)); es
+wirkt wie der zugeordnete Key (Freigaben, Limits, Sessions je Key). Gültiges Token ohne
+zugeordneten Key → `403` mit JSON-RPC-Fehler `-32003` (`identity_not_allowed`). Das Token
+erreicht nie einen Upstream-MCP-Server; dort gelten nur dessen eigene Zugangsdaten.
+
 **Protokollversionen:** `2025-11-25` (neueste), `2025-06-18`, `2025-03-26`, `2024-11-05`.
 `initialize` antwortet mit der angefragten Version, falls unterstützt, sonst mit der neuesten.
 Ein Header `MCP-Protocol-Version` mit nicht unterstützter Version → `400`; fehlt er, gilt

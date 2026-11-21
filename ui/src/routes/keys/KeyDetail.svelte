@@ -130,6 +130,15 @@
             </div>
           </Card>
         </div>
+        {#if k.spec.workloadIdentities?.length}
+          <Card title="Workload-/Agent-Identitäten" description="Anmeldung mit Access-Token (JWT) statt Key">
+            <ul class="flex flex-col gap-1.5 text-sm" data-testid="key-workload-identities">
+              {#each k.spec.workloadIdentities as w (w.issuer + w.subject)}
+                <li class="flex flex-wrap items-center gap-2"><Badge tone="outline">{w.issuer}</Badge><span class="font-mono">{w.subject}</span>{#if w.description}<span class="text-fg-muted">{w.description}</span>{/if}</li>
+              {/each}
+            </ul>
+          </Card>
+        {/if}
         {#if k.spec.budget}
           <Card flush title="Budgetverbrauch" description="laufender Zeitraum"><BudgetMeters level="api-key" name={k.metadata.name} /></Card>
         {/if}

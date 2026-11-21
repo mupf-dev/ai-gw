@@ -230,7 +230,13 @@ impl Resource for ApiKeySpec {
                 Col::opt_text(self.payload_mode.map(PayloadMode::as_str)),
             ),
             ("expose_reasoning", Col::opt_bool(self.expose_reasoning)),
+            ("workload_identities", Col::json(&self.workload_identities)?),
         ])
+    }
+
+    fn validate(&self) -> Result<(), StoreError> {
+        aigw_core::workload::validate_identities(&self.workload_identities)
+            .map_err(StoreError::Invalid)
     }
 
     fn from_row(row: &Row<'_>) -> Result<Self, StoreError> {
@@ -245,6 +251,7 @@ impl Resource for ApiKeySpec {
             metadata: row.json("metadata")?,
             payload_mode: payload_mode(row, "payload_mode")?,
             expose_reasoning: row.opt_bool("expose_reasoning")?,
+            workload_identities: row.json("workload_identities")?,
         })
     }
 }

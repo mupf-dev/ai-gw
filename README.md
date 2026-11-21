@@ -7,6 +7,7 @@ Binary für Gateway, Admin-API und Admin-UI.
   OpenAI, Anthropic, AWS Bedrock, Gemini/Vertex AI, Mistral, Ollama, vLLM u. a.
 - **Routing:** Modellgruppen, Lastverteilung, Retries, Fallbacks, Circuit Breaker
 - **Mandanten:** Organisationen, Teams, API-Keys, Modellfreigaben, Limits, Budgets, Kosten
+- **Workload-/Agent-Identitäten:** Anmeldung mit Entra-Access-Tokens (Microsoft Entra Agent ID) statt Key
 - **Guardrails und Cache:** PII, Prompt-Filter, Content Safety, exakter/semantischer Cache, MCP-Gateway
 - **Betrieb:** Admin-UI, GitOps (YAML), Prometheus, OpenTelemetry, SQLite oder Postgres
 - **Technik:** Rust (tokio, hyper/axum, rustls), Admin-UI Svelte 5 (eingebettet)
@@ -66,6 +67,7 @@ Kubernetes: [deploy/kubernetes/](deploy/kubernetes/), Details:
 | `crates/aigw-proxy` | Hot Path: Endpunkte der Datenebene, Pipeline, Routing, Limits |
 | `crates/aigw-providers` | Anbieter-Adapter (Trait `Provider`) |
 | `crates/aigw-outbound` | ausgehender HTTP-Client mit SSRF-Schutz |
+| `crates/aigw-jwt` | JWT-/JWS-Prüfung: Workload-/Agent-Tokens (Entra Agent ID), JWKS, OIDC-Bausteine |
 | `crates/aigw-store` | Persistenz (SQLite, Postgres), Snapshot, GitOps, Verschlüsselung |
 | `crates/aigw-counters` | Zähler-Backends `local`, `postgres-sync`, `redis` |
 | `crates/aigw-billing` | Kosten und Budgets |

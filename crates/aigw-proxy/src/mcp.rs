@@ -180,11 +180,25 @@ fn authenticate(
         .auth
         .authenticate(extract_api_key(headers).as_ref())
         .map_err(|e| {
-            http_error(
-                StatusCode::UNAUTHORIZED,
-                None,
-                RpcError::gateway(UNAUTHORIZED, 401, "unauthorized", e.message),
-            )
+            // AIGW-115: gültiges Access-Token ohne zugeordneten Key → 403.
+            if e.kind == ErrorKind::PermissionDenied {
+                http_error(
+                    StatusCode::FORBIDDEN,
+                    None,
+                    RpcError::gateway(
+                        aigw_mcp::jsonrpc::FORBIDDEN,
+                        403,
+                        "identity_not_allowed",
+                        e.message,
+                    ),
+                )
+            } else {
+                http_error(
+                    StatusCode::UNAUTHORIZED,
+                    None,
+                    RpcError::gateway(UNAUTHORIZED, 401, "unauthorized", e.message),
+                )
+            }
         })?;
     let snap = auth
         .snapshot

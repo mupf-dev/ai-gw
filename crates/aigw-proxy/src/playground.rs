@@ -51,6 +51,7 @@ pub fn key_context(
         key_id: Some(ctx.key.id.to_string()),
         key: Some(ctx),
         snapshot: Some(snap),
+        workload: None,
     })
 }
 

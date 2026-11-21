@@ -209,6 +209,11 @@ const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
         "wasm_signatures",
         include_str!("../migrations/sqlite/0011_wasm_signatures.sql"),
     ),
+    (
+        12,
+        "workload_identities",
+        include_str!("../migrations/sqlite/0012_workload_identities.sql"),
+    ),
 ];
 
 /// Migrationssatz für Postgres (`migrations/postgres/`), gleiche Versionen wie SQLite.
@@ -267,6 +272,11 @@ const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
         11,
         "wasm_signatures",
         include_str!("../migrations/postgres/0011_wasm_signatures.sql"),
+    ),
+    (
+        12,
+        "workload_identities",
+        include_str!("../migrations/postgres/0012_workload_identities.sql"),
     ),
 ];
 

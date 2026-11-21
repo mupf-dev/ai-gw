@@ -724,6 +724,10 @@ pub struct RequestLogItem {
     /// Erkennungen der Guardrail-Plugins (F161; Zähler, keine Inhalte).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub guardrails: Vec<GuardrailRow>,
+    /// Workload-/Agent-Identität bei Anmeldung mit Access-Token (AIGW-115). Die Nutzerkennung
+    /// delegierter Tokens (`user`) sehen nur `admin` und `auditor` (wie die Client-Adresse).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workload: Option<aigw_core::workload::WorkloadPrincipal>,
     /// Anzahl Upstream-Versuche (Retries, Fallbacks).
     pub attempt_count: usize,
     /// Payload gespeichert (lesbar nur mit `admin`/`auditor`).
@@ -1699,6 +1703,12 @@ fn item(row: RequestLogRow, has_payload: bool, dir: &Directory, show_ip: bool) -
         trace_id: row.trace_id,
         parent_request_id: row.parent_request_id,
         guardrails: row.guardrails,
+        workload: row.workload.map(|mut w| {
+            if !show_ip {
+                w.user = None;
+            }
+            w
+        }),
     }
 }
 

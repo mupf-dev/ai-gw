@@ -150,6 +150,7 @@ impl Processor {
                     count: g.count,
                 })
                 .collect(),
+            workload: r.workload.as_deref().cloned(),
         }
     }
 

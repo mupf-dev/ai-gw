@@ -369,6 +369,11 @@ pub struct ApiKeySpec {
     /// Freie Metadaten (erscheinen im Request-Log).
     #[serde(default, skip_serializing_if = "Metadata::is_empty")]
     pub metadata: Metadata,
+    /// Workload-/Agent-Identitäten, die sich statt mit dem Klartext-Key mit einem
+    /// Access-Token (JWT) eines Ausstellers aus `auth.jwt.issuers` anmelden (AIGW-115). Jede
+    /// Identität darf nur einem Key zugeordnet sein.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workload_identities: Vec<crate::workload::WorkloadIdentity>,
 }
 
 /// Zustand eines API-Keys.

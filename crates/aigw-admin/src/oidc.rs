@@ -23,13 +23,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aigw_core::config::{OidcConfig, OidcProfile};
+use aigw_jwt::jws::{Jwks, JwsHeader, claim_strings};
 use aigw_outbound::{AddressGuard, FetchLimits, OutboundClient, OutboundOptions};
-use aws_lc_rs::signature::{
-    ECDSA_P256_SHA256_FIXED, ED25519, RSA_PKCS1_2048_8192_SHA256, RsaPublicKeyComponents,
-    UnparsedPublicKey,
-};
 use base64::Engine as _;
-use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+use base64::engine::general_purpose::STANDARD;
 use bytes::Bytes;
 use hyper::Request;
 use hyper::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
@@ -90,42 +87,6 @@ pub struct ProviderMetadata {
     /// Unterstützte PKCE-Verfahren.
     #[serde(default)]
     pub code_challenge_methods_supported: Option<Vec<String>>,
-}
-
-/// Ein Schlüssel aus dem JWKS (nur die benötigten Felder).
-#[derive(Debug, Clone, Deserialize)]
-struct Jwk {
-    kty: String,
-    #[serde(default)]
-    kid: Option<String>,
-    #[serde(default, rename = "use")]
-    use_: Option<String>,
-    #[serde(default)]
-    alg: Option<String>,
-    #[serde(default)]
-    crv: Option<String>,
-    #[serde(default)]
-    n: Option<String>,
-    #[serde(default)]
-    e: Option<String>,
-    #[serde(default)]
-    x: Option<String>,
-    #[serde(default)]
-    y: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct Jwks {
-    keys: Vec<Jwk>,
-}
-
-#[derive(Debug, Deserialize)]
-struct JwsHeader {
-    alg: String,
-    #[serde(default)]
-    kid: Option<String>,
-    #[serde(default)]
-    crit: Option<Value>,
 }
 
 /// Geprüfte Angaben aus dem ID-Token.
@@ -470,20 +431,7 @@ impl OidcClient {
         force: bool,
     ) -> Result<bool, OidcError> {
         let jwks = self.jwks(force).await?;
-        let candidates = jwks.keys.iter().filter(|k| {
-            header
-                .kid
-                .as_ref()
-                .is_none_or(|kid| k.kid.as_ref() == Some(kid))
-                && k.use_.as_deref().is_none_or(|u| u == "sig")
-                && k.alg.as_deref().is_none_or(|a| a == header.alg)
-        });
-        for k in candidates {
-            if verify_jws(&header.alg, k, input, sig)? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        jwks.verify(header, input, sig).map_err(|e| err(e.0))
     }
 
     fn check_claims(
@@ -587,87 +535,17 @@ impl OidcClient {
 }
 
 fn b64(s: &str) -> Result<Vec<u8>, OidcError> {
-    URL_SAFE_NO_PAD
-        .decode(s)
-        .map_err(|e| err(format!("Base64url: {e}")))
+    aigw_jwt::jws::b64(s).map_err(|e| err(e.0))
 }
 
 /// Base64url ohne Auffüllung (für PKCE und zufällige Werte).
 pub fn b64url(bytes: &[u8]) -> String {
-    URL_SAFE_NO_PAD.encode(bytes)
+    aigw_jwt::jws::b64url(bytes)
 }
 
 /// PKCE-Challenge (S256) zu einem Verifier.
 pub fn pkce_challenge(verifier: &str) -> String {
     b64url(&crate::auth::sha256(verifier))
-}
-
-/// Liest einen Claim (Punkte = verschachtelt) als Liste von Zeichenketten.
-fn claim_strings(c: &Value, path: &str) -> Vec<String> {
-    if path.is_empty() {
-        return Vec::new();
-    }
-    let mut v = c;
-    // Erst den vollständigen Namen versuchen (Claims dürfen Punkte enthalten).
-    if let Some(x) = c.get(path) {
-        v = x;
-    } else {
-        for part in path.split('.') {
-            match v.get(part) {
-                Some(x) => v = x,
-                None => return Vec::new(),
-            }
-        }
-    }
-    match v {
-        Value::Array(a) => a
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect(),
-        Value::String(s) => vec![s.clone()],
-        _ => Vec::new(),
-    }
-}
-
-/// Prüft eine JWS-Signatur mit einem JWK. `Ok(false)` = Signatur passt nicht; `Err` = Schlüssel
-/// unbrauchbar für dieses Verfahren.
-fn verify_jws(alg: &str, k: &Jwk, input: &[u8], sig: &[u8]) -> Result<bool, OidcError> {
-    let field = |v: &Option<String>, name: &str| -> Result<Vec<u8>, OidcError> {
-        b64(v
-            .as_deref()
-            .ok_or_else(|| err(format!("JWK ohne {name}")))?)
-    };
-    match (alg, k.kty.as_str()) {
-        ("RS256", "RSA") => {
-            let key = RsaPublicKeyComponents {
-                n: field(&k.n, "n")?,
-                e: field(&k.e, "e")?,
-            };
-            Ok(key.verify(&RSA_PKCS1_2048_8192_SHA256, input, sig).is_ok())
-        }
-        ("ES256", "EC") if k.crv.as_deref() == Some("P-256") => {
-            let (x, y) = (field(&k.x, "x")?, field(&k.y, "y")?);
-            if x.len() != 32 || y.len() != 32 {
-                return Err(err("JWK P-256: x/y nicht 32 Byte"));
-            }
-            let mut point = Vec::with_capacity(65);
-            point.push(0x04);
-            point.extend_from_slice(&x);
-            point.extend_from_slice(&y);
-            Ok(UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, point)
-                .verify(input, sig)
-                .is_ok())
-        }
-        ("EdDSA", "OKP") if k.crv.as_deref() == Some("Ed25519") => {
-            let x = field(&k.x, "x")?;
-            Ok(UnparsedPublicKey::new(&ED25519, x)
-                .verify(input, sig)
-                .is_ok())
-        }
-        // Schlüssel passt nicht zum Verfahren: nicht verwenden.
-        _ => Ok(false),
-    }
 }
 
 #[cfg(test)]
@@ -815,50 +693,5 @@ mod tests {
             )
             .is_err()
         );
-    }
-
-    #[test]
-    fn jws_verification_with_aws_lc() {
-        use aws_lc_rs::rand::SystemRandom;
-        use aws_lc_rs::signature::{
-            ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, Ed25519KeyPair, KeyPair as _,
-        };
-        let rng = SystemRandom::new();
-        let input = b"header.payload";
-
-        let ed = Ed25519KeyPair::generate().unwrap();
-        let jwk = Jwk {
-            kty: "OKP".into(),
-            kid: None,
-            use_: None,
-            alg: None,
-            crv: Some("Ed25519".into()),
-            n: None,
-            e: None,
-            x: Some(b64url(ed.public_key().as_ref())),
-            y: None,
-        };
-        let sig = ed.sign(input);
-        assert!(verify_jws("EdDSA", &jwk, input, sig.as_ref()).unwrap());
-        assert!(!verify_jws("EdDSA", &jwk, b"other", sig.as_ref()).unwrap());
-        // falsches Verfahren für den Schlüssel
-        assert!(!verify_jws("RS256", &jwk, input, sig.as_ref()).unwrap());
-
-        let ec = EcdsaKeyPair::generate(&ECDSA_P256_SHA256_FIXED_SIGNING).unwrap();
-        let pk = ec.public_key().as_ref().to_vec();
-        let jwk = Jwk {
-            kty: "EC".into(),
-            kid: None,
-            use_: None,
-            alg: None,
-            crv: Some("P-256".into()),
-            n: None,
-            e: None,
-            x: Some(b64url(&pk[1..33])),
-            y: Some(b64url(&pk[33..65])),
-        };
-        let sig = ec.sign(&rng, input).unwrap();
-        assert!(verify_jws("ES256", &jwk, input, sig.as_ref()).unwrap());
-        assert!(!verify_jws("ES256", &jwk, b"x", sig.as_ref()).unwrap());
     }
 }

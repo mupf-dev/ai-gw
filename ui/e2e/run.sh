@@ -35,6 +35,9 @@ printf 'upstream:\n  entra:\n    ambient_identity: true\n' >> "$RUN/aigw.yaml"
 # AIGW-101: Signaturprüfung der WASM-Module mit einem Testschlüssel (privater Teil nur in tests/aigw101.spec.js);
 # Übergangsmodus, damit die unsignierten Uploads von AIGW-63 weiter funktionieren.
 printf 'wasm:\n  require_signature: false\n  trusted_keys:\n    - id: e2e-test\n      public_key: "MCowBQYDK2VwAyEAzE7fgt1PTL6EqPFBijaqM3R4YvdTwI3prnZJgrtvzc0="\n' >> "$RUN/aigw.yaml"
+# AIGW-115: JWT-Aussteller (Entra) der Datenebene – der JWKS-Abruf erfolgt erst bei der ersten Token-Anfrage
+# (im Test nicht erreichbar → 401); die UI bietet den Aussteller für Workload-Identitäten an.
+printf 'auth:\n  jwt:\n    issuers:\n      - name: entra-e2e\n        profile: entra\n        tenant_id: "72f988bf-86f1-41af-91ab-2d7cd011db47"\n        audiences: ["api://ai-gw-e2e"]\n        jwks_uri: "http://127.0.0.1:9/keys"\n' >> "$RUN/aigw.yaml"
 # Zweiter Server mit OIDC (Einladungen, F90): Issuer wird erst beim Login abgefragt, der Test meldet sich per
 # Bootstrap-Token an (sessionStorage) und erzeugt nur Einladungslinks.
 OIDC_PORT=$((PORT + 1))

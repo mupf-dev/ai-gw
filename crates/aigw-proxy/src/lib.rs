@@ -68,7 +68,8 @@ use axum::routing::{any, get, post};
 
 pub use aigw_core::observe::{NoopObserver, PayloadMode, RequestObserver, RequestRecord};
 pub use auth::{
-    AllowAll, ApiKey, AuthContext, Authenticator, KeySource, SnapshotAuthenticator, extract_api_key,
+    AllowAll, ApiKey, AuthContext, Authenticator, KeySource, PrepareFuture, SnapshotAuthenticator,
+    extract_api_key,
 };
 pub use error::ErrorFormat;
 pub use limits::{Limiter, RedisBudgets, TokenEstimate};
@@ -79,6 +80,7 @@ pub use routing::{GroupRoute, RoutesTask, SnapshotRoutes};
 
 pub use aigw_cache::ResponseCache;
 pub use aigw_core::config::{DEFAULT_MAX_AUDIO_BYTES, DEFAULT_MAX_BODY_BYTES};
+pub use aigw_jwt::WorkloadVerifier;
 pub use aigw_mcp::McpGateway;
 pub use aigw_plugins::{IndexOptions, PluginChains, Registry as PluginRegistry};
 /// Freigabe für Entra Workload/Managed Identity (`upstream.entra.ambient_identity`, AIGW-90).
@@ -244,16 +246,18 @@ pub fn router(state: ProxyState) -> Router {
 /// AIGW-58: Schlüsselprüfung **vor** dem Einlesen des Bodys. Ohne gültigen Schlüssel wird der
 /// Body verworfen (nicht gelesen) – der Handler meldet dann wie gewohnt `401` im
 /// Eingangsformat. So können Anfragen ohne Schlüssel keinen Speicher bis `max_body_bytes`
-/// belegen. Der Handler prüft den Schlüssel erneut (eine Hash-Abfrage im Snapshot).
+/// belegen. Der Handler prüft den Schlüssel erneut (eine Hash-Abfrage im Snapshot; bei
+/// Access-Tokens ein Treffer im Token-Cache).
 pub(crate) async fn auth_gate(
     axum::extract::State(auth): axum::extract::State<Arc<dyn Authenticator>>,
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    if auth
-        .authenticate(extract_api_key(req.headers()).as_ref())
-        .is_ok()
-    {
+    let key = extract_api_key(req.headers());
+    // AIGW-115: ggf. JWKS des Token-Ausstellers nachladen (asynchron, gedrosselt); die
+    // eigentliche Prüfung bleibt synchron und landet im Token-Cache.
+    auth.prepare(key.as_ref()).await;
+    if auth.authenticate(key.as_ref()).is_ok() {
         return next.run(req).await;
     }
     let (parts, _body) = req.into_parts();

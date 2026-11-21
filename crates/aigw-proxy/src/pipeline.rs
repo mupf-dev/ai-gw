@@ -130,10 +130,13 @@ impl<'a> Pipeline<'a> {
         } else {
             let span = crate::trace::auth_span();
             let _g = span.enter();
-            self.st
+            let auth = self
+                .st
                 .auth
                 .authenticate(extract_api_key(headers).as_ref())
-                .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?
+                .inspect_err(|e| crate::trace::fail(&span, error_type(e.kind)))?;
+            crate::trace::record_auth(&span, &auth);
+            auth
         };
         self.rec.set_key(&auth);
         self.auth = Some(auth.clone());

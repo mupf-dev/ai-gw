@@ -36,6 +36,8 @@ export const auth = $state<{
   maxAdminKeyLifetimeSecs: number | null;
   /** Link-Vorlage zum Tracing-System (`admin.ui.trace_url`, `{traceId}`). */
   traceUrl: string | null;
+  /** JWT-Aussteller der Datenebene (`auth.jwt.issuers`, AIGW-115) für Workload-Identitäten am Key. */
+  workloadIssuers: string[];
 }>({
   loaded: false,
   oidc: false,
@@ -48,6 +50,7 @@ export const auth = $state<{
   uiMock: true,
   maxAdminKeyLifetimeSecs: null,
   traceUrl: null,
+  workloadIssuers: [],
 });
 
 const AUTH_ERRORS: Record<string, string> = {
@@ -150,6 +153,7 @@ async function fetchInfo(): Promise<boolean> {
   auth.uiMock = data.uiMock ?? true;
   auth.maxAdminKeyLifetimeSecs = data.maxAdminKeyLifetimeSecs ?? null;
   auth.traceUrl = data.traceUrl ?? null;
+  auth.workloadIssuers = data.workloadIssuers ?? [];
   setCsrfToken(data.session?.csrfToken ?? null);
   return true;
 }

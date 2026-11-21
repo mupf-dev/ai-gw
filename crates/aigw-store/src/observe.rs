@@ -154,6 +154,10 @@ pub struct RequestLogRow {
     /// Erkennungen der Guardrail-Plugins (F161; Zähler, nie Inhalte).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub guardrails: Vec<GuardrailRow>,
+    /// Workload-/Agent-Identität bei Anmeldung mit Access-Token (AIGW-115): Aussteller,
+    /// Kennung, Art, ggf. Nutzer und Blueprint – nie das Token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload: Option<aigw_core::workload::WorkloadPrincipal>,
 }
 
 /// Erkennungen eines Guardrail-Plugins in einer Anfrage (Spalte `request_log.guardrails`,
@@ -313,7 +317,7 @@ impl RollupCounts {
     }
 }
 
-pub(crate) const REQUEST_LOG_COLUMNS: [&str; 33] = [
+pub(crate) const REQUEST_LOG_COLUMNS: [&str; 34] = [
     "id",
     "at",
     "endpoint",
@@ -347,6 +351,7 @@ pub(crate) const REQUEST_LOG_COLUMNS: [&str; 33] = [
     "error_class",
     "trace_id",
     "guardrails",
+    "workload",
 ];
 
 pub(crate) const ROLLUP_KEY_COLUMNS: [&str; 7] = [
@@ -408,7 +413,7 @@ fn insert_sql(backend: Backend, table: &str, cols: &[&str], rows: usize) -> Stri
 
 impl RequestLogRow {
     /// Werte in Spaltenreihenfolge von [`REQUEST_LOG_COLUMNS`].
-    fn vals(&self) -> Result<[Val; 33], StoreError> {
+    fn vals(&self) -> Result<[Val; 34], StoreError> {
         let id = |s: Option<&str>, what: &str| Val::uuid_text(s, what);
         Ok([
             id(Some(&self.id), "request_log.id")?,
@@ -454,6 +459,12 @@ impl RequestLogRow {
             } else {
                 Val::Json(Some(serde_json::to_value(&self.guardrails)?))
             },
+            Val::Json(
+                self.workload
+                    .as_ref()
+                    .map(serde_json::to_value)
+                    .transpose()?,
+            ),
         ])
     }
 }
@@ -814,6 +825,10 @@ pub(crate) fn request_log_from_row(row: &DbRow) -> Result<RequestLogRow, StoreEr
         guardrails: match row.opt_json_value("guardrails")? {
             Some(v) if !v.is_null() => serde_json::from_value(v)?,
             _ => Vec::new(),
+        },
+        workload: match row.opt_json_value("workload")? {
+            Some(v) if !v.is_null() => serde_json::from_value(v)?,
+            _ => None,
         },
     })
 }

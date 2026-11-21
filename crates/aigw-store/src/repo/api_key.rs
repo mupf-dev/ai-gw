@@ -37,9 +37,43 @@ pub(crate) fn api_key_from_row(row: &DbRow) -> Result<(ApiKey, KeyHash), StoreEr
 }
 
 impl AdminTx {
+    /// AIGW-115: Jede Workload-/Agent-Identität darf höchstens einem nicht widerrufenen Key
+    /// zugeordnet sein. Läuft **nach** dem Schreiben in derselben Transaktion (GitOps: einmal
+    /// vor dem Commit), damit das Umhängen einer Identität zwischen Keys in einem Apply
+    /// unabhängig von der Reihenfolge gelingt.
+    pub(crate) async fn check_workload_identities_unique(&mut self) -> Result<(), StoreError> {
+        let rows = Q::new(
+            "SELECT name, workload_identities FROM api_key \
+             WHERE state <> 'revoked' AND workload_identities <> '[]' ORDER BY name",
+        )
+        .fetch_all(&mut self.tx)
+        .await?;
+        let mut seen: std::collections::HashMap<aigw_core::workload::WorkloadKey, String> =
+            std::collections::HashMap::new();
+        for row in rows {
+            let name = row.text("name")?;
+            let list: Vec<aigw_core::workload::WorkloadIdentity> =
+                row.json("workload_identities")?;
+            for w in list {
+                if let Some(other) = seen.insert(w.key(), name.clone())
+                    && other != name
+                {
+                    return Err(StoreError::Conflict(format!(
+                        "workloadIdentities: {}/{} ist bereits dem Key {other:?} zugeordnet \
+                         (Key {name:?})",
+                        w.issuer, w.subject
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// F3: Organisation ist Pflicht; mit Team muss sie die Organisation des Teams sein.
     /// (Der zusammengesetzte Fremdschlüssel sichert das zusätzlich in der Datenbank ab.)
+    /// AIGW-115: zusätzlich Format der Workload-Identitäten.
     pub(crate) async fn check_key_scope(&mut self, spec: &ApiKeySpec) -> Result<(), StoreError> {
+        spec.validate()?;
         if spec.organization.is_empty() {
             return Err(StoreError::Invalid(
                 "organization: Pflichtfeld (Keys gehören immer zu einer Organisation)".into(),
@@ -104,6 +138,9 @@ impl Store {
         cols.push(("state", Col::text(ApiKeyState::Active.as_str())));
         let cols = tx.resolve_cols(cols).await?;
         tx.insert_row(ResourceKind::ApiKey, id, &meta, cols).await?;
+        if !spec.workload_identities.is_empty() {
+            tx.check_workload_identities_unique().await?;
+        }
         let audit = ApiKey {
             id,
             metadata: meta,
@@ -195,6 +232,9 @@ impl Store {
         let cols = tx.resolve_cols(spec.to_columns()?).await?;
         tx.update_row_expect(ResourceKind::ApiKey, before.id, &meta, cols, extras.expect)
             .await?;
+        if !spec.workload_identities.is_empty() {
+            tx.check_workload_identities_unique().await?;
+        }
         let after = ApiKey {
             id: before.id,
             metadata: meta,
@@ -285,7 +325,7 @@ impl Store {
     /// Rotiert einen Key (AIGW-28): legt in **einer** Transaktion einen neuen Key `new_meta`
     /// mit derselben Spezifikation an und setzt beim alten Key den Ablauf auf
     /// `old_expires_at` (ein früherer, bereits gesetzter Ablauf bleibt). Der Klartext des neuen
-    /// Keys steht nur im Ergebnis.
+    /// Keys steht nur im Ergebnis. Workload-Identitäten (AIGW-115) ziehen zum neuen Key um.
     pub async fn rotate_api_key(
         &self,
         actor: &str,
@@ -342,6 +382,8 @@ impl Store {
             .map_or(old_expires_at, |e| e.min(old_expires_at));
         let mut after = before.clone();
         after.spec.expires_at = Some(expires);
+        // AIGW-115: Workload-Identitäten ziehen zum neuen Key um (eindeutige Zuordnung).
+        after.spec.workload_identities.clear();
         let cols = tx.resolve_cols(after.spec.to_columns()?).await?;
         tx.update_row_expect(
             ResourceKind::ApiKey,

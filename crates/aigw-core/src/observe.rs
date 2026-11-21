@@ -376,6 +376,8 @@ pub struct RequestRecord {
     pub organization_id: Option<Id>,
     /// Client-Adresse.
     pub client_ip: Option<IpAddr>,
+    /// Workload-/Agent-Identität, falls mit Access-Token statt Key angemeldet (AIGW-115).
+    pub workload: Option<Arc<crate::workload::WorkloadPrincipal>>,
     /// Vom Client mitgegebene Request-ID (`x-request-id` bzw. `x-client-request-id`), zur
     /// Korrelation im Log-Explorer (AIGW-46). Unverändert vom Client; der Writer kürzt und
     /// filtert sie.
@@ -479,6 +481,7 @@ impl RequestRecord {
             team_id: None,
             organization_id: None,
             client_ip: None,
+            workload: None,
             client_request_id: None,
             payload: None,
             trace_id: None,

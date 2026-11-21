@@ -21,6 +21,7 @@ pub mod upstream;
 pub mod validate;
 pub mod wasm;
 pub mod wire;
+pub mod workload;
 
 pub use config::Config;
 pub use error::{Error, Result};

@@ -135,6 +135,8 @@ pub async fn apply(
             }
         }
     }
+    // AIGW-115: Workload-Identitäten eindeutig (nach allen Schritten, reihenfolgeunabhängig).
+    tx.check_workload_identities_unique().await?;
     let version = tx.commit().await?;
     Ok(ApplyReport {
         plan,

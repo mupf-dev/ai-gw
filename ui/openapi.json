@@ -12265,6 +12265,13 @@
               "null"
             ],
             "description": "Besitzender Nutzer (Name)."
+          },
+          "workloadIdentities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkloadIdentity"
+            },
+            "description": "Workload-/Agent-Identitäten, die sich statt mit dem Klartext-Key mit einem\nAccess-Token (JWT) eines Ausstellers aus `auth.jwt.issuers` anmelden (AIGW-115). Jede\nIdentität darf nur einem Key zugeordnet sein."
           }
         },
         "additionalProperties": false
@@ -12636,6 +12643,13 @@
           "uiMock": {
             "type": "boolean",
             "description": "Mock-Modus der UI anbieten (`admin.ui.mock`, F135): `false` blendet den Schalter aus."
+          },
+          "workloadIssuers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Namen der vertrauenswürdigen JWT-Aussteller der Datenebene (`auth.jwt.issuers`,\nAIGW-115) – Auswahl für Workload-Identitäten am Key; nur für Angemeldete."
           }
         }
       },
@@ -16280,6 +16294,17 @@
           "usageEstimated": {
             "type": "boolean",
             "description": "Usage geschätzt."
+          },
+          "workload": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorkloadPrincipal",
+                "description": "Workload-/Agent-Identität bei Anmeldung mit Access-Token (AIGW-115). Die Nutzerkennung\ndelegierter Tokens (`user`) sehen nur `admin` und `auditor` (wie die Client-Adresse)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -18086,6 +18111,90 @@
             "description": "IDs der vertrauenswürdigen Schlüssel (`wasm.trusted_keys`)."
           }
         }
+      },
+      "WorkloadIdentity": {
+        "type": "object",
+        "description": "Eine Workload- bzw. Agent-Identität, die sich mit einem Access-Token statt mit dem\nKlartext-Key anmelden darf (Feld `workloadIdentities` am API-Key).",
+        "required": [
+          "issuer",
+          "subject"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Freitext (z. B. Name des Agenten)."
+          },
+          "issuer": {
+            "type": "string",
+            "description": "Name des Ausstellers aus `auth.jwt.issuers[].name` (z. B. `entra-contoso`)."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Wert des Kennungs-Claims, z. B. bei Entra die Anwendungs-ID (`azp`/`appid`) der\nAgent-Identität bzw. des Service Principals."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorkloadPrincipal": {
+        "type": "object",
+        "description": "Geprüfte Identität aus einem Access-Token – Grundlage von Zuordnung und Attribution.\nEnthält nie das Token selbst.",
+        "required": [
+          "issuer",
+          "subject",
+          "kind"
+        ],
+        "properties": {
+          "agent": {
+            "type": "boolean",
+            "description": "Entra: Token stammt von einer Agent-Identität (`xms_act_fct` enthält `11`)."
+          },
+          "blueprint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Entra: Agent Identity Blueprint (`xms_par_app_azp`) – nur Protokoll, nie Zuordnung."
+          },
+          "issuer": {
+            "type": "string",
+            "description": "Aussteller-Name aus der Konfiguration."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorkloadTokenKind",
+            "description": "Art des Tokens."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Kennung (Wert des Kennungs-Claims, z. B. Entra `azp`/`appid`)."
+          },
+          "tenant": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Entra: Tenant (`tid`)."
+          },
+          "user": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Nutzer bei delegierten Tokens (Wert von `user_claim`, Entra `oid`)."
+          }
+        }
+      },
+      "WorkloadTokenKind": {
+        "type": "string",
+        "description": "Art des Tokens (aus den dokumentierten Entra-Claims `idtyp` und `xms_sub_fct`).",
+        "enum": [
+          "app",
+          "delegated",
+          "agent-user",
+          "unknown"
+        ]
       }
     },
     "securitySchemes": {

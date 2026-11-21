@@ -24,6 +24,8 @@
   import InheritFields from '../../lib/admin/InheritFields.svelte';
   import { fromRows, toRows, type LimitRow } from '../../lib/admin/limits';
   import LimitsEditor from '../../lib/admin/LimitsEditor.svelte';
+  import WorkloadIdentitiesEditor, { type IdentityRow } from '../../lib/admin/WorkloadIdentitiesEditor.svelte';
+  import { auth } from '../../lib/session.svelte';
 
   let {
     open = $bindable(false),
@@ -55,6 +57,7 @@
     exposeReasoning: '',
     expires: '90',
     expiresAt: '',
+    identities: [] as IdentityRow[],
   });
   let form = $state(blank());
   let loaded = $state<ApiKey | null>(null);
@@ -127,6 +130,7 @@
         exposeReasoning: k.spec.exposeReasoning == null ? '' : String(k.spec.exposeReasoning),
         expires: 'custom',
         expiresAt: toLocalInput(k.spec.expiresAt),
+        identities: (k.spec.workloadIdentities ?? []).map((w) => ({ issuer: w.issuer, subject: w.subject, description: w.description ?? '' })),
       };
     } catch (e) {
       handleError(e, { action: 'Key laden' });
@@ -156,6 +160,9 @@
     }
     if (form.expires === 'custom' && form.expiresAt && !fromLocalInput(form.expiresAt)) e.expiresAt = 'Ungültiges Datum.';
     if (fromRows(form.extraLimits) === null) e.limits = 'Grenzen müssen ganze Zahlen ≥ 1 sein.';
+    const ids = form.identities.filter((r) => r.subject.trim());
+    if (ids.some((r) => !NAME_RE.test(r.issuer))) e.identities = 'Bitte für jede Identität einen Aussteller wählen.';
+    else if (new Set(ids.map((r) => `${r.issuer}/${r.subject.trim().toLowerCase()}`)).size !== ids.length) e.identities = 'Jede Identität nur einmal angeben.';
     errors = e;
     return Object.keys(e).length === 0;
   }
@@ -184,6 +191,9 @@
       expiresAt,
       payloadMode: (form.payloadMode || null) as S['PayloadMode'] | null,
       exposeReasoning: form.exposeReasoning === '' ? null : form.exposeReasoning === 'true',
+      workloadIdentities: form.identities
+        .filter((r) => r.subject.trim())
+        .map((r) => ({ issuer: r.issuer, subject: r.subject.trim(), ...(r.description.trim() ? { description: r.description.trim() } : {}) })),
     };
   }
 
@@ -368,6 +378,13 @@
         <legend class="mb-1 text-sm font-medium text-fg">Weitere Limits <span class="text-xs font-normal text-fg-subtle">(andere Fenster, z. B. Kalendermonat, oder je Modellgruppe)</span></legend>
         <LimitsEditor bind:value={form.extraLimits} {groups} />
         {#if errors.limits}<p class="flex items-center gap-1 text-xs text-danger-fg"><Icon name="alert" size={12} />{errors.limits}</p>{/if}
+      </fieldset>
+      <fieldset class="flex flex-col gap-1.5 sm:col-span-2">
+        <legend class="mb-1 text-sm font-medium text-fg">
+          Workload-/Agent-Identitäten <span class="text-xs font-normal text-fg-subtle">(Anmeldung mit Access-Token statt Key, z. B. Microsoft Entra Agent ID)</span>
+        </legend>
+        <WorkloadIdentitiesEditor bind:value={form.identities} issuers={auth.workloadIssuers} />
+        {#if errors.identities}<p class="flex items-center gap-1 text-xs text-danger-fg"><Icon name="alert" size={12} />{errors.identities}</p>{/if}
       </fieldset>
       <InheritFields bind:payloadMode={form.payloadMode} bind:exposeReasoning={form.exposeReasoning} parents={inheritParents} />
       <div class="sm:col-span-2"><FormError message={formError} /></div>

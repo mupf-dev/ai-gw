@@ -23,6 +23,8 @@
     void id;
     if (open && id) void detail.reload();
   });
+  // AIGW-115: Art des Access-Tokens (Entra: idtyp/xms_sub_fct).
+  const WORKLOAD_KIND: Record<string, string> = { app: 'App-only', delegated: 'für Nutzer (OBO)', 'agent-user': 'Agent-Nutzerkonto', unknown: 'Token' };
   const traceLink = (t: string) => (auth.traceUrl ? auth.traceUrl.replace('{traceId}', encodeURIComponent(t)) : null);
   const PAYLOAD: Record<string, string> = { forbidden: 'nur für Admin/Auditor', 'not-stored': 'nicht gespeichert (observe.payload)', available: 'verfügbar' };
 </script>
@@ -53,6 +55,16 @@
               {#if r.apiKey}<a class="font-mono hover:text-accent-text" href={href(detailPath('key', r.apiKey))}>{r.apiKey}</a>{:else}–{/if}
               {#if r.team} · <a class="font-mono hover:text-accent-text" href={href(detailPath('team', r.team))}>{r.team}</a>{/if}
             </dd>
+            {#if r.workload}
+              {@const w = r.workload}
+              <dt class="text-fg-muted">Identität</dt>
+              <dd class="text-sm break-all" data-testid="request-workload">
+                <span class="font-mono">{w.issuer}/{w.subject}</span>
+                <span class="text-fg-muted"> · {WORKLOAD_KIND[w.kind] ?? w.kind}{w.agent ? ' · Agent' : ''}</span>
+                {#if w.user}<span class="text-fg-muted"> · Nutzer </span><span class="font-mono">{w.user}</span>{/if}
+                {#if w.blueprint}<span class="text-fg-muted"> · Blueprint </span><span class="font-mono">{w.blueprint}</span>{/if}
+              </dd>
+            {/if}
             <dt class="text-fg-muted">Tokens</dt>
             <dd class="num text-sm">{num(r.inputTokens)} → {num(r.outputTokens)}{r.reasoningTokens ? ` (Reasoning ${num(r.reasoningTokens)})` : ''}{r.cachedTokens ? ` · Cache ${num(r.cachedTokens)}` : ''}{r.usageEstimated ? ' · geschätzt' : ''}</dd>
             <dt class="text-fg-muted">Kosten</dt><dd class="num text-sm">{amount(r.cost)}</dd>

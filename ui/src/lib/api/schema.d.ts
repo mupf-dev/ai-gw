@@ -1378,6 +1378,12 @@ export interface components {
             team?: string | null;
             /** @description Besitzender Nutzer (Name). */
             user?: string | null;
+            /**
+             * @description Workload-/Agent-Identitäten, die sich statt mit dem Klartext-Key mit einem
+             *     Access-Token (JWT) eines Ausstellers aus `auth.jwt.issuers` anmelden (AIGW-115). Jede
+             *     Identität darf nur einem Key zugeordnet sein.
+             */
+            workloadIdentities?: components["schemas"]["WorkloadIdentity"][];
         };
         /**
          * @description Zustand eines API-Keys.
@@ -1567,6 +1573,11 @@ export interface components {
             traceUrl?: string | null;
             /** @description Mock-Modus der UI anbieten (`admin.ui.mock`, F135): `false` blendet den Schalter aus. */
             uiMock: boolean;
+            /**
+             * @description Namen der vertrauenswürdigen JWT-Aussteller der Datenebene (`auth.jwt.issuers`,
+             *     AIGW-115) – Auswahl für Workload-Identitäten am Key; nur für Angemeldete.
+             */
+            workloadIssuers?: string[];
         };
         /**
          * @description Anmeldeart.
@@ -2996,6 +3007,7 @@ export interface components {
             ttftMs?: number | null;
             /** @description Usage geschätzt. */
             usageEstimated: boolean;
+            workload?: components["schemas"]["WorkloadPrincipal"] | null;
         };
         /** @description Seite des Log-Explorers. */
         RequestLogList: {
@@ -3684,6 +3696,46 @@ export interface components {
             /** @description IDs der vertrauenswürdigen Schlüssel (`wasm.trusted_keys`). */
             trustedKeys: string[];
         };
+        /**
+         * @description Eine Workload- bzw. Agent-Identität, die sich mit einem Access-Token statt mit dem
+         *     Klartext-Key anmelden darf (Feld `workloadIdentities` am API-Key).
+         */
+        WorkloadIdentity: {
+            /** @description Freitext (z. B. Name des Agenten). */
+            description?: string | null;
+            /** @description Name des Ausstellers aus `auth.jwt.issuers[].name` (z. B. `entra-contoso`). */
+            issuer: string;
+            /**
+             * @description Wert des Kennungs-Claims, z. B. bei Entra die Anwendungs-ID (`azp`/`appid`) der
+             *     Agent-Identität bzw. des Service Principals.
+             */
+            subject: string;
+        };
+        /**
+         * @description Geprüfte Identität aus einem Access-Token – Grundlage von Zuordnung und Attribution.
+         *     Enthält nie das Token selbst.
+         */
+        WorkloadPrincipal: {
+            /** @description Entra: Token stammt von einer Agent-Identität (`xms_act_fct` enthält `11`). */
+            agent?: boolean;
+            /** @description Entra: Agent Identity Blueprint (`xms_par_app_azp`) – nur Protokoll, nie Zuordnung. */
+            blueprint?: string | null;
+            /** @description Aussteller-Name aus der Konfiguration. */
+            issuer: string;
+            /** @description Art des Tokens. */
+            kind: components["schemas"]["WorkloadTokenKind"];
+            /** @description Kennung (Wert des Kennungs-Claims, z. B. Entra `azp`/`appid`). */
+            subject: string;
+            /** @description Entra: Tenant (`tid`). */
+            tenant?: string | null;
+            /** @description Nutzer bei delegierten Tokens (Wert von `user_claim`, Entra `oid`). */
+            user?: string | null;
+        };
+        /**
+         * @description Art des Tokens (aus den dokumentierten Entra-Claims `idtyp` und `xms_sub_fct`).
+         * @enum {string}
+         */
+        WorkloadTokenKind: "app" | "delegated" | "agent-user" | "unknown";
     };
     responses: never;
     parameters: never;

@@ -209,6 +209,56 @@ Inline-Deployments ohne Zugangsdaten.
   `entraClientId`). `localhost` wird dafür gezielt von den SSRF-Regeln ausgenommen – nichts in
   `admin.allow_private_upstreams` eintragen.
 
+### Workload- und Agent-Identitäten (JWT)
+
+AIGW-115, Konzept [18-workload-identitaeten.md](../konzept/18-workload-identitaeten.md):
+Datenebene und MCP-Gateway nehmen neben API-Keys Access-Tokens vertrauenswürdiger Aussteller
+an (z. B. **Microsoft Entra Agent ID**). Ohne `auth.jwt.issuers` ist das aus.
+
+```yaml
+auth:
+  jwt:
+    issuers:
+      - name: entra-prod                 # Name für workloadIdentities[].issuer am Key
+        profile: entra                   # entra | generic
+        tenant_id: "<tenant-guid>"       # entra: Pflicht (GUID, nicht common/organizations)
+        audiences: ["api://ai-gw", "<client-id>"]   # Pflicht: v1-Tokens = App-ID-URI, v2 = Client-ID
+        # authority: https://login.microsoftonline.com   # souveräne Clouds: anpassen (+ issuers)
+        # issuers: [...]                 # entra: Standard sts.windows.net/<tid>/ und <authority>/<tid>/v2.0
+        # jwks_uri: ...                  # entra: Standard <authority>/<tid>/discovery/v2.0/keys
+        # algorithms: [RS256, ES256]     # Teilmenge; none/HS* nie
+        # identity_claims: [azp, appid]  # Kennung für die Zuordnung (generic: [sub])
+        # user_claim: oid                # nur Attribution delegierter Tokens
+        required_roles: [Gateway.Invoke] # optional, App-only (roles)
+        # required_scopes: [access_as_user]   # optional, OBO/Agent-User (scp)
+        # require_agent: true            # nur Agent-Identitäten (xms_act_fct enthält 11)
+      - name: keycloak
+        profile: generic
+        issuers: ["https://sso.example.org/realms/agents"]   # JWKS per Discovery
+        audiences: ["ai-gw"]
+    clock_skew_secs: 60          # höchstens 300
+    jwks_cache_secs: 3600
+    jwks_refresh_min_secs: 30    # Nachladen bei unbekannter kid höchstens so oft
+    http_timeout_secs: 10
+    max_jwks_bytes: 262144
+    max_token_bytes: 16384
+    token_cache_entries: 10000   # geprüfte Tokens bis exp (0 = aus)
+    # ca_file: /etc/aigw/idp-ca.pem
+```
+
+- Zuordnung am Key: `spec.workloadIdentities: [{issuer: entra-prod, subject: <App-ID der
+  Agent-Identität>, description: …}]` (UI: Key bearbeiten → „Workload-/Agent-Identitäten“).
+  Eine Identität gehört zu höchstens einem Key (`409`); Rotation nimmt sie zum neuen Key mit.
+- Antworten: ungültiges/abgelaufenes Token `401 invalid_api_key`; gültiges Token, aber
+  Identität keinem aktiven Key zugeordnet bzw. Rolle/Scope/Agent fehlt `403
+  identity_not_allowed`. Gründe stehen nur im `debug`-Log (ohne Token).
+- Das Token geht nie an Upstreams; im Request-Log steht die Identität (`workload`), nie das
+  Token. Widerruf wirkt sofort nur über den Key (Identität entfernen, sperren); das Token
+  selbst gilt beim Aussteller bis `exp`.
+- Startprüfung: falsche Werte (fehlende `audiences`, `tenant_id` keine GUID, unerlaubtes
+  Verfahren, doppelte Namen/Aussteller) brechen den Start ab. ENV-Overrides wie üblich,
+  z. B. `AIGW_AUTH__JWT__CLOCK_SKEW_SECS=30`.
+
 ### Postgres mit TLS (z. B. Azure Database for PostgreSQL)
 
 `store.url` nimmt die libpq-Parameter `sslmode` und `sslrootcert` an (TLS über rustls):

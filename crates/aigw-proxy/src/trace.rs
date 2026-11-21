@@ -92,7 +92,25 @@ pub(crate) fn auth_span() -> Span {
         otel.status_code = Empty,
         error.type = Empty,
         aigw.team_id = Empty,
+        aigw.workload.issuer = Empty,
+        aigw.workload.subject = Empty,
+        aigw.workload.kind = Empty,
+        aigw.workload.agent = Empty,
     )
+}
+
+/// Ergebnis der Schlüsselprüfung am Auth-Span: Team und – bei Anmeldung mit Access-Token –
+/// die Workload-/Agent-Identität (AIGW-115; nie Token oder Nutzerkennung).
+pub(crate) fn record_auth(span: &Span, auth: &crate::auth::AuthContext) {
+    if let Some(t) = auth.team_id() {
+        span.record("aigw.team_id", t.to_string());
+    }
+    if let Some(w) = &auth.workload {
+        span.record("aigw.workload.issuer", w.issuer.as_str());
+        span.record("aigw.workload.subject", w.subject.as_str());
+        span.record("aigw.workload.kind", w.kind.as_str());
+        span.record("aigw.workload.agent", w.agent);
+    }
 }
 
 /// Plugin-Kette (AIGW-36): eine Phase (`request` bzw. `response`) mit der Zahl der

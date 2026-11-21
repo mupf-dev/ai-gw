@@ -957,6 +957,10 @@ pub struct AuthInfo {
     /// Angemeldete.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_url: Option<String>,
+    /// Namen der vertrauenswürdigen JWT-Aussteller der Datenebene (`auth.jwt.issuers`,
+    /// AIGW-115) – Auswahl für Workload-Identitäten am Key; nur für Angemeldete.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workload_issuers: Vec<String>,
 }
 
 /// Liefert die Anmeldeverfahren und den angemeldeten Principal (für die UI).
@@ -977,6 +981,11 @@ pub(crate) async fn auth_info(State(st): State<AdminState>, headers: HeaderMap) 
     };
     let max_admin_key_lifetime_secs = session.as_ref().and(st.auth_opts.max_admin_key_lifetime);
     let trace_url = session.as_ref().and(st.trace_url.clone());
+    let workload_issuers = if session.is_some() {
+        st.workload_issuers.to_vec()
+    } else {
+        Vec::new()
+    };
     let mut res = Json(AuthInfo {
         oidc,
         login_url: oidc.then(|| "/admin/auth/login".to_owned()),
@@ -986,6 +995,7 @@ pub(crate) async fn auth_info(State(st): State<AdminState>, headers: HeaderMap) 
         ui_mock: st.ui_mock,
         max_admin_key_lifetime_secs,
         trace_url,
+        workload_issuers,
     })
     .into_response();
     res.headers_mut()

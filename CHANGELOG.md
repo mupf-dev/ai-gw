@@ -9,6 +9,17 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Hinzugefügt
 
+- **Workload-/Agent-Identitäten, Microsoft Entra Agent ID (AIGW-115):** Datenebene und
+  MCP-Gateway nehmen neben API-Keys Access-Tokens (JWT) vertrauenswürdiger Aussteller an
+  (`auth.jwt.issuers`, Profile `entra` und `generic`). Prüfung von Signatur (nur RS256/ES256),
+  `iss`, `aud`, `exp`/`nbf`/`iat`, `tid`, optional App-Rollen/Scopes und Agent-Pflicht
+  (`xms_act_fct`); JWKS über den Outbound-Baustein mit Cache und gedrosseltem Nachladen bei
+  Schlüsselwechsel. Zuordnung über `spec.workloadIdentities` am API-Key (Admin-API, GitOps, UI;
+  eindeutig über alle Keys, Rotation nimmt sie mit) – alle Key-Regeln gelten unverändert.
+  Attribution (Agent, Art, Nutzer bei OBO, Blueprint) im Request-Log, Log-Explorer, Trace und
+  OTLP-Logs; Token nie im Log und nie an Upstreams. Neues Crate `aigw-jwt` (gemeinsame
+  JWS-Bausteine auch für den OIDC-Login). Migration 0012 (`api_key.workload_identities`,
+  `request_log.workload`). Konzept `docs/konzept/18-workload-identitaeten.md`.
 - **Unsichtbare Unicode-Zeichen im `prompt-filter` (AIGW-109):** `invisible: {action:
   strip|reject|flag, allowJoiners}` erkennt Tag-Zeichen (ASCII-Schmuggel), Zero-Width-, Bidi-,
   Formatzeichen und Folgen von Variantenselektoren auf den geprüften Rollen; legitime Fälle

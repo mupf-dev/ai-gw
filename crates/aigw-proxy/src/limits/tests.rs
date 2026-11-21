@@ -247,6 +247,7 @@ async fn admit_is_atomic_across_levels_and_settles_parts() {
         key_id: None,
         key: Some(Arc::clone(&k)),
         snapshot: None,
+        workload: None,
     };
     let est = TokenEstimate {
         input: 30,
@@ -343,6 +344,7 @@ async fn plugin_grown_input_is_reserved_or_denied() {
         key_id: None,
         key: Some(k),
         snapshot: None,
+        workload: None,
     };
     let est = TokenEstimate {
         input: 50,
@@ -406,6 +408,7 @@ async fn too_large_request_has_no_retry_after() {
         key_id: None,
         key: Some(k),
         snapshot: None,
+        workload: None,
     };
     let est = TokenEstimate {
         input: 10,
@@ -485,6 +488,7 @@ fn conc_auth(key_limit: u64, team_limit: u64) -> (AuthContext, Arc<KeyCtx>) {
             key_id: None,
             key: Some(Arc::clone(&k)),
             snapshot: None,
+            workload: None,
         },
         k,
     )
@@ -539,6 +543,7 @@ async fn concurrency_released_when_window_limit_rejects() {
         key_id: None,
         key: Some(Arc::clone(&k)),
         snapshot: None,
+        workload: None,
     };
     let kk = format!("key:{}:concurrency", k.key.id);
     let est = TokenEstimate::default();
@@ -664,6 +669,7 @@ fn overhead() {
             key_id: None,
             key: Some(k),
             snapshot: None,
+            workload: None,
         };
         let limiter = Limiter::local();
         let none = Limiter::local();

@@ -185,6 +185,8 @@ fn serve(
     aigw_proxy::set_entra_ambient_identity(config.upstream.entra.ambient_identity);
     // AIGW-63: Grenzen der WASM-Plugins und Module aus Dateien vor dem Start prüfen.
     config.wasm.validate()?;
+    // AIGW-115: vertrauenswürdige JWT-Aussteller der Datenebene.
+    config.auth.validate()?;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -293,11 +295,19 @@ fn serve(
             ))
         });
         let tool_metrics = tools.metrics();
+        // AIGW-115: Access-Tokens von Workload-/Agent-Identitäten (auth.jwt).
+        let workload_verifier = aigw_proxy::WorkloadVerifier::new(&config.auth.jwt)
+            .map_err(|e| format!("auth.jwt: {e}"))?
+            .map(std::sync::Arc::new);
+        if let Some(v) = &workload_verifier {
+            tracing::info!(verifier = ?v, "JWT-Anmeldung der Datenebene aktiv");
+        }
         let state = aigw_proxy::ProxyState {
             routes: routes.clone(),
-            auth: std::sync::Arc::new(aigw_proxy::SnapshotAuthenticator::new(
-                runtime_state.snapshot.clone(),
-            )),
+            auth: std::sync::Arc::new(
+                aigw_proxy::SnapshotAuthenticator::new(runtime_state.snapshot.clone())
+                    .with_jwt(workload_verifier),
+            ),
             observer: runtime_state.observer.clone(),
             // Limits, Budgets, Kosten (AIGW-30/31) und Deployment-Kapazität über counters.
             limits: std::sync::Arc::new(aigw_proxy::Limiter::new(
@@ -384,7 +394,10 @@ fn serve(
                 ))
                 .with_read_only(config.gitops.read_only_admin)
                 .with_ui_mock(config.admin.ui.mock)
-                .with_trace_url(config.admin.ui.trace_url.clone()),
+                .with_trace_url(config.admin.ui.trace_url.clone())
+                .with_workload_issuers(
+                    config.auth.jwt.issuers.iter().map(|i| i.name.clone()).collect(),
+                ),
         )
         .merge(aigw_admin::gitops::router(
             aigw_admin::gitops::GitopsState {

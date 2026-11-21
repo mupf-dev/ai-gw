@@ -310,3 +310,24 @@ wasm:
   #  - id: release-2026
   #    public_key: MCowBQYDK2VwAyEA…    # Base64 (roh/SPKI) oder PEM; aigw wasm keygen gibt ihn aus
   require_signature: null          # null = Pflicht, sobald trusted_keys gesetzt; false = Übergang
+
+# Workload-/Agent-Identitäten (docs/konzept/18-workload-identitaeten.md, AIGW-115): Access-Tokens
+# (JWT) vertrauenswürdiger Aussteller statt API-Key auf Datenebene und MCP-Gateway, z. B.
+# Microsoft Entra Agent ID. Zuordnung am API-Key über spec.workloadIdentities. Leer = aus.
+auth:
+  jwt:
+    issuers: []
+    #  - name: entra-prod
+    #    profile: entra                # entra | generic
+    #    tenant_id: "<tenant-guid>"
+    #    audiences: ["api://ai-gw", "<client-id-des-gateways>"]
+    #    required_roles: [Gateway.Invoke]
+    #    # require_agent: true         # nur Agent-Identitäten (xms_act_fct enthält 11)
+    clock_skew_secs: 60
+    jwks_cache_secs: 3600
+    jwks_refresh_min_secs: 30
+    http_timeout_secs: 10
+    max_jwks_bytes: 262144
+    max_token_bytes: 16384
+    token_cache_entries: 10000
+    # ca_file: /etc/aigw/idp-ca.pem

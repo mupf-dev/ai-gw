@@ -289,6 +289,7 @@ impl Snapshot {
                 }
             }
         }
+        snap.rebuild_workload_index();
         for (info, data) in parts.credentials {
             let name = info.metadata.name.clone();
             snap.credential_data.insert(name.clone(), Arc::new(data));
@@ -447,6 +448,7 @@ impl Snapshot {
         // von Keys geänderter Teams/Organisationen neu binden (das durchläuft alle Keys).
         s.keys = self.keys.clone();
         s.key_ids = self.key_ids.clone();
+        let patch_has_keys = !patch.keys.is_empty();
         if !patch.keys.is_empty() || !changed_orgs.is_empty() || !changed_teams.is_empty() {
             let orgs = by_name(&s.organizations);
             let teams = by_name(&s.teams);
@@ -481,6 +483,11 @@ impl Snapshot {
                     s.keys.insert(hash, Arc::new(key_ctx(key, &teams, &orgs)));
                 }
             }
+        }
+        if patch_has_keys {
+            s.rebuild_workload_index();
+        } else {
+            s.workloads = self.workloads.clone();
         }
 
         // Zugangsdaten.

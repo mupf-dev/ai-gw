@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "aigw-jwt"
+description = "JWS-/JWT-Prüfung von ai-gw: JWKS, Signaturen über aws-lc-rs, Workload-/Agent-Tokens (Microsoft Entra Agent ID)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+aigw-core.workspace = true
+aigw-outbound.workspace = true
+aws-lc-rs.workspace = true
+base64.workspace = true
+bytes.workspace = true
+hyper.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+# Nur Feature `testkit` (lokaler JWKS-Server für Tests anderer Crates).
+axum = { workspace = true, optional = true }
+
+[features]
+# Testhilfen: Test-Aussteller (RS256/ES256), lokaler JWKS-/Discovery-Server.
+testkit = ["dep:axum"]
+
+[[test]]
+name = "verifier"
+required-features = ["testkit"]
+
+[lints]
+workspace = true

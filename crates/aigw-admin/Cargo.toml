@@ -15,6 +15,7 @@ build = "build.rs"
 [dependencies]
 aigw-billing.workspace = true
 aigw-core.workspace = true
+aigw-jwt.workspace = true
 aigw-outbound.workspace = true
 aigw-plugins.workspace = true
 aigw-proxy.workspace = true

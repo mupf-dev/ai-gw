@@ -507,6 +507,7 @@ impl Authenticator for SnapAuth {
             key_id: Some(k.0.clone()),
             key: Some(Arc::clone(&k.1)),
             snapshot: Some(Arc::clone(&self.snap)),
+            workload: None,
         })
     }
 }

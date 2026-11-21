@@ -108,6 +108,14 @@ fn to_log(e: &LogEntry, include_payload: bool, observed: u64) -> LogData {
     opt(&mut a, "aigw.api_key_id", &l.api_key_id);
     opt(&mut a, "aigw.team_id", &l.team_id);
     opt(&mut a, "aigw.organization_id", &l.organization_id);
+    if let Some(w) = &l.workload {
+        a.push(KeyValue::str("aigw.workload.issuer", w.issuer.clone()));
+        a.push(KeyValue::str("aigw.workload.subject", w.subject.clone()));
+        a.push(KeyValue::str(
+            "aigw.workload.kind",
+            w.kind.as_str().to_owned(),
+        ));
+    }
     opt(&mut a, "client.address", &l.client_ip);
     let (severity_number, severity_text) = severity(l.status);
     LogData {

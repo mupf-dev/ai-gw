@@ -69,6 +69,8 @@ pub struct Config {
     pub tools: ToolsConfig,
     /// WASM-Plugins: Laufzeit-Grenzen und Module aus Dateien (AIGW-63).
     pub wasm: WasmConfig,
+    /// Datenebene: Access-Tokens (JWT) von Workload-/Agent-Identitäten (AIGW-115).
+    pub auth: crate::workload::AuthConfig,
 }
 
 /// WASM-Plugins (AIGW-63, `docs/konzept/17-wasm-plugins.md`): Standardgrenzen je Aufruf,

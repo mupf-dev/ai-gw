@@ -111,6 +111,8 @@ pub struct AdminState {
     pub(crate) wasm_max_bytes: u64,
     /// Signatur-Richtlinie der WASM-Module (`wasm.trusted_keys`, AIGW-101).
     pub(crate) wasm_trust: Arc<aigw_core::wasm::TrustPolicy>,
+    /// Namen der JWT-Aussteller der Datenebene (`auth.jwt.issuers`, AIGW-115; nur Anzeige).
+    pub(crate) workload_issuers: Arc<[String]>,
 }
 
 /// Einstellungen der Anmeldung (aus `admin.auth`).
@@ -154,7 +156,16 @@ impl AdminState {
             price_suggester: None,
             wasm_max_bytes: aigw_core::config::WasmConfig::default().max_module_bytes,
             wasm_trust: Arc::default(),
+            workload_issuers: Arc::from(Vec::new()),
         }
+    }
+
+    /// Namen der JWT-Aussteller der Datenebene (`auth.jwt.issuers`, AIGW-115) – für
+    /// `GET /admin/api/v1/auth/info` (Auswahl in der UI).
+    #[must_use]
+    pub fn with_workload_issuers(mut self, names: Vec<String>) -> Self {
+        self.workload_issuers = Arc::from(names);
+        self
     }
 
     /// Modus „nur YAML“ (`gitops.read_only_admin`) – nur für die Anzeige in
@@ -274,6 +285,7 @@ impl AdminState {
             price_suggester: None,
             wasm_max_bytes: aigw_core::config::WasmConfig::default().max_module_bytes,
             wasm_trust: Arc::default(),
+            workload_issuers: Arc::from(Vec::new()),
         })
     }
 
