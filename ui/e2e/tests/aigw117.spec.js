@@ -91,7 +91,7 @@ test('Seite Kosten: Kennzahlen, Verlauf, Drilldown, Budget, Export, Befehlspalet
   await useToken(page);
   await gotoReal(page, `/costs?range=24h&organization=${ORG}`);
   await expect(page.getByTestId('cost-kpis')).toBeVisible();
-  await expect(page.getByTestId('kpi-total')).not.toContainText('0,00');
+  await expect(page.getByTestId('kpi-total')).not.toContainText(/Gesamtkosten\s*0,00/);
   await expect(page.getByTestId('cost-filters')).toContainText(ORG);
   // Gestapelter Verlauf (LayerChart) und Tabellen-Alternative.
   await expect(page.getByTestId('cost-chart').getByTestId('stacked-area')).toBeVisible();
@@ -144,13 +144,15 @@ for (const [theme, mode] of [
   ['dunkel', 'dark'],
 ]) {
   test(`echt kosten ${theme}`, async ({ page }) => {
+    // Hoher Viewport statt fullPage: so bleiben Topbar und Seitenleiste (sticky) an ihrem Platz.
+    await page.setViewportSize({ width: 1440, height: 2080 });
     await useToken(page);
     await gotoReal(page, `/costs?range=24h&organization=${ORG}`, { theme: mode });
     await expect(page.getByTestId('cost-chart').getByTestId('stacked-area')).toBeVisible();
     await page.getByTestId('cost-budgets').getByRole('button', { name: ALPHA, exact: true }).click();
     await expect(page.getByTestId('cost-burndown').locator('figure')).toBeVisible();
     await page.waitForTimeout(400);
-    await page.screenshot({ path: `${OUT}/screens/echt-kosten-${theme}-desktop.png`, fullPage: true });
+    await page.screenshot({ path: `${OUT}/screens/echt-kosten-${theme}-desktop.png` });
     clean(page);
   });
 }
