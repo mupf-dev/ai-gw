@@ -78,7 +78,11 @@ use crate::{admin_keys as ak, session as s};
         crate::costs::export,
         crate::playground::models, crate::playground::chat,
     ),
-    components(schemas(VersionInfo, SnapshotInfo, Problem, crate::bounds::Cascade)),
+    components(schemas(
+        VersionInfo, SnapshotInfo, Problem, crate::bounds::Cascade,
+        crate::costs::ExportFormat, crate::costs::Granularity, crate::costs::ForecastMethod,
+        crate::costs::CostExport, crate::costs::CostExportRow,
+    )),
     modifiers(&SecuritySchemes),
     tags(
         (name = "system", description = "Systeminformationen"),

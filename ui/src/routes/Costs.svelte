@@ -150,7 +150,7 @@
       const text = await costExport({ dimension: expDim, granularity: expGran, format: expFormat, ...r, ...scope() });
       download(`aigw-kosten-${expDim}-${r.from.slice(0, 10)}-${r.to.slice(0, 10)}.${expFormat}`, text, expFormat === 'csv' ? 'text/csv' : 'application/json');
     } catch (e) {
-      handleError(e);
+      handleError(e, { action: 'Kosten-Export' });
     } finally {
       exporting = false;
     }

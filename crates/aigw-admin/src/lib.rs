@@ -293,6 +293,7 @@ impl AdminState {
             bootstrap: gate,
             ui_mock: true,
             trace_url: None,
+            currency: Arc::from("USD"),
             price_suggester: None,
             wasm_max_bytes: aigw_core::config::WasmConfig::default().max_module_bytes,
             wasm_trust: Arc::default(),

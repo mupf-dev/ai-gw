@@ -297,6 +297,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/api/v1/costs/breakdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Kostentreiber einer Dimension mit Vorperiode. */
+        get: operations["breakdown"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/costs/budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Budgets mit Verbrauch, Prognose bis Periodenende und (für ein Ziel) Burn-down. */
+        get: operations["budgets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/costs/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Chargeback-Export (CSV oder JSON, gestreamt je Abschnitt). */
+        get: operations["export"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/costs/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Kosten-Kennzahlen im Zeitraum mit Vorperiode. */
+        get: operations["summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/api/v1/deployments": {
         parameters: {
             query?: never;
@@ -1550,6 +1618,8 @@ export interface components {
              *     abschalten: OIDC-Admin anmelden bzw. Admin-API-Key mit Rolle `admin` anlegen).
              */
             bootstrap: boolean;
+            /** @description Abrechnungswährung (`billing.currency`, ISO 4217, AIGW-117) für die Geldformate der UI. */
+            currency: string;
             /** @description Start des Logins (falls OIDC konfiguriert). */
             loginUrl?: string | null;
             /**
@@ -1633,6 +1703,38 @@ export interface components {
          * @enum {string}
          */
         BudgetEnforcement: "strict" | "soft";
+        /** @description Budget mit Prognose. */
+        BudgetForecast: {
+            /** @description Stand (wie `/usage/budgets`; Verbrauch aus `budget_usage`). */
+            budget: components["schemas"]["BudgetStatus"];
+            /**
+             * @description Burn-down je Tag (bei Tagesbudgets je Stunde) über den laufenden Zeitraum; nur mit
+             *     `target`, leer bei `total`.
+             */
+            burnDown: components["schemas"]["BurnPoint"][];
+            /** @description Prognose. */
+            forecast: components["schemas"]["BudgetProjection"];
+            /** @description Zustand. */
+            health: components["schemas"]["BudgetHealth"];
+        };
+        /** @description Budget-Prognosen. */
+        BudgetForecastList: {
+            /** @description Zeitpunkt der Auswertung. */
+            at: string;
+            /** @description Abrechnungswährung. */
+            currency: string;
+            /** @description Budgets (wie `/usage/budgets`). */
+            items: components["schemas"]["BudgetForecast"][];
+            /** @description `false`, wenn `observe.rollups` aus ist (Prognose `average` und Burn-down dann leer). */
+            rollups: boolean;
+            /** @description Zeitzone der Zeiträume (`billing.timezone`). */
+            timezone: string;
+        };
+        /**
+         * @description Zustand eines Budgets laut Prognose.
+         * @enum {string}
+         */
+        BudgetHealth: "ok" | "warning" | "at_risk" | "exhausted";
         /**
          * @description Ebene eines Budgets.
          * @enum {string}
@@ -1652,6 +1754,31 @@ export interface components {
          * @enum {string}
          */
         BudgetPeriod: "day" | "week" | "month" | "total";
+        /** @description Prognose eines Budgets (Hochrechnung, keine Zusage). */
+        BudgetProjection: {
+            /** @description Kosten je Tag laut Verfahren. */
+            dailyRate: components["schemas"]["Amount"];
+            /**
+             * @description Voraussichtlicher Zeitpunkt der Überschreitung (vor Periodenende); `null`, wenn keine
+             *     erwartet wird oder der Betrag schon erreicht ist.
+             */
+            exceedsAt?: string | null;
+            /**
+             * Format: int32
+             * @description Rückblick in Tagen (nur `average`).
+             */
+            lookbackDays?: number | null;
+            /** @description Verfahren. */
+            method: components["schemas"]["ForecastMethod"];
+            projected?: components["schemas"]["Amount"] | null;
+            /**
+             * Format: int64
+             * @description Erwarteter Verbrauch in Prozent des Betrags (abgerundet); `null` bei `total`.
+             */
+            projectedPercent?: number | null;
+            /** @description Überschreitung bis Periodenende erwartet. */
+            willExceed: boolean;
+        };
         /** @description Stand eines Budgets im laufenden Zeitraum. */
         BudgetStatus: {
             /** @description Betrag je Zeitraum. */
@@ -1686,6 +1813,13 @@ export interface components {
             used: components["schemas"]["Amount"];
             /** @description Warnschwellen in Prozent. */
             warnAtPercent: number[];
+        };
+        /** @description Punkt des Burn-downs. */
+        BurnPoint: {
+            projected?: components["schemas"]["Amount"] | null;
+            spent?: components["schemas"]["Amount"] | null;
+            /** @description Ende des Abschnitts (RFC 3339). */
+            t: string;
         };
         /** @description Kapazität eines Deployments (für das Routing). */
         Capacity: {
@@ -1723,6 +1857,240 @@ export interface components {
          * @enum {string}
          */
         ChangeAction: "create" | "update" | "delete" | "unchanged" | "retain" | "skip";
+        /** @description Betrag mit Vergleich zur Vorperiode. */
+        CostDelta: {
+            /** @description Wert im Zeitraum. */
+            amount: components["schemas"]["Amount"];
+            /** @description Änderung absolut (Wert − Vorperiode, negativ = gesunken). */
+            delta: components["schemas"]["Amount"];
+            /**
+             * Format: double
+             * @description Änderung in Prozent; `null` ohne Vorwert.
+             */
+            deltaPercent?: number | null;
+            /** @description Wert in der Vorperiode. */
+            previous: components["schemas"]["Amount"];
+        };
+        /** @description Ein Kostentreiber. */
+        CostDriver: {
+            /** @description Kosten mit Vorperiode. */
+            cost: components["schemas"]["CostDelta"];
+            costPerRequest?: components["schemas"]["Amount"] | null;
+            /**
+             * Format: int64
+             * @description Eingabe-Tokens.
+             */
+            inputTokens: number;
+            /** @description Schlüssel (ID bzw. Name wie bei Analytics; `""` = ohne Wert). */
+            key: string;
+            /** @description Anzeigename (fehlt bei unbekannten bzw. gelöschten Objekten). */
+            name?: string | null;
+            /**
+             * Format: int64
+             * @description Ausgabe-Tokens.
+             */
+            outputTokens: number;
+            /** @description Davon Plugin-Modellaufrufe. */
+            pluginCost: components["schemas"]["Amount"];
+            /**
+             * Format: int64
+             * @description Anfragen.
+             */
+            requests: number;
+            /**
+             * Format: double
+             * @description Anteil an den Gesamtkosten im Zeitraum (0–1).
+             */
+            share?: number | null;
+        };
+        /** @description Kostentreiber einer Dimension. */
+        CostDrivers: {
+            /** @description Abrechnungswährung. */
+            currency: string;
+            /** @description Dimension. */
+            dimension: components["schemas"]["Dimension"];
+            /** @description Beginn. */
+            from: string;
+            /** @description Einträge absteigend nach Kosten (bei Gleichstand nach Vorperiode, Schlüssel). */
+            items: components["schemas"]["CostDriver"][];
+            /** @description Beginn der Vorperiode. */
+            previousFrom: string;
+            /** @description `false`, wenn `observe.rollups` aus ist. */
+            rollups: boolean;
+            /** @description Ende (exklusive). */
+            to: string;
+            /** @description Gesamtkosten mit Vorperiode (alle Gruppen, nicht nur die gelisteten). */
+            total: components["schemas"]["CostDelta"];
+        };
+        /** @description Chargeback-Export als JSON (gestreamt). */
+        CostExport: {
+            /** @description Währung. */
+            currency: string;
+            /** @description Dimension. */
+            dimension: components["schemas"]["Dimension"];
+            /** @description Beginn. */
+            from: string;
+            /** @description Abschnitte. */
+            granularity: components["schemas"]["Granularity"];
+            /** @description Zeilen je Abschnitt und Gruppe (ohne Gruppen ohne Anfragen und Kosten). */
+            rows: components["schemas"]["CostExportRow"][];
+            /** @description Zeitzone der Abschnitte. */
+            timezone: string;
+            /** @description Ende (exklusive). */
+            to: string;
+        };
+        /**
+         * @description Zeile des Chargeback-Exports (JSON; CSV mit denselben Spalten in `snake_case`, Labels und
+         *     Metadaten als Spalten `label.<name>` bzw. `meta.<name>`).
+         */
+        CostExportRow: {
+            /**
+             * Format: int64
+             * @description Aus dem Anbieter-Cache gelesene Tokens.
+             */
+            cachedTokens: number;
+            /** @description Kosten (inkl. Plugins). */
+            cost: components["schemas"]["Amount"];
+            /** @description Kostenstelle (`spec.metadata[billing.cost_center_key]` von Key, Team, Organisation). */
+            costCenter: string;
+            /** @description Währung. */
+            currency: string;
+            /**
+             * Format: int64
+             * @description Eingabe-Tokens.
+             */
+            inputTokens: number;
+            /** @description Schlüssel (ID bzw. Name). */
+            key: string;
+            /** @description Labels des Objekts (`metadata.labels`). */
+            labels: {
+                [key: string]: string;
+            };
+            /** @description Metadaten des Objekts (`spec.metadata`). */
+            metadata: {
+                [key: string]: string;
+            };
+            /** @description Anzeigename. */
+            name: string;
+            /** @description Organisation (Name; nur Organisation/Team/Key). */
+            organization: string;
+            /**
+             * Format: int64
+             * @description Ausgabe-Tokens.
+             */
+            outputTokens: number;
+            /** @description Ende des Abschnitts (exklusive). */
+            periodEnd: string;
+            /** @description Beginn des Abschnitts. */
+            periodStart: string;
+            /** @description Davon Plugin-Modellaufrufe. */
+            pluginCost: components["schemas"]["Amount"];
+            /**
+             * Format: int64
+             * @description Anfragen.
+             */
+            requests: number;
+            /** @description Team (Name; nur Team/Key). */
+            team: string;
+        };
+        /** @description Ein Teil der Kosten. */
+        CostPart: {
+            /** @description Betrag. */
+            amount: components["schemas"]["Amount"];
+            /** @description Art. */
+            part: components["schemas"]["CostPartKind"];
+            /**
+             * Format: double
+             * @description Anteil an den Gesamtkosten (0–1); `null` ohne Kosten.
+             */
+            share?: number | null;
+        };
+        /**
+         * @description Teil der Kostenaufschlüsselung.
+         * @enum {string}
+         */
+        CostPartKind: "input" | "cache_read" | "cache_write" | "output" | "plugins" | "other";
+        /** @description Ersparnisse. */
+        CostSavings: {
+            gatewayCacheEstimate?: components["schemas"]["Amount"] | null;
+            /**
+             * Format: int64
+             * @description Treffer im Antwort-Cache.
+             */
+            gatewayCacheHits: number;
+            /**
+             * Format: int64
+             * @description Treffer ohne Vergleichsbasis (Modellgruppe ohne bezahlte Anfrage im Zeitraum) – nicht
+             *     in der Schätzung enthalten.
+             */
+            gatewayCacheHitsUnestimated: number;
+            /**
+             * @description Prompt-Caching des Anbieters: gelesene Cache-Tokens × (Eingabepreis − Cache-Lesepreis),
+             *     exakt zum Preis der Anfrage (nur Modelle mit eigenem Cache-Lesepreis).
+             */
+            providerCache: components["schemas"]["Amount"];
+            /**
+             * Format: int64
+             * @description Aus dem Anbieter-Cache gelesene Tokens.
+             */
+            providerCacheTokens: number;
+        };
+        /** @description Kosten-Kennzahlen. */
+        CostSummary: {
+            /** @description Aufschlüsselung (Summe = `total.amount`). */
+            breakdown: components["schemas"]["CostPart"][];
+            /**
+             * Format: int64
+             * @description In den Anbieter-Cache geschriebene Tokens.
+             */
+            cacheWriteTokens: number;
+            /**
+             * Format: int64
+             * @description Aus dem Anbieter-Cache gelesene Tokens.
+             */
+            cachedTokens: number;
+            costPer1kInputTokens?: components["schemas"]["Amount"] | null;
+            costPer1kOutputTokens?: components["schemas"]["Amount"] | null;
+            costPerRequest?: components["schemas"]["CostDelta"] | null;
+            /** @description Abrechnungswährung (ISO 4217). */
+            currency: string;
+            /** @description Beginn. */
+            from: string;
+            /**
+             * Format: int64
+             * @description Eingabe-Tokens (inkl. Cache).
+             */
+            inputTokens: number;
+            /**
+             * Format: int64
+             * @description Ausgabe-Tokens (inkl. Reasoning).
+             */
+            outputTokens: number;
+            /** @description Plugin-Modellaufrufe. */
+            plugins: components["schemas"]["PluginCosts"];
+            /** @description Beginn der Vorperiode (gleich lang, direkt davor). */
+            previousFrom: string;
+            /**
+             * Format: int64
+             * @description Anfragen in der Vorperiode.
+             */
+            previousRequests: number;
+            /** @description Ende der Vorperiode (= `from`). */
+            previousTo: string;
+            /**
+             * Format: int64
+             * @description Anfragen im Zeitraum.
+             */
+            requests: number;
+            /** @description `false`, wenn `observe.rollups` aus ist (F33) – dann gibt es keine Daten. */
+            rollups: boolean;
+            /** @description Ersparnisse. */
+            savings: components["schemas"]["CostSavings"];
+            /** @description Ende (exklusive). */
+            to: string;
+            /** @description Gesamtkosten (inkl. Plugins). */
+            total: components["schemas"]["CostDelta"];
+        };
         /** @description Angelegter Admin-API-Key mit Klartext (nur in dieser Antwort). */
         CreatedAdminApiKey: {
             /** @description Key. */
@@ -1885,6 +2253,11 @@ export interface components {
          * @enum {string}
          */
         EntraCredentialKind: "managedIdentity" | "workloadIdentity" | "clientSecret" | "clientCertificate";
+        /**
+         * @description Dateiformat des Exports.
+         * @enum {string}
+         */
+        ExportFormat: "csv" | "json";
         /** @description Fallback auf eine andere Modellgruppe. */
         Fallback: {
             /** @description Ziel-Modellgruppe (Name). */
@@ -1908,6 +2281,16 @@ export interface components {
             /** @description Geheimer Wert: nur „geändert“, nie der Inhalt. */
             secret?: boolean;
         };
+        /**
+         * @description Verfahren der Budget-Prognose.
+         * @enum {string}
+         */
+        ForecastMethod: "average" | "linear";
+        /**
+         * @description Abschnitte des Exports.
+         * @enum {string}
+         */
+        Granularity: "total" | "day" | "week" | "month";
         /** @description Standard-Guardrail-Profil (eingebettet, versioniert). */
         GuardrailProfile: {
             /** @description Bindungen des Profils. */
@@ -2483,6 +2866,26 @@ export interface components {
         PluginCatalog: {
             /** @description Plugins (nach Name sortiert). */
             items: components["schemas"]["PluginInfo"][];
+        };
+        /** @description Kosten der Plugin-Modellaufrufe (in den Gesamtkosten enthalten). */
+        PluginCosts: {
+            /** @description Betrag. */
+            amount: components["schemas"]["Amount"];
+            /**
+             * Format: int64
+             * @description Eingabe-Tokens.
+             */
+            inputTokens: number;
+            /**
+             * Format: int64
+             * @description Ausgabe-Tokens.
+             */
+            outputTokens: number;
+            /**
+             * Format: double
+             * @description Anteil an den Gesamtkosten (0–1).
+             */
+            share?: number | null;
         };
         /**
          * @description Verhalten bei Fehlern eines Plugins.
@@ -5265,6 +5668,283 @@ export interface operations {
             };
             /** @description Keine Berechtigung */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    breakdown: {
+        parameters: {
+            query: {
+                /** @description Dimension (nicht `error_class`). */
+                dimension: components["schemas"]["Dimension"];
+                /** @description Beginn (RFC 3339; Standard: `to` − 30 Tage). */
+                from?: string;
+                /** @description Ende (RFC 3339, exklusive; Standard: jetzt). */
+                to?: string;
+                /** @description Anzahl (1–100, Standard 10); absteigend nach Kosten im Zeitraum. */
+                limit?: number;
+                /** @description Modellgruppen. */
+                modelGroup?: string;
+                /** @description Deployments (Name oder ID). */
+                deployment?: string;
+                /** @description Anbieter. */
+                provider?: string;
+                /** @description Teams (Name oder ID). */
+                team?: string;
+                /** @description API-Keys (Name oder ID). */
+                key?: string;
+                /** @description Organisationen (Name oder ID). */
+                organization?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Kostentreiber */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CostDrivers"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Filter außerhalb des Geltungsbereichs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unbekannter Name in einem Filter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    budgets: {
+        parameters: {
+            query?: {
+                /** @description Nur diese Ebene. */
+                level?: components["schemas"]["BudgetLevelName"];
+                /** @description Nur dieses Ziel (Name oder ID; erfordert `level`) – dann mit Burn-down. */
+                target?: string;
+                /** @description Verfahren (Standard `average`). */
+                method?: components["schemas"]["ForecastMethod"];
+                /** @description Rückblick für `average` in Tagen (1–90, Standard 7). */
+                lookbackDays?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Budgets mit Prognose (nur Ziele mit Leserecht) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetForecastList"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    export: {
+        parameters: {
+            query?: {
+                /** @description Dimension der Zeilen (Standard `team`; nicht `error_class`). */
+                dimension?: components["schemas"]["Dimension"];
+                /** @description Format (Standard `csv`). */
+                format?: components["schemas"]["ExportFormat"];
+                /** @description Abschnitte (Standard `month`). */
+                granularity?: components["schemas"]["Granularity"];
+                /** @description Beginn (RFC 3339; Standard: `to` − 30 Tage). */
+                from?: string;
+                /** @description Ende (RFC 3339, exklusive; Standard: jetzt). */
+                to?: string;
+                /** @description Modellgruppen. */
+                modelGroup?: string;
+                /** @description Deployments (Name oder ID). */
+                deployment?: string;
+                /** @description Anbieter. */
+                provider?: string;
+                /** @description Teams (Name oder ID). */
+                team?: string;
+                /** @description API-Keys (Name oder ID). */
+                key?: string;
+                /** @description Organisationen (Name oder ID). */
+                organization?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Kosten je Abschnitt und Gruppe, gestreamt. CSV: Kopfzeile `period_start,period_end,dimension,key,name,organization,team,cost_center`, dann `label.<name>` und `meta.<name>` der sichtbaren Objekte, dann `requests,input_tokens,output_tokens,cached_tokens,cost,plugin_cost,currency`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                    "application/json": components["schemas"]["CostExport"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Filter außerhalb des Geltungsbereichs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unbekannter Name in einem Filter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    summary: {
+        parameters: {
+            query?: {
+                /** @description Beginn (RFC 3339; Standard: `to` − 30 Tage). Auf die Minute abgerundet. */
+                from?: string;
+                /** @description Ende (RFC 3339, exklusive; Standard: jetzt). Auf die Minute aufgerundet. */
+                to?: string;
+                /** @description Modellgruppen. */
+                modelGroup?: string;
+                /** @description Deployments (Name oder ID). */
+                deployment?: string;
+                /** @description Anbieter. */
+                provider?: string;
+                /** @description Teams (Name oder ID). */
+                team?: string;
+                /** @description API-Keys (Name oder ID). */
+                key?: string;
+                /** @description Organisationen (Name oder ID). */
+                organization?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Kennzahlen */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CostSummary"];
+                };
+            };
+            /** @description Ungültige Parameter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Nicht angemeldet */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Filter außerhalb des Geltungsbereichs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unbekannter Name in einem Filter */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
