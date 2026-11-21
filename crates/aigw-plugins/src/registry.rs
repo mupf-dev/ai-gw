@@ -134,7 +134,9 @@ impl Registry {
         r.register(Arc::new(builtin::prompt_leak::Factory));
         r.register(Arc::new(builtin::link_guard::Factory));
         r.register(Arc::new(builtin::language::Factory));
-        r.register(Arc::new(builtin::schema_guard::Factory::new(Arc::clone(&host))));
+        r.register(Arc::new(builtin::schema_guard::Factory::new(Arc::clone(
+            &host,
+        ))));
         r.register(Arc::new(builtin::content_safety::Factory::new(host)));
         // Nur Konfigurationsprüfung; die Laufzeit (`aigw-wasm`) ersetzt die Fabrik im Server.
         r.register(Arc::new(builtin::wasm::Factory));

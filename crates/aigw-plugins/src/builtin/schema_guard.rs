@@ -87,16 +87,6 @@ pub enum Action {
     Retry,
 }
 
-impl Action {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Flag => "flag",
-            Self::Reject => "reject",
-            Self::Retry => "retry",
-        }
-    }
-}
-
 /// Welche Tool-Aufrufe geprüft werden.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -341,7 +331,11 @@ fn describe(v: &jsonschema::Validator, instance: &Value) -> Option<(String, Stri
     let mut hint = String::new();
     for e in v.iter_errors(instance).take(3) {
         let path = e.instance_path().to_string();
-        let path = if path.is_empty() { "/".to_owned() } else { path };
+        let path = if path.is_empty() {
+            "/".to_owned()
+        } else {
+            path
+        };
         if summary.is_none() {
             summary = Some(format!("{} bei {path}", e.kind().keyword()));
         }
@@ -366,7 +360,9 @@ impl SchemaGuard {
     fn from_config(c: Config, host: Arc<dyn PluginHost>) -> Result<Self, String> {
         let max_retries = c.max_retries.unwrap_or(1);
         if !(1..=MAX_RETRIES).contains(&max_retries) {
-            return Err(format!("maxRetries muss zwischen 1 und {MAX_RETRIES} liegen"));
+            return Err(format!(
+                "maxRetries muss zwischen 1 und {MAX_RETRIES} liegen"
+            ));
         }
         if c.max_retries.is_some() && c.action != Action::Retry {
             return Err("maxRetries gilt nur mit action: retry".into());
@@ -475,7 +471,11 @@ impl SchemaGuard {
             )),
             TextCheck::Object => None,
             TextCheck::Schema(v) => describe(v, &value).map(|(summary, hint)| {
-                Failure::new("schema-mismatch", format!("Schema verletzt: {summary}"), hint)
+                Failure::new(
+                    "schema-mismatch",
+                    format!("Schema verletzt: {summary}"),
+                    hint,
+                )
             }),
         }
     }
@@ -519,7 +519,7 @@ impl SchemaGuard {
                 return Some(f);
             }
             if let Some(check) = c.tools.get(*name) {
-                let args: &str = if args.trim().is_empty() { "{}" } else { *args };
+                let args: &str = if args.trim().is_empty() { "{}" } else { args };
                 if let Some(mut f) = self.check_json(check, args) {
                     if f.category != "output-too-large" {
                         f.category = "tool-arguments";
@@ -585,7 +585,11 @@ impl SchemaGuard {
             }
             info.guardrails.add(NAME, failure.category, "retry", 1);
             append_correction(&mut req, last, &failure);
-            let resp = match self.host.chat(&group, req.clone(), &info.plugin_calls).await {
+            let resp = match self
+                .host
+                .chat(&group, req.clone(), &info.plugin_calls)
+                .await
+            {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::warn!(
@@ -914,15 +918,16 @@ impl Plugin for SchemaGuard {
                         "",
                     ))
                 } else {
-                    let parts: Vec<Part> = std::iter::once(Part::text(std::mem::take(&mut st.text)))
-                        .chain(st.tools.values().map(|(id, name, args)| {
-                            Part::new(PartKind::ToolCall {
-                                id: id.clone(),
-                                name: name.clone(),
-                                arguments: args.clone(),
-                            })
-                        }))
-                        .collect();
+                    let parts: Vec<Part> =
+                        std::iter::once(Part::text(std::mem::take(&mut st.text)))
+                            .chain(st.tools.values().map(|(id, name, args)| {
+                                Part::new(PartKind::ToolCall {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    arguments: args.clone(),
+                                })
+                            }))
+                            .collect();
                     let msg = Message {
                         role: Role::Assistant,
                         content: Content::Parts(parts),

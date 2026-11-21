@@ -36,9 +36,8 @@ pub use host::{HttpCall, HttpReply, NoHost, PluginHost};
 pub use index::{ChainsTask, IndexOptions, PluginChains, PluginIndex};
 pub use metrics::PluginMetrics;
 pub use plugin::{
-    BoxFuture, CallInfo, ChunkCtx, ChunkFlow, FINAL_REQUEST_META, Flow, Hook, INTERNAL_META_PREFIX, Meta,
-    MetaExt,
-    Phases, Plugin, PluginError, ReqCtx, RespCtx, ResponseHeaders,
+    BoxFuture, CallInfo, ChunkCtx, ChunkFlow, FINAL_REQUEST_META, Flow, Hook, INTERNAL_META_PREFIX,
+    Meta, MetaExt, Phases, Plugin, PluginError, ReqCtx, RespCtx, ResponseHeaders,
 };
 pub use registry::{BuildCtx, DEFAULT_TIMEOUT, EffectiveControl, PluginFactory, Registry};
 pub use stream::{PluginStream, TextWindow, response_events};

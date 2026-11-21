@@ -14,8 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use aigw_core::ir::{
-    ChatRequest, ChatResponse, Choice, Message, Role, StopReason, StreamEvent,
-    UpstreamError, Usage,
+    ChatRequest, ChatResponse, Choice, Message, Role, StopReason, StreamEvent, UpstreamError, Usage,
 };
 use aigw_core::observe::{RequestObserver, RequestRecord};
 use aigw_core::upstream::UpstreamPolicy;
@@ -46,7 +45,11 @@ struct Shaper {
 impl Shaper {
     fn answer(&self, req: &ChatRequest) -> (String, u64) {
         self.seen.lock().unwrap().push(req.clone());
-        let last = req.messages.last().map(|m| m.content.text()).unwrap_or_default();
+        let last = req
+            .messages
+            .last()
+            .map(|m| m.content.text())
+            .unwrap_or_default();
         if last.contains("did not match the required JSON format") {
             (VALID.into(), 50)
         } else if last.contains("VALID") {
@@ -303,7 +306,10 @@ fn finish_reason(r: &Resp, path: &str) -> String {
     }
     let v = r.json();
     if path == OPENAI {
-        v["choices"][0]["finish_reason"].as_str().unwrap().to_owned()
+        v["choices"][0]["finish_reason"]
+            .as_str()
+            .unwrap()
+            .to_owned()
     } else {
         v["stop_reason"].as_str().unwrap().to_owned()
     }
@@ -337,7 +343,10 @@ async fn invalid_output_rejected_in_both_formats() {
         assert_eq!(r.status, StatusCode::OK, "{}", r.raw());
         assert_eq!(finish_reason(&r, path), reason);
         assert_eq!(r.text(), "");
-        assert_eq!(r.header("x-aigw-guardrail").as_deref(), Some("schema-guard"));
+        assert_eq!(
+            r.header("x-aigw-guardrail").as_deref(),
+            Some("schema-guard")
+        );
     }
     let rec = gw.records.last().await;
     assert_eq!(rec.guardrails[0].plugin, "schema-guard");
@@ -345,7 +354,12 @@ async fn invalid_output_rejected_in_both_formats() {
     assert_eq!(rec.guardrails[0].action, "reject");
 
     let gw = gateway(json!({}), OutputRejectMode::Error, Vec::new()).await;
-    let r = post(gw.addr, OPENAI, body(OPENAI, "Wer ist Ada?", false, schema())).await;
+    let r = post(
+        gw.addr,
+        OPENAI,
+        body(OPENAI, "Wer ist Ada?", false, schema()),
+    )
+    .await;
     assert_eq!(r.status, StatusCode::BAD_GATEWAY, "{}", r.raw());
     assert_eq!(r.json()["error"]["code"], "schema_validation_failed");
 }
@@ -371,12 +385,20 @@ async fn unsafe_request_schema_rejected_before_upstream() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retry_fixes_output_and_bills_as_plugin_call() {
-    let gw = gateway(json!({"action": "retry"}), OutputRejectMode::Finish, Vec::new()).await;
+    let gw = gateway(
+        json!({"action": "retry"}),
+        OutputRejectMode::Finish,
+        Vec::new(),
+    )
+    .await;
     for path in [OPENAI, ANTHROPIC] {
         let r = post(gw.addr, path, body(path, "Wer ist Ada?", false, schema())).await;
         assert_eq!(r.status, StatusCode::OK, "{}", r.raw());
         assert_eq!(r.text(), VALID);
-        assert_eq!(r.header("x-aigw-schema-guard").as_deref(), Some("retried=1"));
+        assert_eq!(
+            r.header("x-aigw-schema-guard").as_deref(),
+            Some("retried=1")
+        );
         // Usage der Antwort = erster Aufruf.
         let v = r.json();
         let input = v["usage"]["prompt_tokens"]
@@ -411,7 +433,12 @@ async fn retry_uses_final_request_after_inner_plugins() {
             .build(&json!({"action": "mask", "direction": "input"}))
             .unwrap(),
     );
-    let gw = gateway(json!({"action": "retry"}), OutputRejectMode::Finish, vec![pii]).await;
+    let gw = gateway(
+        json!({"action": "retry"}),
+        OutputRejectMode::Finish,
+        vec![pii],
+    )
+    .await;
     let r = post(
         gw.addr,
         OPENAI,
@@ -442,7 +469,10 @@ async fn buffered_stream_supports_retry() {
         assert_eq!(r.status, StatusCode::OK, "{}", r.raw());
         assert!(r.header("x-aigw-buffered").is_some());
         assert_eq!(r.text(), VALID, "{}", r.raw());
-        assert_eq!(r.header("x-aigw-schema-guard").as_deref(), Some("retried=1"));
+        assert_eq!(
+            r.header("x-aigw-schema-guard").as_deref(),
+            Some("retried=1")
+        );
     }
 }
 
@@ -459,8 +489,18 @@ async fn live_stream_checked_at_end() {
         assert_ne!(finish_reason(&r, path), reason);
     }
     // flag: Stream unverändert, Treffer gezählt.
-    let gw = gateway(json!({"action": "flag"}), OutputRejectMode::Finish, Vec::new()).await;
-    let r = post(gw.addr, OPENAI, body(OPENAI, "Wer ist Ada?", true, schema())).await;
+    let gw = gateway(
+        json!({"action": "flag"}),
+        OutputRejectMode::Finish,
+        Vec::new(),
+    )
+    .await;
+    let r = post(
+        gw.addr,
+        OPENAI,
+        body(OPENAI, "Wer ist Ada?", true, schema()),
+    )
+    .await;
     assert_eq!(finish_reason(&r, OPENAI), "stop");
     let rec = gw.records.last().await;
     assert_eq!(rec.guardrails[0].action, "flag");
@@ -468,7 +508,12 @@ async fn live_stream_checked_at_end() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn json_object_mode() {
-    let gw = gateway(json!({"action": "flag"}), OutputRejectMode::Finish, Vec::new()).await;
+    let gw = gateway(
+        json!({"action": "flag"}),
+        OutputRejectMode::Finish,
+        Vec::new(),
+    )
+    .await;
     let r = post(
         gw.addr,
         OPENAI,

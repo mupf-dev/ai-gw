@@ -20,13 +20,15 @@ use serde_json::json;
 use serde_json::Value;
 
 use super::*;
-use crate::host::PluginHost;
-use crate::plugin::{CallInfo, FINAL_REQUEST_META, Flow, Hook, Meta, Phases, Plugin, PluginError, ReqCtx, RespCtx};
-use crate::registry::PluginFactory;
 use crate::NoHost;
 use crate::chain::{Chain, ChunkMode, ChunkRunner, Entry};
+use crate::host::PluginHost;
 use crate::host::{HttpCall, HttpReply};
 use crate::plugin::{BoxFuture, ResponseHeaders};
+use crate::plugin::{
+    CallInfo, FINAL_REQUEST_META, Flow, Hook, Meta, Phases, Plugin, PluginError, ReqCtx, RespCtx,
+};
+use crate::registry::PluginFactory;
 
 /// Gateway-Host mit vorbereiteten Antworten; merkt sich die Anfragen.
 #[derive(Debug, Default)]
@@ -218,7 +220,11 @@ fn hits(info: &CallInfo) -> Vec<(String, &'static str, u32)> {
 
 #[test]
 fn config_validation() {
-    assert!(Factory::new(Arc::new(NoHost::default())).build(&json!({})).is_ok());
+    assert!(
+        Factory::new(Arc::new(NoHost::default()))
+            .build(&json!({}))
+            .is_ok()
+    );
     assert!(build_err(json!({"action": "retry", "maxRetries": 4})).contains("maxRetries"));
     assert!(build_err(json!({"action": "retry", "maxRetries": 0})).contains("maxRetries"));
     assert!(build_err(json!({"action": "reject", "maxRetries": 2})).contains("nur mit"));
@@ -267,7 +273,11 @@ fn schema_limits_and_external_refs() {
     }
     assert!(compile(&deep, &l).unwrap_err().contains("tiefer"));
     assert!(compile(&json!("kein Schema"), &l).is_err());
-    assert!(compile(&json!({"type": 7}), &l).unwrap_err().contains("ungültig"));
+    assert!(
+        compile(&json!({"type": 7}), &l)
+            .unwrap_err()
+            .contains("ungültig")
+    );
 }
 
 #[test]
@@ -375,7 +385,12 @@ fn tool_modes() {
             .collect::<Vec<_>>(),
         ["person"]
     );
-    assert_eq!(g.spec_of(&tool_request(Some(ToolChoice::Required))).tools.len(), 2);
+    assert_eq!(
+        g.spec_of(&tool_request(Some(ToolChoice::Required)))
+            .tools
+            .len(),
+        2
+    );
     assert!(g.spec_of(&tool_request(Some(ToolChoice::Auto))).is_empty());
     assert!(g.spec_of(&tool_request(None)).is_empty());
     let all = guard(json!({"tools": "all"}));
@@ -388,7 +403,11 @@ fn tool_modes() {
 // Antwort-Phase
 // ---------------------------------------------------------------------------------------------
 
-async fn check(cfg: Value, req: ChatRequest, resp: ChatResponse) -> (Flow, ChatResponse, ResponseHeaders, CallInfo) {
+async fn check(
+    cfg: Value,
+    req: ChatRequest,
+    resp: ChatResponse,
+) -> (Flow, ChatResponse, ResponseHeaders, CallInfo) {
     let g = guard(cfg);
     let i = info(false);
     let (_, mut meta) = run_request(&g, &i, req);
@@ -413,12 +432,19 @@ async fn valid_output_passes() {
 async fn invalid_output_rejected_with_category() {
     for (text, cat) in [
         ("Hier ist das JSON: {\"name\": \"Ada\"}", "invalid-json"),
-        ("```json\n{\"name\": \"Ada\", \"age\": 36}\n```", "invalid-json"),
+        (
+            "```json\n{\"name\": \"Ada\", \"age\": 36}\n```",
+            "invalid-json",
+        ),
         ("{\"name\": \"Ada\"}", "schema-mismatch"),
         ("{\"name\": \"Ada\", \"age\": -1}", "schema-mismatch"),
-        ("{\"name\": \"Ada\", \"age\": 1, \"x\": 1}", "schema-mismatch"),
+        (
+            "{\"name\": \"Ada\", \"age\": 1, \"x\": 1}",
+            "schema-mismatch",
+        ),
     ] {
-        let (flow, _, _, i) = check(json!({}), request(json_schema(schema())), response(text)).await;
+        let (flow, _, _, i) =
+            check(json!({}), request(json_schema(schema())), response(text)).await;
         let Flow::Block(e) = flow else {
             panic!("{text}: {flow:?}")
         };
@@ -468,7 +494,9 @@ async fn refusal_tool_calls_and_filtered_are_not_text_checked() {
     assert_eq!(check(json!({}), req(), r).await.0, Flow::Continue);
     // Tool-Aufruf ohne Tool-Erzwingung: Text-Schema gilt nicht.
     assert_eq!(
-        check(json!({}), req(), tool_response("other", "{}")).await.0,
+        check(json!({}), req(), tool_response("other", "{}"))
+            .await
+            .0,
         Flow::Continue
     );
 }
@@ -512,7 +540,10 @@ fn retry_meta(g: &SchemaGuard, i: &CallInfo, req: ChatRequest) -> Meta {
     let (flow, mut meta) = run_request(g, i, req.clone());
     assert_eq!(flow, Flow::Continue);
     assert!(meta.contains_key(FINAL_REQUEST_META));
-    meta.insert(FINAL_REQUEST_META.into(), serde_json::to_value(&req).unwrap());
+    meta.insert(
+        FINAL_REQUEST_META.into(),
+        serde_json::to_value(&req).unwrap(),
+    );
     meta
 }
 
@@ -533,7 +564,10 @@ async fn retry_succeeds_and_keeps_first_usage() {
     let Flow::Respond(new) = flow else {
         panic!("{flow:?}")
     };
-    assert_eq!(new.choices[0].message.content.text(), "{\"name\": \"Ada\", \"age\": 36}");
+    assert_eq!(
+        new.choices[0].message.content.text(),
+        "{\"name\": \"Ada\", \"age\": 36}"
+    );
     // Usage der Client-Antwort = erster Aufruf; die Wiederholung ist ein Plugin-Aufruf.
     assert_eq!(new.usage.as_ref().unwrap().input_tokens, 10);
     assert_eq!(resp.usage.as_ref().unwrap().input_tokens, 10);
@@ -559,7 +593,10 @@ async fn retry_succeeds_and_keeps_first_usage() {
 async fn retry_exhausted_rejects() {
     let host = Arc::new(FakeHost::default());
     for _ in 0..5 {
-        host.replies.lock().unwrap().push(response("immer noch kein JSON"));
+        host.replies
+            .lock()
+            .unwrap()
+            .push(response("immer noch kein JSON"));
     }
     let g = guard_with(json!({"action": "retry", "maxRetries": 2}), host.clone());
     let i = info(false);
@@ -608,14 +645,17 @@ async fn retry_tool_call_sends_tool_results_and_rejects_unknown_tools() {
     let mut meta = retry_meta(&g, &i, req.clone());
     let (flow, ..) = run_response(&g, &i, &mut meta, tool_response("person", "{}")).await;
     assert!(matches!(flow, Flow::Respond(_)), "{flow:?}");
-    let seen = host.seen.lock().unwrap();
-    let msgs = &seen[0].1.messages;
-    assert_eq!(msgs[2].role, Role::Tool);
-    let Content::Parts(p) = &msgs[2].content else {
-        panic!()
-    };
-    assert!(matches!(&p[0].kind, PartKind::ToolResult { tool_call_id, is_error: Some(true), .. } if tool_call_id == "call_1"));
-    drop(seen);
+    {
+        let seen = host.seen.lock().unwrap();
+        let msgs = &seen[0].1.messages;
+        assert_eq!(msgs[2].role, Role::Tool);
+        let Content::Parts(p) = &msgs[2].content else {
+            panic!()
+        };
+        assert!(
+            matches!(&p[0].kind, PartKind::ToolResult { tool_call_id, is_error: Some(true), .. } if tool_call_id == "call_1")
+        );
+    }
     // Wiederholung ruft ein nicht angebotenes Tool auf → ungültig.
     host.replies
         .lock()
@@ -705,7 +745,11 @@ async fn retry_with_multiple_choices_rejects() {
 // Stream (live)
 // ---------------------------------------------------------------------------------------------
 
-fn stream_run(cfg: Value, req: ChatRequest, events: Vec<StreamEvent>) -> (Vec<StreamEvent>, CallInfo) {
+fn stream_run(
+    cfg: Value,
+    req: ChatRequest,
+    events: Vec<StreamEvent>,
+) -> (Vec<StreamEvent>, CallInfo) {
     let g = guard(cfg);
     let i = info(true);
     let (_, meta) = run_request(&g, &i, req);
@@ -751,7 +795,11 @@ fn stop_reason(out: &[StreamEvent]) -> Option<StopReason> {
 #[test]
 fn live_stream_checked_at_stop() {
     let req = || request(json_schema(schema()));
-    let (out, i) = stream_run(json!({}), req(), text_stream(&["{\"name\":", " \"Ada\", \"age\"", ": 3}"]));
+    let (out, i) = stream_run(
+        json!({}),
+        req(),
+        text_stream(&["{\"name\":", " \"Ada\", \"age\"", ": 3}"]),
+    );
     assert_eq!(stop_reason(&out), Some(StopReason::EndTurn));
     assert!(hits(&i).is_empty());
     let (out, i) = stream_run(json!({}), req(), text_stream(&["{\"name\":", " 5}"]));
@@ -790,7 +838,11 @@ fn live_stream_tool_arguments() {
         });
         v
     };
-    let (out, _) = stream_run(json!({}), req.clone(), events(&["{\"name\":\"A\",", "\"age\":1}"]));
+    let (out, _) = stream_run(
+        json!({}),
+        req.clone(),
+        events(&["{\"name\":\"A\",", "\"age\":1}"]),
+    );
     assert_eq!(stop_reason(&out), Some(StopReason::ToolUse));
     let (out, i) = stream_run(json!({}), req, events(&["{\"age\":", "\"x\"}"]));
     assert_eq!(stop_reason(&out), Some(StopReason::ContentFilter));
@@ -801,10 +853,26 @@ fn live_stream_tool_arguments() {
 fn registered_for_admin_and_gitops_validation() {
     let reg = crate::Registry::for_validation(&aigw_core::upstream::UpstreamPolicy::strict());
     let obj = |v: Value| v.as_object().unwrap().clone();
-    assert!(reg.validate("schema-guard", &obj(json!({"action": "retry", "maxRetries": 2}))).is_ok());
-    assert!(reg.validate("schema-guard", &obj(json!({"action": "retry", "maxRetries": 9}))).is_err());
+    assert!(
+        reg.validate(
+            "schema-guard",
+            &obj(json!({"action": "retry", "maxRetries": 2}))
+        )
+        .is_ok()
+    );
+    assert!(
+        reg.validate(
+            "schema-guard",
+            &obj(json!({"action": "retry", "maxRetries": 9}))
+        )
+        .is_err()
+    );
     let eff = reg.effective("schema-guard", &obj(json!({}))).unwrap();
-    assert_eq!(eff.fail_mode, crate::FailMode::Closed);
+    assert_eq!(eff.fail_mode, FailMode::Closed);
     assert_eq!(eff.timeout, crate::binding::MAX_TIMEOUT);
-    assert!(crate::Registry::with_builtin().names().any(|n| n == "schema-guard"));
+    assert!(
+        crate::Registry::with_builtin()
+            .names()
+            .any(|n| n == "schema-guard")
+    );
 }
