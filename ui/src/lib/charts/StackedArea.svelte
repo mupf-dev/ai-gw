@@ -15,7 +15,13 @@
   import { Area, Axis, Chart, Svg } from 'layerchart';
   import { clockTime, short } from '../format';
 
-  let { t, series, label, height = 'h-56' }: { t: number[]; series: StackSeries[]; label: string; height?: string } = $props();
+  let {
+    t,
+    series,
+    label,
+    height = 'h-56',
+    format = short,
+  }: { t: number[]; series: StackSeries[]; label: string; height?: string; /** Achse und Summen (Standard: kompakte Zahl). */ format?: (v: number) => string } = $props();
 
   type Row = { x: number; y0: number[]; y1: number[]; top: number };
   const rows = $derived<Row[]>(
@@ -42,7 +48,7 @@
   <div class={['w-full', height]}>
     <Chart data={rows} x="x" y="top" yDomain={[0, null]} yNice padding={{ left: 44, bottom: 22, top: 6, right: 6 }}>
       <Svg>
-        <Axis placement="left" format={(v: number) => short(v)} grid rule ticks={4} />
+        <Axis placement="left" format={(v: number) => format(v)} grid rule ticks={4} />
         <Axis placement="bottom" format={(v: number) => fmtX(v)} ticks={6} rule />
         {#each series as s, i (s.key)}
           <Area y0={(d: Row) => d.y0[i]} y1={(d: Row) => d.y1[i]} class="{FILL[i % FILL.length]} opacity-80" line={false} />
@@ -52,7 +58,7 @@
   </div>
   <figcaption class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-fg-muted">
     {#each series as s, i (s.key)}
-      <span class="flex items-center gap-1.5"><span class={['size-2.5 rounded-xs', BG[i % BG.length]]} aria-hidden="true"></span>{s.label} <span class="num text-fg">{short(totals[i])}</span></span>
+      <span class="flex items-center gap-1.5"><span class={['size-2.5 rounded-xs', BG[i % BG.length]]} aria-hidden="true"></span>{s.label} <span class="num text-fg">{format(totals[i])}</span></span>
     {/each}
   </figcaption>
 </figure>

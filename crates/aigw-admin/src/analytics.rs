@@ -279,7 +279,7 @@ pub enum Dimension {
 }
 
 impl Dimension {
-    fn column(self) -> RollupDim {
+    pub(crate) fn column(self) -> RollupDim {
         match self {
             Self::ModelGroup => RollupDim::ModelGroup,
             Self::Deployment | Self::Provider => RollupDim::Deployment,
@@ -327,14 +327,14 @@ impl Step {
 
 /// Gemeinsame Filter (Namen oder IDs, kommagetrennt).
 #[derive(Debug, Clone, Default)]
-struct Filters {
-    model_group: Option<String>,
-    deployment: Option<String>,
-    provider: Option<String>,
-    team: Option<String>,
-    key: Option<String>,
-    organization: Option<String>,
-    error_class: Option<String>,
+pub(crate) struct Filters {
+    pub(crate) model_group: Option<String>,
+    pub(crate) deployment: Option<String>,
+    pub(crate) provider: Option<String>,
+    pub(crate) team: Option<String>,
+    pub(crate) key: Option<String>,
+    pub(crate) organization: Option<String>,
+    pub(crate) error_class: Option<String>,
 }
 
 /// Parameter der Zeitreihe.
@@ -790,67 +790,83 @@ pub struct RequestLogDetail {
 // Verzeichnis (Namen ↔ IDs) und Geltungsbereich
 // ---------------------------------------------------------------------------------------------
 
-struct TeamInfo {
-    name: String,
-    organization: String,
+pub(crate) struct TeamInfo {
+    pub(crate) name: String,
+    pub(crate) organization: String,
 }
 
-struct KeyInfo {
-    name: String,
-    team: Option<String>,
-    organization: String,
+pub(crate) struct KeyInfo {
+    pub(crate) name: String,
+    pub(crate) team: Option<String>,
+    pub(crate) organization: String,
 }
 
-struct DeploymentInfo {
-    name: String,
-    provider: String,
+pub(crate) struct DeploymentInfo {
+    pub(crate) name: String,
+    pub(crate) provider: String,
 }
 
 /// Namen und Beziehungen der Objekte laut aktueller Konfiguration (je Anfrage geladen).
-struct Directory {
-    orgs: HashMap<String, String>,
-    teams: HashMap<String, TeamInfo>,
-    keys: HashMap<String, KeyInfo>,
-    deployments: HashMap<String, DeploymentInfo>,
+pub(crate) struct Directory {
+    pub(crate) orgs: HashMap<String, String>,
+    pub(crate) teams: HashMap<String, TeamInfo>,
+    pub(crate) keys: HashMap<String, KeyInfo>,
+    pub(crate) deployments: HashMap<String, DeploymentInfo>,
+    /// Labels und Metadaten von Organisationen, Teams und Keys je ID (Chargeback-Export,
+    /// AIGW-117).
+    pub(crate) attrs: HashMap<String, Attrs>,
+}
+
+/// Labels (`metadata.labels`) und freie Metadaten (`spec.metadata`) eines Objekts.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Attrs {
+    pub(crate) labels: BTreeMap<String, String>,
+    pub(crate) metadata: BTreeMap<String, String>,
 }
 
 impl Directory {
-    async fn load(store: &Store) -> Result<Self, Problem> {
-        let orgs = store
-            .list::<OrganizationSpec>()
-            .await?
-            .into_iter()
-            .map(|o| (o.id.to_string(), o.metadata.name))
-            .collect();
-        let teams = store
-            .list::<TeamSpec>()
-            .await?
-            .into_iter()
-            .map(|t| {
-                (
-                    t.id.to_string(),
-                    TeamInfo {
-                        name: t.metadata.name,
-                        organization: t.spec.organization,
-                    },
-                )
-            })
-            .collect();
-        let keys = store
-            .list_api_keys()
-            .await?
-            .into_iter()
-            .map(|k| {
-                (
-                    k.id.to_string(),
-                    KeyInfo {
-                        name: k.metadata.name,
-                        team: k.spec.team,
-                        organization: k.spec.organization,
-                    },
-                )
-            })
-            .collect();
+    pub(crate) async fn load(store: &Store) -> Result<Self, Problem> {
+        let mut attrs = HashMap::new();
+        let mut attr =
+            |id: String, labels: &BTreeMap<String, String>, meta: &BTreeMap<String, String>| {
+                if !labels.is_empty() || !meta.is_empty() {
+                    attrs.insert(
+                        id,
+                        Attrs {
+                            labels: labels.clone(),
+                            metadata: meta.clone(),
+                        },
+                    );
+                }
+            };
+        let mut orgs = HashMap::new();
+        for o in store.list::<OrganizationSpec>().await? {
+            attr(o.id.to_string(), &o.metadata.labels, &o.spec.metadata);
+            orgs.insert(o.id.to_string(), o.metadata.name);
+        }
+        let mut teams = HashMap::new();
+        for t in store.list::<TeamSpec>().await? {
+            attr(t.id.to_string(), &t.metadata.labels, &t.spec.metadata);
+            teams.insert(
+                t.id.to_string(),
+                TeamInfo {
+                    name: t.metadata.name,
+                    organization: t.spec.organization,
+                },
+            );
+        }
+        let mut keys = HashMap::new();
+        for k in store.list_api_keys().await? {
+            attr(k.id.to_string(), &k.metadata.labels, &k.spec.metadata);
+            keys.insert(
+                k.id.to_string(),
+                KeyInfo {
+                    name: k.metadata.name,
+                    team: k.spec.team,
+                    organization: k.spec.organization,
+                },
+            );
+        }
         let deployments = store
             .list::<DeploymentSpec>()
             .await?
@@ -870,10 +886,11 @@ impl Directory {
             teams,
             keys,
             deployments,
+            attrs,
         })
     }
 
-    fn team_id_by_name(&self, name: &str) -> Option<&str> {
+    pub(crate) fn team_id_by_name(&self, name: &str) -> Option<&str> {
         self.teams
             .iter()
             .find(|(_, t)| t.name == name)
@@ -892,7 +909,7 @@ impl Directory {
         }
     }
 
-    fn org_id_by_name(&self, name: &str) -> Option<&str> {
+    pub(crate) fn org_id_by_name(&self, name: &str) -> Option<&str> {
         self.orgs
             .iter()
             .find(|(_, o)| o.as_str() == name)
@@ -900,7 +917,7 @@ impl Directory {
     }
 
     /// Anzeigename eines Gruppenschlüssels.
-    fn name(&self, dim: Dimension, key: &str) -> Option<String> {
+    pub(crate) fn name(&self, dim: Dimension, key: &str) -> Option<String> {
         match dim {
             Dimension::ModelGroup | Dimension::Provider => {
                 (!key.is_empty() && key != OTHER_KEY).then(|| key.to_owned())
@@ -914,7 +931,7 @@ impl Directory {
     }
 
     /// Anbieter eines Deployments (`unknown` bei gelöschten, `""` ohne Deployment).
-    fn provider_of(&self, deployment_id: &str) -> String {
+    pub(crate) fn provider_of(&self, deployment_id: &str) -> String {
         if deployment_id.is_empty() {
             return String::new();
         }
@@ -931,7 +948,7 @@ fn teamless_target(org: &str) -> Target {
 }
 
 /// Sichtbarer Bereich des Principals.
-enum Scope {
+pub(crate) enum Scope {
     /// Alles (globale Leserolle).
     All,
     /// Diese Team-IDs und teamlose Anfragen dieser Organisations-IDs.
@@ -941,7 +958,7 @@ enum Scope {
     },
 }
 
-fn scope_of(p: &Principal, dir: &Directory) -> Scope {
+pub(crate) fn scope_of(p: &Principal, dir: &Directory) -> Scope {
     if p.can(Permission::Read, &Target::Global) {
         return Scope::All;
     }
@@ -1013,13 +1030,13 @@ fn intersect(a: Option<Vec<String>>, b: Option<Vec<String>>) -> Option<Vec<Strin
 }
 
 /// Aufgelöste Filter.
-struct Resolved {
-    keys: KeyFilter,
+pub(crate) struct Resolved {
+    pub(crate) keys: KeyFilter,
     /// Anbieter (für das Rohlog; in `keys.deployments` bereits auf Deployments abgebildet).
     providers: Option<Vec<String>>,
 }
 
-fn resolve_filters(
+pub(crate) fn resolve_filters(
     f: &Filters,
     dir: &Directory,
     scope: &Scope,
@@ -1128,35 +1145,35 @@ fn resolve_filters(
 // Zeit
 // ---------------------------------------------------------------------------------------------
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     i64::try_from(OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000).unwrap_or(i64::MAX)
 }
 
-fn rfc3339(ms: i64) -> String {
+pub(crate) fn rfc3339(ms: i64) -> String {
     OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000)
         .ok()
         .and_then(|t| t.format(&Rfc3339).ok())
         .unwrap_or_default()
 }
 
-fn parse_time(name: &str, v: &str) -> Result<i64, Problem> {
+pub(crate) fn parse_time(name: &str, v: &str) -> Result<i64, Problem> {
     let t = OffsetDateTime::parse(v, &Rfc3339)
         .map_err(|_| Problem::bad_request(format!("{name}: kein RFC-3339-Zeitpunkt")))?;
     i64::try_from(t.unix_timestamp_nanos() / 1_000_000)
         .map_err(|_| Problem::bad_request(format!("{name}: außerhalb des Wertebereichs")))
 }
 
-fn floor(v: i64, step: i64) -> i64 {
+pub(crate) fn floor(v: i64, step: i64) -> i64 {
     v.div_euclid(step) * step
 }
 
-fn ceil(v: i64, step: i64) -> i64 {
+pub(crate) fn ceil(v: i64, step: i64) -> i64 {
     let f = floor(v, step);
     if f == v { v } else { f + step }
 }
 
 /// Zeitraum aus `from`/`to` (Standard: letzte 24 h), auf Minuten ausgerichtet.
-fn range(from: Option<&str>, to: Option<&str>) -> Result<(i64, i64), Problem> {
+pub(crate) fn range(from: Option<&str>, to: Option<&str>) -> Result<(i64, i64), Problem> {
     let to = match to {
         Some(t) => parse_time("to", t)?,
         None => now_ms(),
@@ -1181,7 +1198,7 @@ fn range(from: Option<&str>, to: Option<&str>) -> Result<(i64, i64), Problem> {
 /// Tagesbeginne in der Zeitzone des Kalenders (F143; Sommerzeit: 23/25-Stunden-Tage). Liefert
 /// die Grenzen (n + 1 Werte für n Punkte) und die Bucket-Breite der Abfrage (Teiler aller
 /// Grenzen: Stunde, 15 oder 1 Minute).
-fn bucket_edges(cal: &Calendar, from: i64, to: i64, step: Step) -> (Vec<i64>, i64) {
+pub(crate) fn bucket_edges(cal: &Calendar, from: i64, to: i64, step: Step) -> (Vec<i64>, i64) {
     if step != Step::D1 || cal.timezone() == "UTC" {
         let s = step.ms();
         let (from, to) = (floor(from, s), ceil(to, s));
@@ -1225,12 +1242,12 @@ fn pick_step(from: i64, to: i64, step: Option<Step>) -> Result<Step, Problem> {
 // ---------------------------------------------------------------------------------------------
 
 /// Gesamtsummen je Gruppenschlüssel (für Anbieter bereits abgebildet) und Rohwerte je Schlüssel.
-struct GroupTotals {
-    totals: BTreeMap<String, RollupCounts>,
-    raw: BTreeMap<String, Vec<String>>,
+pub(crate) struct GroupTotals {
+    pub(crate) totals: BTreeMap<String, RollupCounts>,
+    pub(crate) raw: BTreeMap<String, Vec<String>>,
 }
 
-async fn group_totals(
+pub(crate) async fn group_totals(
     store: &Store,
     from: i64,
     to: i64,
@@ -1282,7 +1299,7 @@ fn rank(metric: Metric, totals: &BTreeMap<String, RollupCounts>) -> Vec<String> 
     v.into_iter().map(|(k, _)| k.clone()).collect()
 }
 
-fn clamp_limit(v: Option<u32>, default: u32, max: u32) -> Result<u32, Problem> {
+pub(crate) fn clamp_limit(v: Option<u32>, default: u32, max: u32) -> Result<u32, Problem> {
     match v {
         None => Ok(default),
         Some(n) if (1..=max).contains(&n) => Ok(n),
@@ -1290,13 +1307,13 @@ fn clamp_limit(v: Option<u32>, default: u32, max: u32) -> Result<u32, Problem> {
     }
 }
 
-struct Ctx {
-    dir: Directory,
-    resolved: Resolved,
+pub(crate) struct Ctx {
+    pub(crate) dir: Directory,
+    pub(crate) resolved: Resolved,
 }
 
-async fn context(st: &AnalyticsState, p: &Principal, f: &Filters) -> Result<Ctx, Problem> {
-    let dir = Directory::load(&st.store).await?;
+pub(crate) async fn context(store: &Store, p: &Principal, f: &Filters) -> Result<Ctx, Problem> {
+    let dir = Directory::load(store).await?;
     let scope = scope_of(p, &dir);
     let resolved = resolve_filters(f, &dir, &scope, p)?;
     Ok(Ctx { dir, resolved })
@@ -1341,7 +1358,7 @@ pub(crate) async fn timeseries(
         organization: q.organization,
         error_class: q.error_class,
     };
-    let ctx = context(&st, &p, &filters).await?;
+    let ctx = context(&st.store, &p, &filters).await?;
     let filter = &ctx.resolved.keys;
 
     // Gruppen: erst Gesamtsummen je Gruppe (Rang), dann Zeitreihe mit Top-N + „other“.
@@ -1471,7 +1488,7 @@ pub(crate) async fn timeseries(
     }))
 }
 
-async fn totals(
+pub(crate) async fn totals(
     store: &Store,
     from: i64,
     to: i64,
@@ -1545,7 +1562,7 @@ pub(crate) async fn summary(
         organization: q.organization,
         error_class: q.error_class,
     };
-    let ctx = context(&st, &p, &filters).await?;
+    let ctx = context(&st.store, &p, &filters).await?;
     let filter = &ctx.resolved.keys;
     let (cur, prev) = tokio::try_join!(
         totals(&st.store, from, to, filter),
@@ -1596,7 +1613,7 @@ pub(crate) async fn top(
         organization: q.organization,
         error_class: q.error_class,
     };
-    let ctx = context(&st, &p, &filters).await?;
+    let ctx = context(&st.store, &p, &filters).await?;
     let g = group_totals(
         &st.store,
         from,
@@ -1795,7 +1812,7 @@ pub(crate) async fn list_request_logs(
         organization: q.organization,
         error_class: q.error_class,
     };
-    let ctx = context(&st, &p, &filters).await?;
+    let ctx = context(&st.store, &p, &filters).await?;
     let mut keys = ctx.resolved.keys;
     // Im Rohlog steht der Anbieter direkt; die Abbildung auf Deployments gilt nur für Rollups.
     if ctx.resolved.providers.is_some() {

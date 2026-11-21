@@ -119,6 +119,36 @@ billing:
     check_interval_secs: 86400   # tägliche Warnung bei Preisänderungen
 ```
 
+### Kostenanalyse und Chargeback (AIGW-117)
+
+Die Seite „Kosten“ und `GET /admin/api/v1/costs/…` lesen die Rollups (`observe.rollups` muss an
+sein; Konzept [07-beobachtung.md](../konzept/07-beobachtung.md) §14). Abschnitt `billing`:
+
+- `currency` (Standard `USD`): Abrechnungswährung als ISO-4217-Code. Nur Beschriftung in
+  Kennzahlen und Export – das Gateway rechnet nicht um; Preise (und Budgets) müssen in dieser
+  Währung gepflegt sein. Preisvorschläge und Katalog liefern USD.
+- `cost_center_key` (Standard `costCenter`): Schlüssel in `spec.metadata` von API-Key, Team
+  und Organisation, der die Kostenstelle trägt. Der Chargeback-Export nimmt den Wert vom Key,
+  sonst vom Team, sonst von der Organisation; Labels (`metadata.labels`) und weitere Metadaten
+  der Objekte erscheinen als Spalten `label.<name>` bzw. `meta.<name>`.
+
+```yaml
+billing:
+  currency: EUR
+  cost_center_key: kostenstelle
+---
+kind: Team
+metadata: {name: platform, labels: {bereich: it}}
+spec: {organization: acme, metadata: {kostenstelle: "4711"}}
+```
+
+Export per API (CSV, je Monat, nach Team; gestreamt):
+
+```bash
+curl -H "Authorization: Bearer $AIGW_ADMIN_TOKEN" -o kosten.csv \
+  "https://aigw.example/admin/api/v1/costs/export?dimension=team&granularity=month&from=2026-10-01T00:00:00Z&to=2026-11-01T00:00:00Z"
+```
+
 ### Azure OpenAI mit Entra ID
 
 Statt eines API-Keys meldet sich das Gateway per Entra ID an – empfohlen über Zugangsdaten

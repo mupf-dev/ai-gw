@@ -34,5 +34,5 @@ pub use budget::{
     LogEvents, MemoryLedger, MemoryShared, SharedBudgets, SharedItem, SharedReserve,
 };
 pub use calendar::{Calendar, CalendarError, PeriodRange, period_code, period_from_code};
-pub use cost::{cost, cost_at};
+pub use cost::{cost, cost_at, cost_breakdown_at, cost_with_breakdown};
 pub use webhook::WebhookEvents;

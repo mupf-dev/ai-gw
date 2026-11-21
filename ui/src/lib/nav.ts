@@ -21,6 +21,7 @@ export type PageId =
   | 'tools'
   | 'cache'
   | 'mcp'
+  | 'costs'
   | 'logs'
   | 'audit'
   | 'settings'
@@ -70,6 +71,7 @@ export const PAGES: Record<PageId, Page> = {
   tools: { ...p('tools', '/tools', 'Tools', 'puzzle', 'Inventar der Tools, die Anwendungen mitschicken (Herkunft, MCP-Server, Client, Nutzung, geänderte oder verdächtige Beschreibungen) mit Freigeben/Sperren je Ebene und Tool-Richtlinien.', true, 'tool function mcp freigabe sperre inventar richtlinie'), needsAuth: true },
   cache: p('cache', '/cache', 'Cache', 'database', 'Exakter und semantischer Cache: Trefferquote, Ersparnis, TTL-Regeln, Vektorindex und gezieltes Leeren.', false, 'semantic vector ttl'),
   mcp: { ...p('mcp', '/mcp', 'MCP-Server', 'network', 'Angebundene MCP-Server mit Verbindungszustand (verbunden, gestört, unbenutzt, deaktiviert), Fehlern und Fehlversuchen.', true, 'tools model context protocol status'), needsAuth: true },
+  costs: { ...p('costs', '/costs', 'Kosten', 'trend-up', 'Kostenanalyse: Verlauf gestapelt nach Team, Modell, Anbieter oder Key, Vergleich mit der Vorperiode, Kosten je Anfrage und Token, Ersparnis durch Caching, Plugin-Kosten, Budget-Prognosen und Chargeback-Export (CSV/JSON).', true, 'finops kosten chargeback budget prognose export showback ersparnis'), needsAuth: true },
   logs: { ...p('logs', '/logs', 'Logs', 'list', 'Request-Explorer: Filter nach Status, Modell, Key, Team und Zeitraum; Detailansicht mit Request, Response, Fallback-Versuchen und Zeitleiste.', true, 'requests traces explorer'), needsAuth: true },
   audit: { ...p('audit', '/audit', 'Audit', 'clipboard', 'Änderungsprotokoll der Steuerungsebene: wer hat wann was geändert (Vorher/Nachher), Filter, Export als JSON Lines.', true, 'änderungen protokoll compliance siem'), needsAuth: true },
   settings: p('settings', '/settings', 'Einstellungen', 'settings', 'Anmeldung und Rollen, Darstellung, Datenquelle (Mock-Modus), Hinweis auf GitOps (YAML-Import/-Export).', true, 'theme darstellung mock'),
@@ -81,7 +83,7 @@ export const NAV: NavGroup[] = [
   { items: [PAGES.overview, PAGES.playground] },
   { label: 'Gateway', items: [PAGES.models, PAGES.providers, PAGES.secrets, PAGES.prices, PAGES.guardrails, PAGES.tools, PAGES.cache, PAGES.mcp] },
   { label: 'Zugriff', items: [PAGES.keys, PAGES.teams, PAGES.limits, PAGES['admin-keys']] },
-  { label: 'Beobachten', items: [PAGES.logs, PAGES.audit] },
+  { label: 'Beobachten', items: [PAGES.costs, PAGES.logs, PAGES.audit] },
 ];
 
 export const NAV_FOOTER: Page[] = [PAGES.config, PAGES.settings];

@@ -35,6 +35,7 @@
     prices: () => import('./routes/Prices.svelte'),
     teams: () => import('./routes/Teams.svelte'),
     'admin-keys': () => import('./routes/AdminKeys.svelte'),
+    costs: () => import('./routes/Costs.svelte'),
     logs: () => import('./routes/Logs.svelte'),
     audit: () => import('./routes/Audit.svelte'),
     limits: () => import('./routes/Limits.svelte'),

@@ -199,6 +199,11 @@ Status `429`, Fehler im Eingangsformat (`rate_limit_exceeded` bzw. Anthropic
   Verbrauch scheiterte.
 - Gerechnet wird mit dem zuletzt verwendeten Deployment (nach Retries/Fallbacks das, dessen
   Antwort der Client bekam) und der gemeldeten bzw. geschätzten Usage.
+- **Aufschlüsselung (AIGW-117):** `aigw_billing::cost_with_breakdown` liefert zusätzlich die
+  Kosten je Token-Art (Eingabe, Cache lesen, Cache schreiben, Ausgabe inkl. Reasoning) und die
+  Ersparnis durch Prompt-Caching (`cache_read × (input − cachedInput)`) in
+  `RequestRecord.cost_breakdown` → Rollups (Migration 0013). Auswertung, Budget-Prognose und
+  Chargeback-Export: [07-beobachtung.md](07-beobachtung.md) §14.
 
 ## 4a. Preisvorschläge (AIGW-85)
 

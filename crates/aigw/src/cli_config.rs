@@ -249,6 +249,7 @@ fn check_start_config(path: &Path) -> Result<Config, BoxError> {
 fn check_config(cfg: &Config) -> Result<(), BoxError> {
     aigw_core::upstream::UpstreamPolicy::from_config(&cfg.admin)
         .map_err(|e| format!("admin: {e}"))?;
+    cfg.billing.validate()?;
     for w in &cfg.events.webhooks {
         if let Some(secret) = &w.secret {
             secret

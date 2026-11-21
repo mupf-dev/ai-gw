@@ -584,14 +584,16 @@ impl RoutedEmbedder {
                 r.provider,
                 r.provider_model.as_deref(),
             )
-        {
-            r.cost = aigw_billing::cost_at(
+            && let Some((cost, b)) = aigw_billing::cost_breakdown_at(
                 snap,
                 provider,
                 pm,
                 time::OffsetDateTime::from(started_at),
                 &r.usage,
-            );
+            )
+        {
+            r.cost = Some(cost);
+            r.cost_breakdown = b;
         }
         if let (Some(cost), Some(budgets), Some(k)) =
             (r.cost, billing.limits.budgets(), caller.key.as_ref())

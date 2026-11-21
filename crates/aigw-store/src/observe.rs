@@ -268,11 +268,35 @@ pub struct RollupCounts {
     /// Anzahl je TTFT-Bucket (nicht kumulativ, nur Anfragen mit TTFT), gleiche Grenzen.
     #[serde(default)]
     pub ttft_hist: [i64; LATENCY_BUCKET_COUNT],
+    /// Kosten der Eingabe-Tokens ohne Anbieter-Cache (Nano, AIGW-117).
+    #[serde(default)]
+    pub cost_input: i64,
+    /// Kosten der aus dem Anbieter-Cache gelesenen Tokens (Nano).
+    #[serde(default)]
+    pub cost_cache_read: i64,
+    /// Kosten der in den Anbieter-Cache geschriebenen Tokens (Nano).
+    #[serde(default)]
+    pub cost_cache_write: i64,
+    /// Kosten der Ausgabe-Tokens inkl. Reasoning (Nano).
+    #[serde(default)]
+    pub cost_output: i64,
+    /// Ersparnis durch Prompt-Caching des Anbieters (Nano).
+    #[serde(default)]
+    pub cache_read_saved: i64,
+    /// Kosten der Plugin-Modellaufrufe (Nano; in `cost` enthalten).
+    #[serde(default)]
+    pub plugin_cost: i64,
+    /// Eingabe-Tokens der Plugin-Modellaufrufe (nicht in `input_tokens`).
+    #[serde(default)]
+    pub plugin_input_tokens: i64,
+    /// Ausgabe-Tokens der Plugin-Modellaufrufe (nicht in `output_tokens`).
+    #[serde(default)]
+    pub plugin_output_tokens: i64,
 }
 
 impl RollupCounts {
     /// Werte ohne Histogramm, in Spaltenreihenfolge von [`ROLLUP_SCALAR_COLUMNS`].
-    fn scalars(&self) -> [i64; 14] {
+    fn scalars(&self) -> [i64; 22] {
         [
             self.requests,
             self.errors,
@@ -288,6 +312,14 @@ impl RollupCounts {
             self.aborted,
             self.ttft_ms_sum,
             self.ttft_count,
+            self.cost_input,
+            self.cost_cache_read,
+            self.cost_cache_write,
+            self.cost_output,
+            self.cache_read_saved,
+            self.plugin_cost,
+            self.plugin_input_tokens,
+            self.plugin_output_tokens,
         ]
     }
 
@@ -308,6 +340,14 @@ impl RollupCounts {
         add(&mut self.aborted, other.aborted);
         add(&mut self.ttft_ms_sum, other.ttft_ms_sum);
         add(&mut self.ttft_count, other.ttft_count);
+        add(&mut self.cost_input, other.cost_input);
+        add(&mut self.cost_cache_read, other.cost_cache_read);
+        add(&mut self.cost_cache_write, other.cost_cache_write);
+        add(&mut self.cost_output, other.cost_output);
+        add(&mut self.cache_read_saved, other.cache_read_saved);
+        add(&mut self.plugin_cost, other.plugin_cost);
+        add(&mut self.plugin_input_tokens, other.plugin_input_tokens);
+        add(&mut self.plugin_output_tokens, other.plugin_output_tokens);
         for (a, b) in self.latency_hist.iter_mut().zip(other.latency_hist) {
             add(a, b);
         }
@@ -364,7 +404,7 @@ pub(crate) const ROLLUP_KEY_COLUMNS: [&str; 7] = [
     "error_class",
 ];
 
-pub(crate) const ROLLUP_SCALAR_COLUMNS: [&str; 14] = [
+pub(crate) const ROLLUP_SCALAR_COLUMNS: [&str; 22] = [
     "requests",
     "errors",
     "cache_hits",
@@ -379,6 +419,14 @@ pub(crate) const ROLLUP_SCALAR_COLUMNS: [&str; 14] = [
     "aborted",
     "ttft_ms_sum",
     "ttft_count",
+    "cost_input",
+    "cost_cache_read",
+    "cost_cache_write",
+    "cost_output",
+    "cache_read_saved",
+    "plugin_cost",
+    "plugin_input_tokens",
+    "plugin_output_tokens",
 ];
 
 /// `INSERT INTO table (cols) VALUES ($1,…),(…)` für `rows` Zeilen.
@@ -873,6 +921,14 @@ pub(crate) fn rollup_counts_from_row(row: &DbRow) -> Result<RollupCounts, StoreE
         ttft_count: row.i64("ttft_count")?,
         latency_hist: hist,
         ttft_hist,
+        cost_input: row.i64("cost_input")?,
+        cost_cache_read: row.i64("cost_cache_read")?,
+        cost_cache_write: row.i64("cost_cache_write")?,
+        cost_output: row.i64("cost_output")?,
+        cache_read_saved: row.i64("cache_read_saved")?,
+        plugin_cost: row.i64("plugin_cost")?,
+        plugin_input_tokens: row.i64("plugin_input_tokens")?,
+        plugin_output_tokens: row.i64("plugin_output_tokens")?,
     })
 }
 

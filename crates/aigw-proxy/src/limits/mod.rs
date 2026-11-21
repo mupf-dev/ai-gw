@@ -551,7 +551,11 @@ impl Admission {
     pub(crate) fn complete(mut self, record: &mut RequestRecord, plugin_calls: &[PluginCall]) {
         // Die Anfrage ist zu Ende: Plätze sofort frei.
         drop(self.slots.take());
-        let mut cost = self.price(record);
+        let priced = self.price(record);
+        if let Some((_, b)) = priced {
+            record.cost_breakdown = b;
+        }
+        let mut cost = priced.map(|(c, _)| c);
         let plugin_cost = self.plugin_price(record, plugin_calls);
         if let Some(p) = plugin_cost {
             record.plugin_cost = Some(p);
@@ -614,14 +618,14 @@ impl Admission {
             .reduce(Amount::saturating_add)
     }
 
-    fn price(&self, r: &RequestRecord) -> Option<Amount> {
+    fn price(&self, r: &RequestRecord) -> Option<(Amount, aigw_core::observe::CostBreakdown)> {
         let snap = self.snapshot.as_ref()?;
         let (provider, model) = (r.provider?, r.provider_model.as_deref()?);
         // Fehlgeschlagene Anfragen ohne Verbrauch kosten nichts (auch kein Preis je Anfrage).
         if r.usage.total_tokens() == 0 && r.is_error() {
             return None;
         }
-        aigw_billing::cost_at(
+        aigw_billing::cost_breakdown_at(
             snap,
             provider,
             model,

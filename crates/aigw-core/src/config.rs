@@ -789,6 +789,14 @@ pub struct BillingConfig {
     pub budget_sync_ms: u64,
     /// Preisvorschläge (AIGW-85): Azure Retail Prices API und mitgelieferter Preiskatalog.
     pub price_suggestions: PriceSuggestionsConfig,
+    /// Abrechnungswährung als ISO-4217-Code (AIGW-117, Standard `USD` wie Preisvorschläge
+    /// und Katalog). Nur Beschriftung in Kostenanalyse und Chargeback-Export – das Gateway
+    /// rechnet nicht um; die Preise müssen in dieser Währung gepflegt sein.
+    pub currency: String,
+    /// Schlüssel in `spec.metadata` von Organisation, Team und API-Key, der die Kostenstelle
+    /// trägt (AIGW-117, Chargeback-Export; Standard `costCenter`). Gesucht wird am Key, dann
+    /// am Team, dann an der Organisation.
+    pub cost_center_key: String,
 }
 
 impl Default for BillingConfig {
@@ -797,7 +805,25 @@ impl Default for BillingConfig {
             timezone: "UTC".to_owned(),
             budget_sync_ms: 1000,
             price_suggestions: PriceSuggestionsConfig::default(),
+            currency: "USD".to_owned(),
+            cost_center_key: "costCenter".to_owned(),
         }
+    }
+}
+
+impl BillingConfig {
+    /// Prüft Währung und Kostenstellen-Schlüssel (AIGW-117).
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        if self.currency.len() != 3 || !self.currency.bytes().all(|b| b.is_ascii_uppercase()) {
+            return Err(format!(
+                "billing.currency: ISO-4217-Code aus drei Großbuchstaben erwartet, nicht {:?}",
+                self.currency
+            ));
+        }
+        if self.cost_center_key.trim().is_empty() || self.cost_center_key.len() > 128 {
+            return Err("billing.cost_center_key: 1–128 Zeichen".into());
+        }
+        Ok(())
     }
 }
 
@@ -1932,6 +1958,12 @@ counters:
         );
         assert!(cfg.tokenizer.download_ranks);
         cfg.tokenizer.validate().unwrap();
+        // AIGW-117: Abrechnungswährung und Kostenstellen-Schlüssel.
+        cfg.billing.validate().unwrap();
+        assert_eq!(cfg.billing.currency, "USD");
+        let mut b = cfg.billing.clone();
+        b.currency = "eur".into();
+        assert!(b.validate().is_err());
         let only_download = TokenizerConfig {
             ranks_dir: None,
             download_ranks: true,

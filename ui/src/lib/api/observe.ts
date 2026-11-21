@@ -114,6 +114,30 @@ export const budgets = (level?: S['BudgetLevelName']) => unwrap<S['BudgetList']>
 /** Hinweise zu ungenau wirkenden Limits (F29: Sekundenlimits mit postgres-sync). */
 export const limitWarnings = () => unwrap<S['LimitWarnings']>(api.GET('/admin/api/v1/usage/limit-warnings'));
 
+// ------------------------------------------------------------------ Kostenanalyse (AIGW-117)
+
+export type CostSummary = S['CostSummary'];
+export type CostDrivers = S['CostDrivers'];
+export type CostDriver = S['CostDriver'];
+export type BudgetForecast = S['BudgetForecast'];
+export type BudgetForecastList = S['BudgetForecastList'];
+export type ExportFormat = S['ExportFormat'];
+export type Granularity = S['Granularity'];
+
+export const costSummary = (r: Range, f: ScopeFilter = {}) =>
+  unwrap<CostSummary>(api.GET('/admin/api/v1/costs/summary', { params: { query: clean({ ...r, ...f, errorClass: undefined }) as never } }));
+
+export const costDrivers = (dimension: Dimension, r: Range, f: ScopeFilter = {}, limit = 10) =>
+  unwrap<CostDrivers>(api.GET('/admin/api/v1/costs/breakdown', { params: { query: clean({ dimension, ...r, ...f, errorClass: undefined, limit }) as never } }));
+
+export const budgetForecasts = (q: { level?: S['BudgetLevelName']; target?: string; method?: S['ForecastMethod']; lookbackDays?: number } = {}) =>
+  unwrap<BudgetForecastList>(api.GET('/admin/api/v1/costs/budgets', { params: { query: clean(q) as never } }));
+
+/** Chargeback-Export als Text (CSV bzw. JSON); der Server streamt, die UI lädt die Datei als Ganzes. */
+export async function costExport(q: { dimension: Dimension; format: ExportFormat; granularity: Granularity } & Range & ScopeFilter): Promise<string> {
+  return unwrap<string>(api.GET('/admin/api/v1/costs/export', { params: { query: clean({ ...q, errorClass: undefined }) as never }, parseAs: 'text' }));
+}
+
 // ------------------------------------------------------------------ Plugin-Bindungen (lesen, F148)
 
 export const pluginBindings = (level: S['ScopeLevel'], target?: string) =>

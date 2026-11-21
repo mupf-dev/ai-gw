@@ -7,6 +7,8 @@ Binary für Gateway, Admin-API und Admin-UI.
   OpenAI, Anthropic, AWS Bedrock, Gemini/Vertex AI, Mistral, Ollama, vLLM u. a.
 - **Routing:** Modellgruppen, Lastverteilung, Retries, Fallbacks, Circuit Breaker
 - **Mandanten:** Organisationen, Teams, API-Keys, Modellfreigaben, Limits, Budgets, Kosten
+- **Kostenanalyse (FinOps):** Verlauf je Team/Modell/Anbieter/Key, Vorperiode, Kosten je Anfrage und Token,
+  Cache-Ersparnis, Plugin-Kosten, Budget-Prognosen, Chargeback-Export (CSV/JSON)
 - **Workload-/Agent-Identitäten:** Anmeldung mit Entra-Access-Tokens (Microsoft Entra Agent ID) statt Key
 - **Guardrails und Cache:** PII, Prompt-Filter, Content Safety, exakter/semantischer Cache, MCP-Gateway
 - **Betrieb:** Admin-UI, GitOps (YAML), Prometheus, OpenTelemetry, SQLite oder Postgres
@@ -28,6 +30,7 @@ Admin-Oberfläche (Svelte 5), Aufnahmen der echten UI. Weitere Bilder unter [doc
 | <a href="docs/konzept/ux/echt-guardrail-profil-diff-hell-desktop.png"><img src="docs/konzept/ux/echt-guardrail-profil-diff-hell-desktop.png" alt="Guardrail-Profil (Diff)" width="420"></a><br>Guardrail-Profil (Diff) | <a href="docs/konzept/ux/echt-mcp-freigaben-hell-desktop.png"><img src="docs/konzept/ux/echt-mcp-freigaben-hell-desktop.png" alt="MCP-Freigaben" width="420"></a><br>MCP-Freigaben |
 | <a href="docs/konzept/ux/echt-playground-hell-desktop.png"><img src="docs/konzept/ux/echt-playground-hell-desktop.png" alt="Playground" width="420"></a><br>Playground | <a href="docs/konzept/ux/echt-preise-hell-desktop.png"><img src="docs/konzept/ux/echt-preise-hell-desktop.png" alt="Preise" width="420"></a><br>Preise |
 | <a href="docs/konzept/ux/echt-audit-hell-desktop.png"><img src="docs/konzept/ux/echt-audit-hell-desktop.png" alt="Audit-Log" width="420"></a><br>Audit-Log | <a href="docs/konzept/ux/echt-gitops-trockenlauf-hell-desktop.png"><img src="docs/konzept/ux/echt-gitops-trockenlauf-hell-desktop.png" alt="GitOps-Trockenlauf" width="420"></a><br>GitOps-Trockenlauf |
+| <a href="docs/konzept/ux/echt-kosten-hell-desktop.png"><img src="docs/konzept/ux/echt-kosten-hell-desktop.png" alt="Kosten" width="420"></a><br>Kosten | <a href="docs/konzept/ux/echt-kosten-dunkel-desktop.png"><img src="docs/konzept/ux/echt-kosten-dunkel-desktop.png" alt="Kosten (dunkel)" width="420"></a><br>Kosten (dunkel) |
 | <a href="docs/konzept/ux/echt-yaml-import-hell-desktop.png"><img src="docs/konzept/ux/echt-yaml-import-hell-desktop.png" alt="YAML-Import" width="420"></a><br>YAML-Import | <a href="docs/konzept/ux/befehlspalette-hell-desktop.png"><img src="docs/konzept/ux/befehlspalette-hell-desktop.png" alt="Befehlspalette" width="420"></a><br>Befehlspalette |
 
 ## Schnellstart mit Docker

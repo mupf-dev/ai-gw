@@ -22,7 +22,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use aigw_billing::{BudgetKey, BudgetLevel, Calendar};
+use aigw_billing::{BudgetKey, BudgetLevel, Calendar, PeriodRange};
 use aigw_core::config::CounterBackendKind;
 use aigw_core::resource::ModelGroupSpec;
 use aigw_core::resource::{
@@ -71,7 +71,9 @@ impl fmt::Debug for UsageState {
 }
 
 /// Ebene eines Budgets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum BudgetLevelName {
     /// Organisation.
@@ -172,12 +174,28 @@ pub(crate) async fn list_budgets(
     q: Result<Query<BudgetQuery>, QueryRejection>,
 ) -> Result<Json<BudgetList>, Problem> {
     let Query(q) = q?;
-    let want = |l: BudgetLevelName| q.level.is_none_or(|w| w == l);
+    let (now_ms, items) = collect_budgets(&st.store, &st.calendar, &p, q.level).await?;
+    Ok(Json(BudgetList {
+        timezone: st.calendar.timezone().to_owned(),
+        at: rfc3339(now_ms),
+        items: items.into_iter().map(|(b, _)| b).collect(),
+    }))
+}
+
+/// Budgets mit Leserecht (`Read` auf dem Ziel) samt Stand im laufenden Zeitraum und dessen
+/// Grenzen (Unix-ms); auch für die Kostenanalyse (AIGW-117).
+pub(crate) async fn collect_budgets(
+    store: &Store,
+    calendar: &Calendar,
+    p: &Principal,
+    level: Option<BudgetLevelName>,
+) -> Result<(i64, Vec<(BudgetStatus, PeriodRange)>), Problem> {
+    let want = |l: BudgetLevelName| level.is_none_or(|w| w == l);
     let read = |t: &Target| p.can(Permission::Read, t);
 
     let mut targets: Vec<(BudgetLevelName, Id, String, Budget)> = Vec::new();
     if want(BudgetLevelName::Organization) {
-        for o in st.store.list::<OrganizationSpec>().await? {
+        for o in store.list::<OrganizationSpec>().await? {
             if let Some(b) = o.spec.budget
                 && read(&Target::Organization(o.metadata.name.clone()))
             {
@@ -186,7 +204,7 @@ pub(crate) async fn list_budgets(
         }
     }
     let teams = if want(BudgetLevelName::Team) || want(BudgetLevelName::ApiKey) {
-        st.store.list::<TeamSpec>().await?
+        store.list::<TeamSpec>().await?
     } else {
         Vec::new()
     };
@@ -215,7 +233,7 @@ pub(crate) async fn list_budgets(
                 .map(|t| t.spec.organization.clone())
                 .unwrap_or_default()
         };
-        for k in st.store.list_api_keys().await? {
+        for k in store.list_api_keys().await? {
             let target = match &k.spec.team {
                 Some(t) => Target::in_team(org_of(t), t.clone()),
                 None => Target::InOrganization(k.spec.organization.clone()),
@@ -233,7 +251,7 @@ pub(crate) async fn list_budgets(
     let now_ms = i64::try_from(now.unix_timestamp_nanos() / 1_000_000).unwrap_or(i64::MAX);
     let ranges: Vec<_> = targets
         .iter()
-        .map(|(_, _, _, b)| st.calendar.period(b.period, now_ms))
+        .map(|(_, _, _, b)| calendar.period(b.period, now_ms))
         .collect();
     let keys: Vec<BudgetKey> = targets
         .iter()
@@ -245,7 +263,7 @@ pub(crate) async fn list_budgets(
             period_start_ms: r.start_ms,
         })
         .collect();
-    let used = st.store.budget_usage(&keys).await?;
+    let used = store.budget_usage(&keys).await?;
 
     let items = targets
         .into_iter()
@@ -259,28 +277,27 @@ pub(crate) async fn list_budgets(
             } else {
                 0
             };
-            BudgetStatus {
-                level,
-                target_id: id,
-                target_name: name,
-                period: b.period,
-                period_start: rfc3339(r.start_ms),
-                period_end: r.end_ms.map(rfc3339),
-                amount: b.amount,
-                used: Amount::from_nanos(used),
-                remaining: Amount::from_nanos(amount.saturating_sub(used).max(0)),
-                percent,
-                warn_at_percent: b.warn_at_percent,
-                hard_limit: b.hard_limit,
-                exhausted: used >= amount,
-            }
+            (
+                BudgetStatus {
+                    level,
+                    target_id: id,
+                    target_name: name,
+                    period: b.period,
+                    period_start: rfc3339(r.start_ms),
+                    period_end: r.end_ms.map(rfc3339),
+                    amount: b.amount,
+                    used: Amount::from_nanos(used),
+                    remaining: Amount::from_nanos(amount.saturating_sub(used).max(0)),
+                    percent,
+                    warn_at_percent: b.warn_at_percent,
+                    hard_limit: b.hard_limit,
+                    exhausted: used >= amount,
+                },
+                r,
+            )
         })
         .collect();
-    Ok(Json(BudgetList {
-        timezone: st.calendar.timezone().to_owned(),
-        at: rfc3339(now_ms),
-        items,
-    }))
+    Ok((now_ms, items))
 }
 
 /// Hinweise zu Limits.

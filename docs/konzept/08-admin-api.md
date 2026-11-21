@@ -48,6 +48,7 @@ Instanz nach ca. 100 ms (Debounce), bei Postgres auf allen Instanzen per `NOTIFY
 | `/mcp-servers:status` | GET | Zustand der Upstream-MCP-Server (`up`/`down`/`idle`/`disabled`, letzter Fehler; AIGW-41-Folge) |
 | `/usage/budgets` | GET | Budgetstände ([11-limits-und-budgets.md](11-limits-und-budgets.md)) |
 | `/analytics/timeseries`, `/analytics/summary`, `/analytics/top` | GET | Dashboards: Zeitreihen, KPIs mit Vorperiode, Ranglisten (§5.11, [07-beobachtung.md](07-beobachtung.md) §13) |
+| `/costs/summary`, `/costs/breakdown`, `/costs/budgets`, `/costs/export` | GET | Kostenanalyse: Kennzahlen mit Vorperiode und Aufschlüsselung, Kostentreiber, Budget-Prognosen mit Burn-down, Chargeback-Export CSV/JSON (gestreamt); Sichtregeln wie Analytics ([07-beobachtung.md](07-beobachtung.md) §14, AIGW-117) |
 | `/request-logs`, `/request-logs/{id}`, `/request-logs/{id}/payload` | GET | Log-Explorer: Anfragen, Upstream-Versuche, Payload (§5.11) |
 | `/usage/limit-warnings` | GET | Hinweise zu ungenau wirkenden Limits (§5.12, F29) |
 | `/version` | GET | Version (ohne Anmeldung) |

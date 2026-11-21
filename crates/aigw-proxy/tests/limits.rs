@@ -1005,6 +1005,10 @@ async fn streams_are_priced_too() {
     assert_eq!(r.status, StatusCode::OK);
     let recs = capture.wait(1).await;
     assert_eq!(recs[0].cost, Some(amount("0.01")));
+    // AIGW-117: Aufschlüsselung nach Token-Art (Eingabe + Ausgabe = Kosten, kein Cache).
+    let b = recs[0].cost_breakdown;
+    assert_eq!(b.input.saturating_add(b.output), amount("0.01"));
+    assert_eq!(b.cache_read_saved, amount("0"));
 }
 
 // ---------------------------------------------------------------------------------------------

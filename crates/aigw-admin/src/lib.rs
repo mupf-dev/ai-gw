@@ -36,6 +36,7 @@ pub mod api;
 pub mod audit;
 pub mod auth;
 pub mod bounds;
+pub mod costs;
 pub mod credentials;
 pub mod deployments;
 pub mod gitops;

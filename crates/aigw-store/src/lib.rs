@@ -214,6 +214,11 @@ const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
         "workload_identities",
         include_str!("../migrations/sqlite/0012_workload_identities.sql"),
     ),
+    (
+        13,
+        "cost_breakdown",
+        include_str!("../migrations/sqlite/0013_cost_breakdown.sql"),
+    ),
 ];
 
 /// Migrationssatz für Postgres (`migrations/postgres/`), gleiche Versionen wie SQLite.
@@ -277,6 +282,11 @@ const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
         12,
         "workload_identities",
         include_str!("../migrations/postgres/0012_workload_identities.sql"),
+    ),
+    (
+        13,
+        "cost_breakdown",
+        include_str!("../migrations/postgres/0013_cost_breakdown.sql"),
     ),
 ];
 

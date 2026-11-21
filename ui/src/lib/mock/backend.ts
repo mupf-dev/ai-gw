@@ -552,10 +552,126 @@ function analytics(kind: string, q: URLSearchParams): unknown {
     const n = 24;
     const step = (to - from) / n;
     const base = q.get('metric') === 'cost' ? 2 : q.get('metric')?.includes('tokens') ? 40_000 : 120;
-    const points = Array.from({ length: n }, (_, i) => ({ t: new Date(from + i * step).toISOString(), v: base * (0.5 + r()) * (1 + Math.sin(i / 3) / 2) }));
-    return { metric: q.get('metric'), unit: 'count', step: '1h', stepSeconds: 3600, from: new Date(from).toISOString(), to: new Date(to).toISOString(), rollups: true, series: [{ key: 'total', other: false, points }] };
+    const line = (scale: number) => Array.from({ length: n }, (_, i) => ({ t: new Date(from + i * step).toISOString(), v: scale * base * (0.5 + r()) * (1 + Math.sin(i / 3) / 2) }));
+    // AIGW-117: mit groupBy mehrere Reihen (Kostenverlauf gestapelt).
+    const groups = q.get('groupBy') ? mockGroups(q.get('groupBy')!).slice(0, 5) : [{ key: 'total', name: undefined, share: 1 }];
+    const series = groups.map((g) => {
+      const points = line(g.share);
+      const total = points.reduce((a, p) => a + p.v, 0);
+      return { key: g.key, ...(g.name ? { name: g.name } : {}), other: false, total, ...(q.get('metric') === 'cost' ? { totalAmount: total.toFixed(4) } : {}), points };
+    });
+    return { metric: q.get('metric'), unit: q.get('metric') === 'cost' ? 'currency' : 'count', step: '1h', stepSeconds: 3600, from: new Date(from).toISOString(), to: new Date(to).toISOString(), rollups: true, ...(q.get('groupBy') ? { groupBy: q.get('groupBy') } : {}), series };
   }
   return { dimension: q.get('dimension'), metric: q.get('metric') ?? 'requests', unit: 'count', from: new Date(from).toISOString(), to: new Date(to).toISOString(), rollups: true, items: [] };
+}
+
+/** Beispielgruppen je Dimension für die Kostenanalyse im Mock-Modus (Namen aus den Mock-Ressourcen). */
+function mockGroups(dim: string): { key: string; name?: string; share: number }[] {
+  const names =
+    dim === 'team'
+      ? all('teams').map((o) => o.metadata.name)
+      : dim === 'org'
+        ? all('organizations').map((o) => o.metadata.name)
+        : dim === 'key'
+          ? all('api-keys').map((o) => o.metadata.name)
+          : dim === 'deployment'
+            ? all('deployments').map((o) => o.metadata.name)
+            : dim === 'provider'
+              ? [...new Set(all('deployments').map((o) => o.spec.provider as string))]
+              : all('model-groups').map((o) => o.metadata.name);
+  return names.map((name, i) => ({ key: name, name: dim === 'provider' || dim === 'model_group' ? undefined : name, share: 1 / (i + 1.5) }));
+}
+
+/** Kostenanalyse (AIGW-117) im Mock-Modus: deterministische Beispielwerte. */
+function costsMock(kind: string, q: URLSearchParams): Response {
+  const r = seeded(q.toString().replace(/(from|to)=[^&]*/g, ''));
+  const to = Date.parse(q.get('to') ?? new Date().toISOString());
+  const from = Date.parse(q.get('from') ?? new Date(to - 30 * 86_400_000).toISOString());
+  const iso = (t: number) => new Date(t).toISOString();
+  const fix = (v: number) => v.toFixed(4);
+  const delta = (v: number, p: number) => ({ amount: fix(v), previous: fix(p), delta: fix(v - p), deltaPercent: p ? ((v - p) / p) * 100 : null });
+  if (kind === 'summary') {
+    const total = 1800 + r() * 900;
+    const prev = total * (0.75 + r() * 0.4);
+    const req = Math.round(total * 160);
+    const parts: [string, number][] = [
+      ['input', 0.34],
+      ['cache_read', 0.04],
+      ['cache_write', 0.02],
+      ['output', 0.49],
+      ['plugins', 0.07],
+      ['other', 0.04],
+    ];
+    return json(200, {
+      from: iso(from),
+      to: iso(to),
+      previousFrom: iso(2 * from - to),
+      previousTo: iso(from),
+      currency: 'USD',
+      rollups: true,
+      total: delta(total, prev),
+      requests: req,
+      previousRequests: Math.round(prev * 160),
+      costPerRequest: delta(total / req, prev / Math.round(prev * 160)),
+      inputTokens: req * 900,
+      outputTokens: req * 220,
+      cachedTokens: req * 180,
+      cacheWriteTokens: req * 20,
+      costPer1kInputTokens: fix((total * 0.4) / (req * 0.9)),
+      costPer1kOutputTokens: fix((total * 0.49) / (req * 0.22)),
+      breakdown: parts.map(([part, sh]) => ({ part, amount: fix(total * sh), share: sh })),
+      savings: { providerCache: fix(total * 0.09), providerCacheTokens: req * 180, gatewayCacheEstimate: fix(total * 0.06), gatewayCacheHits: Math.round(req * 0.05), gatewayCacheHitsUnestimated: 0 },
+      plugins: { amount: fix(total * 0.07), inputTokens: req * 60, outputTokens: req * 4, share: 0.07 },
+    });
+  }
+  if (kind === 'breakdown') {
+    const dim = q.get('dimension') ?? 'team';
+    const groups = mockGroups(dim).slice(0, Number(q.get('limit') ?? 10));
+    const sum = groups.reduce((a, g) => a + g.share, 0);
+    const total = 1800 + r() * 900;
+    const items = groups.map((g) => {
+      const v = (total * g.share) / sum;
+      const p = v * (0.7 + r() * 0.6);
+      const req = Math.round(v * 150);
+      return { key: g.key, ...(g.name ? { name: g.name } : {}), cost: delta(v, p), share: g.share / sum, requests: req, inputTokens: req * 900, outputTokens: req * 200, costPerRequest: fix(v / req), pluginCost: fix(v * 0.06) };
+    });
+    return json(200, { dimension: dim, from: iso(from), to: iso(to), previousFrom: iso(2 * from - to), currency: 'USD', rollups: true, total: delta(total, total * 0.9), items });
+  }
+  if (kind === 'budgets') {
+    const list = budgetList(q.get('level'));
+    const target = q.get('target');
+    const items = list.items
+      .filter((b) => !target || b.targetName === target)
+      .map((b) => {
+        const used = Number(b.used);
+        const amountV = Number(b.amount);
+        const rate = (used / 5) * (0.8 + r() * 0.6);
+        const projected = used + rate * 25;
+        const exceeds = projected > amountV && used < amountV ? Date.now() + ((amountV - used) / rate) * 86_400_000 : null;
+        const health = used >= amountV ? 'exhausted' : exceeds ? 'at_risk' : b.percent >= Math.min(...b.warnAtPercent) ? 'warning' : 'ok';
+        const start = Date.parse(b.periodStart);
+        const end = Date.parse(b.periodEnd ?? new Date().toISOString());
+        const burnDown = target
+          ? Array.from({ length: 30 }, (_, i) => {
+              const t = start + (i + 1) * 86_400_000;
+              return t <= Date.now() ? { t: iso(t), spent: fix((used * (i + 1)) / 5) } : { t: iso(Math.min(t, end)), projected: fix(used + (rate * (t - Date.now())) / 86_400_000) };
+            })
+          : [];
+        return {
+          budget: b,
+          health,
+          forecast: { method: 'average', lookbackDays: 7, dailyRate: fix(rate), projected: fix(projected), projectedPercent: Math.floor((projected / amountV) * 100), exceedsAt: exceeds ? iso(exceeds) : null, willExceed: !!exceeds || used >= amountV },
+          burnDown,
+        };
+      });
+    return json(200, { timezone: list.timezone, at: list.at, currency: 'USD', rollups: true, items });
+  }
+  // export
+  const dim = q.get('dimension') ?? 'team';
+  const rows = mockGroups(dim).map((g) => ({ periodStart: iso(from), periodEnd: iso(to), key: g.key, name: g.name ?? g.key, cost: fix(500 * g.share), requests: Math.round(80_000 * g.share) }));
+  if (q.get('format') === 'json') return json(200, { dimension: dim, granularity: q.get('granularity') ?? 'month', from: iso(from), to: iso(to), timezone: 'UTC', currency: 'USD', rows });
+  const csv = ['period_start,period_end,dimension,key,name,requests,cost,currency', ...rows.map((x) => `${x.periodStart},${x.periodEnd},${dim},${x.key},${x.name},${x.requests},${x.cost},USD`)].join('\r\n');
+  return new Response(`${csv}\r\n`, { status: 200, headers: { 'Content-Type': 'text/csv; charset=utf-8' } });
 }
 
 function budgetList(level: string | null) {
@@ -599,6 +715,7 @@ function extra(method: string, parts: string[], q: URLSearchParams): Response | 
   if (a === 'audit-log' && !b) return json(200, auditPage(q));
   if (a === 'audit-log' && b === 'verify') return json(200, { ok: true, checked: auditLog.length, headSeq: auditLog.length, anchorSeq: 0, unchained: 0, headHash: 'mock', issues: [] });
   if (a === 'analytics' && b) return json(200, analytics(b, q));
+  if (a === 'costs' && b) return costsMock(b, q);
   if (a === 'request-logs' && !b) return json(200, { items: [] });
   if (a === 'usage' && b === 'budgets') return json(200, budgetList(q.get('level')));
   if (a === 'usage' && b === 'limit-warnings') return json(200, { counterBackend: 'local', warnings: [] });

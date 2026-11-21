@@ -403,6 +403,29 @@ pub struct RequestRecord {
     pub plugin_usage: Usage,
     /// Anteil der Plugin-Modellaufrufe an `cost` (nur mit Preis).
     pub plugin_cost: Option<Amount>,
+    /// Aufschlüsselung der Kosten der Hauptanfrage nach Token-Art (AIGW-117, ohne
+    /// Plugin-Anteil); alle Teile 0, wenn kein Preis bekannt ist.
+    pub cost_breakdown: CostBreakdown,
+}
+
+/// Aufschlüsselung der Kosten einer Anfrage nach Token-Art (AIGW-117, Kostenanalyse).
+///
+/// Die Teile sind je Art auf ganze Nano-Einheiten abgerundet; ihre Summe kann daher um wenige
+/// Nano-Einheiten unter den Token-Kosten liegen. Kosten je Anfrage, Bild, Audio-Minute und
+/// Zeichen sind nicht aufgeschlüsselt (Rest = `cost` − Teile − `plugin_cost`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CostBreakdown {
+    /// Eingabe-Tokens ohne Anbieter-Cache.
+    pub input: Amount,
+    /// Aus dem Anbieter-Cache gelesene Tokens (Prompt-Caching).
+    pub cache_read: Amount,
+    /// In den Anbieter-Cache geschriebene Tokens.
+    pub cache_write: Amount,
+    /// Ausgabe-Tokens inklusive Reasoning.
+    pub output: Amount,
+    /// Ersparnis durch Prompt-Caching des Anbieters: gelesene Cache-Tokens × (Eingabepreis −
+    /// Cache-Lesepreis); 0 ohne eigenen Cache-Lesepreis.
+    pub cache_read_saved: Amount,
 }
 
 /// Ergebnis eines MCP-Tool-Aufrufs (Label `status` von `aigw_mcp_calls_total`).
@@ -491,6 +514,7 @@ impl RequestRecord {
             mcp: None,
             plugin_usage: Usage::default(),
             plugin_cost: None,
+            cost_breakdown: CostBreakdown::default(),
         }
     }
 

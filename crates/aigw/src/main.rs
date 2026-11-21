@@ -187,6 +187,8 @@ fn serve(
     config.wasm.validate()?;
     // AIGW-115: vertrauenswürdige JWT-Aussteller der Datenebene.
     config.auth.validate()?;
+    // AIGW-117: Abrechnungswährung und Kostenstellen-Schlüssel.
+    config.billing.validate()?;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -425,6 +427,15 @@ fn serve(
                 rollups: config.observe.rollups,
             },
         ))
+        // Kostenanalyse (AIGW-117): Kennzahlen, Kostentreiber, Budget-Prognosen, Chargeback-Export.
+        .merge(aigw_admin::costs::router(aigw_admin::costs::CostsState {
+            store: runtime_state.store.clone(),
+            auth: std::sync::Arc::clone(&auth),
+            calendar: std::sync::Arc::clone(&runtime_state.calendar),
+            rollups: config.observe.rollups,
+            currency: config.billing.currency.clone(),
+            cost_center_key: config.billing.cost_center_key.clone(),
+        }))
         .merge(aigw_admin::mcp_status::router(
             aigw_admin::mcp_status::McpStatusState {
                 store: runtime_state.store.clone(),

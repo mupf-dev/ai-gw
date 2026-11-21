@@ -401,6 +401,17 @@ eingebunden). uPlot bleibt für einfache Zeitreihen.
 |---|---|---|
 | ![](ux/echt-uebersicht-hell-desktop.png) | ![](ux/echt-routing-einstellungen-hell-desktop.png) | ![](ux/echt-audit-hell-desktop.png) |
 
+**Kostenanalyse (AIGW-117).** Seite `/costs` („Kosten“, Gruppe Beobachten): KPI-Kacheln mit Vorperiode, Kostenverlauf
+gestapelt (StackedArea mit `format`, Top 5 + Übrige, Farben `chart-1…6` in fester Reihenfolge) mit aufklappbarer
+Tabelle als Alternative, Aufschlüsselung als Meter-Liste, Ersparnis (Gateway-Cache mit Badge „Schätzung“),
+Kostentreiber-Tabelle (Klick filtert die Seite und wechselt die Gruppierung eine Ebene tiefer, Link „Logs“ für
+Modellgruppe/Deployment/Key), Budgets mit Zustand und Prognosetext, Burn-down (uPlot: Verbraucht, Prognose, Budget)
+und Chargeback-Export. Filter, Zeitraum, Gruppierung und Schritt stehen in der URL.
+
+| Kosten (hell) | Kosten (dunkel) |
+|---|---|
+| ![](ux/echt-kosten-hell-desktop.png) | ![](ux/echt-kosten-dunkel-desktop.png) |
+
 ## 6. Seitenkatalog (alle geplanten Seiten)
 
 | Seite | Pfad | Inhalt | Stand |
@@ -414,7 +425,8 @@ eingebunden). uPlot bleibt für einfache Zeitreihen.
 | Keys | `/keys`, `/keys/{name}` | Virtuelle Keys: erstellen (einmalige Anzeige), rotieren, sperren/entsperren/widerrufen; Detail mit Budget, Nutzung, Audit | **echt** |
 | Teams & Nutzer | `/teams`, `/teams/{name}`, `/organizations/{name}` | Organisationen, Teams (Detailseiten), Nutzer, Rollen, Einladungen | **echt** |
 | Admin-API-Keys | `/admin-keys` | Zugänge für Automatisierung mit Rollen und Ablauf | **echt** |
-| Limits & Budgets | `/limits` | Budgetverbrauch je Org/Team/Key, Hinweise zu ungenauen Limits; Prognose folgt | **echt** (Budgets) |
+| Limits & Budgets | `/limits` | Budgetverbrauch je Org/Team/Key, Hinweise zu ungenauen Limits; Prognose auf der Seite Kosten | **echt** (Budgets) |
+| Kosten | `/costs` | Kostenverlauf gestapelt nach Dimension, Vorperiode, Kosten je Anfrage/Token, Aufschlüsselung, Ersparnis, Plugin-Kosten, Kostentreiber mit Drilldown, Budget-Prognose mit Burn-down, Chargeback-Export CSV/JSON | **echt** (AIGW-117) |
 | Guardrails & Plugins | `/guardrails` | Plugin-Bindungen je Ebene mit Steuerfeldern, wirksamem Fehlermodus, Formularen je Plugin, Testlauf und Kettenvorschau; Standard-Profile mit Diff und Anwenden | **echt** (AIGW-52, AIGW-86) |
 | Tools | `/tools` | Tool-Inventar (Name, Art, Herkunft/MCP-Server, Gateway-MCP, Client, Team/Key, Anfragen/Aufrufe/blockiert, zuletzt gesehen) mit Filtern (Status inkl. geändert/verdächtig, Herkunft, Client, Team), Badges „geändert“/„verdächtig“, Aktionen Freigeben/Sperren je Ebene (global, Organisation, Team, Key; entfernen oder ablehnen), Änderung bestätigen; Detail-Sheet mit Beschreibung, Schema, Hash-Verlauf, passenden Richtlinien; Reiter „Richtlinien“ (CRUD `ToolPolicy`) | **echt** (AIGW-87) |
 | Cache | `/cache` | Exakt/semantisch, Trefferquote, Ersparnis, TTL-Regeln, Vektorindex, gezieltes Leeren | geplant |

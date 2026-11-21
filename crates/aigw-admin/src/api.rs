@@ -74,6 +74,8 @@ use crate::{admin_keys as ak, session as s};
         crate::analytics::timeseries, crate::analytics::summary, crate::analytics::top,
         crate::analytics::list_request_logs, crate::analytics::get_request_log,
         crate::analytics::get_request_payload,
+        crate::costs::summary, crate::costs::breakdown, crate::costs::budgets,
+        crate::costs::export,
         crate::playground::models, crate::playground::chat,
     ),
     components(schemas(VersionInfo, SnapshotInfo, Problem, crate::bounds::Cascade)),
@@ -103,6 +105,7 @@ use crate::{admin_keys as ak, session as s};
         (name = "usage", description = "Verbrauch und Budgetstände"),
         (name = "audit-log", description = "Audit-Log: Änderungen und Anmeldeereignisse, Export als JSON Lines"),
         (name = "analytics", description = "Dashboards: Zeitreihen, KPIs, Ranglisten aus den Rollups"),
+        (name = "costs", description = "Kostenanalyse (FinOps): Kennzahlen, Kostentreiber, Budget-Prognosen, Chargeback-Export (CSV/JSON)"),
         (name = "request-logs", description = "Log-Explorer: einzelne Anfragen, Versuche, Payloads"),
         (name = "playground", description = "Playground der Admin-UI: Chat im Namen eines virtuellen Keys über die Pipeline der Datenebene (auditiert)"),
     )
@@ -335,6 +338,10 @@ mod tests {
             "/admin/api/v1/admin-api-keys",
             "/admin/api/v1/admin-api-keys/{name}",
             "/admin/api/v1/audit-log",
+            "/admin/api/v1/costs/summary",
+            "/admin/api/v1/costs/breakdown",
+            "/admin/api/v1/costs/budgets",
+            "/admin/api/v1/costs/export",
         ] {
             assert!(json["paths"][p].is_object(), "Pfad {p} fehlt");
         }
@@ -343,6 +350,9 @@ mod tests {
         let content =
             &json["paths"]["/admin/api/v1/audit-log"]["get"]["responses"]["200"]["content"];
         assert!(content["application/x-ndjson"].is_object(), "{content}");
+        let content =
+            &json["paths"]["/admin/api/v1/costs/export"]["get"]["responses"]["200"]["content"];
+        assert!(content["text/csv"].is_object(), "{content}");
         // Ressourcen akzeptieren Bearer und Session.
         let sec = json["paths"]["/admin/api/v1/teams"]["post"]["security"].to_string();
         assert!(sec.contains("bearer") && sec.contains("session"), "{sec}");

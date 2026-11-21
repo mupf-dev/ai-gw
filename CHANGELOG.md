@@ -9,6 +9,23 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Hinzugefügt
 
+- **Kostenanalyse / FinOps (AIGW-117):** neue Seite „Kosten“ (Navigation, `/costs`,
+  Befehlspalette): Kostenverlauf gestapelt nach Team, Organisation, Modellgruppe, Deployment,
+  Anbieter oder API-Key (Top 5 + Übrige, Schrittweite wählbar, Tabellen-Alternative), Filter
+  wie Analytics, Vergleich mit der Vorperiode (Delta absolut/%), Kosten je Anfrage und je 1000
+  Ein-/Ausgabe-Tokens, Aufschlüsselung nach Eingabe/Cache lesen/Cache schreiben/Ausgabe/
+  Plugins/Rest, Ersparnis durch Prompt-Caching des Anbieters (exakt) und den Antwort-Cache des
+  Gateways (als Schätzung gekennzeichnet), Plugin-Kosten (content-safety, schema-guard)
+  getrennt, Kostentreiber mit Drilldown (Filter, Log-Explorer), Budgets mit Prognose bis
+  Periodenende (Durchschnitt der letzten N Tage bzw. linear), Warnung bei erwarteter
+  Überschreitung und Burn-down, Chargeback-Export. Admin-API `GET /admin/api/v1/costs/{summary,
+  breakdown,budgets,export}` mit denselben Sichtregeln wie Analytics; Export als CSV oder JSON
+  gestreamt je Abschnitt (gesamt/Tag/Woche/Monat) mit Kostenstelle, Labels und Metadaten.
+  Migration 0013 (Rollup-Spalten `cost_input`, `cost_cache_read`, `cost_cache_write`,
+  `cost_output`, `cache_read_saved`, `plugin_cost`, `plugin_input_tokens`,
+  `plugin_output_tokens`), `RequestRecord.cost_breakdown`. Neue Einstellungen
+  `billing.currency` (Standard `USD`, nur Beschriftung) und `billing.cost_center_key`
+  (Standard `costCenter`).
 - **Workload-/Agent-Identitäten, Microsoft Entra Agent ID (AIGW-115):** Datenebene und
   MCP-Gateway nehmen neben API-Keys Access-Tokens (JWT) vertrauenswürdiger Aussteller an
   (`auth.jwt.issuers`, Profile `entra` und `generic`). Prüfung von Signatur (nur RS256/ES256),

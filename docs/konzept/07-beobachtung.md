@@ -129,6 +129,9 @@ Read-Modify-Write. Schlüssel werden sortiert geschrieben (gleiche Sperrreihenfo
 | `latency_ms_sum`, `ttft_ms_sum`, `ttft_count` | Summen für Mittelwerte |
 | `estimated`, `aborted` | Anfragen mit geschätzter Usage, Client-Abbrüche |
 | `lat_le_25` … `lat_le_60000`, `lat_inf` | Latenz-Histogramm: Anzahl je Bucket (nicht kumulativ), Grenzen 25, 50, 100, 250, 500, 1000, 2500, 5000, 10 000, 30 000, 60 000 ms, +Inf |
+| `cost_input`, `cost_cache_read`, `cost_cache_write`, `cost_output` | Kosten der Hauptanfrage je Token-Art (Nano, seit Migration 0013, AIGW-117; §14) |
+| `cache_read_saved` | Ersparnis durch Prompt-Caching des Anbieters (Nano) |
+| `plugin_cost`, `plugin_input_tokens`, `plugin_output_tokens` | Modellaufrufe von Plugins (Kosten in `cost` enthalten, Tokens nicht in `input/output_tokens`) |
 
 Das JSON-Feld `latency_hist` aus 0001 entfällt: JSON lässt sich nicht portabel additiv
 aktualisieren.
@@ -637,3 +640,94 @@ möglich wäre eine dritte Stufe mit 5-Minuten-Rollups. Schreiben (Seed): 1 Mio.
 - Einheiten: Abschnittszerlegung, Interpolation, Schrittwahl, Status-/Cursor-Parser,
   `ReadPayload` in `rbac.rs`.
 - Last: `crates/aigw-admin/tests/analytics_perf.rs` (nur mit `AIGW_ANALYTICS_PERF=1`).
+
+## 14. Kostenanalyse (AIGW-117)
+
+Lese-API: `GET /admin/api/v1/costs/{summary,breakdown,budgets,export}` (OpenAPI-Tag `costs`),
+UI-Seite „Kosten“ (`/costs`). Der gestapelte Kostenverlauf nutzt unverändert
+`/analytics/timeseries?metric=cost&groupBy=…` (§13.2) – keine zweite Zeitreihen-Abfrage.
+
+### 14.1 Datenbasis (Migration `0013_cost_breakdown.sql`)
+
+- Beide Rollup-Tabellen bekommen acht additive Zählspalten (SQLite `INTEGER`, Postgres
+  `BIGINT`, Standard 0): Kosten je Token-Art (`cost_input` = Eingabe ohne Cache,
+  `cost_cache_read`, `cost_cache_write`, `cost_output` inkl. Reasoning), `cache_read_saved`,
+  `plugin_cost`, `plugin_input_tokens`, `plugin_output_tokens`. Ältere Zeilen behalten 0 – ihre
+  Kosten erscheinen als „nicht aufgeschlüsselt“.
+- Quelle ist `RequestRecord.cost_breakdown` (`aigw_core::observe::CostBreakdown`), berechnet im
+  Abschluss der Limits (`Admission::complete`) mit demselben Preis wie `cost`
+  (`aigw_billing::cost_with_breakdown`): Teile je Art abgerundet, die Summe rechnet weiter exakt
+  wie bisher. Embedding-Aufrufe des semantischen Caches (F191) werden ebenso aufgeschlüsselt.
+- **Ersparnis durch Prompt-Caching des Anbieters** = gelesene Cache-Tokens × (Eingabepreis −
+  Cache-Lesepreis), exakt zum Preis der Anfrage; ohne eigenen `cachedInput`-Preis 0.
+- **Plugin-Kosten** (`RequestRecord.plugin_cost`/`plugin_usage`, AIGW-89/S-13: Prüfmodell von
+  `content-safety`, Wiederholungen von `schema-guard`) stehen damit erstmals getrennt in den
+  Rollups.
+- Agent-/Workload-Identitäten (AIGW-115) sind immer einem API-Key zugeordnet – Kosten je
+  Identität zeigt die Dimension `key`. Eine eigene Rollup-Schlüsselspalte wäre ein Umbau des
+  Primärschlüssels beider Tabellen; bewusst nicht ergänzt.
+- Indizes: unverändert ausreichend. Kostenabfragen über Tage lesen die Stunden-Rollups mit den
+  Dimensionsindizes aus §13.1; Budget-Prognosen filtern je Ebene auf Team/Organisation/Key
+  (Index `(…, bucket_start)`).
+
+### 14.2 Kennzahlen (`summary`) und Kostentreiber (`breakdown`)
+
+- Standard-Zeitraum 30 Tage (höchstens 400), Vorperiode gleich lang direkt davor; Filter wie
+  Analytics (Name oder ID: `organization`, `team`, `key`, `modelGroup`, `deployment`,
+  `provider`).
+- `total` und `costPerRequest` als `CostDelta` (Betrag, Vorperiode, Delta absolut, Delta in %);
+  Kosten je 1000 Eingabe-Tokens = (Eingabe + Cache lesen + Cache schreiben) / Eingabe-Tokens,
+  je 1000 Ausgabe-Tokens = Ausgabe / Ausgabe-Tokens.
+- Aufschlüsselung `breakdown`: Eingabe, Cache lesen, Cache schreiben, Ausgabe, Plugins und
+  Rest (`other`: Preise je Anfrage, Bild, Audio-Minute, Zeichen, ältere Daten; nie negativ –
+  Rundung der Teile). Summe = Gesamtkosten.
+- **Ersparnis durch den Antwort-Cache des Gateways (Schätzung):** Treffer haben Usage und
+  Kosten 0 (14-cache.md). Geschätzt wird je Modellgruppe: Treffer × (Kosten − Plugin-Kosten) /
+  bezahlte Anfragen (Anfragen − Treffer − Fehler) im Zeitraum. Treffer einer Modellgruppe ohne
+  bezahlte Anfrage zählen als `gatewayCacheHitsUnestimated`. Die UI kennzeichnet den Wert als
+  Schätzung.
+- `breakdown?dimension=…` (alle Analytics-Dimensionen außer `error_class`): je Gruppe Kosten mit
+  Vorperiode, Anteil, Anfragen, Tokens, Kosten je Anfrage und Plugin-Anteil; absteigend nach
+  Kosten, Gruppen nur der Vorperiode ebenfalls (Delta −100 %).
+
+### 14.3 Budgets mit Prognose (`budgets`)
+
+- Liste wie `/usage/budgets` (Leserecht auf das Ziel, Verbrauch aus `budget_usage`) plus
+  `health` (`ok`, `warning` ab der ersten Warnschwelle, `at_risk` bei erwarteter
+  Überschreitung, `exhausted`) und `forecast`:
+  - `method=average` (Standard): Kosten der letzten `lookbackDays` Tage (1–90, Standard 7; auch
+    vor dem Periodenbeginn) aus den Rollups, je Ebene **eine** gruppierte Abfrage;
+  - `method=linear`: Verbrauch / verstrichene Zeit seit Periodenbeginn.
+  - `projected` = Verbrauch + Rate × Restzeit bis Periodenende (fehlt bei `total`),
+    `exceedsAt` = Zeitpunkt, an dem der Betrag erreicht wird, falls vor Periodenende.
+- Mit `level` und `target` (Name oder ID) zusätzlich `burnDown`: kumulierte Kosten laut Rollups
+  je Kalendertag (Tagesbudgets je Stunde) bis jetzt, danach die Prognose je Abschnitt. Der
+  Verlauf stammt aus den Rollups, „verbraucht“ aus dem Ledger – kleine Abweichungen (Abgleich-
+  intervall, Aufbewahrung) sind möglich.
+
+### 14.4 Chargeback-Export (`export`)
+
+- `dimension` (Standard `team`), `granularity` `total|day|week|month` (Standard `month`,
+  Kalender in `billing.timezone`), `format` `csv|json`, Zeitraum und Filter wie oben.
+- Gestreamt: je Abschnitt eine gruppierte Rollup-Abfrage, die Zeilen gehen sofort hinaus
+  (Speicher ≈ ein Abschnitt). CSV (RFC 4180, CRLF) mit Kopfzeile `period_start, period_end,
+  dimension, key, name, organization, team, cost_center`, dann `label.<name>` und
+  `meta.<name>` der **sichtbaren** Objekte der Dimension, dann `requests, input_tokens,
+  output_tokens, cached_tokens, cost, plugin_cost, currency`. JSON: Objekt mit `rows`.
+  `Content-Disposition: attachment; filename="aigw-kosten-<dimension>-<von>-<bis>.<ext>"`.
+- Kostenstelle: `spec.metadata[billing.cost_center_key]` vom Key, sonst Team, sonst
+  Organisation. Textfelder, die mit `=`, `+`, `-`, `@`, Tab oder CR beginnen, werden mit `'`
+  entschärft (Formel-Injektion in Tabellenkalkulationen).
+- Beträge exakt als Dezimaltext, `currency` = `billing.currency` (nur Beschriftung).
+
+### 14.5 Geltungsbereich und Tests
+
+- Wie Analytics (§13.2, F146/F147): eingeschränkte Rollen sehen nur ihre Teams und – mit an die
+  Organisation gebundener Rolle – teamlose Keys ihrer Organisation; ausdrücklich gewählte fremde
+  Teams/Keys → `403`. Der Export zeigt auch Label-/Metadaten-Spalten nur sichtbarer Objekte.
+- `crates/aigw-admin/tests/costs_api.rs` (SQLite, Postgres): Kennzahlen, Aufschlüsselung,
+  Ersparnisse, Plugin-Kosten, Kostentreiber mit Vorperiode, Export CSV/JSON (Abschnitte,
+  Kostenstelle mit Vererbung, Labels, Formel-Schutz), Budgets mit Prognose und Burn-down,
+  Rollen (Team-Betrachter, Org-Admin), Fehlerfälle. Einheiten in `costs.rs` (Prognose,
+  Schätzung, Abschnitte, CSV) sowie `aigw-billing` (Aufschlüsselung), `aigw-observe`
+  (Rollup-Felder) und `aigw-proxy/tests/limits.rs`. UI: `ui/e2e/tests/aigw117.spec.js`.

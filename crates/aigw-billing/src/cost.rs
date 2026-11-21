@@ -21,6 +21,7 @@
 //! (Preis in Nano-Einheiten × Menge) und erst die Summe auf ganze Nano-Einheiten abgerundet.
 
 use aigw_core::ir::Usage;
+use aigw_core::observe::CostBreakdown;
 use aigw_core::resource::{Amount, PriceSpec};
 use aigw_core::snapshot::Snapshot;
 use aigw_core::types::ProviderKind;
@@ -28,6 +29,15 @@ use time::OffsetDateTime;
 
 /// Kosten von `usage` zum Preis `price`.
 pub fn cost(price: &PriceSpec, usage: &Usage) -> Amount {
+    cost_with_breakdown(price, usage).0
+}
+
+/// Kosten von `usage` zum Preis `price` samt Aufschlüsselung nach Token-Art (AIGW-117).
+///
+/// Die Summe rechnet exakt wie [`cost`] (erst die Summe wird abgerundet); die Teile sind je Art
+/// abgerundet. Die Ersparnis durch Prompt-Caching ist `cache_read × (input − cachedInput)`,
+/// nur wenn ein eigener, niedrigerer Cache-Lesepreis hinterlegt ist.
+pub fn cost_with_breakdown(price: &PriceSpec, usage: &Usage) -> (Amount, CostBreakdown) {
     let p = &price.per_million_tokens;
     let nanos = |a: Option<Amount>| i128::from(a.map_or(0, Amount::nanos));
     let input = nanos(p.input);
@@ -46,20 +56,29 @@ pub fn cost(price: &PriceSpec, usage: &Usage) -> Amount {
     let plain_output = usage.output_tokens - reasoning_tokens;
 
     let t = i128::from;
-    let sum = input * t(plain_input)
-        + cached * t(read_tokens)
-        + cache_write * t(write_tokens)
-        + output * t(plain_output)
-        + reasoning * t(reasoning_tokens);
+    let part = |v: i128| Amount::from_nanos(i64::try_from(v / 1_000_000).unwrap_or(i64::MAX));
+    let input_part = input * t(plain_input);
+    let read_part = cached * t(read_tokens);
+    let write_part = cache_write * t(write_tokens);
+    let output_part = output * t(plain_output) + reasoning * t(reasoning_tokens);
+    let sum = input_part + read_part + write_part + output_part;
     let tokens = i64::try_from(sum / 1_000_000).unwrap_or(i64::MAX);
     // Bilder (ganzzahlig), Audio-Minuten (je ms) und Zeichen (je 1 Mio.).
     let images = nanos(price.per_image) * t(usage.images.unwrap_or(0));
     let audio = nanos(price.per_audio_minute) * t(usage.audio_ms.unwrap_or(0)) / 60_000;
     let chars = nanos(price.per_million_characters) * t(usage.characters.unwrap_or(0)) / 1_000_000;
     let media = i64::try_from(images + audio + chars).unwrap_or(i64::MAX);
-    Amount::from_nanos(tokens)
+    let total = Amount::from_nanos(tokens)
         .saturating_add(Amount::from_nanos(media))
-        .saturating_add(price.per_request.unwrap_or(Amount::ZERO))
+        .saturating_add(price.per_request.unwrap_or(Amount::ZERO));
+    let breakdown = CostBreakdown {
+        input: part(input_part),
+        cache_read: part(read_part),
+        cache_write: part(write_part),
+        output: part(output_part),
+        cache_read_saved: part((input - cached).max(0) * t(read_tokens)),
+    };
+    (total, breakdown)
 }
 
 /// Kosten einer Anfrage an `provider`/`model` mit dem zum Zeitpunkt `at` gültigen Preis
@@ -74,6 +93,19 @@ pub fn cost_at(
     snapshot
         .price_at(provider, model, at)
         .map(|p| cost(&p.spec, usage))
+}
+
+/// Wie [`cost_at`], zusätzlich mit Aufschlüsselung nach Token-Art (AIGW-117).
+pub fn cost_breakdown_at(
+    snapshot: &Snapshot,
+    provider: ProviderKind,
+    model: &str,
+    at: OffsetDateTime,
+    usage: &Usage,
+) -> Option<(Amount, CostBreakdown)> {
+    snapshot
+        .price_at(provider, model, at)
+        .map(|p| cost_with_breakdown(&p.spec, usage))
 }
 
 #[cfg(test)]
@@ -145,6 +177,17 @@ mod tests {
         // 3000×3 + 6000×0,3 + 1000×3,75 + 1500×15 + 500×20 = 9000 + 1800 + 3750 + 22500 + 10000
         // = 47 050 / 1 Mio. = 0,04705 (+ 0,001 je Anfrage)
         assert_eq!(cost(&p, &u).to_string(), "0.04805");
+        // AIGW-117: Aufschlüsselung je Art, Ersparnis = 6000 × (3 − 0,3) / 1 Mio. = 0,0162.
+        let (total, b) = cost_with_breakdown(&p, &u);
+        assert_eq!(total.to_string(), "0.04805");
+        assert_eq!(b.input.to_string(), "0.009");
+        assert_eq!(b.cache_read.to_string(), "0.0018");
+        assert_eq!(b.cache_write.to_string(), "0.00375");
+        assert_eq!(b.output.to_string(), "0.0325");
+        assert_eq!(b.cache_read_saved.to_string(), "0.0162");
+        // Ohne eigenen Cache-Lesepreis keine Ersparnis.
+        p.per_million_tokens.cached_input = None;
+        assert_eq!(cost_with_breakdown(&p, &u).1.cache_read_saved, Amount::ZERO);
     }
 
     #[test]

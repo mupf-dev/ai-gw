@@ -180,6 +180,15 @@ impl Processor {
             aborted: i64::from(log.client_aborted),
             ttft_ms_sum: log.ttft_ms.unwrap_or(0),
             ttft_count: i64::from(log.ttft_ms.is_some()),
+            // AIGW-117: Kosten nach Art, Plugin-Anteil und Ersparnis durch Prompt-Caching.
+            cost_input: r.cost_breakdown.input.nanos(),
+            cost_cache_read: r.cost_breakdown.cache_read.nanos(),
+            cost_cache_write: r.cost_breakdown.cache_write.nanos(),
+            cost_output: r.cost_breakdown.output.nanos(),
+            cache_read_saved: r.cost_breakdown.cache_read_saved.nanos(),
+            plugin_cost: r.plugin_cost.map_or(0, |c| c.nanos()),
+            plugin_input_tokens: i64::try_from(r.plugin_usage.input_tokens).unwrap_or(i64::MAX),
+            plugin_output_tokens: i64::try_from(r.plugin_usage.output_tokens).unwrap_or(i64::MAX),
             ..RollupCounts::default()
         };
         if let Some(slot) = c.latency_hist.get_mut(latency_bucket(log.latency_ms)) {
@@ -252,6 +261,21 @@ mod tests {
         let mut a = rec(60_000, 10, Some(team));
         a.ttft = Some(Duration::from_millis(4));
         a.cache = Some(CacheOutcome::HitExact);
+        // AIGW-117: Kosten-Aufschlüsselung und Plugin-Anteil landen in den Rollups.
+        a.cost = Some(aigw_core::resource::Amount::from_nanos(100));
+        a.cost_breakdown = aigw_core::observe::CostBreakdown {
+            input: aigw_core::resource::Amount::from_nanos(30),
+            cache_read: aigw_core::resource::Amount::from_nanos(5),
+            cache_write: aigw_core::resource::Amount::ZERO,
+            output: aigw_core::resource::Amount::from_nanos(50),
+            cache_read_saved: aigw_core::resource::Amount::from_nanos(9),
+        };
+        a.plugin_cost = Some(aigw_core::resource::Amount::from_nanos(15));
+        a.plugin_usage = Usage {
+            input_tokens: 40,
+            output_tokens: 3,
+            ..Usage::default()
+        };
         let mut b = rec(119_999, 300, Some(team));
         b.status = 502;
         b.error_kind = Some(ErrorKind::BadGateway);
@@ -286,6 +310,12 @@ mod tests {
         assert_eq!(v.latency_hist[0], 1);
         assert_eq!(v.latency_hist[4], 1);
         assert_eq!(v.latency_hist.iter().sum::<i64>(), 2);
+        assert_eq!(
+            (v.cost, v.cost_input, v.cost_cache_read, v.cost_output),
+            (100, 30, 5, 50)
+        );
+        assert_eq!((v.cache_read_saved, v.plugin_cost), (9, 15));
+        assert_eq!((v.plugin_input_tokens, v.plugin_output_tokens), (40, 3));
         let late = batch
             .rollups
             .iter()

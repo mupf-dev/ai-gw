@@ -228,6 +228,10 @@ tokenizer:
 billing:
   timezone: UTC
   budget_sync_ms: 1000
+  # Kostenanalyse (AIGW-117): Abrechnungswährung (ISO 4217, nur Beschriftung – Preise in dieser
+  # Währung pflegen) und Metadaten-Schlüssel der Kostenstelle (spec.metadata an Key/Team/Org).
+  currency: USD
+  cost_center_key: costCenter
   # Preisvorschläge (AIGW-85, docs/konzept/11-limits-und-budgets.md §4a): nur Anzeige auf der
   # Preise-Seite bzw. GET /admin/api/v1/price-suggestions, Übernahme ausdrücklich per Admin-API.
   price_suggestions:
