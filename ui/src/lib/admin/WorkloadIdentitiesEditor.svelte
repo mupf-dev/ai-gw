@@ -26,7 +26,7 @@
     <p class="text-sm text-fg-muted">Keine JWT-Aussteller konfiguriert (<code class="font-mono text-xs">auth.jwt.issuers</code>) – Identitäten wirken erst danach.</p>
   {/if}
   {#each value as r, i (i)}
-    <div class="grid gap-2 rounded-lg border border-line bg-surface-2 p-2 sm:grid-cols-[10rem_1fr_1fr_auto]">
+    <div class="grid gap-2 rounded-lg border border-line bg-surface-2 p-2 sm:grid-cols-[9rem_minmax(19rem,2fr)_1fr_auto]">
       {#if items.length}
         <Select label="Aussteller {i + 1}" bind:value={r.issuer} {items} />
       {:else}
