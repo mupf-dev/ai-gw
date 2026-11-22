@@ -394,6 +394,7 @@ fn serve(
                 .with_wasm_trust(std::sync::Arc::new(
                     aigw_core::wasm::TrustPolicy::from_config(&config.wasm)?,
                 ))
+                .with_wasm_four_eyes(config.wasm.four_eyes())
                 .with_read_only(config.gitops.read_only_admin)
                 .with_ui_mock(config.admin.ui.mock)
                 .with_trace_url(config.admin.ui.trace_url.clone())

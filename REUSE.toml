@@ -32,3 +32,11 @@ path = [
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 mupf-dev"
 SPDX-License-Identifier = "FSL-1.1-ALv2"
+
+# Test-Bundles und Public-Good-Trust-Root aus der Sigstore-Konformitätssuite bzw. sigstore-python
+# (AIGW-106, unverändert übernommen).
+[[annotations]]
+path = ["crates/aigw-sigstore/tests/data/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "The Sigstore Authors"
+SPDX-License-Identifier = "Apache-2.0"

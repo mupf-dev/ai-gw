@@ -15,7 +15,8 @@
 //!   `wasm.trusted_keys` ([`aigw_core::wasm::TrustPolicy::check_module`]: SHA-256 des Inhalts
 //!   neu berechnet, Ed25519-Signatur, Pflicht). Nicht ladbare Module machen die Bindung
 //!   ungültig (→ `failMode`) – auch wenn sie an der Admin-API vorbei in Datenbank oder
-//!   Snapshot-Cache gelangt sind.
+//!   Snapshot-Cache gelangt sind. Sigstore-Bundles (AIGW-106) prüft dieselbe Richtlinie
+//!   offline gegen `wasm.sigstore` (Trust-Root, Identitäten).
 //! - Je Aufruf eine frische Instanz (kein Zustand zwischen Anfragen): Anfrage- und
 //!   Antwort-Phase laufen über `spawn_blocking` ([`aigw_plugins::Hook::Pending`], Zeitgrenze
 //!   der Kette + Epoch-Deadline), die Stream-Phase synchron ([`run_blocking`]).
@@ -173,10 +174,17 @@ impl PluginFactory for Factory {
             .get("module")
             .and_then(Value::as_str)
             .and_then(|m| snap.wasm_modules.get(m))
-            .map(|m| match &m.signature {
+            .map(|m| {
                 // Neu signiert (gleicher Inhalt) → Prüfergebnis kann sich ändern → neu bauen.
-                Some(s) => format!("{}:{}:{}", m.sha256, s.key_id, s.signature),
-                None => m.sha256.clone(),
+                let mut f = match &m.signature {
+                    Some(s) => format!("{}:{}:{}", m.sha256, s.key_id, s.signature),
+                    None => m.sha256.clone(),
+                };
+                if let Some(b) = &m.sigstore_bundle {
+                    f.push_str(":sigstore:");
+                    f.push_str(&aigw_core::wasm::sha256_hex(b.as_bytes()));
+                }
+                f
             })
             .unwrap_or_default()
     }

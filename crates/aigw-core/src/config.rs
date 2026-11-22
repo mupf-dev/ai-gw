@@ -110,6 +110,67 @@ pub struct WasmConfig {
     /// Prüfung sonst unbemerkt umgehen. `false` erlaubt unsignierte Module (Übergangszeit);
     /// vorhandene Signaturen müssen trotzdem gültig sein.
     pub require_signature: Option<bool>,
+    /// Sigstore-Signaturen ohne Schlüsselverwaltung (keyless, AIGW-106): Trust-Root und
+    /// erlaubte Signier-Identitäten. Fehlt = Sigstore-Prüfung aus.
+    pub sigstore: Option<SigstoreConfig>,
+    /// Sicherheitsprofil der WASM-Module (AIGW-106): `standard` (Standard) oder `strict`
+    /// („Streng“: Signatur Pflicht, Vier-Augen-Freigabe an).
+    pub profile: WasmProfile,
+    /// Vier-Augen-Freigabe neuer Module/Versionen (AIGW-106): Ein Upload über die Admin-API
+    /// wird erst aktiv, wenn ein **anderer** globaler `admin` ihn freigibt. Standard (`null`):
+    /// nach `profile` (`strict`: an, `standard`: aus).
+    pub four_eyes: Option<bool>,
+}
+
+/// Sicherheitsprofil der WASM-Module (AIGW-106).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WasmProfile {
+    /// Wie bisher: Signatur Pflicht nur mit `trusted_keys`/`sigstore`, keine Vier-Augen-Freigabe.
+    #[default]
+    Standard,
+    /// „Streng“: Signatur (Ed25519 oder Sigstore) immer Pflicht – ohne `trusted_keys` und ohne
+    /// `sigstore` startet das Gateway nicht –, Vier-Augen-Freigabe standardmäßig an.
+    Strict,
+}
+
+/// Sigstore-Konfiguration (`wasm.sigstore`, AIGW-106).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SigstoreConfig {
+    /// Pfad zum Trust-Root (`trusted_root.json`, Sigstore-Format): Fulcio-CAs, Rekor- und
+    /// CT-Logs. Wird beim Start gelesen – zur Laufzeit keine Netzaufrufe.
+    pub trusted_root: String,
+    /// Erlaubte Signier-Identitäten (mindestens eine): OIDC-Issuer und Subjekt (SAN) als
+    /// reguläre Ausdrücke, jeweils vollständig verankert.
+    pub identities: Vec<SigstoreIdentity>,
+    /// Inclusion-Proof mit Checkpoint Pflicht (Standard `true`); `false` lässt Bundles mit nur
+    /// SET zu (ältere Bundles v0.1).
+    #[serde(default = "default_true")]
+    pub require_inclusion_proof: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Erlaubte Sigstore-Identität.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SigstoreIdentity {
+    /// OIDC-Issuer (regulärer Ausdruck), z. B. `https://token\.actions\.githubusercontent\.com`.
+    pub issuer: String,
+    /// Subjekt/SAN (regulärer Ausdruck), z. B. der Workflow-Pfad
+    /// `https://github\.com/org/repo/\.github/workflows/release\.yml@refs/tags/v.*`.
+    pub subject: String,
+}
+
+impl WasmConfig {
+    /// Vier-Augen-Freigabe wirksam (Konfiguration bzw. Profil)?
+    pub fn four_eyes(&self) -> bool {
+        self.four_eyes
+            .unwrap_or(self.profile == WasmProfile::Strict)
+    }
 }
 
 impl Default for WasmConfig {
@@ -128,6 +189,9 @@ impl Default for WasmConfig {
             modules: Vec::new(),
             trusted_keys: Vec::new(),
             require_signature: None,
+            sigstore: None,
+            profile: WasmProfile::Standard,
+            four_eyes: None,
         }
     }
 }
@@ -151,6 +215,9 @@ pub struct WasmModuleFile {
     /// Schlüssel-ID der Signatur (aus `wasm.trusted_keys`).
     #[serde(default)]
     pub key_id: Option<String>,
+    /// Pfad zu einem Sigstore-Bundle (`cosign sign-blob --bundle …`, AIGW-106).
+    #[serde(default)]
+    pub sigstore_bundle: Option<String>,
 }
 
 impl WasmModuleFile {
@@ -195,7 +262,7 @@ impl WasmConfig {
             m.signature()
                 .map_err(|e| format!("wasm.modules[{}]: {e}", m.name))?;
         }
-        crate::wasm::TrustPolicy::from_config(self)?;
+        crate::wasm::check_policy_config(self)?;
         Ok(())
     }
 }

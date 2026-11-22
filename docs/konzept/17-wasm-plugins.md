@@ -1,4 +1,4 @@
-# WASM-Plugins (AIGW-63)
+# WASM-Plugins (AIGW-63, AIGW-101, AIGW-106)
 
 Eigene Plugin-Logik ohne Fork und ohne externen Dienst: Betreiber laden eine
 **WebAssembly-Komponente** hoch, die das Gateway in einer Sandbox in der Plugin-Kette ausführt
@@ -82,10 +82,12 @@ blockieren in wasmtime-wasi intern auf Tokio und dürfen nicht im asynchronen Ko
   (ETag = SHA-256), Löschen ebenso und nur ohne verweisende Bindungen (`409`).
 - **Freigabe nur durch globalen `admin`** (Katalog-Schreibrecht): Ein Modul läuft im
   Gateway-Prozess und sieht Anfragen aller Mandanten, die es binden. Org-/Team-Admins dürfen
-  freigegebene Module **binden** (auf ihrer Ebene), aber keine hochladen. Eine kryptografische
-  Signatur der Module (z. B. Sigstore) ist nicht umgesetzt – der Upload durch einen globalen
-  Admin ist die Freigabe; der SHA-256 in der Bindung pinnt die freigegebene Version. Mit
-  `wasm.trusted_keys` kommt eine Ed25519-Signatur hinzu (§3a, AIGW-101).
+  freigegebene Module **binden** (auf ihrer Ebene), aber keine hochladen. Ohne weitere
+  Einstellungen ist der Upload durch einen globalen Admin die Freigabe; der SHA-256 in der
+  Bindung pinnt die freigegebene Version. Dazu kommen wahlweise eine Ed25519-Signatur
+  (`wasm.trusted_keys`, §3a, AIGW-101), eine Sigstore-Signatur ohne Schlüsselverwaltung
+  (`wasm.sigstore`, §3b, AIGW-106) und die Vier-Augen-Freigabe (`wasm.four_eyes`, §3c,
+  AIGW-106).
 - **Datei aus der Startkonfiguration** (`wasm.modules: [{name, path, sha256}]`): beim Start
   in die Datenbank übernommen (Akteur `startup-config`; unverändert = kein Schreibvorgang).
   Abweichender SHA-256 bricht den Start ab, ebenso eine fehlende/ungültige Signatur (`key_id`,
@@ -196,6 +198,163 @@ Die Liste zeigt danach für noch alt signierte Module `unknown-key` / `loadable:
 Schlüssel stehen bewusst **nur in der Startkonfiguration** (nicht per Admin-API änderbar):
 ein Admin-Konto allein kann sich so keinen eigenen Schlüssel freigeben.
 
+## 3b. Sigstore – keyless (AIGW-106)
+
+Ed25519-Schlüssel (§3a) muss jemand erzeugen, aufbewahren, verteilen und wechseln. Mit
+**Sigstore** signiert der Build mit einem kurzlebigen Zertifikat (Fulcio, 10 Minuten gültig),
+das an eine **OIDC-Identität** gebunden ist – typischerweise den Release-Workflow eines
+Repositorys (GitHub Actions: `https://github.com/<org>/<repo>/.github/workflows/release.yml@refs/tags/v1.2.3`)
+oder eine E-Mail-Adresse. Die Signatur steht im öffentlichen Transparenz-Log (Rekor). Das
+Gateway vertraut damit nicht einem Schlüssel, sondern einer **Identität**: „dieses Modul hat der
+Release-Workflow von `mupf-dev/plugins` gebaut“.
+
+**Signieren** (im CI, z. B. GitHub Actions mit `id-token: write`):
+
+```sh
+cosign sign-blob --yes --bundle keyword-guard.wasm.sigstore.json keyword-guard.wasm
+```
+
+cosign ab v3 schreibt standardmäßig Rekor-v2-Einträge mit RFC-3161-Zeitstempel; die Prüfung
+im Gateway kennt Rekor **v1** (siehe Grenzen). Bis Rekor v2 unterstützt ist, mit
+`--use-signing-config=false --rekor-url https://rekor.sigstore.dev` signieren (bzw. cosign
+v2.x).
+
+**Konfiguration** (nur Startkonfiguration, wie `trusted_keys`):
+
+```yaml
+wasm:
+  sigstore:
+    trusted_root: /etc/aigw/sigstore/trusted_root.json
+    identities:
+      - issuer: 'https://token\.actions\.githubusercontent\.com'
+        subject: 'https://github\.com/mupf-dev/plugins/\.github/workflows/release\.yml@refs/tags/v.*'
+    require_inclusion_proof: true   # Standard
+```
+
+- `trusted_root`: das **Trust-Root** im Sigstore-Format (`trusted_root.json`: Fulcio-CAs,
+  Rekor- und CT-Logs mit Gültigkeitszeiträumen). Für die öffentliche Instanz z. B. nach
+  `cosign initialize` aus `~/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json`
+  (oder `sigstore-python`/`sigstore-go` exportieren); bei eigener Sigstore-Instanz deren Datei.
+  Das Gateway liest die Datei **beim Start** und macht zur Laufzeit **keine Netzaufrufe** (kein
+  TUF, kein Rekor-Abruf). Aktualisieren = Datei tauschen und neu starten (wie bei
+  CA-Wechseln der öffentlichen Instanz, selten).
+- `identities`: mindestens eine; `issuer` und `subject` sind reguläre Ausdrücke und werden
+  **vollständig** verglichen (`^(?:…)$`; ein Teiltreffer reicht nie). Punkte maskieren!
+- Signatur Pflicht: wie bei `trusted_keys` ist mit `sigstore` die Signatur standardmäßig
+  Pflicht (`require_signature: false` nur für den Übergang). Es genügt **ein** Verfahren:
+  Ed25519 **oder** Sigstore; ist beides angegeben, muss beides gültig sein.
+
+**Übertragen**: Admin-API als JSON-Umschlag (`Content-Type: application/json`,
+`{"content": "<Base64 der Komponente>", "sigstoreBundle": {…}}`; die übrigen Query-Parameter
+wie gehabt), Startkonfiguration `wasm.modules[].sigstore_bundle: <Pfad>`, UI-Upload-Dialog Feld
+„Sigstore-Bundle“. Gespeichert wird das Bundle in `wasm_module.sigstore_bundle` (Migration
+0014), im Snapshot und im Snapshot-Cache.
+
+```sh
+jq -n --rawfile c <(base64 -w0 keyword-guard.wasm) --slurpfile b keyword-guard.wasm.sigstore.json \
+  '{content: $c, sigstoreBundle: $b[0]}' |
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @- \
+  "$AIGW/admin/api/v1/wasm-modules/keyword-guard?sha256=$(sha256sum keyword-guard.wasm | cut -d' ' -f1)"
+aigw wasm verify-sigstore --bundle keyword-guard.wasm.sigstore.json --trusted-root trusted_root.json \
+  --issuer 'https://token\.actions\.githubusercontent\.com' --subject 'https://github\.com/mupf-dev/.*' keyword-guard.wasm
+```
+
+**Prüfung** (Crate `aigw-sigstore`, offline, dieselbe an allen Prüfpunkten aus §3a – Upload,
+Startkonfiguration, vor jedem Kompilieren, Freigabe):
+
+1. Bundle v0.1–v0.3 mit `messageSignature` (wie `cosign sign-blob`); `messageDigest` muss zum
+   Modul passen.
+2. **Signatur** des Moduls (ECDSA P-256 über SHA-256) mit dem Schlüssel des Zertifikats. Geprüft
+   wird über den SHA-256 – zur Laufzeit wird er zuvor aus dem Inhalt neu berechnet (§3a).
+3. **Zertifikatskette** gegen die Fulcio-CAs des Trust-Roots (rustls-webpki): Signaturen,
+   Gültigkeit **zum Zeitpunkt des Log-Eintrags**, EKU `codeSigning`, kein CA-Zertifikat als
+   Blatt, keine Wurzel im Bundle.
+4. **SCT** (Certificate Transparency): mindestens ein gültiger eingebetteter SCT eines CT-Logs
+   aus dem Trust-Root (sofern es CT-Logs enthält).
+5. **Rekor-Eintrag** (`hashedrekord` 0.0.1): Log aus dem Trust-Root, Schlüssel zum Zeitpunkt
+   gültig, **SET** (signierter Zeitstempel; Pflicht) und **Inclusion-Proof** mit signiertem
+   Checkpoint (Standard Pflicht; `require_inclusion_proof: false` lässt ältere v0.1-Bundles nur
+   mit SET zu – wie `cosign verify-blob --offline`). Der Eintrag muss genau Digest, Signatur
+   und Zertifikat des Bundles enthalten; der Zeitpunkt darf nicht in der Zukunft liegen.
+6. **Identität**: OIDC-Issuer (Fulcio-Erweiterung 1.3.6.1.4.1.57264.1.8 bzw. .1.1) und Subjekt
+   (SAN: URI, E-Mail, Nutzername) gegen `identities`.
+
+Ergebnis in Liste/Einzelabfrage: `signature.sigstore = {status: valid|invalid|identity,
+subject, issuer, integratedTime, logIndex, message}`; Gesamtstatus `signature.status` (neu:
+`identity` = gültig signiert, aber keine erlaubte Identität). Ablehnungen zählen in
+`aigw_wasm_signature_rejected_total{reason="sigstore"|"identity"}`.
+
+**Warum eine eigene Prüfung statt des Crates `sigstore`** (sigstore-rs, Apache-2.0): Die Lizenz
+passt, aber das Crate ist nicht schlank – es bringt rund 30 zusätzliche Crates mit
+(RustCrypto-Stapel `p256`/`p384`/`ecdsa`/`ed25519-dalek`/`rsa`/`x509-cert`/`scrypt`/
+`crypto_secretbox`/`chrono`, Tokio-Werkzeuge; Bundle-Prüfung je nach Version mit `tough`/TUF
+und HTTP-Client), also einen **zweiten Krypto-Provider** neben aws-lc-rs, und `rsa` trägt den
+offenen Hinweis RUSTSEC-2023-0071 (Marvin), den cargo-deny meldet. Gebraucht wird hier nur
+ein kleiner, fester Ausschnitt (Bundle lesen, Kette, SCT, SET, Merkle-Proof, Checkpoint) – das
+leisten aws-lc-rs und rustls-webpki, die ohnehin im Baum sind, mit ≈ 1000 Zeilen eigenem Code
+(`crates/aigw-sigstore`). Die Prüfung ist gegen die **Sigstore-Konformitätssuite** getestet
+(echte Bundles der öffentlichen Instanz, 5 gültige und 23 ungültige Fälle, ohne Netz).
+
+**Grenzen**: keine DSSE-Umschläge/Attestierungen (nur `messageSignature`), kein Rekor v2
+(`hashedrekord` 0.0.2) und keine RFC-3161-Zeitstempel (TSA), keine Bundles mit festem Schlüssel
+statt Zertifikat, Zertifikatsschlüssel nur ECDSA P-256 (Fulcio-Standard). Folgeticket: Rekor
+v2 + TSA.
+
+## 3c. Vier-Augen-Freigabe (AIGW-106)
+
+Signaturen belegen die Herkunft, aber nicht, dass ein Mensch die Version für dieses Gateway
+gewollt hat – und ein einzelnes übernommenes Admin-Konto kann ein (korrekt signiertes, aber
+unerwünschtes) Modul sofort aktivieren. Mit der **Vier-Augen-Freigabe** wird ein neues Modul
+bzw. eine neue Version erst aktiv, wenn eine **zweite berechtigte Person** freigibt.
+
+| Einstellung | Wirkung |
+|---|---|
+| `wasm.four_eyes: null` (Standard) | nach Profil: `wasm.profile: strict` → an, `standard` → aus |
+| `wasm.four_eyes: true` / `false` | ausdrücklich an / aus |
+| `wasm.profile: strict` („Streng“) | Vier-Augen-Freigabe an (sofern nicht `four_eyes: false`), Signatur Pflicht: ohne `trusted_keys` und ohne `sigstore` startet das Gateway nicht, `require_signature: false` ist verboten |
+
+**Ablauf (Admin-API, UI):**
+
+1. `PUT /wasm-modules/{name}` (wie bisher, inkl. Signaturprüfung und `If-Match` gegen die
+   aktive Version) **reicht ein**: Antwort `202` mit der Einreichung
+   (`PendingWasmModule`: SHA-256, Hochlader, Signaturstatus, `replaces`, `canApprove`). Die
+   aktive Version und der Snapshot bleiben unverändert. Höchstens eine Einreichung je Name;
+   eine neue ersetzt die alte. Gleich der aktiven Version → `200`, nichts eingereicht.
+2. Prüfen: `GET /wasm-modules` (Feld `pending`), `GET /wasm-modules/{name}` (Feld `pending`),
+   `GET /wasm-modules/{name}/pending/content` (Download zum Prüfen).
+3. `POST /wasm-modules/{name}/approve?sha256=<geprüfte Version>` → aktiv (`200`, Hot Reload).
+   `sha256` ist Pflicht: freigegeben wird genau die geprüfte Version (sonst `409`). Die
+   Signaturen werden dabei gegen die **aktuelle** Richtlinie erneut geprüft (`422`).
+4. `DELETE /wasm-modules/{name}/pending` verwirft (jeder globale Admin, auch der Hochlader).
+
+**Wer darf freigeben (RBAC):** nur ein globaler `admin` (wie Hochladen), der **nicht** der
+Hochlader ist (`403`). Verglichen wird die **Person**: Ein Admin-API-Key zählt als der Nutzer,
+der ihn angelegt hat (rekursiv), damit niemand mit Session und eigenem Key zwei Personen
+spielt; die Person des Hochladers wird beim Einreichen festgehalten (ein später gelöschter Key
+ändert nichts). Keys, die der Bootstrap-Admin angelegt hat, gelten als eigene Personen – sie
+werden in der Einrichtung an verschiedene Halter ausgegeben, und der Bootstrap-Zugang endet
+(`bootstrap: auto`) mit dem ersten Admin-Key. Die UI zeigt Einreichungen unter „Wartet auf
+Freigabe“ mit Button **Freigeben** (nur wenn erlaubt, sonst Hinweis) und **Verwerfen**.
+
+**Audit:** Einreichen/Freigeben/Verwerfen schreiben Einträge der Art `wasm-module-approval`
+(Aktionen `submit`, `approve`, `reject`; mit Hochlader, SHA-256, Signaturen – ohne Inhalt).
+Die Freigabe schreibt zusätzlich den üblichen `wasm-module`-Eintrag (Journal des Snapshots) mit
+Akteur = Freigebender; das Modul trägt danach `approval: {uploadedBy, approvedBy, approvedAt}`.
+
+**Bindungen:** Die Admin-API lehnt Bindungen auf ein nur eingereichtes Modul bzw. eine
+eingereichte, noch nicht freigegebene `sha256` ab (`422` „wartet auf Freigabe“), damit eine
+Bindung mit `failMode: closed` nicht bis zur Freigabe Anfragen sperrt.
+
+**GitOps / Startkonfiguration:** Module sind nicht Teil des YAML; `config:apply` ändert an
+Modulen nichts. Bindungen auf ein (noch) nicht freigegebenes Modul sind wie bisher beim Apply
+erlaubt und bis zur Freigabe ungültig (Log, `failMode`). Module aus `wasm.modules` der
+Startkonfiguration sind **ohne** Vier-Augen-Freigabe aktiv: Wer die Startkonfiguration ändert,
+hat ohnehin Betreiberrechte – das zweite Augenpaar ist dort das Review der Konfiguration (Pull
+Request). Im Modus „nur YAML“ gibt es keine Uploads und damit keine Einreichungen.
+
+**Speicherung:** Tabelle `wasm_module_pending` (Migration 0014, beide Dialekte) – nicht Teil
+des Snapshots; Spalten `uploaded_by`, `approved_by`, `approved_at` an `wasm_module`.
+
 ## 4. Bindung
 
 ```yaml
@@ -249,7 +408,7 @@ jedem Stream-Ereignis.
 | `aigw_wasm_call_duration_seconds` (Histogramm) | `module`, `phase` |
 | `aigw_wasm_fuel_consumed_total` | `module` |
 | `aigw_wasm_compile_total` | `outcome` (`ok`, `error`, `cached`) |
-| `aigw_wasm_signature_rejected_total` | `reason` (`missing`, `unknown-key`, `invalid`, `digest`; AIGW-101) |
+| `aigw_wasm_signature_rejected_total` | `reason` (`missing`, `unknown-key`, `invalid`, `digest`; AIGW-101; `sigstore`, `identity`; AIGW-106) |
 
 Dazu wie bei allen Plugins `aigw_plugin_failmode_triggered_total{plugin="wasm"}`.
 
@@ -279,8 +438,8 @@ Bauzeit).
 
 ## 10. Offen / später
 
-- Sigstore/cosign (keyless, Transparenz-Log) zusätzlich zu den eigenen Ed25519-Schlüsseln
-  (§3a) und eine Freigabe im Vier-Augen-Prinzip.
+- Sigstore: Rekor v2 (`hashedrekord` 0.0.2) mit RFC-3161-Zeitstempeln, DSSE/Attestierungen
+  (§3b, Grenzen).
 - Weitere Host-Funktionen (z. B. Zähler, Modellaufrufe über `PluginHost`) – bewusst nicht im
   ersten Schnitt, damit Module keine Seiteneffekte haben.
 - Wiederverwendung von Instanzen je Anfrage (Zustand zwischen Phasen ohne `meta`).

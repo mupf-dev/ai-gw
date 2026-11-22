@@ -45,6 +45,14 @@ mkdir -p "$RUN/oidc"
 printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "sqlite://%s/oidc/aigw.db?mode=rwc"\nadmin:\n  auth:\n    oidc:\n      issuer: "http://127.0.0.1:9/realms/e2e"\n      client_id: aigw-e2e\n      redirect_url: "http://127.0.0.1:%s/admin/auth/callback"\n' \
   "$OIDC_PORT" "$OIDC_PORT" "$RUN" "$OIDC_PORT" > "$RUN/oidc/aigw.yaml"
 # Wegwerf-Master-Key, -Bootstrap-Token und -Datenbank nur für diesen Lauf (ohne Key startet `aigw serve` nicht).
+# AIGW-106: dritter Server mit Vier-Augen-Freigabe und Sigstore (Trust-Root aus den Test-Bundles);
+# Bootstrap bleibt an, damit der Test einen zweiten Admin (Admin-Key) anlegen kann.
+FOUR_PORT=$((PORT + 3))
+mkdir -p "$RUN/four"
+printf 'server:\n  data:\n    listen: "127.0.0.1:%s"\n  control:\n    listen: "127.0.0.1:%s"\nstore:\n  url: "sqlite://%s/four/aigw.db?mode=rwc"\nadmin:\n  auth:\n    bootstrap: "on"\n' \
+  "$FOUR_PORT" "$FOUR_PORT" "$RUN" > "$RUN/four/aigw.yaml"
+printf 'wasm:\n  four_eyes: true\n  require_signature: false\n  sigstore:\n    trusted_root: "%s"\n    identities:\n      - issuer: "https://token\\\\.actions\\\\.githubusercontent\\\\.com"\n        subject: "https://github\\\\.com/sigstore-conformance/.*"\n' \
+  "$ROOT/crates/aigw-sigstore/tests/data/trusted_root.public-good.json" >> "$RUN/four/aigw.yaml"
 TOKEN="aigw-admin-e2e-$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
 (cd "$RUN" && AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') AIGW_BOOTSTRAP_TOKEN="$TOKEN" \
   exec "$BIN" serve --config "$RUN/aigw.yaml") > "$OUT/server.log" 2>&1 &
@@ -52,11 +60,15 @@ PID=$!
 (cd "$RUN/oidc" && AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') AIGW_BOOTSTRAP_TOKEN="$TOKEN" \
   exec "$BIN" serve --config "$RUN/oidc/aigw.yaml") > "$OUT/server-oidc.log" 2>&1 &
 PID2=$!
+(cd "$RUN/four" && AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n') AIGW_BOOTSTRAP_TOKEN="$TOKEN" \
+  exec "$BIN" serve --config "$RUN/four/aigw.yaml") > "$OUT/server-four-eyes.log" 2>&1 &
+PID4=$!
 python3 "$E2E/fake-retail.py" "$RETAIL_PORT" > "$OUT/fake-retail.log" 2>&1 &
 PID3=$!
-trap 'kill $PID $PID2 $PID3 2>/dev/null || true; rm -rf "$RUN"' EXIT
+trap 'kill $PID $PID2 $PID3 $PID4 2>/dev/null || true; rm -rf "$RUN"' EXIT
 for _ in $(seq 1 50); do curl -fsS -o /dev/null "http://127.0.0.1:$PORT/admin/" && break; sleep 0.2; done
 for _ in $(seq 1 50); do curl -fsS -o /dev/null "http://127.0.0.1:$OIDC_PORT/admin/api/v1/version" && break; sleep 0.2; done
+for _ in $(seq 1 50); do curl -fsS -o /dev/null "http://127.0.0.1:$FOUR_PORT/admin/api/v1/version" && break; sleep 0.2; done
 curl -fsS -D "$OUT/headers-admin.txt" -o /dev/null "http://127.0.0.1:$PORT/admin/"
 grep -qi '^content-security-policy:' "$OUT/headers-admin.txt"
 
@@ -65,4 +77,4 @@ if [[ -f pnpm-lock.yaml ]]; then pnpm install --frozen-lockfile; else pnpm insta
 if ! ls "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}" 2>/dev/null | grep -q chromium; then
   pnpm exec playwright install --with-deps chromium > "$OUT/playwright-install.log" 2>&1
 fi
-AIGW_OIDC_URL="http://127.0.0.1:$OIDC_PORT" AIGW_URL="http://127.0.0.1:$PORT" AIGW_TOKEN="$TOKEN" E2E_OUT="$OUT" pnpm exec playwright test ${E2E_GREP:+--grep "$E2E_GREP"}
+AIGW_FOUR_EYES_URL="http://127.0.0.1:$FOUR_PORT" AIGW_OIDC_URL="http://127.0.0.1:$OIDC_PORT" AIGW_URL="http://127.0.0.1:$PORT" AIGW_TOKEN="$TOKEN" E2E_OUT="$OUT" pnpm exec playwright test ${E2E_GREP:+--grep "$E2E_GREP"}

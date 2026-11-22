@@ -105,6 +105,7 @@ async fn random_change(store: &Store, keyring: &Keyring, rng: &mut Rng) {
                             content,
                             sha256: None,
                             signature: None,
+                            sigstore_bundle: None,
                         },
                         1024,
                     )
@@ -813,6 +814,7 @@ async fn sample(store: &Store, keyring: &Keyring) {
                 signature: Some(
                     aigw_core::wasm::ModuleSignature::parse("release", &"A".repeat(86)).unwrap(),
                 ),
+                sigstore_bundle: None,
             },
             1024,
         )

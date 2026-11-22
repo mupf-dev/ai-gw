@@ -7,6 +7,27 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ## [Unreleased]
 
+### Hinzugefügt
+
+- **WASM-Module: Sigstore-Signatur ohne Schlüsselverwaltung und Vier-Augen-Freigabe
+  (AIGW-106):** `wasm.sigstore` (Trust-Root `trusted_root.json` offline, erlaubte Identitäten
+  mit Issuer/Subjekt als reguläre Ausdrücke) prüft Bundles aus `cosign sign-blob --bundle`
+  (Fulcio-Kette, SCT, Rekor-SET und Inclusion-Proof mit Checkpoint) beim Upload, beim Import aus
+  `wasm.modules` (`sigstore_bundle`), vor jedem Kompilieren und bei der Freigabe – ohne
+  Netzaufrufe zur Laufzeit; eigenes schlankes Crate `aigw-sigstore` (aws-lc-rs,
+  rustls-webpki), getestet mit der Sigstore-Konformitätssuite. Upload mit Bundle als
+  JSON-Umschlag (`Content-Type: application/json`, `{content, sigstoreBundle}`), UI-Feld
+  „Sigstore-Bundle“, CLI `aigw wasm verify-sigstore`. **Vier-Augen-Freigabe** `wasm.four_eyes`
+  (Standard im neuen Profil `wasm.profile: strict`, das außerdem eine Signatur erzwingt):
+  Uploads antworten mit `202` und warten auf Freigabe durch einen anderen globalen `admin`
+  (`POST /admin/api/v1/wasm-modules/{name}/approve?sha256=…`, verwerfen mit `DELETE
+  …/{name}/pending`, prüfen mit `GET …/{name}/pending/content`); Admin-Keys zählen als ihr
+  Ersteller. UI: Bereich „Wartet auf Freigabe“ mit Buttons „Freigeben“/„Verwerfen“, Herkunft
+  (hochgeladen/freigegeben von) je Modul. Audit-Art `wasm-module-approval` (Aktionen `submit`,
+  `approve`, `reject`). Migration 0014 (`wasm_module_pending`; `wasm_module.sigstore_bundle`,
+  `uploaded_by`, `approved_by`, `approved_at`). Neuer Signaturstatus `identity`, Metrikgründe
+  `sigstore`/`identity`.
+
 ## [0.1.0] – JJJJ-MM-TT
 
 Erste öffentliche Version: AI-Gateway, Admin-API und Admin-UI in einem Binary.

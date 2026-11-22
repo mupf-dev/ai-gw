@@ -3,7 +3,8 @@
 
 //! WASM-Module (AIGW-63, Migration 0009) auf beiden Backends: Hochladen mit SHA-256-Prüfung,
 //! Ersetzen, „unverändert“ ohne neue Version, Audit ohne Inhalt, Löschschutz bei verweisenden
-//! Bindungen, Snapshot (vollständig und inkrementell). Postgres mit `AIGW_TEST_POSTGRES_URL`.
+//! Bindungen, Snapshot (vollständig und inkrementell), Vier-Augen-Freigabe und Sigstore-Bundles
+//! (AIGW-106, Migration 0014). Postgres mit `AIGW_TEST_POSTGRES_URL`.
 
 #![allow(
     clippy::unwrap_used,
@@ -13,7 +14,7 @@
 )]
 
 use aigw_core::resource::{ObjectMeta, PluginBindingSpec, Scope, ScopeLevel, new_id};
-use aigw_store::wasm::{NewWasmModule, PutOutcome, sha256_hex};
+use aigw_store::wasm::{NewWasmModule, PutOutcome, SubmitOutcome, sha256_hex};
 use aigw_store::{
     Incremental, Keyring, MasterKey, Store, StoreError, load_incremental, load_snapshot,
 };
@@ -34,6 +35,7 @@ fn new(name: &str, content: Vec<u8>, sha: Option<String>) -> NewWasmModule {
         content,
         sha256: sha,
         signature: None,
+        sigstore_bundle: None,
     }
 }
 
@@ -242,6 +244,188 @@ async fn run(store: Store) {
             .signature
             .is_none()
     );
+
+    // Vier-Augen-Freigabe (AIGW-106): Einreichen ändert weder aktive Version noch Snapshot;
+    // die Freigabe macht die Einreichung aktiv (Journal), Verwerfen entfernt sie.
+    let active = store.wasm_module_info("guard").await.unwrap().unwrap();
+    let s5 = load_snapshot(&store, &ring).await.unwrap();
+    let bundle = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../aigw-sigstore/tests/data/conformance/happy-path-v0.3/bundle.sigstore.json"
+    ))
+    .unwrap();
+    let v3 = component(b"drei");
+    let sub = NewWasmModule {
+        sigstore_bundle: Some(bundle.clone()),
+        description: Some("neu".into()),
+        ..new("guard", v3.clone(), None)
+    };
+    let SubmitOutcome::Pending {
+        info: p,
+        replaced: false,
+    } = store
+        .submit_wasm_module("admin-key:ci", "user:alice", sub.clone(), 1024)
+        .await
+        .unwrap()
+    else {
+        panic!("Pending erwartet")
+    };
+    assert_eq!(p.sha256, sha256_hex(&v3));
+    assert_eq!(p.uploader_person, "user:alice");
+    assert_eq!(
+        store.wasm_module_info("guard").await.unwrap().unwrap(),
+        active
+    );
+    let Incremental::Built { snapshot: s6, .. } =
+        load_incremental(&store, &ring, &s5, 100).await.unwrap()
+    else {
+        panic!("inkrementell erwartet")
+    };
+    assert_eq!(
+        s6.wasm_modules, s5.wasm_modules,
+        "Einreichung nicht im Snapshot"
+    );
+    // Gleich der aktiven Version: nichts eingereicht.
+    assert!(matches!(
+        store
+            .submit_wasm_module(ACTOR, ACTOR, new("guard", v2.clone(), None), 1024)
+            .await
+            .unwrap(),
+        SubmitOutcome::Unchanged(_)
+    ));
+    // Erneut einreichen ersetzt die Einreichung.
+    assert!(matches!(
+        store
+            .submit_wasm_module("admin-key:ci", "user:alice", sub, 1024)
+            .await
+            .unwrap(),
+        SubmitOutcome::Pending { replaced: true, .. }
+    ));
+    assert_eq!(store.list_pending_wasm_modules().await.unwrap().len(), 1);
+    let (_, content) = store.pending_wasm_module("guard").await.unwrap().unwrap();
+    assert_eq!(content.as_ref(), v3.as_slice());
+    // Falscher SHA → Konflikt; ohne Einreichung → None.
+    assert!(matches!(
+        store
+            .approve_wasm_module("user:bob", "guard", &"0".repeat(64))
+            .await,
+        Err(StoreError::Conflict(_))
+    ));
+    assert!(
+        store
+            .approve_wasm_module("user:bob", "fehlt", &"0".repeat(64))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let Some(PutOutcome::Replaced(a)) = store
+        .approve_wasm_module("user:bob", "guard", &sha256_hex(&v3))
+        .await
+        .unwrap()
+    else {
+        panic!("Replaced erwartet")
+    };
+    assert_eq!(a.approved_by.as_deref(), Some("user:bob"));
+    assert_eq!(a.uploaded_by.as_deref(), Some("admin-key:ci"));
+    assert!(a.approved_at.is_some());
+    assert_eq!(a.sigstore_bundle.as_deref(), Some(bundle.as_str()));
+    assert_eq!(store.wasm_module_info("guard").await.unwrap().unwrap(), a);
+    assert!(
+        store
+            .pending_wasm_module_info("guard")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let Incremental::Built { snapshot: s7, .. } =
+        load_incremental(&store, &ring, &s6, 100).await.unwrap()
+    else {
+        panic!("inkrementell erwartet")
+    };
+    assert_eq!(*s7, load_snapshot(&store, &ring).await.unwrap());
+    assert_eq!(s7.wasm_modules["guard"].sha256, sha256_hex(&v3));
+    assert_eq!(
+        s7.wasm_modules["guard"].sigstore_bundle.as_deref(),
+        Some(bundle.as_str())
+    );
+    // Neues Modul nur eingereicht und verworfen: nie aktiv.
+    store
+        .submit_wasm_module(ACTOR, ACTOR, new("neu", v3.clone(), None), 1024)
+        .await
+        .unwrap();
+    assert!(store.wasm_module_info("neu").await.unwrap().is_none());
+    assert_eq!(
+        store
+            .reject_wasm_module("user:bob", "neu")
+            .await
+            .unwrap()
+            .unwrap()
+            .name,
+        "neu"
+    );
+    assert!(
+        store
+            .reject_wasm_module("user:bob", "neu")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    // Neues Modul freigeben = angelegt, Ersteller ist der Hochlader.
+    store
+        .submit_wasm_module(
+            "user:alice",
+            "user:alice",
+            new("neu2", v3.clone(), None),
+            1024,
+        )
+        .await
+        .unwrap();
+    let Some(PutOutcome::Created(c)) = store
+        .approve_wasm_module("user:bob", "neu2", &sha256_hex(&v3))
+        .await
+        .unwrap()
+    else {
+        panic!("Created erwartet")
+    };
+    assert_eq!(c.created_by, "user:alice");
+    // Audit: Einreichen/Freigeben/Verwerfen (ohne Inhalt).
+    let audit = store.audit_log(50).await.unwrap();
+    let mut actions: Vec<&str> = audit
+        .iter()
+        .filter(|e| e.kind == "wasm-module-approval")
+        .map(|e| e.action.as_str())
+        .collect();
+    actions.reverse();
+    assert_eq!(
+        actions,
+        [
+            "submit", "submit", "approve", "submit", "reject", "submit", "approve"
+        ]
+    );
+    let approve = audit
+        .iter()
+        .find(|e| {
+            e.kind == "wasm-module"
+                && e.actor == "user:bob"
+                && e.object_name.as_deref() == Some("guard")
+        })
+        .unwrap();
+    assert_eq!(approve.object_id, Some(a.id));
+    // Ungültiges Bundle: abgelehnt.
+    assert!(matches!(
+        store
+            .submit_wasm_module(
+                ACTOR,
+                ACTOR,
+                NewWasmModule {
+                    sigstore_bundle: Some("{}".into()),
+                    ..new("x", v3.clone(), None)
+                },
+                1024
+            )
+            .await,
+        Err(StoreError::Invalid(_))
+    ));
     store.close().await;
 }
 

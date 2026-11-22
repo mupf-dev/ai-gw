@@ -36,6 +36,7 @@ pub fn module(name: &str, file: &str, sha: &str) -> WasmModule {
         updated_at: time::OffsetDateTime::UNIX_EPOCH,
         content: bytes::Bytes::from(wasm(file)),
         signature: None,
+        sigstore_bundle: None,
     }
 }
 

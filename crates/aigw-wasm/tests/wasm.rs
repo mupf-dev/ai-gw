@@ -671,3 +671,48 @@ fn invalid_trust_config_is_rejected() {
     };
     assert!(aigw_wasm::WasmRuntime::new(&cfg).is_err());
 }
+
+// ------------------------------------------------------------------ AIGW-106: Sigstore
+
+const SIGSTORE_DATA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../aigw-sigstore/tests/data");
+
+fn sigstore_cfg(subject: &str) -> WasmConfig {
+    WasmConfig {
+        sigstore: Some(aigw_core::config::SigstoreConfig {
+            trusted_root: format!("{SIGSTORE_DATA}/trusted_root.public-good.json"),
+            identities: vec![aigw_core::config::SigstoreIdentity {
+                issuer: ".*".into(),
+                subject: subject.into(),
+            }],
+            require_inclusion_proof: true,
+        }),
+        ..WasmConfig::default()
+    }
+}
+
+#[test]
+fn sigstore_checked_before_loading() {
+    // Ein echtes Bundle (Konformitätssuite) gehört zu einem anderen Artefakt: das Modul lädt
+    // nicht (Grund `sigstore`), unsigniert ebenso nicht (Pflicht, `missing`).
+    let bundle = std::fs::read_to_string(format!(
+        "{SIGSTORE_DATA}/conformance/happy-path-v0.3/bundle.sigstore.json"
+    ))
+    .unwrap();
+    let cfg = sigstore_cfg(".*");
+    let mut m = real("testkit");
+    m.sigstore_bundle = Some(bundle);
+    let (reg, rt) = registry(&cfg);
+    let snap = snapshot(
+        vec![m.clone()],
+        vec![binding("b", json!({"module": "testkit"}), None, None)],
+    );
+    assert_eq!(chain(&snap, &reg).1, 0);
+    assert_eq!(rt.metrics().signature_rejections("sigstore"), 1);
+    assert!(!loads(&cfg, real("testkit")));
+    // Fingerabdruck enthält das Bundle (anderes Bundle → Bindung baut neu).
+    let f = aigw_wasm::Factory::new(None);
+    use aigw_plugins::PluginFactory as _;
+    let fp1 = f.fingerprint(&snap, &json!({"module": "testkit"}));
+    let snap2 = snapshot(vec![real("testkit")], vec![]);
+    assert_ne!(fp1, f.fingerprint(&snap2, &json!({"module": "testkit"})));
+}

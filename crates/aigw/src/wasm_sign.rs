@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 mupf-dev
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-//! `aigw wasm keygen|pubkey|sign|verify` (AIGW-101): Ed25519-Signaturen für WASM-Module.
+//! `aigw wasm keygen|pubkey|sign|verify` (AIGW-101): Ed25519-Signaturen für WASM-Module;
+//! `aigw wasm verify-sigstore` (AIGW-106): Sigstore-Bundle offline prüfen wie das Gateway.
 //!
 //! Signiert wird `aigw-wasm-module-v1:<sha256 hex>` (Doku 17-wasm-plugins.md §3a). Der private
 //! Schlüssel ist PKCS#8 (PEM oder DER; auch aus `openssl genpkey -algorithm ed25519`), der
@@ -28,6 +29,31 @@ pub(crate) enum WasmCommand {
     Sign(SignArgs),
     /// Prüft eine Signatur gegen einen öffentlichen Schlüssel.
     Verify(VerifyArgs),
+    /// Prüft ein Sigstore-Bundle (`cosign sign-blob --bundle`) offline gegen ein Trust-Root und
+    /// eine Identität – dieselbe Prüfung wie `wasm.sigstore` im Gateway (AIGW-106).
+    VerifySigstore(VerifySigstoreArgs),
+}
+
+/// Parameter von `aigw wasm verify-sigstore`.
+#[derive(Debug, Clone, Args)]
+pub(crate) struct VerifySigstoreArgs {
+    /// Sigstore-Bundle (JSON).
+    #[arg(long)]
+    pub(crate) bundle: PathBuf,
+    /// Trust-Root (`trusted_root.json`).
+    #[arg(long)]
+    pub(crate) trusted_root: PathBuf,
+    /// OIDC-Issuer (regulärer Ausdruck, vollständig verankert).
+    #[arg(long)]
+    pub(crate) issuer: String,
+    /// Subjekt/SAN (regulärer Ausdruck, vollständig verankert).
+    #[arg(long)]
+    pub(crate) subject: String,
+    /// Bundles ohne Inclusion-Proof (nur SET) zulassen.
+    #[arg(long)]
+    pub(crate) allow_missing_inclusion_proof: bool,
+    /// Das Modul.
+    pub(crate) module: PathBuf,
 }
 
 /// Parameter von `aigw wasm keygen`.
@@ -180,6 +206,26 @@ pub(crate) fn run(cmd: &WasmCommand) -> Result<(), String> {
                 .map_err(|e| format!("{}: {e}", a.module.display()))?;
             out(&format!("OK {sha} {}\n", sig.key_id))
         }
+        WasmCommand::VerifySigstore(a) => {
+            let trust = aigw_core::wasm::SigstoreTrust::new(
+                &read(&a.trusted_root)?,
+                &[aigw_core::config::SigstoreIdentity {
+                    issuer: a.issuer.clone(),
+                    subject: a.subject.clone(),
+                }],
+                !a.allow_missing_inclusion_proof,
+            )?;
+            let bundle = String::from_utf8(read(&a.bundle)?)
+                .map_err(|_| format!("{}: kein UTF-8", a.bundle.display()))?;
+            let sha = aigw_core::wasm::sha256_hex(&read(&a.module)?);
+            let s = trust
+                .verify(&sha, &bundle)
+                .map_err(|e| format!("{}: {e}", a.module.display()))?;
+            out(&format!(
+                "OK {sha} {} (Issuer {}, Rekor-Index {})\n",
+                s.subject, s.issuer, s.log_index
+            ))
+        }
     }
 }
 
@@ -226,6 +272,28 @@ mod tests {
         let other = aigw_core::wasm::sign_sha256(&aigw_core::wasm::generate_pkcs8().unwrap(), &sha)
             .unwrap();
         assert!(verify(&other, "release").is_err());
+        // Sigstore (AIGW-106): Konformitäts-Bundle gegen das Public-Good-Trust-Root.
+        let data = concat!(env!("CARGO_MANIFEST_DIR"), "/../aigw-sigstore/tests/data");
+        let vs = |subject: &str, module: PathBuf| {
+            run(&WasmCommand::VerifySigstore(VerifySigstoreArgs {
+                bundle: format!("{data}/conformance/happy-path-v0.3/bundle.sigstore.json").into(),
+                trusted_root: format!("{data}/trusted_root.public-good.json").into(),
+                issuer: r"https://token\.actions\.githubusercontent\.com".into(),
+                subject: subject.into(),
+                allow_missing_inclusion_proof: false,
+                module,
+            }))
+        };
+        let a_txt: PathBuf = format!("{data}/conformance/a.txt").into();
+        assert!(
+            vs(
+                r"https://github\.com/sigstore-conformance/.*",
+                a_txt.clone()
+            )
+            .is_ok()
+        );
+        assert!(vs(r"https://github\.com/mupf-dev/.*", a_txt).is_err());
+        assert!(vs(".*", module.clone()).is_err());
         // Signatur-Ausgabe als Query ist prozentkodiert.
         assert_eq!(query("k", "a+b/c="), "keyId=k&signature=a%2Bb%2Fc%3D");
         std::fs::remove_dir_all(&dir).unwrap();

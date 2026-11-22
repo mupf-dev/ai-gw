@@ -155,6 +155,7 @@ dependencies = [
 name = "aigw-core"
 version = "0.1.0"
 dependencies = [
+ "aigw-sigstore",
  "arc-swap",
  "aws-lc-rs",
  "base64 0.22.1",
@@ -367,6 +368,21 @@ dependencies = [
  "tower",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "aigw-sigstore"
+version = "0.1.0"
+dependencies = [
+ "aws-lc-rs",
+ "base64 0.22.1",
+ "regex",
+ "rustls-pki-types",
+ "rustls-webpki",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time",
 ]
 
 [[package]]

@@ -40,6 +40,7 @@ Instanz nach ca. 100 ms (Debounce), bei Postgres auf allen Instanzen per `NOTIFY
 | `/plugins` | GET | Registrierte Plugins mit Standard-`failMode`/-Zeitlimit und `testable` (AIGW-52) |
 | `/plugin-bindings:test` | POST | Testlauf einer ungespeicherten Konfiguration auf einem Beispieltext (`phase` request/response) → `outcome` pass/modified/filtered/rejected, Text, Treffer; nur `pii`/`prompt-filter` (sonst 422), schreibt nichts, auch im Modus „nur YAML“ erlaubt (AIGW-52) |
 | `/guardrail-profiles`, `/guardrail-profiles/{name}:apply` | GET · POST | Standard-Guardrail-Profile (Basis, Streng, Offen) mit Bindungs-Specs; Anwenden auf einen Scope mit `dryRun`-Diff, idempotent, Rechte wie Plugin-Bindungen, siehe [13-guardrails.md](13-guardrails.md) §10 (AIGW-86) |
+| `/wasm-modules`, `/wasm-modules/{name}`, `…/{name}/content`, `…/{name}/approve`, `…/{name}/pending`, `…/{name}/pending/content` | GET · PUT · DELETE · POST | WASM-Module: Upload mit SHA-256 und Signaturen (Ed25519, Sigstore-Umschlag), Vier-Augen-Freigabe (`202` eingereicht, Freigabe durch einen anderen globalen `admin`, verwerfen), siehe [17-wasm-plugins.md](17-wasm-plugins.md) §3–§3c (AIGW-63, AIGW-101, AIGW-106) |
 | `/admin-api-keys`, `/admin-api-keys/{name}` | GET, POST · GET, PUT, DELETE | Admin-API-Keys (§5.5) |
 | `/session`, `/auth/info` | GET | angemeldeter Principal bzw. Anmeldeverfahren (§5) |
 | `/audit-log` | GET | Audit-Log lesen, filtern, als JSON Lines exportieren (§5.10) |

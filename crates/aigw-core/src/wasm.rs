@@ -49,6 +49,8 @@ pub struct WasmModule {
     pub content: Bytes,
     /// Ed25519-Signatur (AIGW-101); `None` = unsigniert.
     pub signature: Option<ModuleSignature>,
+    /// Sigstore-Bundle (JSON, AIGW-106); `None` = ohne.
+    pub sigstore_bundle: Option<String>,
 }
 
 impl WasmModule {
@@ -66,6 +68,7 @@ impl fmt::Debug for WasmModule {
             .field("sha256", &self.sha256)
             .field("size", &self.content.len())
             .field("signature", &self.signature.as_ref().map(|s| &s.key_id))
+            .field("sigstore_bundle", &self.sigstore_bundle.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -205,14 +208,31 @@ pub fn public_key_pem(raw: &[u8; PUBLIC_KEY_LEN]) -> String {
     )
 }
 
+/// Unterzeichner laut Sigstore-Bundle (AIGW-106).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SigstoreSigner {
+    /// Subjekt (SAN) des Fulcio-Zertifikats, z. B. Workflow-URI oder E-Mail.
+    pub subject: String,
+    /// OIDC-Issuer.
+    pub issuer: String,
+    /// Zeitpunkt des Rekor-Eintrags (Unix-Sekunden).
+    pub integrated_time: i64,
+    /// Index im Rekor-Log.
+    pub log_index: i64,
+}
+
 /// Ergebnis einer Signaturprüfung, die das Laden erlaubt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verified {
-    /// Gültige Signatur eines vertrauenswürdigen Schlüssels.
+    /// Gültige Ed25519-Signatur eines vertrauenswürdigen Schlüssels (ein zusätzliches
+    /// Sigstore-Bundle ist dann ebenfalls gültig).
     Valid {
         /// ID des Schlüssels.
         key_id: String,
     },
+    /// Gültiges Sigstore-Bundle einer erlaubten Identität (AIGW-106).
+    Sigstore(SigstoreSigner),
     /// Unsigniert, aber erlaubt (`wasm.require_signature: false`).
     Unsigned,
     /// Nicht geprüft: keine `wasm.trusted_keys` konfiguriert (Signaturprüfung aus).
@@ -234,16 +254,30 @@ pub enum SignatureError {
     /// Inhalt passt nicht zum gespeicherten SHA-256 (Laufzeitprüfung).
     #[error("Inhalt passt nicht zum SHA-256 {0}")]
     Digest(String),
+    /// Sigstore-Bundle ungültig (Kette, SCT, Rekor, Signatur) oder Sigstore nicht konfiguriert.
+    #[error("Sigstore-Bundle ungültig: {0}")]
+    Sigstore(String),
+    /// Sigstore-Bundle gültig, aber von keiner erlaubten Identität (`wasm.sigstore.identities`).
+    #[error("Sigstore-Identität {subject:?} (Issuer {issuer:?}) nicht erlaubt")]
+    Identity {
+        /// Subjekt(e) des Zertifikats.
+        subject: String,
+        /// OIDC-Issuer.
+        issuer: String,
+    },
 }
 
 impl SignatureError {
-    /// Kurzform für Anzeigen (`missing`, `unknown-key`, `invalid`, `digest`).
+    /// Kurzform für Anzeigen (`missing`, `unknown-key`, `invalid`, `digest`, `sigstore`,
+    /// `identity`).
     pub fn code(&self) -> &'static str {
         match self {
             Self::Missing => "missing",
             Self::UnknownKey(_) => "unknown-key",
             Self::Invalid(_) => "invalid",
             Self::Digest(_) => "digest",
+            Self::Sigstore(_) => "sigstore",
+            Self::Identity { .. } => "identity",
         }
     }
 }
@@ -258,6 +292,138 @@ impl SignatureError {
 pub struct TrustPolicy {
     keys: Vec<(String, [u8; PUBLIC_KEY_LEN])>,
     required: bool,
+    sigstore: Option<std::sync::Arc<SigstoreTrust>>,
+}
+
+/// Sigstore-Teil der Richtlinie (AIGW-106): Trust-Root und erlaubte Identitäten.
+#[derive(Debug)]
+pub struct SigstoreTrust {
+    root: aigw_sigstore::TrustedRoot,
+    policy: aigw_sigstore::Policy,
+    identities: Vec<crate::config::SigstoreIdentity>,
+}
+
+impl SigstoreTrust {
+    /// Aus dem Inhalt eines `trusted_root.json` und den Identitäten.
+    pub fn new(
+        trusted_root_json: &[u8],
+        identities: &[crate::config::SigstoreIdentity],
+        require_inclusion_proof: bool,
+    ) -> Result<Self, String> {
+        let root = aigw_sigstore::TrustedRoot::from_json(trusted_root_json)
+            .map_err(|e| format!("wasm.sigstore.trusted_root: {e}"))?;
+        let ids = compile_identities(identities)?;
+        let mut policy = aigw_sigstore::Policy::new(ids);
+        policy.require_inclusion_proof = require_inclusion_proof;
+        Ok(Self {
+            root,
+            policy,
+            identities: identities.to_vec(),
+        })
+    }
+
+    /// Liest das Trust-Root aus `wasm.sigstore.trusted_root` (Datei).
+    pub fn from_config(cfg: &crate::config::SigstoreConfig) -> Result<Self, String> {
+        let json = std::fs::read(&cfg.trusted_root)
+            .map_err(|e| format!("wasm.sigstore.trusted_root: {}: {e}", cfg.trusted_root))?;
+        Self::new(&json, &cfg.identities, cfg.require_inclusion_proof)
+    }
+
+    /// Erlaubte Identitäten (wie konfiguriert).
+    pub fn identities(&self) -> &[crate::config::SigstoreIdentity] {
+        &self.identities
+    }
+
+    /// Prüft ein Bundle über den SHA-256 (hex) eines Moduls.
+    pub fn verify(&self, sha256_hex: &str, bundle: &str) -> Result<SigstoreSigner, SignatureError> {
+        let digest = hex32(sha256_hex).ok_or_else(|| SignatureError::Digest(sha256_hex.into()))?;
+        match aigw_sigstore::verify(
+            &self.root,
+            &self.policy,
+            bundle.as_bytes(),
+            aigw_sigstore::Artifact::Sha256(digest),
+        ) {
+            Ok(v) => Ok(SigstoreSigner {
+                subject: v.subject,
+                issuer: v.issuer,
+                integrated_time: v.integrated_time,
+                log_index: v.log_index,
+            }),
+            Err(aigw_sigstore::Error::Identity { subject, issuer }) => {
+                Err(SignatureError::Identity { subject, issuer })
+            }
+            Err(e) => Err(SignatureError::Sigstore(e.to_string())),
+        }
+    }
+}
+
+fn hex32(s: &str) -> Option<[u8; 32]> {
+    if s.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (i, b) in out.iter_mut().enumerate() {
+        *b = u8::from_str_radix(s.get(2 * i..2 * i + 2)?, 16).ok()?;
+    }
+    Some(out)
+}
+
+fn compile_identities(
+    ids: &[crate::config::SigstoreIdentity],
+) -> Result<Vec<aigw_sigstore::Identity>, String> {
+    if ids.is_empty() {
+        return Err("wasm.sigstore.identities: mindestens eine Identität nötig".into());
+    }
+    ids.iter()
+        .enumerate()
+        .map(|(i, id)| {
+            aigw_sigstore::Identity::new(&id.issuer, &id.subject)
+                .map_err(|e| format!("wasm.sigstore.identities[{i}]: {e}"))
+        })
+        .collect()
+}
+
+/// Höchstgröße eines Sigstore-Bundles (Byte).
+pub const MAX_SIGSTORE_BUNDLE_BYTES: usize = aigw_sigstore::MAX_BUNDLE_BYTES;
+
+/// Prüft nur das Format eines Sigstore-Bundles (lesbar, unterstützte Art; ohne Trust-Root).
+pub fn check_bundle_format(bundle: &str) -> Result<(), String> {
+    aigw_sigstore::check_format(bundle.as_bytes()).map_err(|e| format!("sigstoreBundle: {e}"))
+}
+
+/// Prüft die Signatur-Konfiguration ohne Dateizugriff (Konfigurationsprüfung): Schlüssel,
+/// Identitäten, Profil. Das Trust-Root liest erst [`TrustPolicy::from_config`].
+pub fn check_policy_config(cfg: &crate::config::WasmConfig) -> Result<(), String> {
+    // Mit Sigstore darf `require_signature: true` auch ohne Ed25519-Schlüssel stehen.
+    let require = if cfg.sigstore.is_some() {
+        None
+    } else {
+        cfg.require_signature
+    };
+    let p = TrustPolicy::new(&cfg.trusted_keys, require)?;
+    if let Some(s) = &cfg.sigstore {
+        if s.trusted_root.trim().is_empty() {
+            return Err("wasm.sigstore.trusted_root: Pfad fehlt".into());
+        }
+        compile_identities(&s.identities)?;
+    }
+    strict_check(cfg, p.active() || cfg.sigstore.is_some())
+}
+
+fn strict_check(cfg: &crate::config::WasmConfig, active: bool) -> Result<(), String> {
+    if cfg.profile == crate::config::WasmProfile::Strict {
+        if !active {
+            return Err(
+                "wasm.profile: strict verlangt Signaturen – wasm.trusted_keys oder wasm.sigstore \
+                 konfigurieren"
+                    .into(),
+            );
+        }
+        if cfg.require_signature == Some(false) {
+            return Err("wasm.profile: strict erlaubt kein require_signature: false".into());
+        }
+    }
+    Ok(())
 }
 
 impl TrustPolicy {
@@ -285,17 +451,46 @@ impl TrustPolicy {
         Ok(Self {
             keys: out,
             required,
+            sigstore: None,
         })
     }
 
-    /// Aus der WASM-Konfiguration.
-    pub fn from_config(cfg: &crate::config::WasmConfig) -> Result<Self, String> {
-        Self::new(&cfg.trusted_keys, cfg.require_signature)
+    /// Ergänzt Sigstore (AIGW-106). Ohne ausdrückliches `require_signature` ist die Signatur
+    /// danach Pflicht (wie bei Schlüsseln).
+    pub fn with_sigstore(
+        mut self,
+        sigstore: SigstoreTrust,
+        require_signature: Option<bool>,
+    ) -> Self {
+        self.sigstore = Some(std::sync::Arc::new(sigstore));
+        self.required = require_signature.unwrap_or(true);
+        self
     }
 
-    /// Signaturprüfung aktiv (mindestens ein Schlüssel)?
+    /// Aus der WASM-Konfiguration (liest das Sigstore-Trust-Root aus der Datei).
+    pub fn from_config(cfg: &crate::config::WasmConfig) -> Result<Self, String> {
+        check_policy_config(cfg)?;
+        let mut p = match &cfg.sigstore {
+            Some(_) => Self::new(&cfg.trusted_keys, None)?,
+            None => Self::new(&cfg.trusted_keys, cfg.require_signature)?,
+        };
+        if let Some(s) = &cfg.sigstore {
+            p = p.with_sigstore(SigstoreTrust::from_config(s)?, cfg.require_signature);
+        }
+        if cfg.profile == crate::config::WasmProfile::Strict {
+            p.required = true;
+        }
+        Ok(p)
+    }
+
+    /// Signaturprüfung aktiv (mindestens ein Schlüssel oder Sigstore)?
     pub fn active(&self) -> bool {
-        !self.keys.is_empty()
+        !self.keys.is_empty() || self.sigstore.is_some()
+    }
+
+    /// Sigstore-Teil (falls konfiguriert).
+    pub fn sigstore(&self) -> Option<&SigstoreTrust> {
+        self.sigstore.as_deref()
     }
 
     /// Sind Signaturen Pflicht?
@@ -308,22 +503,61 @@ impl TrustPolicy {
         self.keys.iter().map(|(id, _)| id.as_str())
     }
 
-    /// Prüft eine (optionale) Signatur über den SHA-256 (hex, klein) eines Moduls.
+    /// Prüft eine (optionale) Ed25519-Signatur über den SHA-256 (hex, klein) eines Moduls
+    /// (ohne Sigstore-Bundle; siehe [`Self::verify_all`]).
     pub fn verify(
         &self,
         sha256_hex: &str,
         sig: Option<&ModuleSignature>,
     ) -> Result<Verified, SignatureError> {
+        self.verify_all(sha256_hex, sig, None)
+    }
+
+    /// Prüft alle Signaturen eines Moduls (AIGW-106): Ed25519-Signatur und Sigstore-Bundle.
+    /// Jede **vorhandene** Signatur muss gültig sein; ist die Signatur Pflicht, muss mindestens
+    /// eine vorhanden sein.
+    pub fn verify_all(
+        &self,
+        sha256_hex: &str,
+        sig: Option<&ModuleSignature>,
+        bundle: Option<&str>,
+    ) -> Result<Verified, SignatureError> {
         if !self.active() {
             return Ok(Verified::Unchecked);
         }
+        let signer = match bundle {
+            Some(b) => Some(self.verify_sigstore(sha256_hex, b)?),
+            None => None,
+        };
         let Some(sig) = sig else {
-            return if self.required {
-                Err(SignatureError::Missing)
-            } else {
-                Ok(Verified::Unsigned)
+            return match signer {
+                Some(s) => Ok(Verified::Sigstore(s)),
+                None if self.required => Err(SignatureError::Missing),
+                None => Ok(Verified::Unsigned),
             };
         };
+        self.verify_ed25519(sha256_hex, sig)
+    }
+
+    /// Prüft nur ein Sigstore-Bundle (Anzeige, Upload).
+    pub fn verify_sigstore(
+        &self,
+        sha256_hex: &str,
+        bundle: &str,
+    ) -> Result<SigstoreSigner, SignatureError> {
+        match &self.sigstore {
+            Some(s) => s.verify(sha256_hex, bundle),
+            None => Err(SignatureError::Sigstore(
+                "wasm.sigstore ist nicht konfiguriert".into(),
+            )),
+        }
+    }
+
+    fn verify_ed25519(
+        &self,
+        sha256_hex: &str,
+        sig: &ModuleSignature,
+    ) -> Result<Verified, SignatureError> {
         let Some((_, key)) = self.keys.iter().find(|(id, _)| *id == sig.key_id) else {
             return Err(SignatureError::UnknownKey(sig.key_id.clone()));
         };
@@ -347,7 +581,11 @@ impl TrustPolicy {
         if sha256_hex(&m.content) != m.sha256 {
             return Err(SignatureError::Digest(m.sha256.clone()));
         }
-        self.verify(&m.sha256, m.signature.as_ref())
+        self.verify_all(
+            &m.sha256,
+            m.signature.as_ref(),
+            m.sigstore_bundle.as_deref(),
+        )
     }
 }
 
@@ -537,11 +775,146 @@ mod tests {
             updated_at: OffsetDateTime::UNIX_EPOCH,
             content,
             signature: Some(signed(&der, "release", &sha)),
+            sigstore_bundle: None,
         };
         let p = TrustPolicy::new(&[key("release", TEST_PUB)], None).unwrap();
         assert!(p.check_module(&m).is_ok());
         m.content = Bytes::from_static(b"\0asm\x0d\0\x01\0getauscht");
         assert_eq!(p.check_module(&m), Err(SignatureError::Digest(sha)));
+    }
+
+    const SIGSTORE_DATA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../aigw-sigstore/tests/data");
+
+    fn sigstore(subject: &str) -> SigstoreTrust {
+        let root = std::fs::read(format!("{SIGSTORE_DATA}/trusted_root.public-good.json")).unwrap();
+        SigstoreTrust::new(
+            &root,
+            &[crate::config::SigstoreIdentity {
+                issuer: r"https://token\.actions\.githubusercontent\.com".into(),
+                subject: subject.into(),
+            }],
+            true,
+        )
+        .unwrap()
+    }
+
+    fn bundle() -> (String, String) {
+        let b = std::fs::read_to_string(format!(
+            "{SIGSTORE_DATA}/conformance/happy-path-v0.3/bundle.sigstore.json"
+        ))
+        .unwrap();
+        let artifact = std::fs::read(format!("{SIGSTORE_DATA}/conformance/a.txt")).unwrap();
+        (sha256_hex(&artifact), b)
+    }
+
+    #[test]
+    fn sigstore_policy() {
+        let (sha, b) = bundle();
+        let p = TrustPolicy::default().with_sigstore(
+            sigstore(r"https://github\.com/sigstore-conformance/.*"),
+            None,
+        );
+        assert!(p.active() && p.required());
+        match p.verify_all(&sha, None, Some(&b)) {
+            Ok(Verified::Sigstore(s)) => {
+                assert!(
+                    s.subject
+                        .starts_with("https://github.com/sigstore-conformance/")
+                );
+                assert_eq!(s.issuer, "https://token.actions.githubusercontent.com");
+            }
+            other => panic!("{other:?}"),
+        }
+        // Ohne Signatur: Pflicht.
+        assert_eq!(p.verify_all(&sha, None, None), Err(SignatureError::Missing));
+        // Anderer Inhalt.
+        assert!(matches!(
+            p.verify_all(&sha256_hex(b"anders"), None, Some(&b)),
+            Err(SignatureError::Sigstore(_))
+        ));
+        // Ed25519-Signatur ohne Schlüssel: vorhandene Signatur muss gültig sein.
+        let der = private_key_der(TEST_KEY.as_bytes()).unwrap();
+        let sig = signed(&der, "release", &sha);
+        assert_eq!(
+            p.verify_all(&sha, Some(&sig), Some(&b)),
+            Err(SignatureError::UnknownKey("release".into()))
+        );
+        // Beide Verfahren gültig.
+        let both = TrustPolicy::new(&[key("release", TEST_PUB)], None)
+            .unwrap()
+            .with_sigstore(sigstore(".*"), None);
+        assert_eq!(
+            both.verify_all(&sha, Some(&sig), Some(&b)),
+            Ok(Verified::Valid {
+                key_id: "release".into()
+            })
+        );
+        assert!(matches!(
+            both.verify_all(&sha, None, Some(&b)),
+            Ok(Verified::Sigstore(_))
+        ));
+        // Falsche Identität.
+        let other = TrustPolicy::default()
+            .with_sigstore(sigstore(r"https://github\.com/mupf-dev/.*"), None);
+        assert!(matches!(
+            other.verify_all(&sha, None, Some(&b)),
+            Err(SignatureError::Identity { .. })
+        ));
+        // Bundle, aber Sigstore nicht konfiguriert (nur Schlüssel).
+        let keys = TrustPolicy::new(&[key("release", TEST_PUB)], None).unwrap();
+        assert!(matches!(
+            keys.verify_all(&sha, None, Some(&b)),
+            Err(SignatureError::Sigstore(_))
+        ));
+        // Übergangsmodus: unsigniert erlaubt.
+        let lax = TrustPolicy::default().with_sigstore(sigstore(".*"), Some(false));
+        assert_eq!(lax.verify_all(&sha, None, None), Ok(Verified::Unsigned));
+    }
+
+    #[test]
+    fn profile_and_config_checks() {
+        use crate::config::{SigstoreConfig, SigstoreIdentity, WasmConfig, WasmProfile};
+        let mut c = WasmConfig::default();
+        assert!(!c.four_eyes());
+        c.profile = WasmProfile::Strict;
+        assert!(c.four_eyes(), "strict: Vier-Augen an");
+        assert!(
+            check_policy_config(&c).is_err(),
+            "strict ohne Signaturverfahren"
+        );
+        c.trusted_keys = vec![key("release", TEST_PUB)];
+        assert!(check_policy_config(&c).is_ok());
+        c.require_signature = Some(false);
+        assert!(check_policy_config(&c).is_err(), "strict ohne Pflicht");
+        c.require_signature = None;
+        c.four_eyes = Some(false);
+        assert!(!c.four_eyes());
+        let p = TrustPolicy::from_config(&c).unwrap();
+        assert!(p.required());
+        // Sigstore: Identitäten Pflicht, reguläre Ausdrücke gültig, Trust-Root lesbar.
+        let mut c = WasmConfig {
+            sigstore: Some(SigstoreConfig {
+                trusted_root: format!("{SIGSTORE_DATA}/trusted_root.public-good.json"),
+                identities: vec![],
+                require_inclusion_proof: true,
+            }),
+            require_signature: Some(true),
+            ..WasmConfig::default()
+        };
+        assert!(check_policy_config(&c).is_err());
+        let id = SigstoreIdentity {
+            issuer: "(".into(),
+            subject: ".*".into(),
+        };
+        c.sigstore.as_mut().unwrap().identities = vec![id];
+        assert!(check_policy_config(&c).is_err());
+        c.sigstore.as_mut().unwrap().identities[0].issuer = ".*".into();
+        assert!(check_policy_config(&c).is_ok());
+        let p = TrustPolicy::from_config(&c).unwrap();
+        assert!(p.active() && p.required() && p.sigstore().is_some());
+        c.sigstore.as_mut().unwrap().trusted_root = "/nicht/vorhanden.json".into();
+        assert!(check_policy_config(&c).is_ok(), "ohne Dateizugriff");
+        assert!(TrustPolicy::from_config(&c).is_err());
     }
 
     #[test]

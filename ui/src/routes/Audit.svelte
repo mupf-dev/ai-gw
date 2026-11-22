@@ -47,7 +47,7 @@
 
   // Arten in kebab-case (F115).
   const KINDS = ['organization', 'team', 'user', 'api-key', 'provider-credential', 'secret', 'model-group', 'deployment', 'price', 'plugin-binding', 'mcp-server', 'mcp-grant', 'admin-api-key', 'admin-session', 'admin-invitation', 'bootstrap-token', 'audit-log'];
-  const ACTIONS = ['create', 'update', 'delete', 'rotate', 'suspend', 'resume', 'revoke', 'clamp', 'force', 'cascade-remove', 'login', 'login-failed', 'logout', 'first-use', 'disable'];
+  const ACTIONS = ['create', 'update', 'delete', 'rotate', 'suspend', 'resume', 'revoke', 'clamp', 'force', 'cascade-remove', 'submit', 'approve', 'reject', 'login', 'login-failed', 'logout', 'first-use', 'disable'];
   const ACTOR_TYPES = [
     { value: 'user', label: 'Nutzer' },
     { value: 'admin-key', label: 'Admin-API-Key' },

@@ -114,6 +114,8 @@ pub struct AdminState {
     pub(crate) wasm_max_bytes: u64,
     /// Signatur-Richtlinie der WASM-Module (`wasm.trusted_keys`, AIGW-101).
     pub(crate) wasm_trust: Arc<aigw_core::wasm::TrustPolicy>,
+    /// Vier-Augen-Freigabe neuer WASM-Module (`wasm.four_eyes`, AIGW-106).
+    pub(crate) wasm_four_eyes: bool,
     /// Namen der JWT-Aussteller der Datenebene (`auth.jwt.issuers`, AIGW-115; nur Anzeige).
     pub(crate) workload_issuers: Arc<[String]>,
 }
@@ -160,6 +162,7 @@ impl AdminState {
             price_suggester: None,
             wasm_max_bytes: aigw_core::config::WasmConfig::default().max_module_bytes,
             wasm_trust: Arc::default(),
+            wasm_four_eyes: false,
             workload_issuers: Arc::from(Vec::new()),
         }
     }
@@ -224,6 +227,13 @@ impl AdminState {
     #[must_use]
     pub fn with_wasm_trust(mut self, trust: Arc<aigw_core::wasm::TrustPolicy>) -> Self {
         self.wasm_trust = trust;
+        self
+    }
+
+    /// Vier-Augen-Freigabe neuer WASM-Module bzw. Versionen (`wasm.four_eyes`, AIGW-106):
+    /// Uploads warten auf die Freigabe durch einen anderen globalen `admin`.
+    pub fn with_wasm_four_eyes(mut self, on: bool) -> Self {
+        self.wasm_four_eyes = on;
         self
     }
 
@@ -297,6 +307,7 @@ impl AdminState {
             price_suggester: None,
             wasm_max_bytes: aigw_core::config::WasmConfig::default().max_module_bytes,
             wasm_trust: Arc::default(),
+            wasm_four_eyes: false,
             workload_issuers: Arc::from(Vec::new()),
         })
     }

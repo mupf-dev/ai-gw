@@ -396,12 +396,34 @@ wasm:
   trusted_keys:               # öffentliche Ed25519-Schlüssel (PEM/Base64); leer = keine Prüfung
     - id: release-2026
       public_key: MCowBQYDK2VwAyEA…
-  require_signature: null     # Standard: Pflicht, sobald trusted_keys gesetzt; false = Übergang
+  require_signature: null     # Standard: Pflicht, sobald trusted_keys/sigstore gesetzt; false = Übergang
+  sigstore:                   # keyless (AIGW-106): Trust-Root offline, erlaubte Identitäten
+    trusted_root: /etc/aigw/sigstore/trusted_root.json
+    identities:
+      - issuer: 'https://token\.actions\.githubusercontent\.com'
+        subject: 'https://github\.com/mupf-dev/plugins/\.github/workflows/release\.yml@refs/tags/v.*'
+    require_inclusion_proof: true
+  profile: standard           # standard | strict („Streng“: Signatur Pflicht, Vier-Augen an)
+  four_eyes: null             # Vier-Augen-Freigabe; null = nach profile (strict: an)
 ```
 
 Signaturen (AIGW-101): Mit `trusted_keys` müssen Module beim Upload, beim Import aus
 `wasm.modules` und vor dem Laden eine gültige Ed25519-Signatur tragen (Format, Werkzeuge
 `aigw wasm keygen|sign` und Schlüsselwechsel: [Konzept §3a](../konzept/17-wasm-plugins.md)).
+
+Sigstore (AIGW-106): Mit `sigstore` genügt statt eines eigenen Schlüssels ein Bundle aus
+`cosign sign-blob --bundle` (Fulcio-Zertifikat + Rekor-Eintrag), das zu einer der `identities`
+passt (`issuer`/`subject` als reguläre Ausdrücke, vollständig verankert). Das Trust-Root wird
+nur beim Start gelesen, zur Laufzeit gibt es keine Netzaufrufe. Module aus Dateien:
+`wasm.modules[].sigstore_bundle: <Pfad>`. Prüfung offline: `aigw wasm verify-sigstore`. Details,
+Grenzen (Rekor v1, kein DSSE): [Konzept §3b](../konzept/17-wasm-plugins.md).
+
+Vier-Augen-Freigabe (AIGW-106): Mit `four_eyes` (bzw. `profile: strict`) werden Uploads über
+die Admin-API nur eingereicht und erst aktiv, wenn ein **anderer** globaler `admin` sie freigibt
+(`POST /admin/api/v1/wasm-modules/{name}/approve?sha256=…`, UI: Button „Freigeben“). Module aus
+`wasm.modules` sind ohne Freigabe aktiv. Ablauf, RBAC, Audit und GitOps:
+[Konzept §3c](../konzept/17-wasm-plugins.md). `profile: strict` verlangt `trusted_keys` oder
+`sigstore` (sonst Startabbruch) und verbietet `require_signature: false`.
 
 `wasm.enabled: false` (bzw. ein Build ohne Feature `wasm`) lässt Bindungen der Art `wasm`
 prüfbar, Aufrufe schlagen aber fehl (→ `failMode`). Kann das System den Adressraum des

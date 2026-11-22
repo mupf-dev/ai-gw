@@ -246,7 +246,10 @@ async fn connect_and_load(
 
 /// Übernimmt die WASM-Module aus `wasm.modules` in die Datenbank (AIGW-63; unverändert =
 /// kein Schreibvorgang). Der SHA-256 der Datei muss zur Konfiguration passen, die Signatur
-/// (`key_id`/`signature`, AIGW-101) zu `wasm.trusted_keys` – sonst bricht der Start ab.
+/// (`key_id`/`signature`, AIGW-101) zu `wasm.trusted_keys` bzw. das Sigstore-Bundle
+/// (`sigstore_bundle`, AIGW-106) zu `wasm.sigstore` – sonst bricht der Start ab. Module der
+/// Startkonfiguration sind ohne Vier-Augen-Freigabe aktiv (die Prüfung erfolgt im Review der
+/// Konfiguration).
 async fn import_wasm_modules(
     store: &Store,
     cfg: &aigw_core::config::WasmConfig,
@@ -258,8 +261,20 @@ async fn import_wasm_modules(
         })?;
         let invalid = |e: String| StoreError::Invalid(format!("wasm.modules[{}]: {e}", m.name));
         let signature = m.signature().map_err(invalid)?;
+        let sigstore_bundle = match &m.sigstore_bundle {
+            Some(path) => Some(
+                tokio::fs::read_to_string(path)
+                    .await
+                    .map_err(|e| invalid(format!("sigstore_bundle: {path}: {e}")))?,
+            ),
+            None => None,
+        };
         trust
-            .verify(&aigw_core::wasm::sha256_hex(&content), signature.as_ref())
+            .verify_all(
+                &aigw_core::wasm::sha256_hex(&content),
+                signature.as_ref(),
+                sigstore_bundle.as_deref(),
+            )
             .map_err(|e| invalid(format!("signature: {e}")))?;
         let out = store
             .put_wasm_module(
@@ -270,6 +285,7 @@ async fn import_wasm_modules(
                     content,
                     sha256: Some(m.sha256.clone()),
                     signature,
+                    sigstore_bundle,
                 },
                 cfg.max_module_bytes,
             )

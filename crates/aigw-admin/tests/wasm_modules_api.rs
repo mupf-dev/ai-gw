@@ -3,7 +3,8 @@
 
 //! WASM-Module über die Admin-API (AIGW-63): Hochladen nur durch globale Admins und nur mit
 //! passendem SHA-256, Medientyp, Größe, `If-Match` beim Ersetzen/Löschen, Download, Löschschutz
-//! bei verwendeten Modulen und Prüfung des Modulverweises in Plugin-Bindungen.
+//! bei verwendeten Modulen und Prüfung des Modulverweises in Plugin-Bindungen; Signaturen
+//! (AIGW-101), Sigstore-Umschlag und Vier-Augen-Freigabe (AIGW-106).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -40,13 +41,20 @@ impl AdminAuthenticator for Roles {
                 team: None,
             };
             let roles = match token.as_str() {
-                "admin" => vec![b(Role::Admin, None)],
+                "admin" | "alice" | "bob" | "kalice" | "kboot" => vec![b(Role::Admin, None)],
                 "org" => vec![b(Role::OrgAdmin, Some("acme"))],
                 "viewer" => vec![b(Role::Viewer, None)],
                 _ => return None,
             };
+            let subject = match token.as_str() {
+                "alice" => "user:alice".to_owned(),
+                "bob" => "user:bob".to_owned(),
+                "kalice" => "admin-key:k-alice".to_owned(),
+                "kboot" => "admin-key:k-boot".to_owned(),
+                t => format!("test:{t}"),
+            };
             Some(Principal {
-                subject: format!("test:{token}"),
+                subject,
                 roles,
                 method: AuthMethod::AdminApiKey,
                 display_name: None,
@@ -163,11 +171,22 @@ async fn upload_rights_integrity_and_lifecycle() {
         "admin",
         Method::PUT,
         &format!("{BASE}/guard?sha256={sha1}"),
-        &[("content-type", "application/json")],
+        &[("content-type", "text/plain")],
         Body::from(v1.clone()),
     )
     .await;
     assert_eq!(r.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    // application/json = Umschlag (AIGW-106): Rohbytes sind kein gültiges JSON → 400.
+    let r = call(
+        &app,
+        "admin",
+        Method::PUT,
+        &format!("{BASE}/guard?sha256={sha1}"),
+        &[("content-type", "application/json")],
+        Body::from(v1.clone()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
     let big = component(&[0u8; 2048]);
     let r = upload(&app, "admin", "guard", &big, &sha256_hex(&big), None).await;
     assert_eq!(r.status, StatusCode::PAYLOAD_TOO_LARGE);
@@ -506,4 +525,337 @@ async fn signatures_upload_list_and_rotation() {
         r.body["signature"],
         json!({"keyId": "k9", "status": "unchecked", "loadable": true})
     );
+}
+
+// ------------------------------------------------------------------ AIGW-106: Vier-Augen-Freigabe
+
+fn router_four_eyes(store: &Store) -> Router {
+    router_with(
+        AdminState::new(store.clone(), Arc::new(Roles))
+            .with_wasm_max_module_bytes(1024)
+            .with_wasm_four_eyes(true),
+    )
+}
+
+async fn put_as(
+    app: &Router,
+    token: &str,
+    name: &str,
+    content: &[u8],
+    if_match: Option<&str>,
+) -> Resp {
+    let mut h = vec![("content-type", "application/wasm")];
+    if let Some(m) = if_match {
+        h.push(("if-match", m));
+    }
+    call(
+        app,
+        token,
+        Method::PUT,
+        &format!("{BASE}/{name}?sha256={}", sha256_hex(content)),
+        &h,
+        Body::from(content.to_vec()),
+    )
+    .await
+}
+
+async fn approve(app: &Router, token: &str, name: &str, sha: &str) -> Resp {
+    call(
+        app,
+        token,
+        Method::POST,
+        &format!("{BASE}/{name}/approve?sha256={sha}"),
+        &[],
+        Body::empty(),
+    )
+    .await
+}
+
+async fn admin_key(store: &Store, actor: &str, name: &str) {
+    store
+        .create_admin_api_key(
+            actor,
+            name,
+            aigw_store::admin_auth::AdminApiKeySpec {
+                description: None,
+                roles: vec![RoleBinding {
+                    role: Role::Admin,
+                    organization: None,
+                    team: None,
+                }],
+                expires_at: None,
+            },
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn four_eyes_submit_approve_reject() {
+    let store = Store::connect("sqlite::memory:").await.unwrap();
+    store.migrate().await.unwrap();
+    let app = router_four_eyes(&store);
+    let v1 = component(b"eins");
+    let sha1 = sha256_hex(&v1);
+
+    // Hochladen = einreichen (202), noch nicht aktiv.
+    let r = put_as(&app, "alice", "guard", &v1, None).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{}", r.body);
+    assert_eq!(r.body["sha256"], sha1);
+    assert_eq!(r.body["uploadedBy"], "user:alice");
+    assert_eq!(r.body["canApprove"], false);
+    assert!(r.body.get("replaces").is_none());
+    assert_eq!(
+        call(
+            &app,
+            "admin",
+            Method::GET,
+            &format!("{BASE}/guard"),
+            &[],
+            Body::empty()
+        )
+        .await
+        .status,
+        StatusCode::NOT_FOUND
+    );
+    let list = call(&app, "bob", Method::GET, BASE, &[], Body::empty()).await;
+    assert_eq!(list.body["fourEyes"], true);
+    assert_eq!(list.body["items"].as_array().unwrap().len(), 0);
+    assert_eq!(list.body["pending"][0]["name"], "guard");
+    assert_eq!(list.body["pending"][0]["canApprove"], true);
+    let dl = call(
+        &app,
+        "viewer",
+        Method::GET,
+        &format!("{BASE}/guard/pending/content"),
+        &[],
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(dl.status, StatusCode::OK);
+    assert_eq!(dl.raw, v1);
+
+    // Bindung auf ein nur eingereichtes Modul: 422 „wartet auf Freigabe“.
+    let b = call(
+        &app,
+        "admin",
+        Method::POST,
+        "/admin/api/v1/plugin-bindings",
+        &[("content-type", "application/json")],
+        Body::from(
+            json!({"metadata": {"name": "b1"}, "spec": {"plugin": "wasm", "scope": {"level": "global"}, "config": {"module": "guard"}}})
+                .to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(b.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", b.body);
+    assert!(
+        b.body["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("wartet auf Freigabe"),
+        "{}",
+        b.body
+    );
+
+    // Selbstfreigabe verboten, auch über einen eigenen Admin-Key; Viewer/Org-Admin ebenso.
+    admin_key(&store, "user:alice", "k-alice").await;
+    for token in ["alice", "kalice", "viewer", "org"] {
+        let r = approve(&app, token, "guard", &sha1).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{token}: {}", r.body);
+    }
+    // Falscher SHA → 409, unbekannt → 404.
+    assert_eq!(
+        approve(&app, "bob", "guard", &"0".repeat(64)).await.status,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        approve(&app, "bob", "fehlt", &sha1).await.status,
+        StatusCode::NOT_FOUND
+    );
+    // Freigabe durch Bob → aktiv.
+    let r = approve(&app, "bob", "guard", &sha1).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(r.body["approval"]["uploadedBy"], "user:alice");
+    assert_eq!(r.body["approval"]["approvedBy"], "user:bob");
+    assert!(r.body["approval"]["approvedAt"].is_string());
+    let etag = r.etag.clone().unwrap();
+
+    // Neue Version über Alices Key: aktive Version bleibt, Einreichung ersetzt sie erst nach
+    // Freigabe. If-Match bezieht sich auf die aktive Version.
+    let v2 = component(b"zwei");
+    let sha2 = sha256_hex(&v2);
+    assert_eq!(
+        put_as(&app, "kalice", "guard", &v2, None).await.status,
+        StatusCode::PRECONDITION_REQUIRED
+    );
+    let r = put_as(&app, "kalice", "guard", &v2, Some(&etag)).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{}", r.body);
+    assert_eq!(r.body["replaces"], sha1);
+    let g = call(
+        &app,
+        "admin",
+        Method::GET,
+        &format!("{BASE}/guard"),
+        &[],
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(g.body["sha256"], sha1);
+    assert_eq!(g.body["pending"]["sha256"], sha2);
+    // Key von Alice zählt als Alice.
+    assert_eq!(
+        approve(&app, "alice", "guard", &sha2).await.status,
+        StatusCode::FORBIDDEN
+    );
+    // Gleich der aktiven Version: nichts eingereicht (200).
+    assert_eq!(
+        put_as(&app, "kalice", "guard", &v1, Some(&etag))
+            .await
+            .status,
+        StatusCode::OK
+    );
+    // Verwerfen (auch durch den Hochlader), dann ist nichts mehr freizugeben.
+    let r = call(
+        &app,
+        "kalice",
+        Method::DELETE,
+        &format!("{BASE}/guard/pending"),
+        &[],
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        approve(&app, "bob", "guard", &sha2).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        call(
+            &app,
+            "kalice",
+            Method::DELETE,
+            &format!("{BASE}/guard/pending"),
+            &[],
+            Body::empty()
+        )
+        .await
+        .status,
+        StatusCode::NOT_FOUND
+    );
+    // Keys des Bootstrap-Admins gelten als eigene Personen.
+    admin_key(&store, "bootstrap-admin", "k-boot").await;
+    let r = put_as(&app, "kboot", "guard", &v2, Some(&etag)).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    assert_eq!(
+        approve(&app, "kboot", "guard", &sha2).await.status,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        approve(&app, "alice", "guard", &sha2).await.status,
+        StatusCode::OK
+    );
+
+    // Audit: submit/approve/reject.
+    let audit = store.audit_log(100).await.unwrap();
+    let mut actions: Vec<(&str, &str)> = audit
+        .iter()
+        .filter(|e| e.kind == "wasm-module-approval")
+        .map(|e| (e.action.as_str(), e.actor.as_str()))
+        .collect();
+    actions.reverse();
+    assert_eq!(
+        actions,
+        [
+            ("submit", "user:alice"),
+            ("approve", "user:bob"),
+            ("submit", "admin-key:k-alice"),
+            ("reject", "admin-key:k-alice"),
+            ("submit", "admin-key:k-boot"),
+            ("approve", "user:alice"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn four_eyes_off_and_sigstore_envelope() {
+    // Ohne Vier-Augen: wie bisher sofort aktiv. Sigstore-Umschlag: mit Sigstore-Richtlinie wird
+    // ein Bundle eines anderen Artefakts abgelehnt; ungültiges JSON / Format → 400/422.
+    let store = Store::connect("sqlite::memory:").await.unwrap();
+    store.migrate().await.unwrap();
+    let data = concat!(env!("CARGO_MANIFEST_DIR"), "/../aigw-sigstore/tests/data");
+    let root = std::fs::read(format!("{data}/trusted_root.public-good.json")).unwrap();
+    let bundle: Value = serde_json::from_slice(
+        &std::fs::read(format!(
+            "{data}/conformance/happy-path-v0.3/bundle.sigstore.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let trust = aigw_core::wasm::TrustPolicy::default().with_sigstore(
+        aigw_core::wasm::SigstoreTrust::new(
+            &root,
+            &[aigw_core::config::SigstoreIdentity {
+                issuer: ".*".into(),
+                subject: ".*".into(),
+            }],
+            true,
+        )
+        .unwrap(),
+        Some(false),
+    );
+    let app = router_with(
+        AdminState::new(store.clone(), Arc::new(Roles))
+            .with_wasm_max_module_bytes(1024)
+            .with_wasm_trust(Arc::new(trust)),
+    );
+    let v1 = component(b"eins");
+    let r = put_as(&app, "alice", "plain", &v1, None).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(r.body["approval"]["uploadedBy"], "user:alice");
+    assert!(r.body["approval"].get("approvedBy").is_none());
+
+    use base64::Engine as _;
+    let env = |content: &[u8], bundle: Value| {
+        json!({"content": base64::engine::general_purpose::STANDARD.encode(content), "sigstoreBundle": bundle}).to_string()
+    };
+    let put_env = |name: &'static str, body: String, sha: String| {
+        let app = app.clone();
+        async move {
+            call(
+                &app,
+                "alice",
+                Method::PUT,
+                &format!("{BASE}/{name}?sha256={sha}"),
+                &[("content-type", "application/json")],
+                Body::from(body),
+            )
+            .await
+        }
+    };
+    // Bundle gehört zu a.txt, nicht zum Modul → 422 (Sigstore).
+    let r = put_env("sig", env(&v1, bundle.clone()), sha256_hex(&v1)).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", r.body);
+    assert!(
+        r.body["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Sigstore"),
+        "{}",
+        r.body
+    );
+    // Kaputtes Bundle-Format → 422, kaputtes JSON → 400, Bundle als Zahl → 422.
+    let r = put_env("sig", env(&v1, json!({"mediaType": "x"})), sha256_hex(&v1)).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", r.body);
+    let r = put_env("sig", "{kaputt".into(), sha256_hex(&v1)).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let r = put_env("sig", env(&v1, json!(5)), sha256_hex(&v1)).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    // Umschlag ohne Bundle: wie application/wasm (Übergangsmodus erlaubt unsigniert).
+    let r = put_env("env", env(&v1, Value::Null), sha256_hex(&v1)).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    // Liste zeigt die Identitäten.
+    let l = call(&app, "viewer", Method::GET, BASE, &[], Body::empty()).await;
+    assert_eq!(l.body["sigstoreIdentities"][0]["subject"], ".*");
+    assert_eq!(l.body["fourEyes"], false);
 }

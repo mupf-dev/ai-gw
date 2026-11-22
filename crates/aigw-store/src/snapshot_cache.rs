@@ -167,6 +167,9 @@ struct CachedWasm {
     /// Signatur (AIGW-101; ältere Caches ohne Feld lesbar).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     signature: Option<aigw_core::wasm::ModuleSignature>,
+    /// Sigstore-Bundle (AIGW-106; ältere Caches ohne Feld lesbar).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sigstore_bundle: Option<String>,
 }
 
 impl Body {
@@ -229,6 +232,7 @@ impl Body {
                         &m.content,
                     ),
                     signature: m.signature,
+                    sigstore_bundle: m.sigstore_bundle,
                 })
                 .collect(),
         }
@@ -293,6 +297,7 @@ impl Body {
                         updated_at: m.updated_at,
                         content: bytes::Bytes::from(content),
                         signature: m.signature,
+                        sigstore_bundle: m.sigstore_bundle,
                     })
                 })
                 .collect::<Result<Vec<_>, CacheError>>()?,

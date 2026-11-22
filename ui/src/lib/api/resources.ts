@@ -236,28 +236,60 @@ export async function sha256Hex(data: ArrayBuffer): Promise<string> {
   const d = await crypto.subtle.digest('SHA-256', data);
   return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join('');
 }
+export type PendingWasmModule = S['PendingWasmModule'];
+/** Base64 eines Puffers (stückweise, auch für große Module). */
+function base64Of(data: ArrayBuffer): string {
+  const bytes = new Uint8Array(data);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
 /** WASM-Module (Komponenten für die Plugin-Art `wasm`): Schreiben nur globaler Admin. */
 export const wasmModules = {
   list: async () => (await unwrap<S['WasmModuleList']>(api.GET('/admin/api/v1/wasm-modules'))).items,
-  /** Liste samt Signatur-Richtlinie (AIGW-101: `signatureRequired`, `trustedKeys`). */
+  /** Liste samt Signatur-Richtlinie (AIGW-101: `signatureRequired`, `trustedKeys`; AIGW-106: `sigstoreIdentities`, `fourEyes`, `pending`). */
   overview: async () => unwrap<S['WasmModuleList']>(api.GET('/admin/api/v1/wasm-modules')),
-  /** Hochladen bzw. Ersetzen (`exists`: If-Match mit dem aktuellen ETag; `keyId`+`signature`: Ed25519-Signatur, AIGW-101). */
-  upload: async (name: string, content: ArrayBuffer, opts: { sha256?: string; description?: string; exists?: boolean; keyId?: string; signature?: string }) => {
+  /**
+   * Hochladen bzw. Ersetzen (`exists`: If-Match mit dem aktuellen ETag; `keyId`+`signature`: Ed25519-Signatur, AIGW-101;
+   * `sigstoreBundle`: Bundle-JSON aus `cosign sign-blob --bundle`, als JSON-Umschlag, AIGW-106). Mit Vier-Augen-Freigabe
+   * antwortet der Server mit `202` und der Einreichung (`pending: true`).
+   */
+  upload: async (
+    name: string,
+    content: ArrayBuffer,
+    opts: { sha256?: string; description?: string; exists?: boolean; keyId?: string; signature?: string; sigstoreBundle?: string },
+  ): Promise<{ pending: false; module: WasmModule } | { pending: true; module: PendingWasmModule }> => {
     const sha256 = opts.sha256?.trim() || (await sha256Hex(content));
-    const headers: Record<string, string> = { 'Content-Type': 'application/wasm' };
+    const bundle = opts.sigstoreBundle?.trim();
+    const headers: Record<string, string> = { 'Content-Type': bundle ? 'application/json' : 'application/wasm' };
     if (opts.exists) headers['If-Match'] = await etagFor(WASM_ITEM, name);
-    return unwrap<WasmModule>(
-      api.PUT(WASM_ITEM, {
-        params: {
-          path: { name },
-          query: { sha256, description: opts.description?.trim() || undefined, keyId: opts.keyId?.trim() || undefined, signature: opts.signature?.trim() || undefined },
-        },
-        body: content as unknown as string,
-        bodySerializer: (b: unknown) => b as BodyInit,
-        headers,
-      }),
-    );
+    let parsed: unknown = undefined;
+    if (bundle) {
+      try {
+        parsed = JSON.parse(bundle);
+      } catch {
+        throw new Error('Sigstore-Bundle ist kein gültiges JSON.');
+      }
+    }
+    const body = bundle ? JSON.stringify({ content: base64Of(content), sigstoreBundle: parsed }) : content;
+    const req = api.PUT(WASM_ITEM, {
+      params: {
+        path: { name },
+        query: { sha256, description: opts.description?.trim() || undefined, keyId: opts.keyId?.trim() || undefined, signature: opts.signature?.trim() || undefined },
+      },
+      body: body as unknown as string,
+      bodySerializer: (b: unknown) => b as BodyInit,
+      headers,
+    });
+    const data = await unwrap<WasmModule | PendingWasmModule>(req);
+    const res = await req;
+    return res.response.status === 202 ? { pending: true, module: data as PendingWasmModule } : { pending: false, module: data as WasmModule };
   },
+  /** Eingereichte Version freigeben (Vier-Augen-Prinzip, AIGW-106; `sha256` = geprüfte Version). */
+  approve: (name: string, sha256: string) =>
+    unwrap<WasmModule>(api.POST('/admin/api/v1/wasm-modules/{name}/approve', { params: { path: { name }, query: { sha256 } } })),
+  /** Eingereichte Version verwerfen (AIGW-106). */
+  reject: (name: string) => unwrap<void>(api.DELETE('/admin/api/v1/wasm-modules/{name}/pending', { params: { path: { name } } })),
   remove: async (name: string) => {
     const tag = await etagFor(WASM_ITEM, name);
     return unwrap<void>(api.DELETE(WASM_ITEM, { params: { path: { name } }, headers: { 'If-Match': tag } }));

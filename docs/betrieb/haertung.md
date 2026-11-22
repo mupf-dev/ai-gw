@@ -151,6 +151,19 @@ AIGW-58). Verweise `S-xx` beziehen sich auf die dortigen Befunde.
   oder nachträglich veränderte Module werden weder angenommen noch geladen (auch nicht aus
   Datenbank oder Snapshot-Cache). Signieren: `aigw wasm sign --key release.pem --key-id … modul.wasm`.
   Überwachen: `aigw_wasm_signature_rejected_total`.
+- **Sigstore statt eigener Schlüssel (AIGW-106):** Wer Module in CI baut (z. B. GitHub Actions),
+  signiert keyless mit `cosign sign-blob --bundle` und trägt in `wasm.sigstore` das Trust-Root
+  (`trusted_root.json`, offline) und die erlaubte Identität ein – **eng** fassen: genau der
+  Release-Workflow des Plugin-Repos und ein Tag-Muster, Punkte maskieren
+  (`https://github\.com/org/repo/\.github/workflows/release\.yml@refs/tags/v.*`). Ein zu
+  weites Muster (`.*`) lässt jeden Sigstore-Nutzer signieren. Trust-Root bei CA-/Log-Wechseln
+  der Sigstore-Instanz aktualisieren (Datei tauschen, Neustart).
+- **Vier-Augen-Freigabe (AIGW-106):** `wasm.profile: strict` (oder `wasm.four_eyes: true`)
+  setzen, sobald mehr als eine Person globaler Admin ist: Ein Upload wird erst aktiv, wenn ein
+  anderer Admin ihn freigibt; Admin-Keys zählen als die Person, die sie angelegt hat. Den
+  Bootstrap-Zugang nach der Einrichtung beenden (`admin.auth.bootstrap: auto`/`off`) – Keys,
+  die der Bootstrap-Admin anlegt, gelten als eigene Personen. Audit-Einträge
+  `wasm-module-approval` (submit/approve/reject) regelmäßig sichten.
 - Wer keine WASM-Plugins braucht: `wasm.enabled: false` oder ein Build ohne Feature `wasm`.
 
 ## Audit

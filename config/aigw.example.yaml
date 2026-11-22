@@ -313,7 +313,17 @@ wasm:
   trusted_keys: []
   #  - id: release-2026
   #    public_key: MCowBQYDK2VwAyEA…    # Base64 (roh/SPKI) oder PEM; aigw wasm keygen gibt ihn aus
-  require_signature: null          # null = Pflicht, sobald trusted_keys gesetzt; false = Übergang
+  require_signature: null          # null = Pflicht, sobald trusted_keys/sigstore gesetzt; false = Übergang
+  # Sigstore keyless (AIGW-106, §3b): Bundles aus `cosign sign-blob --bundle`, offline geprüft.
+  # Module aus Dateien: modules[].sigstore_bundle: <Pfad>.
+  sigstore: null
+  #  trusted_root: /etc/aigw/sigstore/trusted_root.json
+  #  identities:
+  #    - issuer: 'https://token\.actions\.githubusercontent\.com'
+  #      subject: 'https://github\.com/org/plugins/\.github/workflows/release\.yml@refs/tags/v.*'
+  #  require_inclusion_proof: true
+  profile: standard                # standard | strict („Streng“: Signatur Pflicht, Vier-Augen an)
+  four_eyes: null                  # Vier-Augen-Freigabe (AIGW-106, §3c); null = nach profile
 
 # Workload-/Agent-Identitäten (docs/konzept/18-workload-identitaeten.md, AIGW-115): Access-Tokens
 # (JWT) vertrauenswürdiger Aussteller statt API-Key auf Datenebene und MCP-Gateway, z. B.

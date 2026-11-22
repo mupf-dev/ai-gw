@@ -296,6 +296,12 @@ pub(crate) enum Action {
     Suspend,
     /// Gesperrten API-Key wieder aktiviert (F37).
     Resume,
+    /// WASM-Modul zur Freigabe eingereicht (AIGW-106, Vier-Augen-Prinzip).
+    Submit,
+    /// Eingereichtes WASM-Modul freigegeben (AIGW-106).
+    Approve,
+    /// Eingereichtes WASM-Modul verworfen (AIGW-106).
+    Reject,
 }
 
 impl Action {
@@ -311,6 +317,9 @@ impl Action {
             Self::CascadeRemove => "cascade-remove",
             Self::Suspend => "suspend",
             Self::Resume => "resume",
+            Self::Submit => "submit",
+            Self::Approve => "approve",
+            Self::Reject => "reject",
         }
     }
 }
