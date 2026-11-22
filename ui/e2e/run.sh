@@ -10,6 +10,7 @@
 #   AIGW_BIN   fertiges Binary (Standard: target/debug/aigw, wird sonst gebaut)
 #   E2E_OUT    Ergebnisordner (Standard: ui/e2e/results; Screenshots unter screens/)
 #   E2E_GREP   nur passende Tests (Playwright --grep)
+#   E2E_ARGS   weitere Playwright-Argumente (z. B. "--repeat-each 10" gegen sporadische Fehler)
 set -euo pipefail
 
 E2E=$(cd "$(dirname "$0")" && pwd)
@@ -77,4 +78,4 @@ if [[ -f pnpm-lock.yaml ]]; then pnpm install --frozen-lockfile; else pnpm insta
 if ! ls "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}" 2>/dev/null | grep -q chromium; then
   pnpm exec playwright install --with-deps chromium > "$OUT/playwright-install.log" 2>&1
 fi
-AIGW_FOUR_EYES_URL="http://127.0.0.1:$FOUR_PORT" AIGW_OIDC_URL="http://127.0.0.1:$OIDC_PORT" AIGW_URL="http://127.0.0.1:$PORT" AIGW_TOKEN="$TOKEN" E2E_OUT="$OUT" pnpm exec playwright test ${E2E_GREP:+--grep "$E2E_GREP"}
+AIGW_FOUR_EYES_URL="http://127.0.0.1:$FOUR_PORT" AIGW_OIDC_URL="http://127.0.0.1:$OIDC_PORT" AIGW_URL="http://127.0.0.1:$PORT" AIGW_TOKEN="$TOKEN" E2E_OUT="$OUT" pnpm exec playwright test ${E2E_GREP:+--grep "$E2E_GREP"} ${E2E_ARGS:-}
