@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Smoke-Test des Helm-Charts deploy/helm/ai-gw in einem Wegwerf-Cluster (kind, AIGW-119):
 #   Image bauen (außer SKIP_BUILD=1) und in kind laden → Secrets (Master-Key, Bootstrap-Token) →

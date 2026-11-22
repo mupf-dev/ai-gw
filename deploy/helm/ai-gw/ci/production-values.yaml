@@ -1,5 +1,5 @@
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 # Beispiel Produktion (auch Prüfvariante in scripts/k8s-check.sh): Postgres + Redis, 2 Replikate,
 # Ingress mit TLS, ServiceMonitor, Image per Digest.
 image:

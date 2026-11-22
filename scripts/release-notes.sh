@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Release-Vorprüfung und Release-Notizen (AIGW-119).
 #
@@ -8,8 +8,8 @@
 #   scripts/release-notes.sh v0.1.0           # führendes "v" (Tag-Name) ist erlaubt
 #   ALLOW_PLACEHOLDER=1 scripts/release-notes.sh 0.1.0   # Datum darf noch offen sein (Probelauf)
 #
-# Prüft, dass die Version zu Cargo.toml ([workspace.package]), Cargo.lock (Paket aigw) und
-# ui/package.json passt und dass CHANGELOG.md einen Abschnitt `## [<version>] – JJJJ-MM-TT` mit
+# Prüft, dass die Version zu Cargo.toml ([workspace.package]), Cargo.lock (Paket aigw),
+# ui/package.json und dem Helm-Chart (version, appVersion) passt und dass CHANGELOG.md einen Abschnitt `## [<version>] – JJJJ-MM-TT` mit
 # echtem Datum hat. Ausgabe auf stdout: der Abschnitt ohne Überschrift (für `gh release create
 # --notes-file`), ergänzt um Hinweise zu Prüfsummen und Attestierungen. Fehler → Exit-Code 1.
 set -euo pipefail
@@ -29,6 +29,12 @@ lock_v=$(awk '/^name = "aigw"$/{getline; gsub(/[" ]/,""); sub(/version=/,""); pr
 [[ "$lock_v" == "$v" ]] || fail "Cargo.lock: aigw $lock_v, erwartet $v (cargo update -w)"
 ui_v=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' ui/package.json | head -1)
 [[ "$ui_v" == "$v" ]] || fail "ui/package.json version = $ui_v, erwartet $v"
+
+chart=deploy/helm/ai-gw/Chart.yaml
+chart_v=$(sed -n 's/^version: *//p' "$chart")
+chart_app=$(sed -n 's/^appVersion: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$chart")
+[[ "$chart_v" == "$v" && "$chart_app" == "$v" ]] ||
+  fail "$chart: version $chart_v / appVersion $chart_app, erwartet $v"
 
 esc=${v//./\\.}
 head=$(grep -E "^## \[$esc\]" CHANGELOG.md || true)

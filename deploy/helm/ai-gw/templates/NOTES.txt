@@ -1,3 +1,7 @@
+{{- /*
+SPDX-FileCopyrightText: 2026 mupf-dev
+SPDX-License-Identifier: FSL-1.1-ALv2
+*/ -}}
 ai-gw {{ .Chart.AppVersion }} ({{ include "ai-gw.image" . }}) als Release "{{ .Release.Name }}" in Namespace "{{ .Release.Namespace }}".
 
 Datenebene (Clients):   {{ include "ai-gw.fullname" . }}-data:{{ .Values.service.dataPort }}  (/v1/…, /mcp)

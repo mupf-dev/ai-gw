@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Release-Artefakte bauen (AIGW-119) – derselbe Einstieg im Workflow .github/workflows/release.yml
 # und auf der Buildbox (Probelauf ohne Veröffentlichung):
@@ -108,6 +108,25 @@ cp ui/package.json ui/pnpm-lock.yaml "$TMP/sbom/ui/"
 sbom="$OUT/ai-gw-$VERSION.cdx.json"
 docker run --rm -v "$TMP/sbom:/src:ro" "$SYFT_IMAGE" scan dir:/src -q \
   --source-name ai-gw --source-version "$VERSION" -o cyclonedx-json >"$sbom"
+# Produkt-Metadaten (Lizenz FSL-1.1-ALv2, Hersteller mupf-dev) in metadata.component ergänzen.
+python3 - "$sbom" "$VERSION" <<'PY'
+import json, sys
+path, version = sys.argv[1], sys.argv[2]
+bom = json.load(open(path))
+meta = bom.setdefault("metadata", {})
+comp = meta.setdefault("component", {"type": "application", "name": "ai-gw"})
+comp.update({
+    "type": "application", "name": "ai-gw", "version": version,
+    "licenses": [{"license": {"id": "FSL-1.1-ALv2"}}],
+    "supplier": {"name": "mupf-dev", "url": ["https://github.com/mupf-dev"]},
+    "authors": [{"name": "mupf-dev"}],
+    "purl": f"pkg:github/mupf-dev/ai-gw@v{version}",
+    "externalReferences": [{"type": "vcs", "url": "https://github.com/mupf-dev/ai-gw"}],
+})
+meta["supplier"] = {"name": "mupf-dev", "url": ["https://github.com/mupf-dev"]}
+json.dump(bom, open(path, "w"), indent=2)
+PY
+grep -q '"FSL-1.1-ALv2"' "$sbom"
 n=$(grep -o '"bom-ref"' "$sbom" | wc -l)
 grep -q '"bomFormat": *"CycloneDX"' "$sbom"
 [[ "$n" -gt 100 ]] || { echo "FEHLER: SBOM mit nur $n Komponenten" >&2; exit 1; }
@@ -144,12 +163,13 @@ if [[ -n "${PUSH:-}" ]]; then
   ann=()
   for kv in \
     "org.opencontainers.image.title=ai-gw" \
+    "org.opencontainers.image.authors=mupf-dev" \
     "org.opencontainers.image.description=AI-Gateway (OpenAI-/Anthropic-kompatibel) mit Admin-API und Admin-UI in einem Binary" \
-    "org.opencontainers.image.licenses=AGPL-3.0-or-later" \
+    "org.opencontainers.image.licenses=FSL-1.1-ALv2" \
     "org.opencontainers.image.source=https://github.com/mupf-dev/ai-gw" \
     "org.opencontainers.image.url=https://github.com/mupf-dev/ai-gw" \
     "org.opencontainers.image.documentation=https://github.com/mupf-dev/ai-gw/tree/v$VERSION/docs/betrieb" \
-    "org.opencontainers.image.vendor=ai-gw contributors" \
+    "org.opencontainers.image.vendor=mupf-dev" \
     "org.opencontainers.image.version=$VERSION" \
     "org.opencontainers.image.revision=$REVISION" \
     "org.opencontainers.image.created=$CREATED"; do
