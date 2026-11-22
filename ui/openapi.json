@@ -12020,7 +12020,7 @@
         "tags": [
           "wasm-modules"
         ],
-        "summary": "Modul hochladen oder ersetzen (nur globaler `admin`).",
+        "summary": "Modul hochladen oder ersetzen (nur globaler `admin`). Mit Vier-Augen-Freigabe\n(`wasm.four_eyes`) wird die Version nur eingereicht (`202`).",
         "operationId": "put_wasm_module",
         "parameters": [
           {
@@ -12070,8 +12070,13 @@
           }
         ],
         "requestBody": {
-          "description": "WebAssembly-Komponente (WIT-Welt aigw:plugin/plugin)",
+          "description": "WebAssembly-Komponente (WIT-Welt aigw:plugin/plugin) bzw. JSON-Umschlag mit Sigstore-Bundle",
           "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WasmUpload"
+              }
+            },
             "application/wasm": {
               "schema": {
                 "$ref": "#/components/schemas/WasmBinary"
@@ -12097,6 +12102,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WasmModule"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Eingereicht, wartet auf Freigabe (wasm.four_eyes)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingWasmModule"
                 }
               }
             }
@@ -12132,7 +12147,7 @@
             }
           },
           "415": {
-            "description": "Content-Type nicht application/wasm",
+            "description": "Content-Type nicht application/wasm bzw. application/json",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12142,7 +12157,7 @@
             }
           },
           "422": {
-            "description": "Kein gültiges Modul, SHA-256 passt nicht oder Signatur fehlt/ungültig (wasm.trusted_keys)",
+            "description": "Kein gültiges Modul, SHA-256 passt nicht oder Signatur fehlt/ungültig (wasm.trusted_keys, wasm.sigstore)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12243,6 +12258,95 @@
         ]
       }
     },
+    "/admin/api/v1/wasm-modules/{name}/approve": {
+      "post": {
+        "tags": [
+          "wasm-modules"
+        ],
+        "summary": "Eingereichte Version freigeben (Vier-Augen-Prinzip, AIGW-106): nur ein globaler `admin`,\nder die Version nicht selbst hochgeladen hat. Die Signaturen werden erneut gegen die\naktuelle Richtlinie geprüft.",
+        "operationId": "approve_wasm_module",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name des Moduls",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sha256",
+            "in": "query",
+            "description": "SHA-256 der geprüften Einreichung (Pflicht: freigegeben wird genau diese Version).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Freigegeben, jetzt aktiv",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WasmModule"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Kein globaler admin oder Hochlader selbst (Vier-Augen-Prinzip)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Keine Einreichung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Einreichung inzwischen ersetzt (SHA-256 passt nicht)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Signatur unter der aktuellen Richtlinie ungültig",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/admin/api/v1/wasm-modules/{name}/content": {
       "get": {
         "tags": [
@@ -12274,6 +12378,109 @@
           },
           "404": {
             "description": "Unbekannt",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/wasm-modules/{name}/pending": {
+      "delete": {
+        "tags": [
+          "wasm-modules"
+        ],
+        "summary": "Eingereichte Version verwerfen (jeder globale `admin`, auch der Hochlader selbst).",
+        "operationId": "reject_wasm_module",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name des Moduls",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Verworfen"
+          },
+          "403": {
+            "description": "Nur globaler admin",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Keine Einreichung",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/admin/api/v1/wasm-modules/{name}/pending/content": {
+      "get": {
+        "tags": [
+          "wasm-modules"
+        ],
+        "summary": "Inhalt einer Einreichung (zur Prüfung vor der Freigabe).",
+        "operationId": "get_pending_content",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Name des Moduls",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Komponente",
+            "content": {
+              "application/wasm": {
+                "schema": {
+                  "$ref": "#/components/schemas/WasmBinary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Keine Einreichung",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12902,6 +13109,33 @@
           "plan": {
             "$ref": "#/components/schemas/Plan",
             "description": "Plan (bei `applied` genau das, was geschrieben wurde)."
+          }
+        }
+      },
+      "ApprovalInfo": {
+        "type": "object",
+        "description": "Herkunft der aktiven Version (AIGW-106).",
+        "required": [
+          "uploadedBy"
+        ],
+        "properties": {
+          "approvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Freigegeben am (RFC 3339)."
+          },
+          "approvedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Freigegeben von (fehlt = ohne Vier-Augen-Freigabe aktiv geworden)."
+          },
+          "uploadedBy": {
+            "type": "string",
+            "description": "Hochgeladen von."
           }
         }
       },
@@ -15856,6 +16090,65 @@
           "not-stored"
         ]
       },
+      "PendingWasmModule": {
+        "type": "object",
+        "description": "Eingereichte Version, die auf Freigabe wartet (AIGW-106).",
+        "required": [
+          "name",
+          "sha256",
+          "size",
+          "uploadedBy",
+          "uploadedAt",
+          "signature",
+          "canApprove"
+        ],
+        "properties": {
+          "canApprove": {
+            "type": "boolean",
+            "description": "Darf der anfragende Principal freigeben (globaler `admin`, nicht der Hochlader)?"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Beschreibung."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name des Moduls."
+          },
+          "replaces": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "SHA-256 der aktiven Version, die ersetzt würde (fehlt = neues Modul)."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 der eingereichten Version (für `approve?sha256=…`)."
+          },
+          "signature": {
+            "$ref": "#/components/schemas/SignatureInfo",
+            "description": "Signaturen gegen die aktuelle Richtlinie."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Größe in Byte.",
+            "minimum": 0
+          },
+          "uploadedAt": {
+            "type": "string",
+            "description": "Hochgeladen am (RFC 3339)."
+          },
+          "uploadedBy": {
+            "type": "string",
+            "description": "Hochgeladen von."
+          }
+        }
+      },
       "Plan": {
         "type": "object",
         "description": "Ergebnis des Soll/Ist-Vergleichs.",
@@ -18169,6 +18462,17 @@
             "type": "boolean",
             "description": "Darf das Modul unter der aktuellen Richtlinie geladen werden? (`false`: Bindungen\ndarauf sind ungültig → `failMode`.)"
           },
+          "sigstore": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SigstoreInfo",
+                "description": "Sigstore-Bundle (AIGW-106; fehlt = ohne)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status": {
             "$ref": "#/components/schemas/SignatureStatus",
             "description": "Prüfergebnis."
@@ -18183,7 +18487,84 @@
           "invalid",
           "unknown-key",
           "unsigned",
-          "unchecked"
+          "unchecked",
+          "identity"
+        ]
+      },
+      "SigstoreIdentityView": {
+        "type": "object",
+        "description": "Erlaubte Sigstore-Identität (reguläre Ausdrücke wie konfiguriert).",
+        "required": [
+          "issuer",
+          "subject"
+        ],
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "description": "OIDC-Issuer."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Subjekt (SAN)."
+          }
+        }
+      },
+      "SigstoreInfo": {
+        "type": "object",
+        "description": "Sigstore-Bundle eines Moduls (AIGW-106).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "integratedTime": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Zeitpunkt des Rekor-Eintrags (RFC 3339)."
+          },
+          "issuer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "OIDC-Issuer."
+          },
+          "logIndex": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Index im Rekor-Log."
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fehler (bei `invalid`)."
+          },
+          "status": {
+            "$ref": "#/components/schemas/SigstoreStatus",
+            "description": "Prüfergebnis."
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Subjekt des Zertifikats (z. B. Workflow-URI, E-Mail)."
+          }
+        }
+      },
+      "SigstoreStatus": {
+        "type": "string",
+        "description": "Prüfstatus eines Sigstore-Bundles (AIGW-106).",
+        "enum": [
+          "valid",
+          "invalid",
+          "identity"
         ]
       },
       "SnapshotInfo": {
@@ -19343,9 +19724,14 @@
           "createdAt",
           "updatedAt",
           "usedBy",
-          "signature"
+          "signature",
+          "approval"
         ],
         "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/ApprovalInfo",
+            "description": "Hochgeladen bzw. freigegeben (Vier-Augen-Freigabe, AIGW-106)."
+          },
           "createdAt": {
             "type": "string",
             "description": "Angelegt (RFC 3339)."
@@ -19370,13 +19756,24 @@
             "type": "string",
             "description": "Name."
           },
+          "pending": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PendingWasmModule",
+                "description": "Eingereichte neue Version, die auf Freigabe wartet (nur Einzelabfrage)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sha256": {
             "type": "string",
             "description": "SHA-256 des Inhalts (hex)."
           },
           "signature": {
             "$ref": "#/components/schemas/SignatureInfo",
-            "description": "Signatur und Prüfergebnis gegen die aktuelle Richtlinie (AIGW-101)."
+            "description": "Signatur und Prüfergebnis gegen die aktuelle Richtlinie (AIGW-101, AIGW-106)."
           },
           "size": {
             "type": "integer",
@@ -19403,9 +19800,16 @@
         "required": [
           "items",
           "signatureRequired",
-          "trustedKeys"
+          "trustedKeys",
+          "sigstoreIdentities",
+          "fourEyes",
+          "pending"
         ],
         "properties": {
+          "fourEyes": {
+            "type": "boolean",
+            "description": "Vier-Augen-Freigabe aktiv (`wasm.four_eyes`, AIGW-106)."
+          },
           "items": {
             "type": "array",
             "items": {
@@ -19413,9 +19817,23 @@
             },
             "description": "Module (nach Name sortiert)."
           },
+          "pending": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingWasmModule"
+            },
+            "description": "Eingereichte Versionen, die auf Freigabe warten (nach Name sortiert)."
+          },
           "signatureRequired": {
             "type": "boolean",
             "description": "Signatur Pflicht (`wasm.require_signature`, Standard: sobald Schlüssel konfiguriert)."
+          },
+          "sigstoreIdentities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SigstoreIdentityView"
+            },
+            "description": "Erlaubte Sigstore-Identitäten (`wasm.sigstore.identities`, AIGW-106)."
           },
           "trustedKeys": {
             "type": "array",
@@ -19425,6 +19843,27 @@
             "description": "IDs der vertrauenswürdigen Schlüssel (`wasm.trusted_keys`)."
           }
         }
+      },
+      "WasmUpload": {
+        "type": "object",
+        "description": "JSON-Umschlag für den Upload mit Sigstore-Bundle (`Content-Type: application/json`).",
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Komponente (Base64, Standard-Alphabet)."
+          },
+          "sigstoreBundle": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Sigstore-Bundle (`cosign sign-blob --bundle`, JSON-Objekt)."
+          }
+        },
+        "additionalProperties": false
       },
       "WorkloadIdentity": {
         "type": "object",
@@ -19584,7 +20023,7 @@
     },
     {
       "name": "wasm-modules",
-      "description": "WASM-Module (WebAssembly-Komponenten) für Plugins der Art wasm: hochladen mit SHA-256, auflisten, löschen (AIGW-63)"
+      "description": "WASM-Module (WebAssembly-Komponenten) für Plugins der Art wasm: hochladen mit SHA-256, Signaturen (Ed25519, Sigstore), Vier-Augen-Freigabe, auflisten, löschen (AIGW-63, AIGW-101, AIGW-106)"
     },
     {
       "name": "guardrail-profiles",

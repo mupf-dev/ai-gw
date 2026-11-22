@@ -622,17 +622,6 @@ pub(crate) async fn put_wasm_module(
             let content = base64::engine::general_purpose::STANDARD
                 .decode(u.content.trim())
                 .map_err(|_| Problem::invalid("content: kein gültiges Base64"))?;
-            if content.len() as u64 > st.wasm_max_bytes {
-                return Err(Problem::new(
-                    StatusCode::PAYLOAD_TOO_LARGE,
-                    "payload-too-large",
-                    "Zu groß",
-                    format!(
-                        "Modul: höchstens {} Byte (wasm.max_module_bytes)",
-                        st.wasm_max_bytes
-                    ),
-                ));
-            }
             let bundle = match u.sigstore_bundle {
                 None | Some(serde_json::Value::Null) => None,
                 Some(v @ serde_json::Value::Object(_)) => Some(v.to_string()),
@@ -655,6 +644,18 @@ pub(crate) async fn put_wasm_module(
             ));
         }
     };
+    // Die Body-Grenze des Routers ist wegen des Base64-Umschlags größer als das Modul.
+    if content.len() as u64 > st.wasm_max_bytes {
+        return Err(Problem::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "payload-too-large",
+            "Zu groß",
+            format!(
+                "Modul: höchstens {} Byte (wasm.max_module_bytes)",
+                st.wasm_max_bytes
+            ),
+        ));
+    }
     let signature = match (q.key_id.as_deref(), q.signature.as_deref()) {
         (None, None) => None,
         (Some(k), Some(s)) => Some(ModuleSignature::parse(k, s).map_err(Problem::invalid)?),

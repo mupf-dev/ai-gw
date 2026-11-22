@@ -1202,11 +1202,35 @@ export interface paths {
         };
         /** Metadaten eines Moduls. */
         get: operations["get_wasm_module"];
-        /** Modul hochladen oder ersetzen (nur globaler `admin`). */
+        /**
+         * Modul hochladen oder ersetzen (nur globaler `admin`). Mit Vier-Augen-Freigabe
+         *     (`wasm.four_eyes`) wird die Version nur eingereicht (`202`).
+         */
         put: operations["put_wasm_module"];
         post?: never;
         /** Modul löschen (nur globaler `admin`, nur ohne verweisende Bindungen). */
         delete: operations["delete_wasm_module"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/wasm-modules/{name}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Eingereichte Version freigeben (Vier-Augen-Prinzip, AIGW-106): nur ein globaler `admin`,
+         *     der die Version nicht selbst hochgeladen hat. Die Signaturen werden erneut gegen die
+         *     aktuelle Richtlinie geprüft.
+         */
+        post: operations["approve_wasm_module"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1221,6 +1245,40 @@ export interface paths {
         };
         /** Inhalt eines Moduls (Komponente). */
         get: operations["get_wasm_module_content"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/wasm-modules/{name}/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Eingereichte Version verwerfen (jeder globale `admin`, auch der Hochlader selbst). */
+        delete: operations["reject_wasm_module"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/api/v1/wasm-modules/{name}/pending/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inhalt einer Einreichung (zur Prüfung vor der Freigabe). */
+        get: operations["get_pending_content"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1481,6 +1539,15 @@ export interface components {
             configVersion: number;
             /** @description Plan (bei `applied` genau das, was geschrieben wurde). */
             plan: components["schemas"]["Plan"];
+        };
+        /** @description Herkunft der aktiven Version (AIGW-106). */
+        ApprovalInfo: {
+            /** @description Freigegeben am (RFC 3339). */
+            approvedAt?: string | null;
+            /** @description Freigegeben von (fehlt = ohne Vier-Augen-Freigabe aktiv geworden). */
+            approvedBy?: string | null;
+            /** @description Hochgeladen von. */
+            uploadedBy: string;
         };
         /** @description Ein Upstream-Versuch einer Anfrage (Spalte `request_log.attempts`, JSON-Array; AIGW-46). */
         AttemptRow: {
@@ -2758,6 +2825,30 @@ export interface components {
          * @enum {string}
          */
         PayloadStatus: "available" | "forbidden" | "not-stored";
+        /** @description Eingereichte Version, die auf Freigabe wartet (AIGW-106). */
+        PendingWasmModule: {
+            /** @description Darf der anfragende Principal freigeben (globaler `admin`, nicht der Hochlader)? */
+            canApprove: boolean;
+            /** @description Beschreibung. */
+            description?: string | null;
+            /** @description Name des Moduls. */
+            name: string;
+            /** @description SHA-256 der aktiven Version, die ersetzt würde (fehlt = neues Modul). */
+            replaces?: string | null;
+            /** @description SHA-256 der eingereichten Version (für `approve?sha256=…`). */
+            sha256: string;
+            /** @description Signaturen gegen die aktuelle Richtlinie. */
+            signature: components["schemas"]["SignatureInfo"];
+            /**
+             * Format: int64
+             * @description Größe in Byte.
+             */
+            size: number;
+            /** @description Hochgeladen am (RFC 3339). */
+            uploadedAt: string;
+            /** @description Hochgeladen von. */
+            uploadedBy: string;
+        };
         /** @description Ergebnis des Soll/Ist-Vergleichs. */
         Plan: {
             /** @description Umgang mit API-Keys. */
@@ -3616,6 +3707,7 @@ export interface components {
              *     darauf sind ungültig → `failMode`.)
              */
             loadable: boolean;
+            sigstore?: components["schemas"]["SigstoreInfo"] | null;
             /** @description Prüfergebnis. */
             status: components["schemas"]["SignatureStatus"];
         };
@@ -3623,7 +3715,37 @@ export interface components {
          * @description Prüfstatus der Signatur eines Moduls.
          * @enum {string}
          */
-        SignatureStatus: "valid" | "invalid" | "unknown-key" | "unsigned" | "unchecked";
+        SignatureStatus: "valid" | "invalid" | "unknown-key" | "unsigned" | "unchecked" | "identity";
+        /** @description Erlaubte Sigstore-Identität (reguläre Ausdrücke wie konfiguriert). */
+        SigstoreIdentityView: {
+            /** @description OIDC-Issuer. */
+            issuer: string;
+            /** @description Subjekt (SAN). */
+            subject: string;
+        };
+        /** @description Sigstore-Bundle eines Moduls (AIGW-106). */
+        SigstoreInfo: {
+            /** @description Zeitpunkt des Rekor-Eintrags (RFC 3339). */
+            integratedTime?: string | null;
+            /** @description OIDC-Issuer. */
+            issuer?: string | null;
+            /**
+             * Format: int64
+             * @description Index im Rekor-Log.
+             */
+            logIndex?: number | null;
+            /** @description Fehler (bei `invalid`). */
+            message?: string | null;
+            /** @description Prüfergebnis. */
+            status: components["schemas"]["SigstoreStatus"];
+            /** @description Subjekt des Zertifikats (z. B. Workflow-URI, E-Mail). */
+            subject?: string | null;
+        };
+        /**
+         * @description Prüfstatus eines Sigstore-Bundles (AIGW-106).
+         * @enum {string}
+         */
+        SigstoreStatus: "valid" | "invalid" | "identity";
         /** @description Zustand des aktiven Konfigurations-Snapshots (F15). */
         SnapshotInfo: {
             /**
@@ -4063,6 +4185,8 @@ export interface components {
         WasmBinary: string;
         /** @description Ein WASM-Modul (Metadaten). */
         WasmModule: {
+            /** @description Hochgeladen bzw. freigegeben (Vier-Augen-Freigabe, AIGW-106). */
+            approval: components["schemas"]["ApprovalInfo"];
             /** @description Angelegt (RFC 3339). */
             createdAt: string;
             /** @description Hochgeladen von. */
@@ -4076,9 +4200,10 @@ export interface components {
             id: string;
             /** @description Name. */
             name: string;
+            pending?: components["schemas"]["PendingWasmModule"] | null;
             /** @description SHA-256 des Inhalts (hex). */
             sha256: string;
-            /** @description Signatur und Prüfergebnis gegen die aktuelle Richtlinie (AIGW-101). */
+            /** @description Signatur und Prüfergebnis gegen die aktuelle Richtlinie (AIGW-101, AIGW-106). */
             signature: components["schemas"]["SignatureInfo"];
             /**
              * Format: int64
@@ -4092,12 +4217,25 @@ export interface components {
         };
         /** @description Liste der Module. */
         WasmModuleList: {
+            /** @description Vier-Augen-Freigabe aktiv (`wasm.four_eyes`, AIGW-106). */
+            fourEyes: boolean;
             /** @description Module (nach Name sortiert). */
             items: components["schemas"]["WasmModule"][];
+            /** @description Eingereichte Versionen, die auf Freigabe warten (nach Name sortiert). */
+            pending: components["schemas"]["PendingWasmModule"][];
             /** @description Signatur Pflicht (`wasm.require_signature`, Standard: sobald Schlüssel konfiguriert). */
             signatureRequired: boolean;
+            /** @description Erlaubte Sigstore-Identitäten (`wasm.sigstore.identities`, AIGW-106). */
+            sigstoreIdentities: components["schemas"]["SigstoreIdentityView"][];
             /** @description IDs der vertrauenswürdigen Schlüssel (`wasm.trusted_keys`). */
             trustedKeys: string[];
+        };
+        /** @description JSON-Umschlag für den Upload mit Sigstore-Bundle (`Content-Type: application/json`). */
+        WasmUpload: {
+            /** @description Komponente (Base64, Standard-Alphabet). */
+            content: string;
+            /** @description Sigstore-Bundle (`cosign sign-blob --bundle`, JSON-Objekt). */
+            sigstoreBundle?: Record<string, never> | null;
         };
         /**
          * @description Eine Workload- bzw. Agent-Identität, die sich mit einem Access-Token statt mit dem
@@ -12039,9 +12177,10 @@ export interface operations {
             };
             cookie?: never;
         };
-        /** @description WebAssembly-Komponente (WIT-Welt aigw:plugin/plugin) */
+        /** @description WebAssembly-Komponente (WIT-Welt aigw:plugin/plugin) bzw. JSON-Umschlag mit Sigstore-Bundle */
         requestBody: {
             content: {
+                "application/json": components["schemas"]["WasmUpload"];
                 "application/wasm": components["schemas"]["WasmBinary"];
             };
         };
@@ -12062,6 +12201,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WasmModule"];
+                };
+            };
+            /** @description Eingereicht, wartet auf Freigabe (wasm.four_eyes) */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingWasmModule"];
                 };
             };
             /** @description Nur globaler admin */
@@ -12091,7 +12239,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Content-Type nicht application/wasm */
+            /** @description Content-Type nicht application/wasm bzw. application/json */
             415: {
                 headers: {
                     [name: string]: unknown;
@@ -12100,7 +12248,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Kein gültiges Modul, SHA-256 passt nicht oder Signatur fehlt/ungültig (wasm.trusted_keys) */
+            /** @description Kein gültiges Modul, SHA-256 passt nicht oder Signatur fehlt/ungültig (wasm.trusted_keys, wasm.sigstore) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -12177,6 +12325,68 @@ export interface operations {
             };
         };
     };
+    approve_wasm_module: {
+        parameters: {
+            query: {
+                /** @description SHA-256 der geprüften Einreichung (Pflicht: freigegeben wird genau diese Version). */
+                sha256: string;
+            };
+            header?: never;
+            path: {
+                /** @description Name des Moduls */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Freigegeben, jetzt aktiv */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WasmModule"];
+                };
+            };
+            /** @description Kein globaler admin oder Hochlader selbst (Vier-Augen-Prinzip) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Einreichung */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Einreichung inzwischen ersetzt (SHA-256 passt nicht) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Signatur unter der aktuellen Richtlinie ungültig */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     get_wasm_module_content: {
         parameters: {
             query?: never;
@@ -12199,6 +12409,77 @@ export interface operations {
                 };
             };
             /** @description Unbekannt */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    reject_wasm_module: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name des Moduls */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verworfen */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nur globaler admin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Keine Einreichung */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_pending_content: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Name des Moduls */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Komponente */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/wasm": components["schemas"]["WasmBinary"];
+                };
+            };
+            /** @description Keine Einreichung */
             404: {
                 headers: {
                     [name: string]: unknown;
