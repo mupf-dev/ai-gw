@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Integrationstests AIGW-84: Zugangsdaten mit Entra-ID-Anmeldung (`spec.entra`), Deployments
 //! mit `credential` statt Inline-Einstellungen, Validierung, Snapshot, Audit und die

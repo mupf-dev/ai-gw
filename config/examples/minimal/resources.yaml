@@ -1,5 +1,5 @@
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Kleinster sinnvoller Bestand: eine Organisation, ein OpenAI-Zugang, eine Modellgruppe.
 # Benötigt AIGW_SECRET_OPENAI_API_KEY in der Umgebung von `aigw config apply`.

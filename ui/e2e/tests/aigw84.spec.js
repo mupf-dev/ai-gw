@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // AIGW-84 gegen das echte `aigw serve`: Anbieter-Übersicht je Endpunkt (auch ohne Zugangsdaten, Entra ID per
 // Managed Identity inline bzw. über `spec.entra`), Zustand aus dem Routing, Links zu Deployments; Zugangsdaten-

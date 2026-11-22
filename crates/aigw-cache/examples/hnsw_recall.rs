@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Recall und Latenz des eigenen HNSW gegen Brute-Force (AIGW-40, Abnahme: Recall ≥ 0,95 bei
 //! 100 000 Vektoren mit 768 Dimensionen, p99 im Bericht).

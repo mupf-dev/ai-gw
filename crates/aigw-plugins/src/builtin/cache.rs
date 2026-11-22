@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Plugin `cache`: schaltet den Antwort-Cache (AIGW-39/40) für eine Ebene ein und legt die
 //! Richtlinie fest.

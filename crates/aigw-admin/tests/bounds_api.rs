@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Grenzen Key ≤ Team ≤ Organisation in der Admin-API (AIGW-67): Limits je Metrik/Fenster,
 //! Budgets je Zeitraum, Modellfreigaben; Rollen (`team-admin`, `org-admin`, globaler und

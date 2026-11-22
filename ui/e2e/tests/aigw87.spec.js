@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // AIGW-87 gegen das echte `aigw serve`: Tool-Inventar aus Anfragen der Datenebene (Mock-Deployment),
 // Seite „Tools“ mit Filter, Detail-Sheet (Beschreibung, Hash-Verlauf), Sperren je Team (Richtlinie

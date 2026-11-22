@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // AIGW-117 gegen das echte `aigw serve`: Seite „Kosten“ mit echtem Verkehr (Mock-Deployment mit Preis) – Kennzahlen,
 // gestapelter Verlauf mit Tabellen-Alternative, Kostentreiber mit Drilldown (Filter, Log-Explorer), Budget mit Prognose

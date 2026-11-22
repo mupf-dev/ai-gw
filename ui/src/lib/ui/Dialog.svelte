@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Modaler Dialog (Bits UI Dialog: Fokusfalle, Esc, aria-modal). Kopf, Inhalt (scrollt), Fußzeile mit Aktionen.
   import { Dialog } from 'bits-ui';

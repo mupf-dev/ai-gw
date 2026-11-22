@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Kosten bei abgeschaltetem Tracing: Mit dem Subscriber-Aufbau des Binarys (Log-Layer mit
 //! `aigw::otel=off`, Otel-Layer inaktiv) sind die Trace-Callsites ganz abgeschaltet

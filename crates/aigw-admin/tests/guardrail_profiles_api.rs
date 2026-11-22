@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Standard-Guardrail-Profile über die Admin-API (AIGW-86): Liste, Dry-Run mit Diff,
 //! Anwenden (Namen mit Profil-Präfix, Labels, Audit je Objekt), Idempotenz, Profilwechsel,

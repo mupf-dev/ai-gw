@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Testlauf (AIGW-52): die ungespeicherte Konfiguration auf einem Beispieltext ausführen
   // (POST /plugin-bindings:test, nur lokale Plugins pii/prompt-filter) und das Ergebnis zeigen – unverändert,

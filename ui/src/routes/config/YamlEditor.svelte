@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // YAML-Eingabe mit Zeilennummern (AIGW-55): Zeilen mit Validierungsfehlern sind in der Leiste markiert,
   // `gotoLine` springt zur Fundstelle (Auswahl der Zeile). Kein CodeMirror – ein Textfeld genügt, Scroll-Position

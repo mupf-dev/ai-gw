@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Erzeugt die Referenz-Fixtures von aigw-tokenizer (einmalig von Hand, nicht zur Build-Zeit).
 
 Benötigt `tiktoken` (MIT) und `tokenizers` (Apache-2.0) in einem venv:

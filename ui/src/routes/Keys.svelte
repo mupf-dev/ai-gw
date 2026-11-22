@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Keys (AIGW-49, AIGW-77): Liste mit serverseitiger Pagination, Suche und Filtern (Status, Team, Organisation –
   // D11/F139), Erstellen mit einmaliger Klartext-Anzeige, Zeilenmenü (Bearbeiten, Rotieren, Sperren/Entsperren,

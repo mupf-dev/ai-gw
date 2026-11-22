@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // AIGW-89 gegen das echte `aigw serve`: Guardrail-Profil „Streng“ mit Azure AI Content Safety über Entra ID
 // (Zugang „Entra ID“, Anbieter-Zugangsdaten mit spec.entra) – Diff, Anwenden, gespeicherte Bindung mit

@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Azure Retail Prices API (`https://prices.azure.com/api/retail/prices`, öffentlich, ohne
 //! Anmeldung) für Azure-OpenAI- und Foundry-Deployments.

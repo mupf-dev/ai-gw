@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Ende-zu-Ende-Tests Gateway → Fake-Upstreams für die Adapter Anthropic (AIGW-16),
 //! Ollama/vLLM (AIGW-17) und Mistral (AIGW-20): nicht gestreamt, gestreamt, Tools, Fehler und

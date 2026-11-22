@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // AIGW-49: Verwaltungsseiten gegen das echte `aigw serve` (Bootstrap-Token-Pfad, ohne OIDC):
 // Anmeldung per Token-Dialog, Key anlegen mit einmaliger Klartext-Anzeige, Modellgruppe + Mock-Deployment,

@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Einmalige Klartext-Anzeige nach Anlegen/Rotieren (API-Key, Admin-API-Key). Schließen erst nach Bestätigung;
   // danach ist der Klartext verworfen (der Server speichert nur Präfix und Hash).

@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // AIGW-94 gegen das echte `aigw serve`: Zugangsdaten „Service Principal (Zertifikat)“ mit optionalem Passwort für
 // verschlüsselte Schlüssel und Schalter „Zertifikatskette mitsenden (x5c)“ (`spec.entra.sendX5c`).

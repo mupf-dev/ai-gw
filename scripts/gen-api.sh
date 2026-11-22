@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Erzeugt ui/openapi.json aus der Admin-API (Rust/utoipa) und daraus die TS-Typen
 # ui/src/lib/api/schema.d.ts (openapi-typescript). Beide Dateien werden eingecheckt;

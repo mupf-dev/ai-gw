@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Browser-Tests der Admin-UI gegen ein echtes `aigw serve` (UI eingebettet, CSP aus crates/aigw-admin):
 # CSP-Prüfung der Overlays/Diagramme, Verwaltungsseiten gegen die echte Admin-API (Bootstrap-Token, ohne OIDC)

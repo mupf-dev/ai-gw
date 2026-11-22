@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Audit (AIGW-66/77): Änderungsprotokoll der Steuerungsebene (GET /audit-log) mit Filtern (Art, Aktion,
   // Akteursart, Akteur, Objekt, Zeitraum), Vorher/Nachher je Eintrag und Export als JSON Lines (SIEM).

@@ -161,7 +161,18 @@ auf `main`, bei Pull Requests, bei Tags `v*` und manuell (`workflow_dispatch`).
 
 ## Lizenz
 
-Code: AGPL-3.0-or-later, siehe [LICENSE](LICENSE). Dokumentation (`docs/`, README, CHANGELOG):
+Code: [Functional Source License 1.1, ALv2 Future License](https://fsl.software/) (FSL-1.1-ALv2),
+siehe [LICENSE](LICENSE). Kurz: ai-gw darf für jeden Zweck kostenlos genutzt, verändert und
+weitergegeben werden – auch kommerziell und im eigenen Unternehmen –, **außer** für ein
+konkurrierendes kommerzielles Produkt oder einen konkurrierenden Dienst. Jede Version wird zwei
+Jahre nach ihrer Veröffentlichung automatisch zusätzlich unter Apache-2.0 lizenziert. Für andere
+Nutzungen sind kommerzielle Lizenzen beim Rechteinhaber (mupf-dev) erhältlich.
+
+Die Plugin-Schnittstelle (`crates/aigw-wasm/wit/`) und die Beispiel-Plugins (`plugins/`) stehen unter
+Apache-2.0, damit eigene Plugins frei lizenziert werden können. Stände bis einschließlich Commit
+`9503d41` (2026-11-21) wurden unter AGPL-3.0-or-later veröffentlicht.
+
+Dokumentation (`docs/`, README, CHANGELOG):
 CC-BY-4.0, siehe [LICENSES/CC-BY-4.0.txt](LICENSES/CC-BY-4.0.txt). Das Repository ist
 [REUSE](https://reuse.software/)-konform (`REUSE.toml`).
 

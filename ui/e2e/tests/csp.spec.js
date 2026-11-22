@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // AIGW-48: Bits-UI-Overlays (Popover/Dropdown/Select, Dialog, Sheet, Tooltip) und das Diagramm (uPlot)
 // funktionieren unter der strikten CSP von aigw-admin – ohne Verstöße und ohne Konsolenfehler.

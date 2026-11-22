@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Guardrails im Hot Path (AIGW-37/38): `pii` in allen Modi und beiden Eingangsformaten,
 //! Pseudonymisierung über Chunk-Grenzen im Stream, Zähler im Request-Record, `prompt-filter`,

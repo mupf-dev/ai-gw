@@ -47,7 +47,7 @@ Eigenschaften des Images:
 | Daten | `VOLUME /data` (gehört 65532, Arbeitsverzeichnis) |
 | Healthcheck | `aigw healthcheck` → `GET /readyz` der Steuerebene (Adresse aus der Konfiguration), Intervall 15 s |
 | Root-FS | schreibgeschützt möglich (`--read-only`); geschrieben wird nur unter `/data` |
-| Labels | OCI (`org.opencontainers.image.*`), Lizenz `AGPL-3.0-or-later`, Version/Revision per Build-Arg |
+| Labels | OCI (`org.opencontainers.image.*`), Lizenz `FSL-1.1-ALv2`, Version/Revision per Build-Arg |
 | Größe | ≈ 26 MB komprimiert (Registry/Download), ≈ 65 MB entpackt (linux/amd64, Stand 0.1.0; arm64 siehe unten): Binary `aigw` 39 MB (UI, Tokenizer-Tabellen [Feature `embedded-tokenizers`, Standard], Migrationen eingebettet) + distroless/cc ≈ 25 MB. `docker images` zeigt mit containerd-Image-Store ≈ 93 MB, weil dort komprimierte und entpackte Schichten zusammen zählen |
 
 ### Mehrere Architekturen (amd64 + arm64)

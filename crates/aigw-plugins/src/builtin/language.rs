@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Plugin `language` (AIGW-114): erlaubte bzw. gesperrte Sprachen in Anfragen (optional
 //! Antworten). Erkennung mit `whatlang` (Trigramme + Schrift, 69 Sprachen, MIT).

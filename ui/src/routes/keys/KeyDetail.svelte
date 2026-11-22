@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Detailseite eines API-Keys (D8/F136, /keys/{name}): Übersicht (Zuordnung, Modelle, Limits, Budgetverbrauch,
   // Plugin-Bindungen mit failMode), Nutzung (Analytics), Audit-Verlauf; Aktionen Bearbeiten, Rotieren, Sperren/

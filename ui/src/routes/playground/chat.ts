@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Playground (AIGW-54): Anfrage bauen, Antwort lesen (JSON oder SSE über fetch-Stream, POST – daher kein
 // EventSource), Kennzahlen messen (TTFT/Latenz im Browser) und Code-Beispiele erzeugen.

@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Audio (AIGW-21): Transkription/Übersetzung (`/v1/audio/transcriptions`,
 //! `/v1/audio/translations`, `multipart/form-data`) und Sprachausgabe (`/v1/audio/speech`).

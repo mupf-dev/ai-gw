@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! `aigw keygen` (F6): erzeugt einen Master-Key (32 Byte) als Hex oder Base64 – auf die
 //! Standardausgabe oder in eine neue Datei mit Rechten `0600`.

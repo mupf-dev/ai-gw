@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Base64 (RFC 4648, Standard-Alphabet mit Padding) – für Embeddings (`encoding_format:
 //! base64`, Little-Endian-`f32`) und Bilddaten (`b64_json`).

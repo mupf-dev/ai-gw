@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Verschlüsselung der Anbieter-Zugangsdaten: AES-256-GCM über aws-lc-rs (derselbe
 //! Krypto-Provider wie rustls), Master-Key aus Datei oder Umgebung, Rotation über Key-IDs.

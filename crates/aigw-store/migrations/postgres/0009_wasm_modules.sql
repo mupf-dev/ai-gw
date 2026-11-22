@@ -1,5 +1,5 @@
--- SPDX-FileCopyrightText: 2026 ai-gw contributors
--- SPDX-License-Identifier: AGPL-3.0-or-later
+-- SPDX-FileCopyrightText: 2026 mupf-dev
+-- SPDX-License-Identifier: FSL-1.1-ALv2
 --
 -- AIGW-63 WASM-Plugins (Postgres; Gegenstück in migrations/sqlite/0009_wasm_modules.sql):
 --   * wasm_module: hochgeladene Komponenten (Inhalt + SHA-256). Teil des Snapshots; jede

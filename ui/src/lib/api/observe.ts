@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Lesende Auswertungs-Endpunkte der Admin-API (AIGW-77): Audit-Log (AIGW-66), Dashboards und Log-Explorer
 // (AIGW-46), Budgetstände (AIGW-30/31), Plugin-Bindungen (F148, nur lesen) und Einladungen (F90).

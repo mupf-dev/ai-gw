@@ -1,5 +1,5 @@
--- SPDX-FileCopyrightText: 2026 ai-gw contributors
--- SPDX-License-Identifier: AGPL-3.0-or-later
+-- SPDX-FileCopyrightText: 2026 mupf-dev
+-- SPDX-License-Identifier: FSL-1.1-ALv2
 --
 -- AIGW-87 Tool-Inventar und Tool-Richtlinien (Postgres; Gegenstück in
 -- migrations/sqlite/0008_tools.sql):

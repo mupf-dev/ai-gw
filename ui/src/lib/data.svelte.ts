@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Datenquelle der Seiten, für die es noch keine Admin-API gibt (Übersicht, Logs – Rollups/Logs folgen mit
 // AIGW-46/53). Mock-Modus: deterministische Beispieldaten aus mock/data.ts; ohne Mock liefern die Seiten

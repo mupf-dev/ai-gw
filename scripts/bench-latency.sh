@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Latenz-Benchmark des Gateways (AIGW-14/15, Ziele Q1/Q4): lokaler Fake-Upstream, Gateway
 # und Lastgenerator als getrennte Prozesse auf getrennten Kernen (mindestens 8 vCPU).

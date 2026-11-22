@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Löschen und sofortige Neuanlage unter demselben Namen – Ende zu Ende über Admin-API und
 //! Datenebene (Verdacht aus dem UI-e2e: neu angelegter Key liefert 401).

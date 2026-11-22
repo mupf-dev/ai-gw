@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Kleine Kodierhilfen ohne Zusatz-Crates: Hex, Base64 (Standard und URL-sicher),
 //! Prozentkodierung nach RFC 3986, UTC-Zeitstempel und Zufalls-IDs.

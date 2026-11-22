@@ -1,8 +1,8 @@
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 version = 1
 SPDX-PackageName = "ai-gw"
-SPDX-PackageSupplier = "ai-gw contributors"
+SPDX-PackageSupplier = "mupf-dev"
 SPDX-PackageDownloadLocation = "https://github.com/mupf-dev/ai-gw"
 
 # Quelldateien tragen eigene SPDX-Header ("closest" hat Vorrang).
@@ -10,7 +10,7 @@ SPDX-PackageDownloadLocation = "https://github.com/mupf-dev/ai-gw"
 [[annotations]]
 path = ["docs/**", "README.md", "CHANGELOG.md", "THIRD-PARTY.md"]
 precedence = "closest"
-SPDX-FileCopyrightText = "2026 ai-gw contributors"
+SPDX-FileCopyrightText = "2026 mupf-dev"
 SPDX-License-Identifier = "CC-BY-4.0"
 
 # Generierte bzw. kommentarlose Dateien (Lockfiles, JSON, generierte Typen, Ignore-Listen)
@@ -30,5 +30,5 @@ path = [
     "plugins/*/Cargo.lock",
 ]
 precedence = "aggregate"
-SPDX-FileCopyrightText = "2026 ai-gw contributors"
-SPDX-License-Identifier = "AGPL-3.0-or-later"
+SPDX-FileCopyrightText = "2026 mupf-dev"
+SPDX-License-Identifier = "FSL-1.1-ALv2"

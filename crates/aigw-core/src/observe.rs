@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Beobachtung: Kennzahlen einer abgeschlossenen Anfrage ([`RequestRecord`]) und der Hook
 //! [`RequestObserver`], über den der Proxy sie am Ende jeder Anfrage abgibt (AIGW-43).

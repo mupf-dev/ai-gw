@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Preise (AIGW-49): Versionen je (Anbieter, Modell) mit Zustand „gültig“, „abgelöst“, „künftig“. Gültige und
   // abgelöste Versionen sind unveränderlich (Server: 409) – neue Version anlegen; künftige dürfen geändert/gelöscht werden.

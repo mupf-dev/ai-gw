@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Integrationstests MCP-Gateway (AIGW-41) gegen lokale Fake-MCP-Upstreams (Streamable HTTP
 //! mit JSON- und SSE-Antworten, älteres HTTP+SSE) mit eigenem Minimal-Client:

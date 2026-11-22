@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Hot Reload des Snapshots (AIGW-10): SQLite im Prozess, Versionsabfrage zwischen zwei
 //! Instanzen, Fehlerfälle und – falls `AIGW_TEST_POSTGRES_URL` gesetzt ist – Postgres

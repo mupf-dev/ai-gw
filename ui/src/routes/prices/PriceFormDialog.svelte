@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Preisversion anlegen bzw. künftige Version ändern (Admin-API §2.5). Gültige Versionen sind unveränderlich –
   // dafür eine neue Version mit späterem „gültig ab“ anlegen (Vorlage: `template`).

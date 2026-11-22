@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Plugin `pii`: personenbezogene Daten und Geheimnisse erkennen (Engine `aigw-pii`) und je
 //! Kategorie maskieren, entfernen, ablehnen, pseudonymisieren oder nur zählen.

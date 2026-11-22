@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Integrationstests des Workload-Token-Prüfers (AIGW-115) gegen einen lokalen JWKS-Server:
 //! Signatur RS256/ES256, Verfahrens-Allowlist (`none`/HS256), Aussteller/Zielgruppe/Ablauf,

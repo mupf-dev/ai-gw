@@ -1,5 +1,5 @@
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Startkonfiguration für Guardrails/PII (docs/konzept/13-guardrails.md). Die Prüfungen selbst
 # sind Plugin-Bindungen (resources.yaml). Payload-Logging höchstens maskiert.

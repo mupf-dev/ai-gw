@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Preisvorschläge (AIGW-85) über die Admin-API gegen eine Fake-Retail-API (lokaler
 //! axum-Server, Client ohne SSRF-Filter): Zuordnung Deployment → Meter je Region und

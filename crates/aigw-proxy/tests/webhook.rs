@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Plugin `webhook` (AIGW-61) im Hot Path gegen einen lokalen Fake-Webhook-Server: alle
 //! Antworttypen in beiden Eingangsformaten, Antwort-Phase im gepufferten Modus,

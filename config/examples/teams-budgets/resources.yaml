@@ -1,5 +1,5 @@
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Organisation → Teams → API-Keys mit Modellfreigaben, Limits und Budgets.
 # Setzt die Modellgruppen aus providers/resources.yaml voraus (hier verkürzt mit eigenen

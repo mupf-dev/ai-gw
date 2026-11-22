@@ -1,5 +1,5 @@
--- SPDX-FileCopyrightText: 2026 ai-gw contributors
--- SPDX-License-Identifier: AGPL-3.0-or-later
+-- SPDX-FileCopyrightText: 2026 mupf-dev
+-- SPDX-License-Identifier: FSL-1.1-ALv2
 --
 -- AIGW-115 Workload-/Agent-Identitäten (sqlite; Gegenstück in migrations/postgres/0012_workload_identities.sql):
 --   * api_key.workload_identities: JSON-Array [{issuer, subject, description?}] – Identitäten

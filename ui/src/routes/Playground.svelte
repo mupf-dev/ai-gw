@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Playground (AIGW-54): Modellgruppen im Namen eines virtuellen Keys ausprobieren – Chat (SSE-Streaming oder
   // JSON), Systemprompt, Parameter (temperature, max_tokens, n), Vergleich bis zu drei Modelle nebeneinander,

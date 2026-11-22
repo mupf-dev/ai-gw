@@ -1,8 +1,8 @@
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # cargo-deny: Lieferkettenprüfung (Advisories, Lizenzen, Banns, Quellen).
-# Lizenzen: nur AGPL-3.0-kompatible, permissive Lizenzen (bzw. AGPL selbst).
+# Lizenzen: nur permissive Lizenzen (mit FSL-1.1-ALv2 und kommerzieller Lizenzierung vereinbar).
 
 [graph]
 targets = [
@@ -32,7 +32,7 @@ ignore = [
 ]
 
 [licenses]
-# Erlaubt: permissive Lizenzen und MPL-2.0 (dateibasiertes Copyleft, AGPL-kompatibel).
+# Erlaubt: permissive Lizenzen und MPL-2.0 (dateibasiertes Copyleft).
 # Nicht erlaubt: GPL-2.0-only (inkompatibel), LGPL-* (Relinkbarkeit bei statischem Linken
 # vorerst ungeklärt), proprietäre/unklare Lizenzen.
 allow = [
@@ -49,7 +49,7 @@ allow = [
     "CDLA-Permissive-2.0",
     "Unlicense",
     "0BSD",
-    "AGPL-3.0-or-later",
+    "FSL-1.1-ALv2",
     # Boost Software License: permissiv, OSI/FSF-frei, GPL-kompatibel (xxhash-rust über redis, AIGW-29).
     "BSL-1.0",
 ]

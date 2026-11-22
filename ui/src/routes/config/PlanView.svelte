@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // GitOps-Plan (Trockenlauf/Ergebnis von config:apply) als Diff: Zusammenfassung je Aktion, Warnungen und je
   // Ressource die Aktion mit geänderten Feldern (vorher → nachher; Geheimnisse nur als „geändert“).

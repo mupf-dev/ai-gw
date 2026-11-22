@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // AIGW-52 gegen das echte `aigw serve`: Editoren für Plugin-Bindungen (strukturiertes PII-Formular, JSON-Ansicht,
 // Testlauf mit Vorschau, Backend-Fehler am Feld), Kettenvorschau (Zwiebelprinzip, override/disable) und MCP-Server

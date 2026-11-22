@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Durchsatz der PII-Erkennung: typischer Prompt mit 4 KB bzw. 64 KB (Ziel: 4 KB < 50 µs).
 

@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Anbieter (AIGW-49, AIGW-84):
   // - Übersicht je Anbieter + Endpunkt aus den Deployments (auch ohne Zugangsdaten, z. B. Entra ID per Managed Identity

@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Einstellungen: Anmeldung (Principal, Verfahren, Rollen, Abmelden), Nur-YAML-Modus, Verweis auf GitOps
   // (YAML-Import/-Export, /config), Datenquelle (Mock-Modus), Darstellung (Schema), Über.
@@ -118,7 +118,7 @@
       <dt class="text-fg-muted">Version</dt>
       <dd class="num">{gateway.info?.version ?? (gateway.error ? 'nicht erreichbar' : '…')}</dd>
       <dt class="text-fg-muted">Lizenz</dt>
-      <dd>AGPL-3.0-or-later</dd>
+      <dd>FSL-1.1-ALv2</dd>
       <dt class="text-fg-muted">Admin-UI</dt>
       <dd class="flex items-center gap-2">Svelte 5 · Bits UI · Tailwind 4 <Badge tone="outline">CSP strikt</Badge></dd>
     </dl>

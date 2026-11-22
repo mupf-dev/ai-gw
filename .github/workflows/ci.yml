@@ -1,5 +1,5 @@
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # CI für Rust und UI. Das Repo ist privat: um Actions-Minuten zu sparen, läuft der Workflow
 # NICHT bei jedem Push, sondern nur bei Pull Requests, Release-Tags (v*) und manuell

@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! SSRF-Schutz des Anbieter-Clients nach der Namensauflösung (AIGW-72, F63): Ein Deployment,
 //! dessen (öffentlich wirkender) Name auf eine private Adresse zeigt – etwa nach

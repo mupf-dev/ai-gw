@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Typisierter Client der Admin-API (AIGW-49). Die Typen in schema.d.ts werden aus der OpenAPI-
 // Spezifikation erzeugt (scripts/gen-api.sh → ui/openapi.json → pnpm gen:api).

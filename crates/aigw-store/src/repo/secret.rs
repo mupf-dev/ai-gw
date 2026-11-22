@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Allgemeine Geheimnisse (`Secret`, F149): wie Zugangsdaten verschlüsselt gespeichert
 //! (AES-256-GCM mit dem Master-Key, gebunden an die ID), nie im Klartext ausgegeben.

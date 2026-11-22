@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Strukturierte Einstellungen (D9/F137) mit JSON-Ansicht „Erweitert“: Felder schreiben direkt in `value`
   // (leeres Feld = Standard, Schlüssel entfällt); unbekannte Schlüssel bleiben erhalten. In „Erweitert“ wird das

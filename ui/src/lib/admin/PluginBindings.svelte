@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Plugin-Bindungen auf einer Ebene (nur lesen) mit wirksamem Fehlermodus (F148): `closed` = bei Fehler/Timeout
   // ablehnen, `open` = überspringen; Herkunft Bindung bzw. Plugin-Standard. Pflege folgt mit der Guardrails-Seite.

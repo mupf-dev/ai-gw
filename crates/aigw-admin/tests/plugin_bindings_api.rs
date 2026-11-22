@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Plugin-Bindungen über die Admin-API (AIGW-69): Prüfung mit der Plugin-Registry beim
 //! Schreiben (F118/F165, 422 mit verständlicher Meldung, SSRF-Regeln aus `admin.*`),

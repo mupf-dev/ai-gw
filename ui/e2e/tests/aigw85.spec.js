@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // AIGW-85 gegen das echte `aigw serve` mit Fake-Retail-API (run.sh, fake-retail.py): Preisvorschläge für ein
 // Azure-Deployment (Azure Retail Prices, swedencentral, global) und ein OpenAI-Deployment (Preiskatalog), Hinweis auf

@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! `multipart/form-data` (RFC 7578) lesen und schreiben – für Audio-Uploads
 //! (`/v1/audio/transcriptions`, `/v1/audio/translations`, AIGW-21).

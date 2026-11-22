@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Container-Image von ai-gw (AIGW-59), Doku: docs/betrieb/installation.md
 #
@@ -88,11 +88,11 @@ ARG REVISION=unknown
 ARG CREATED=unknown
 LABEL org.opencontainers.image.title="ai-gw" \
       org.opencontainers.image.description="AI-Gateway (OpenAI-/Anthropic-kompatibel) mit Admin-API und Admin-UI in einem Binary" \
-      org.opencontainers.image.licenses="AGPL-3.0-or-later" \
+      org.opencontainers.image.licenses="FSL-1.1-ALv2" \
       org.opencontainers.image.source="https://github.com/mupf-dev/ai-gw" \
       org.opencontainers.image.url="https://github.com/mupf-dev/ai-gw" \
       org.opencontainers.image.documentation="https://github.com/mupf-dev/ai-gw/tree/main/docs/betrieb" \
-      org.opencontainers.image.vendor="ai-gw contributors" \
+      org.opencontainers.image.vendor="mupf-dev" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.created="${CREATED}"

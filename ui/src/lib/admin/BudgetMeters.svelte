@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Budgetverbrauch im laufenden Zeitraum (GET /usage/budgets, AIGW-30/31) – je Zeile ein Meter (ab 80 % gelb,
   // ab 95 % rot), Betrag, Rest und Zeitraumende. Ohne `name`: alle Budgets der Ebene(n).

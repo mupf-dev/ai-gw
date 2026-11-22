@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Mikro-Benchmark des Tool-Schritts (AIGW-87): Kosten je Anfrage ohne Tools, mit 30 Tools
 //! (Claude-Code-ähnlich: Beschreibungen ~600 Zeichen, Schemas mit 8 Feldern) ohne Inventar und

@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Strukturierte Routing-Einstellungen (D9/F137): Beschreibung der bekannten Felder in `settings` von Modellgruppen
 // und Deployments (docs/konzept/10-routing.md §2/§2b, 06 §3). Unbekannte Schlüssel bleiben erhalten und sind in der

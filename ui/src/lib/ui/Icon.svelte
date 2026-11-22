@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts" module>
   // Eigene Inline-SVG-Icons (24er-Raster, Kontur 1.75), Grundstock aus dem cloud-project-Portal (gleiche Lizenz),
   // ergänzt um Gateway-Motive. Keine Icon-Fonts/CDNs; immer dekorativ (aria-hidden) – Bedeutung trägt Text.

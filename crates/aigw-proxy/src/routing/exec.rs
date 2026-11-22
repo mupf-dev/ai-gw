@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Ausführung einer Anfrage über eine Modellgruppe: Auswahl, Retries, Backoff, `Retry-After`,
 //! Gesamtbudget und Fallback-Ketten (AIGW-25).

@@ -1,5 +1,5 @@
--- SPDX-FileCopyrightText: 2026 ai-gw contributors
--- SPDX-License-Identifier: AGPL-3.0-or-later
+-- SPDX-FileCopyrightText: 2026 mupf-dev
+-- SPDX-License-Identifier: FSL-1.1-ALv2
 --
 -- Schema für Postgres (AIGW-73, F7: getrennte Migrationssätze je Datenbank, native Typen).
 -- Frischer Schnitt: fasst die früheren portablen Migrationen 0001–0007 (AIGW-9, -43, -32, -66,

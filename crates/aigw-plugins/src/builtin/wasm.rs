@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Plugin `wasm` (AIGW-63, `docs/konzept/17-wasm-plugins.md`): führt eine hochgeladene
 //! WebAssembly-Komponente (WIT-Welt `aigw:plugin/plugin`) in einer Sandbox aus.

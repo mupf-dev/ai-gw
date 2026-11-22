@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Preisvorschläge (AIGW-85): Vorschlag (Azure Retail Prices bzw. Preiskatalog) neben dem aktuell gültigen Preis je Deployment,
   // Auswahl + Übernahme als neue Preisversionen. Manuelle Preise haben Vorrang – abweichende nur mit ausdrücklicher Bestätigung.

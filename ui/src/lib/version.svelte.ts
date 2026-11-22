@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Gateway-Version und Snapshot-Zustand (F15) über die echte Admin-API – auch im Mock-Modus echt.
 // Wird alle 30 s erneut abgefragt, damit das Banner „Konfiguration veraltet“ von selbst erscheint/verschwindet.

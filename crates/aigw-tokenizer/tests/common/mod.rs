@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Gemeinsame Hilfen der Integrationstests: `*.tiktoken`-Dateien aus den Tabellen in `data/`
 //! zurückgewinnen (byte-genau, die SHA-256-Summe stimmt) und für Builds ohne

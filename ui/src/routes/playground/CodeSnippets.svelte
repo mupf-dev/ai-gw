@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Code-Beispiele zur aktuellen Playground-Anfrage (curl, OpenAI-SDK, Anthropic-SDK) gegen die Datenebene. Der
   // Key-Klartext ist der UI nie bekannt – Platzhalter $AIGW_URL / $AIGW_API_KEY.

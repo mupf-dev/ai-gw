@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Latenz eines WASM-Plugins (AIGW-63): Leer-Plugin (`testkit`, `mode: pass`) in der
 //! Anfrage-Phase (frische Instanz je Aufruf, `spawn_blocking`) und im Stream-Pfad (synchron,

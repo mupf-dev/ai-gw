@@ -1,5 +1,5 @@
--- SPDX-FileCopyrightText: 2026 ai-gw contributors
--- SPDX-License-Identifier: AGPL-3.0-or-later
+-- SPDX-FileCopyrightText: 2026 mupf-dev
+-- SPDX-License-Identifier: FSL-1.1-ALv2
 --
 -- AIGW-117 Kostenanalyse (sqlite; Gegenstück in migrations/postgres/0013_cost_breakdown.sql):
 -- Zählspalten der Minuten- und Stunden-Rollups für die Aufschlüsselung der Kosten (Nano-Einheiten):

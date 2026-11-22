@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Modelle & Routen (AIGW-49, AIGW-77): Modellgruppen mit serverseitiger Pagination und Suche (Name, Alias – D11);
   // Zeile → Detailseite /models/{name} (D8) mit Deployments, Einstellungen, Nutzung und Audit.

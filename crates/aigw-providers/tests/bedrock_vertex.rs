@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Ende-zu-Ende-Tests der Adapter Bedrock (AIGW-18) und Vertex/Gemini (AIGW-19) gegen lokale
 //! Fake-Server: SigV4-Prüfung auf Serverseite, Eventstream in ungünstig geschnittenen

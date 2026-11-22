@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Admin-API-Keys für Automatisierung (AIGW-32): `sk-aigw-admin-<Präfix>-<Geheimnis>` mit
 //! Rollen und Ablauf. Gespeichert wird nur SHA-256; der Klartext steht nur in der Antwort auf

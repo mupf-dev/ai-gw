@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Richtet die Werkzeuge auf einer frischen Buildbox bzw. im CI-Runner ein (idempotent):
 # rustup mit der Toolchain aus rust-toolchain.toml, cargo-deny und reuse.

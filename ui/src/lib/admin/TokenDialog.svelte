@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Anmeldung ohne OIDC: Bootstrap-Token (Server-Log beim Start bzw. AIGW_BOOTSTRAP_TOKEN) oder Admin-API-Key.
   // Gespeichert nur im sessionStorage dieses Tabs; geprüft über /admin/api/v1/auth/info.

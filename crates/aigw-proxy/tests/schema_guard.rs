@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Plugin `schema-guard` im Hot Path (AIGW-113): strukturierte Ausgabe (OpenAI
 //! `response_format`, Anthropic `output_config.format`) gegen das Schema prüfen – Ablehnung

@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Log-Explorer gegen GET /request-logs (AIGW-46/77): serverseitige Filter und Cursor-Pagination (Status,
   // Fehlerklasse F47, Modellgruppe, Key, Cache inkl. cache-embedding F191, Stream, Request-/Trace-/Eltern-ID) –

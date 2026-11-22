@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: 2026 ai-gw contributors
+SPDX-FileCopyrightText: 2026 mupf-dev
 SPDX-License-Identifier: CC-BY-4.0
 -->
 # WASM-Plugins (Beispiele)

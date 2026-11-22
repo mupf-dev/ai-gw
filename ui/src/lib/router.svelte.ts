@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Minimaler History-Router unter /admin/ (aigw-admin liefert für Pfade ohne Dateiendung index.html).
 // Links sind echte <a href>, Klicks werden abgefangen (Strg/Mittelklick öffnen weiter einen neuen Tab).

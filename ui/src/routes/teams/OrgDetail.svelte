@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Detailseite einer Organisation (D8/F136, /organizations/{name}): Übersicht (Limits, Payload-Modus/Reasoning,
   // Budgetverbrauch, Teams, Plugin-Bindungen), Nutzung, Audit-Verlauf.

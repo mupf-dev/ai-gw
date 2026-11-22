@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Store-Umbau AIGW-73: gemeinsame Tests für **beide** Backends (SQLite in-memory, SQLite-Datei
 //! und – mit `AIGW_TEST_POSTGRES_URL` – Postgres in einer Wegwerf-Datenbank).

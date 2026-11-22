@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # End-to-End-Last- und Latenztest mit dem echten `aigw`-Binary (AIGW-57, Ziele Q1/Q4):
 # Fake-Upstream (Beispiel `latency upstream`), `aigw serve` mit SQLite, Key-Prüfung,

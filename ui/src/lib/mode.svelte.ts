@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Wirksame Datenquelle: Mock-Modus an (Schalter bzw. ?mock=1) → Beispieldaten aus dem Mock-Backend, sonst die
 // echte Admin-API (Standard; User-Entscheidung D6). Mit `admin.ui.mock: false` (F135) gibt es keinen Mock-Modus.

@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Darstellungs- und Sitzungseinstellungen: Farbschema (System/Hell/Dunkel) und Mock-Modus (An/Aus, Standard aus). Am <html> stehen immer die wirksamen Werte (data-theme), damit
 // Tokens (light-dark) und die dark:-Variante ohne Inline-Skript (CSP) stimmen.

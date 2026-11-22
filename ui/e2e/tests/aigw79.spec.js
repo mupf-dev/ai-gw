@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // AIGW-79 (S-09/F203) gegen das echte `aigw serve`: Payload-Richtlinie an Organisation/Team (payloadModeMax,
 // payloadModeLocked). Serverseitig 422 mit feldgenauer Meldung, in den Formularen Stufen über dem Maximum nicht

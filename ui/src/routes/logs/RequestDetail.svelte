@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Detail einer Anfrage (GET /request-logs/{id}): Übersicht, Fehlerklasse (F47), Trace-ID mit Link zum
   // Tracing-System (admin.ui.trace_url), Guardrail-Treffer (F161), Eltern-Anfrage (F191, z. B. Cache-Embedding),

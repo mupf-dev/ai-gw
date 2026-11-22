@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Zahlen-, Geld- und Zeitformate (de-DE). Große Zahlen kompakt (1,2 Mio.), Geld in der Abrechnungswährung
 // (`billing.currency` aus auth/info, AIGW-117; Standard USD).

@@ -2,7 +2,7 @@
   "name": "aigw-ui-e2e",
   "private": true,
   "version": "0.1.0",
-  "license": "AGPL-3.0-or-later",
+  "license": "FSL-1.1-ALv2",
   "type": "module",
   "scripts": {
     "test": "playwright test"

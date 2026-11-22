@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Spans für OpenTelemetry-Traces (AIGW-45), nur über `tracing` mit
 //! `target: "aigw::otel"` ([`TRACE_TARGET`]).

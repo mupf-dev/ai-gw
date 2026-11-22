@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Gemeinsamer Ablauf aller Endpunkte der Datenebene (Chat/Messages, Responses, Embeddings,
 //! Bilder, Audio; AIGW-21/AIGW-78):

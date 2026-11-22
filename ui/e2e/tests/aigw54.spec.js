@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // AIGW-54/55 gegen das echte `aigw serve`: Playground (Chat im Namen eines Keys über die Pipeline, Streaming, sicheres
 // Markdown ohne XSS, Kennzahlen, Request-ID mit Link zum Log, Vergleich, Code-Beispiele, Audit) und

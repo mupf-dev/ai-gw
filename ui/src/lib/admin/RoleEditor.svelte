@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Rollenzuweisungen bearbeiten (Nutzer, Admin-API-Keys): Rolle + optional Organisation/Team (Admin-API §5.4).
   import type { Role, RoleBinding } from '../api/resources';

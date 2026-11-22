@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Rangtabellen zur Laufzeit (AIGW-95): Prüfsumme und Format in beiden Builds; mit
 //! `embedded-tokenizers` bleibt das Verzeichnis unbeachtet, ohne das Feature wird daraus

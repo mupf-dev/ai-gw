@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: Apache-2.0
 
 //! Beispiel-Plugin `keyword-guard` für ai-gw (AIGW-63): Stichwort-Blocker und Header-Setzer.
 //!

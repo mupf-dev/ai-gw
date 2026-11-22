@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Cache und Vektor-Backends: exakt (RAM, Redis), semantisch (eigener HNSW, pgvector, Redis
 //! Stack), Ausfälle als Miss, Warmstart aus der Datenbank.

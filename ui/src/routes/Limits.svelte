@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Limits & Budgets (AIGW-77): Budgetverbrauch aller Ebenen im laufenden Zeitraum (GET /usage/budgets) mit
   // Meter (80 %/95 %) und Hinweise zu ungenau wirkenden Limits (GET /usage/limit-warnings, F29).

@@ -1,5 +1,5 @@
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: Apache-2.0
 #
 # WASM-Plugin für ai-gw (AIGW-63). Bauen: cargo build --release --target wasm32-wasip2
 # (siehe plugins/README.md); eigener Workspace, nicht Teil des Gateway-Workspaces.
@@ -7,7 +7,7 @@
 name = "aigw-plugin-keyword-guard"
 version = "0.1.0"
 edition = "2024"
-license = "AGPL-3.0-or-later"
+license = "Apache-2.0"
 publish = false
 
 [lib]

@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Befehlspalette (⌘K / Strg+K) im Bits-UI-Dialog. Die Liste ist ein eigenes APG-Muster (Combobox + Listbox,
   // aria-activedescendant), weil Bits UI Command statische style-Attribute rendert (CSP style-src-attr) –

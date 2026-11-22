@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Aufbau des Konfigurations-Snapshots aus der Datenbank: vollständig ([`load_snapshot`]) oder
 //! inkrementell über das Änderungsjournal ([`load_incremental`], F16, AIGW-75).

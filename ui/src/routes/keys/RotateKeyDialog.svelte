@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Rotation (Admin-API §2.1): neuer Key mit gleicher Spezifikation, der alte läuft nach der Übergangszeit ab.
   // Liest den Key vorher (ETag) und rotiert mit If-Match.

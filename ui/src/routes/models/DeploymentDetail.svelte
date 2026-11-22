@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Detailseite eines Deployments (D8/F136, /deployments/{name}): Anbieter (Mock gekennzeichnet, F85), Modell,
   // Endpunkt, Zugangsdaten, Priorität/Gewicht/Kapazität, strukturierte Einstellungen; Nutzung und Audit.

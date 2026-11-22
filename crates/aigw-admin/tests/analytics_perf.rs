@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Lastmessung Dashboards/Log-Explorer (AIGW-46): 1 Mio. Minuten-Rollups über 7 Tage und
 //! 500 000 Rohlogs (synthetisch), danach Antwortzeiten der Admin-Routen über HTTP.

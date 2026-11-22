@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // AIGW-77 gegen das echte `aigw serve`: Detailseiten (D8) mit Audit und Nutzung, strukturierte Routing-Formulare
 // (D9), Limit-Editor/Payload-Modus, serverseitige Pagination (D11), Banner (Snapshot F15, Bootstrap/Nur-YAML F56,

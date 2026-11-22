@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! WASM-Module über die Admin-API (AIGW-63): Hochladen nur durch globale Admins und nur mit
 //! passendem SHA-256, Medientyp, Größe, `If-Match` beim Ersetzen/Löschen, Download, Löschschutz

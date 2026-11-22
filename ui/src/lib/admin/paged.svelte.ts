@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Serverseitige Pagination (D11/F139): eine Seite je Abfrage (Keyset-Cursor der Admin-API), Filter und Suche
 // gehen als Query an den Server. Vor-/Zurück-Blättern über einen Cursor-Stapel (der Server kennt nur „weiter“).

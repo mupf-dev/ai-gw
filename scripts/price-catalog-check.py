@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Vergleicht crates/aigw-billing/catalog/prices.yaml mit LiteLLM model_prices_and_context_window.json.
 
 Aufruf: scripts/price-catalog-check.py [PFAD|URL]   (Standard: aktuelle Datei von GitHub)

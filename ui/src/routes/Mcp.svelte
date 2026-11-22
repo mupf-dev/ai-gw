@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // MCP-Server (AIGW-41/78/77/52): angebundene Upstreams mit Verbindungszustand (GET /mcp-servers:status: up, down,
   // idle, disabled; letzter Fehler, Fehlversuche) und Freigaben (Rechte: welche Teams/Keys welche Tools nutzen).

@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Antwort-Cache von ai-gw (AIGW-39 exakt, AIGW-40 semantisch; Architektur §10,
 //! Doku `docs/konzept/14-cache.md`).

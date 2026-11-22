@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Verschlüsselte PKCS#8-Schlüssel (`-----BEGIN ENCRYPTED PRIVATE KEY-----`, RFC 5958/8018) für
 //! das Client-Zertifikat der Entra-ID-Anmeldung (AIGW-94).

@@ -1,5 +1,5 @@
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Screenshots für docs/konzept/ux/ übernehmen: nur Desktop hell/dunkel, die das UX-Konzept einbindet,
 verkleinert (1200 px) und auf eine Palette reduziert (Ziel: zusammen ca. 1 MB).
 

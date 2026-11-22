@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts" module>
   /** Plugins mit strukturiertem Formular (F214: Felder nach dem Konfigurationsschema der Plugins, 12/13-*.md). */
   export const STRUCTURED = new Set(['pii', 'prompt-filter', 'prompt-leak', 'content-safety', 'webhook', 'wasm', 'link-guard', 'language', 'schema-guard']);

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Baut Container-Images je Architektur (AIGW-91). Das Rust-Binary wird auf der Build-Plattform
 # quer kompiliert (Dockerfile, Stufe build) – arm64 braucht auf einem amd64-Builder kein QEMU.

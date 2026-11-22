@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Antwort-Cache im Hot Path (AIGW-39/40): Header `x-aigw-cache`, Wiedergabe als Stream im
 //! Eingangsformat, Client-Steuerung, Regeln für das Speichern, Usage 0 bei Treffern,

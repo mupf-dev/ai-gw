@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! OpenAI Chat Completions: Wire-Typen und Konverter; dazu die weiteren OpenAI-Endpunkte
 //! (AIGW-21): [`embeddings`], [`images`], [`audio`] und die Responses API ([`responses`],

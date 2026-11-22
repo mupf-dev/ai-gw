@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Limits, Budgets, Kosten und Deployment-Kapazität über die HTTP-Schnittstelle
 //! (AIGW-30, AIGW-31). Zähler `local`; zusätzlich gegen Redis (`AIGW_TEST_REDIS_URL`) und

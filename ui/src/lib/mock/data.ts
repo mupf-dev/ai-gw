@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Deterministische Mock-Daten (fester Seed) für die Musterseiten: gleiche Zahlen bei jedem Laden,
 // damit Screenshots und Reviews vergleichbar bleiben. Zeitstempel relativ zu „jetzt“.

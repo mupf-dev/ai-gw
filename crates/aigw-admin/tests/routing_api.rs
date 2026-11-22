@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Integrationstests AIGW-65: Modellgruppen, Deployments, Anbieter-Zugangsdaten und Preise
 //! über die Admin-API mit echtem Server und echter Datenbank – Alias-Kollisionen,

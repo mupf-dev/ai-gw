@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Klassen-Rezepte für Bits-UI-Bausteine und eigene Komponenten. Bits UI ist headless; alle Teile werden
 // über diese Rezepte gestylt, damit Trigger (Bits) und eigene Buttons gleich aussehen.

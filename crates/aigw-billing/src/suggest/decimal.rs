@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Dezimalzahlen aus fremden Quellen (JSON-Zahlen wie `2.5e-05`) exakt in
 //! [`Amount`](aigw_core::resource::Amount) umrechnen – ohne Umweg über `f64`-Arithmetik.

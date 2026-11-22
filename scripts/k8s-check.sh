@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Prüft die Kubernetes-Manifeste (AIGW-91): `kubectl kustomize deploy/kubernetes` rendert das
 # kustomize-Grundgerüst, kubeconform validiert jedes Objekt streng gegen die OpenAPI-Schemas der

@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // WASM-Module (AIGW-63): Komponenten für die Plugin-Art `wasm`. Liste mit SHA-256, Größe und Verwendung in
   // Bindungen; Hochladen (SHA-256 wird im Browser berechnet und vom Server geprüft) und Löschen (409, solange

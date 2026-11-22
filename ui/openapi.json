@@ -4,11 +4,11 @@
     "title": "ai-gw Admin-API",
     "description": "Verwaltungs-API von ai-gw",
     "contact": {
-      "name": "ai-gw contributors"
+      "name": "mupf-dev"
     },
     "license": {
-      "name": "AGPL-3.0-or-later",
-      "identifier": "AGPL-3.0-or-later"
+      "name": "FSL-1.1-ALv2",
+      "identifier": "FSL-1.1-ALv2"
     },
     "version": "0.1.0"
   },

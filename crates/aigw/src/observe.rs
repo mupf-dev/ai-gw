@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Beobachtung starten: Request-Log (AIGW-43), Prometheus-Metriken (AIGW-44), OTLP-Traces und
 //! -Logs (AIGW-45); `/metrics` der Steuerebene.

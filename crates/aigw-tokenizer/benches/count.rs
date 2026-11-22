@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Durchsatz der Token-Zählung: typischer Prompt mit 4 KB (Ziel: < 50 µs) bzw. 64 KB, gemischt
 //! Englisch/Deutsch/Code; dazu 4 KB CJK (lange Stücke) und die Heuristik.

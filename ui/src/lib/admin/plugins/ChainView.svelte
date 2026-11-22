@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Kettenvorschau (AIGW-52): wirksame Plugin-Kette für einen Kontext (Organisation, Team, Key, Modellgruppe)
   // nach den Regeln aus 12-plugins.md §4 (chain.ts). Anfrage-Haken laufen von außen nach innen, Antwort- und

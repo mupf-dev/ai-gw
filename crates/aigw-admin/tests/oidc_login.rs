@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Integrationstests AIGW-32: OIDC-Login (Authorization Code + PKCE) gegen einen Mini-IdP im
 //! Test (eigener axum-Server mit Discovery, JWKS, Authorize, Token; signiert mit Testschlüsseln

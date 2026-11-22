@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 """Fake der Azure Retail Prices API für die Browser-Tests (AIGW-85): feste Meter für swedencentral.
 
 Aufruf: fake-retail.py PORT  – beantwortet jedes GET mit einer Seite (ohne NextPageLink).

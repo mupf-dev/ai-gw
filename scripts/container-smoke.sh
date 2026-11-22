@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Container-Smoke-Test (AIGW-59): baut das Image (außer SKIP_BUILD=1) und prüft
 #   1. Einzelcontainer mit SQLite: schreibgeschütztes Root-FS, ohne Capabilities, nicht-root;
@@ -38,7 +38,7 @@ if [[ "${SKIP_BUILD:-0}" != 1 ]]; then
 fi
 echo "--- Image"
 docker image inspect "$IMAGE" --format 'Größe: {{.Size}} Bytes, Benutzer {{.Config.User}}, Healthcheck {{json .Config.Healthcheck.Test}}'
-docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}' | grep -qx 'AGPL-3.0-or-later'
+docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}' | grep -qx 'FSL-1.1-ALv2'
 docker history "$IMAGE" --format '{{.Size}}\t{{.CreatedBy}}' | grep -E 'aigw|distroless' | head -3 || true
 test "$(docker image inspect "$IMAGE" --format '{{.Config.User}}')" = "65532:65532"
 

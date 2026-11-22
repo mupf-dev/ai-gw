@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! GitOps: Grenzen Key ≤ Team ≤ Organisation (AIGW-67) im Plan – alle Verstöße gesammelt, an
 //! welchem Dokument sie stehen, bestehende Objekte außerhalb des Manifests, bereits vorher

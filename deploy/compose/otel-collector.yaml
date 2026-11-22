@@ -1,5 +1,5 @@
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Minimaler OpenTelemetry-Collector für docker-compose.yaml (Profil "otel"): nimmt OTLP/HTTP
 # von ai-gw an und gibt Traces/Logs auf stdout aus. Für den Betrieb den Exporter durch das

@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Toast-Region unten rechts (aria-live polite; Fehler zusätzlich role=alert).
   import { dismiss, pauseToasts, toasts, type ToastKind } from '../toast.svelte';

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Baut die WASM-Plugins unter plugins/ (Ziel wasm32-wasip2, AIGW-63) und legt sie als
 # Testdateien unter crates/aigw-wasm/tests/data/ ab (eingecheckt, damit `cargo test` ohne

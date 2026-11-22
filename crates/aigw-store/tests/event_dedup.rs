@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Ereignis-Webhooks im Cluster (AIGW-61): zwei Gateway-Instanzen (zwei `Store`-Verbindungen
 //! auf dieselbe SQLite-Datei bzw. – mit `AIGW_TEST_POSTGRES_URL` – dieselbe Postgres-DB)

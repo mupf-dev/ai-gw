@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Geheimnisse über die Admin-API (F149): Werte nur schreibbar, nie in Antworten, Fehlern
 //! oder im Audit-Log; `PATCH` je Feld; `409` beim Löschen eines verwendeten Geheimnisses;

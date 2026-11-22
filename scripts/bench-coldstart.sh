@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Kaltstart-Test (AIGW-57): Datenbank mit vielen Ressourcen füllen (Standard 10 000 API-Keys,
 # 1 000 Modellgruppen mit je 2 Deployments, 10 Teams) und messen, wie lange `aigw serve` bis

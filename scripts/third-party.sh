@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Erzeugt THIRD-PARTY.md: Lizenzen aller Rust-Abhängigkeiten, die in das Binary `aigw`
 # eingehen (normale Abhängigkeiten, alle Zielplattformen; aus `cargo metadata`), und der
@@ -53,7 +53,7 @@ for pid in seen:
 
 print("<!-- Erzeugt mit scripts/third-party.sh – nicht von Hand bearbeiten. -->")
 print("# Drittanbieter-Lizenzen\n")
-print("ai-gw selbst steht unter AGPL-3.0-or-later (Code) bzw. CC-BY-4.0 (Dokumentation).")
+print("ai-gw selbst steht unter FSL-1.1-ALv2 (Code) bzw. CC-BY-4.0 (Dokumentation).")
 print("Diese Übersicht listet die Lizenzen der Komponenten, die in das Binary `aigw` und die")
 print("eingebettete Admin-UI eingehen. Die zulässigen Lizenzen legt `deny.toml` fest")
 print("(geprüft mit `cargo deny check licenses`). Lizenztexte: jeweilige Quellpakete.\n")
@@ -70,7 +70,7 @@ print("| `crates/aigw-tokenizer/data/cl100k_base.bin`, `o200k_base.bin` | BPE-Ra
 print("| `crates/aigw-billing/catalog/prices.yaml` | Eigene, gepflegte Datei (AIGW-85): Listenpreise "
       "(Fakten) aus den öffentlichen Preisseiten von OpenAI, Anthropic, Mistral und Google (Gemini API); "
       "Werte abgeglichen mit LiteLLM `model_prices_and_context_window.json` (BerriAI, MIT) – keine "
-      "Übernahme der fremden Datei | AGPL-3.0-or-later (wie der Code) |")
+      "Übernahme der fremden Datei | FSL-1.1-ALv2 (wie der Code) |")
 print("| Laufzeit: Azure Retail Prices API (`prices.azure.com`) | Öffentliche Preisabfrage von Microsoft "
       "ohne Anmeldung, nur zur Anzeige von Vorschlägen; nichts wird mitgeliefert | – |\n")
 total = sum(len(v) for v in by_license.values())

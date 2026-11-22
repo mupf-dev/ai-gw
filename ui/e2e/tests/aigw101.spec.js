@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // AIGW-101 gegen das echte `aigw serve` (run.sh: wasm.trusted_keys = e2e-test, require_signature: false): WASM-Modul
 // mit Ed25519-Signatur über die UI hochladen (Status „gültig“), falsche Signatur und unbekannter Schlüssel werden

@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Laufzeitzustand je Deployment: offene Anfragen, EWMA von TTFT und Latenz, Circuit Breaker,
 //! Sperre nach `Retry-After` und Sperre wegen erschöpfter Kapazität.

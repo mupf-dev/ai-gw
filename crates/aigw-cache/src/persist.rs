@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Warmstart des Backends `memory`: Einträge verschlüsselt in der Datenbank
 //! (Tabelle `cache_vector`, Migration 0007).

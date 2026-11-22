@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Modellgruppe anlegen/bearbeiten (Admin-API §2.2): Aliasse, Routing-Strategie, Fallback-Kette mit Auslösern,
   // Einstellungen (retry, circuitBreaker, healthCheck – vom Server mit dem Parser der Datenebene geprüft).

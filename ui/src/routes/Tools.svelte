@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Tools (AIGW-87): Inventar der Tools, die Anwendungen in Anfragen mitschicken (Name, Art, Herkunft/MCP-Server,
   // Client, Team/Key, Nutzung, Hash von Beschreibung und Schema) mit wirksamem Status (neu, freigegeben, gesperrt,

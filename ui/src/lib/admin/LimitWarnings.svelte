@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 ai-gw contributors -->
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 mupf-dev -->
+<!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Hinweise zu Limits, die mit dem gewählten Zähler-Backend nur ungenau wirken (GET /usage/limit-warnings, F29),
   // z. B. Sekundenlimits mit counters.backend = postgres-sync. Ohne Hinweise unsichtbar; Fehler werden verschluckt

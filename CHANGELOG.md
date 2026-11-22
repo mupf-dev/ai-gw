@@ -228,6 +228,9 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Geändert
 
+- **Lizenz:** Der Code steht jetzt unter FSL-1.1-ALv2 (Functional Source License, nach zwei Jahren
+  je Version Apache-2.0) statt unter AGPL-3.0-or-later. Plugin-Schnittstelle (WIT) und
+  Beispiel-Plugins stehen unter Apache-2.0, Rechteinhaber ist mupf-dev. Frühere Stände bleiben unter AGPL.
 - **Admin-Cookies `__Host-` (S-23, AIGW-99, inkompatibel):** Session- und Login-Cookie heißen
   `__Host-aigw-session` bzw. `__Host-aigw-login` (`Path=/`, ohne `Domain`) – Schwester-
   Subdomains können sie nicht mehr setzen (Login-CSRF/Session-Fixierung). Alte

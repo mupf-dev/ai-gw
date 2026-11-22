@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
 // Bundle-Größen der gebauten UI (gzip -9 und Brotli q11, im Speicher berechnet): initial geladene Dateien
 // (laut index.html) vs. per dynamic import nachgeladene Seiten. Ausgabe als JSON; `pnpm sizes`.
