@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Feste Test-Bundles aus der Sigstore-Konformitätssuite (`sigstore/sigstore-conformance`,
 //! `test/assets/bundle-verify`, Apache-2.0; Stand e275ffb) gegen das Public-Good-Trust-Root –

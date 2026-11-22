@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Eingebettete SCTs (RFC 6962 §3.2/§3.3) eines Fulcio-Zertifikats gegen die CT-Logs des
 //! Trust-Roots: mindestens ein SCT eines bekannten, zum Zeitpunkt gültigen Logs muss stimmen.

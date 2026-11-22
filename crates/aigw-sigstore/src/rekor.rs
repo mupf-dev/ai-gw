@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 ai-gw contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 mupf-dev
+// SPDX-License-Identifier: FSL-1.1-ALv2
 
 //! Rekor (v1): Signed Entry Timestamp (SET), Inclusion-Proof (RFC 9162 §2.1.3.2),
 //! Checkpoint (C2SP signed note) und Abgleich des `hashedrekord`-Eintrags mit dem Bundle.
