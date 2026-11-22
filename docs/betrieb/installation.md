@@ -18,7 +18,7 @@ Jeder Release (Tag `v<version>`, [Releases](https://github.com/mupf-dev/ai-gw/re
 
 | Artefakt | Inhalt |
 |---|---|
-| `ai-gw-<version>-linux-amd64.tar.gz`, `…-linux-arm64.tar.gz` | Binary `aigw` (Admin-UI eingebettet, glibc ≥ 2.36: Debian 12+, Ubuntu 24.04+, RHEL/Alma/Rocky 10), `config/aigw.example.yaml`, LICENSE, THIRD-PARTY.md, CHANGELOG |
+| `ai-gw-<version>-linux-amd64.tar.gz`, `…-linux-arm64.tar.gz` | Binary `aigw` (Admin-UI eingebettet, glibc ≥ 2.34: Debian 12+, Ubuntu 22.04+, RHEL/Alma/Rocky 9+), `config/aigw.example.yaml`, LICENSE, THIRD-PARTY.md, CHANGELOG |
 | `ghcr.io/mupf-dev/ai-gw:<version>` | Multi-Arch-Image (amd64 + arm64), zusätzlich Tags `<major>.<minor>` und `latest` (nicht bei Vorabversionen) |
 | `SHA256SUMS` | Prüfsummen der Archive und des SBOM |
 | `ai-gw-<version>.cdx.json` | SBOM (CycloneDX) aus `Cargo.lock` und `ui/pnpm-lock.yaml` |

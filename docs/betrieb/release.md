@@ -27,7 +27,7 @@ Repository-Secrets nötig: `GITHUB_TOKEN` genügt für GHCR, Attestierungen und 
 
 Warum glibc statt musl: Binary und Image entstehen aus derselben, gemessenen Build-Stufe
 (aws-lc-rs, mimalloc, SQLite mit glibc, [leistung.md](leistung.md)); musl bräuchte eine zweite
-Cross-Toolchain und eigene Messungen. Mindestens nötig ist die glibc von Debian 12 (2.36).
+Cross-Toolchain und eigene Messungen. Gebaut wird auf Debian 12; die Binaries brauchen mindestens glibc 2.34 (Ubuntu 22.04, RHEL 9).
 
 ## Release vorbereiten
 

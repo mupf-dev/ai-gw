@@ -39,7 +39,7 @@ Fertige Artefakte je Release ([Releases](https://github.com/mupf-dev/ai-gw/relea
 und Prüfung (SHA256SUMS, SBOM, `gh attestation verify`):
 [docs/betrieb/installation.md](docs/betrieb/installation.md#release-artefakte).
 
-**Binary** (linux amd64/arm64, Admin-UI eingebettet, glibc ≥ 2.36):
+**Binary** (linux amd64/arm64, Admin-UI eingebettet, glibc ≥ 2.34):
 
 ```bash
 V=0.1.0; A=amd64                                              # oder arm64
