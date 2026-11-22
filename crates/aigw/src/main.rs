@@ -10,6 +10,7 @@
 //! - `aigw config export|diff|apply|validate` – GitOps (siehe [`cli_config`]);
 //!   `aigw config check` prüft die Startkonfiguration.
 //! - `aigw healthcheck` – Bereitschaftsprüfung für Container (siehe [`healthcheck`]).
+//! - `aigw tokenizer fetch|verify` – tiktoken-Rangtabellen bereitstellen (siehe [`tokenizer`]).
 
 /// Globaler Allokator (AIGW-57): mimalloc statt glibc-malloc – weniger CPU je Anfrage und
 /// keine Arena-Sperren unter Last (Messung: docs/betrieb/leistung.md).
@@ -74,6 +75,10 @@ enum Command {
     /// Bereitschaftsprüfung (`GET /readyz` der Steuerebene) für Container-HEALTHCHECKs;
     /// Exit-Code 0 = bereit.
     Healthcheck(healthcheck::HealthcheckArgs),
+    /// tiktoken-Rangtabellen (o200k_base/cl100k_base) laden bzw. prüfen – nicht im Binary
+    /// enthalten (AIGW-92).
+    #[command(subcommand)]
+    Tokenizer(tokenizer::TokenizerCommand),
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -134,6 +139,10 @@ fn main() -> ExitCode {
             }
         },
         Command::Healthcheck(args) => healthcheck::run(&args),
+        Command::Tokenizer(cmd) => {
+            init_tracing(cli.log_format);
+            tokenizer::run(cmd)
+        }
         Command::Wasm(cmd) => match wasm_sign::run(&cmd) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
@@ -194,7 +203,7 @@ fn serve(
         .enable_all()
         .build()?;
     runtime.block_on(async move {
-        // Rangtabellen o200k/cl100k (Build ohne embedded-tokenizers, AIGW-95).
+        // Rangtabellen o200k/cl100k zur Laufzeit (AIGW-95, AIGW-92).
         tokenizer::init(&config).await?;
         let runtime_state = runtime::Runtime::start(&config, traces).await?;
         let listeners = server::Listeners::bind(&config.server).await?;

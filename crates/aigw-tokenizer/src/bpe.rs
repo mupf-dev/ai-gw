@@ -76,7 +76,7 @@ pub(crate) struct Ranks {
     map: HashMap<&'static [u8], u32, FxBuild>,
 }
 
-/// Fehler beim Lesen einer eingebetteten Tabelle.
+/// Fehler beim Lesen einer Rangtabelle.
 #[derive(Debug, thiserror::Error)]
 #[error("Rangtabelle ungültig: {0}")]
 pub struct TableError(pub(crate) &'static str);

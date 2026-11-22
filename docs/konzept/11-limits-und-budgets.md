@@ -525,7 +525,7 @@ Crate `aigw-tokenizer` (Eigenentwicklung, keine fremde Tokenizer-Bibliothek):
 
 | Tokenizer | Umfang | Genauigkeit |
 |---|---|---|
-| `o200k_base`, `cl100k_base` | BPE wie tiktoken; Rangtabellen eingebettet (Feature `embedded-tokenizers`, Standard; `data/*.bin`, 0,7 + 1,6 MB, eigenes Längenpräfix-Format aus den von OpenAI veröffentlichten `*.tiktoken`, SHA-256 geprüft, `tools/gen_tables.py`) oder zur Laufzeit geladen (siehe unten); Pre-Tokenizer als Zustandsautomat | exakt: Token-IDs identisch mit tiktoken 0.14 (436 Fixture-Texte inkl. 400 Zufallstexte) |
+| `o200k_base`, `cl100k_base` | BPE wie tiktoken; Rangtabellen = die von OpenAI veröffentlichten `*.tiktoken`, **nicht enthalten**, zur Laufzeit geladen und SHA-256-geprüft (siehe unten, AIGW-92); Pre-Tokenizer als Zustandsautomat | exakt: Token-IDs identisch mit tiktoken 0.14 (436 Fixture-Texte inkl. 400 Zufallstexte) |
 | `hf:<datei>` | `tokenizer.json` (BPE mit Merges/byte_fallback/ignore_merges, Unigram; Normalizer Prepend/Replace/Lowercase; Pre-Tokenizer Split/ByteLevel/Metaspace/Digits) | exakt ohne Spezial-Tokens: Llama 3.2, Mistral 7B v0.3, Mistral Nemo, TinyLlama (1744 Vergleiche, `AIGW_TOKENIZER_HF_DIR`) und 6 eingecheckte Mini-Tokenizer |
 | `heuristic[:claude\|:gemini]` | Zeichen je Token nach Sprache (EN/DE/Code), CJK/andere Schriften/Emojis getrennt | Schätzung (`generic` −20 %/+35 % von o200k) |
 
@@ -544,28 +544,35 @@ Crate `aigw-tokenizer` (Eigenentwicklung, keine fremde Tokenizer-Bibliothek):
   (EN/DE/Code gemischt) o200k 36 µs (schnellster Lauf; Median 36–50 µs auf der geteilten Box),
   cl100k 39 µs (Ziel < 50 µs); 64 KB 0,6 ms; 4 KB CJK (lange Stücke, Heap-Pfad) 170 µs;
   Heuristik 4 KB 9 µs. Tabellen laden ≈ 20 ms (beim Start im Hintergrund).
-- **Build-Varianten der Rangtabellen (AIGW-95):** Die Lizenzlage der Tabellen ist offen
-  ([99-offene-fragen.md](99-offene-fragen.md), „AIGW-91/95 – Hinweise“). Deshalb steuert das
-  Cargo-Feature `embedded-tokenizers` (Crates `aigw` und `aigw-tokenizer`, **Standard an**),
-  ob die Tabellen im Binary liegen:
-
-  | Build | Tabellen | Verhalten |
-  |---|---|---|
-  | Standard (`cargo build -p aigw`, Dockerfile, offizielle Images) | eingebettet | exakt; `tokenizer.ranks_dir` wird nicht gelesen |
-  | `cargo build -p aigw --no-default-features --features mimalloc` (Image: `--build-arg CARGO_FEATURES="--no-default-features --features mimalloc"`) | keine | Laden beim Start aus `tokenizer.ranks_dir` |
-
-  Ohne Feature erwartet das Gateway in `tokenizer.ranks_dir` die Originaldateien
-  `cl100k_base.tiktoken` und `o200k_base.tiktoken` (dieselben Dateien und Namen wie tiktoken,
-  Quelle `https://openaipublic.blob.core.windows.net/encodings/`). Jede Datei wird gegen die
+- **Rangtabellen zur Laufzeit (AIGW-95, AIGW-92):** Die Lizenzlage der OpenAI-Dateien ist
+  offen ([99-offene-fragen.md](99-offene-fragen.md), „AIGW-92“). ai-gw enthält sie deshalb
+  **weder im Repository noch im Binary oder Image** (früheres Cargo-Feature
+  `embedded-tokenizers` entfernt). Das Gateway erwartet in `tokenizer.ranks_dir` die
+  Originaldateien `cl100k_base.tiktoken` und `o200k_base.tiktoken` (dieselben Dateien und Namen
+  wie tiktoken, Quelle `https://openaipublic.blob.core.windows.net/encodings/`; im Image
+  voreingestellt `AIGW_TOKENIZER__RANKS_DIR=/data/tiktoken`). Jede Datei wird gegen die
   eingebaute SHA-256-Summe geprüft (dieselben Summen wie `expected_hash` in tiktoken);
-  abweichende Dateien werden abgelehnt. `tokenizer.download_ranks: true` (Standard aus) lädt
-  fehlende Dateien einmalig im Hintergrund von dieser Quelle – über den gemeinsamen
-  `OutboundClient` mit den SSRF-Regeln aus `admin.allow_*_upstreams`, ohne Weiterleitungen,
-  höchstens 16 MiB, 120 s –, prüft sie und legt sie atomar im Verzeichnis ab; Neustarts lesen
-  dann nur noch die Dateien. Fehlen die Tabellen (kein `ranks_dir`, Datei fehlt/ungültig,
-  Download gescheitert), zählt `Tokenizer::Bpe` mit der Heuristik `generic` und meldet beim
-  Start eine Warnung; `Tokenizer::is_exact()` ist dann `false`. Prüfung: `scripts/check.sh`
-  baut und testet die Variante ohne Feature (`aigw-tokenizer`, `aigw`).
+  abweichende Dateien werden abgelehnt. Bereitstellen:
+
+  | Weg | Ablauf |
+  |---|---|
+  | `aigw tokenizer fetch [--dir …] [--base-url <spiegel>/]` | lädt fehlende Dateien, prüft, legt sie atomar ab (Init-Container, `docker run … tokenizer fetch`); `aigw tokenizer verify` prüft nur |
+  | `tokenizer.download_ranks: true` (Opt-in, Standard aus) | lädt fehlende Dateien beim Start im Hintergrund; bis dahin Heuristik; ist das Verzeichnis nicht beschreibbar, nur im Speicher |
+  | `scripts/fetch-tokenizers.sh [dir]` | dasselbe mit curl/sha256sum (Entwicklung, CI, ohne Binary) |
+  | eigene Ablage | Dateien selbst in `ranks_dir` legen (Volume, Offline-Spiegel) |
+
+  Downloads laufen über den gemeinsamen `OutboundClient` (`aigw-outbound`) mit den SSRF-Regeln
+  aus `admin.allow_*_upstreams`, ohne Weiterleitungen, höchstens 16 MiB, 120 s. Fehlen die
+  Tabellen (kein `ranks_dir`, Datei fehlt/ungültig, Download gescheitert), zählt
+  `Tokenizer::Bpe` mit der Heuristik `generic` und meldet beim Start eine Warnung;
+  `Tokenizer::is_exact()` ist dann `false`.
+- **Tests ohne Netz:** Format, Prüfsumme, Laden aus dem Verzeichnis, Rückfall und Download
+  laufen mit einer synthetischen Tabelle (256 Einzelbytes + einige Paare, eigene Prüfsumme
+  über `ranks::parse_tiktoken_unverified`/`install_parsed`). Die exakten Vergleiche mit
+  tiktoken (`tests/reference.rs`, Proxy-Test `request_estimate`) brauchen die echten Tabellen
+  in `AIGW_TOKENIZER_RANKS_DIR` und überspringen sich sonst mit Hinweis;
+  `AIGW_TOKENIZER_REQUIRE_RANKS=1` macht daraus einen Fehler. `scripts/check.sh` mit
+  `AIGW_TOKENIZER_RANKS=fetch` (CI) lädt die Tabellen in den Cache und setzt beides.
 
 ## 9. Offene Punkte
 

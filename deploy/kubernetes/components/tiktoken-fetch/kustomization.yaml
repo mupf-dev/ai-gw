@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Optional (AIGW-92): tiktoken-Rangtabellen o200k_base/cl100k_base vor dem Start laden. Das
+# Image enthält sie nicht (Lizenz ungeklärt); ohne Tabellen schätzt ai-gw Tokens (Heuristik).
+# Der Init-Container (gleiches Image) lädt die Dateien von openaipublic.blob.core.windows.net,
+# prüft die SHA-256-Summen und legt sie in /data/tiktoken ab (braucht ausgehendes HTTPS).
+# Aktivieren in der eigenen kustomization.yaml:
+#   resources: [<pfad>/deploy/kubernetes]
+#   components: [<pfad>/deploy/kubernetes/components/tiktoken-fetch]
+#   images: [{name: ai-gw, newName: <registry>/ai-gw, newTag: <version>}]   # gilt auch für den Init-Container
+# Spiegel im internen Netz: args um "--base-url=https://spiegel.example/encodings/" ergänzen
+# (Ziel muss nach admin.allow_*_upstreams erlaubt sein).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - path: init-container.yaml

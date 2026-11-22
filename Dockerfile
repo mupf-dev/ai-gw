@@ -108,6 +108,12 @@ COPY --from=build --chown=65532:65532 /out/data /data
 # Konfigurationspfad für `serve`, `healthcheck` und `config …` (eigene Datei einhängen oder
 # AIGW_CONFIG ändern; einzelne Werte per AIGW_<ABSCHNITT>__<FELD>).
 ENV AIGW_CONFIG=/etc/aigw/aigw.yaml
+# tiktoken-Rangtabellen (o200k_base/cl100k_base) sind NICHT im Image (Lizenz ungeklärt,
+# AIGW-92). Gesucht werden sie im Volume; bereitstellen mit
+#   docker run --rm -v aigw-data:/data ai-gw:dev tokenizer fetch
+# oder Download beim Start erlauben (AIGW_TOKENIZER__DOWNLOAD_RANKS=true). Ohne Tabellen
+# schätzt das Gateway Tokens (Heuristik).
+ENV AIGW_TOKENIZER__RANKS_DIR=/data/tiktoken
 USER 65532:65532
 WORKDIR /data
 VOLUME ["/data"]

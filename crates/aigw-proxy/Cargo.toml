@@ -44,8 +44,6 @@ uuid.workspace = true
 [dev-dependencies]
 # Workload-Tokens (AIGW-115): Test-Aussteller und lokaler JWKS-Server.
 aigw-jwt = { workspace = true, features = ["testkit"] }
-# Tests rechnen mit exakter o200k/cl100k-Zählung (eingebettete Tabellen, AIGW-95).
-aigw-tokenizer = { workspace = true, features = ["embedded-tokenizers"] }
 # Tests gegen postgres-sync (Migration der Wegwerf-Datenbank).
 aigw-store.workspace = true
 aigw-webhook.workspace = true

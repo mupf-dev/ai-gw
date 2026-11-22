@@ -61,9 +61,7 @@ Stufen ([Dockerfile](../../Dockerfile)):
 2. **build** – `rust:1-slim-bookworm`, Toolchain aus `rust-toolchain.toml`,
    `cargo build --release --locked -p aigw` mit `AIGW_UI_DIST` (UI eingebettet). Build-Cache
    für Registry und `target/` je Zielplattform. `--build-arg CARGO_FEATURES=--no-default-features`
-   baut ohne mimalloc (System-Allokator) **und ohne eingebettete tiktoken-Rangtabellen**;
-   nur ohne Tabellen: `--build-arg CARGO_FEATURES="--no-default-features --features mimalloc"`
-   (dann `tokenizer.ranks_dir`, siehe [konfiguration.md](konfiguration.md), AIGW-95).
+   baut ohne mimalloc (System-Allokator).
 3. **Laufzeit** – `gcr.io/distroless/cc-debian12:nonroot`: glibc, libgcc, CA-Zertifikate,
    **keine Shell, kein Paketmanager**, Benutzer `65532:65532`.
 
@@ -78,7 +76,7 @@ Eigenschaften des Images:
 | Healthcheck | `aigw healthcheck` → `GET /readyz` der Steuerebene (Adresse aus der Konfiguration), Intervall 15 s |
 | Root-FS | schreibgeschützt möglich (`--read-only`); geschrieben wird nur unter `/data` |
 | Labels | OCI (`org.opencontainers.image.*`), Lizenz `FSL-1.1-ALv2`, Version/Revision per Build-Arg |
-| Größe | ≈ 26 MB komprimiert (Registry/Download), ≈ 65 MB entpackt (linux/amd64, Stand 0.1.0; arm64 siehe unten): Binary `aigw` 39 MB (UI, Tokenizer-Tabellen [Feature `embedded-tokenizers`, Standard], Migrationen eingebettet) + distroless/cc ≈ 25 MB. `docker images` zeigt mit containerd-Image-Store ≈ 93 MB, weil dort komprimierte und entpackte Schichten zusammen zählen |
+| Größe | ≈ 26 MB komprimiert (Registry/Download), ≈ 65 MB entpackt (linux/amd64, Stand 0.1.0; arm64 siehe unten): Binary `aigw` 39 MB (UI und Migrationen eingebettet; seit AIGW-92 ohne tiktoken-Tabellen, ≈ 2,3 MB weniger) + distroless/cc ≈ 25 MB. `docker images` zeigt mit containerd-Image-Store ≈ 93 MB, weil dort komprimierte und entpackte Schichten zusammen zählen |
 
 ### Mehrere Architekturen (amd64 + arm64)
 
@@ -157,6 +155,26 @@ docker exec aigw aigw config check                      # Startkonfiguration pr�
 docker run --rm -v "$PWD":/w:ro ai-gw:dev config validate /w/resources.yaml
 ```
 
+### Tokenizer-Tabellen (tiktoken) bereitstellen
+
+Das Image enthält die BPE-Rangtabellen `o200k_base`/`cl100k_base` von OpenAI **nicht**
+(Lizenz ungeklärt, AIGW-92). Ohne sie schätzt ai-gw Tokens für GPT-Modelle (Heuristik,
+Warnung beim Start) – Limits und Budgets funktionieren, die Reservierung ist nur ungenauer.
+Für exakte Zählung die Dateien einmalig ins Volume laden (Ziel `/data/tiktoken`, im Image
+voreingestellt per `AIGW_TOKENIZER__RANKS_DIR`):
+
+```sh
+docker run --rm -v aigw-data:/data ai-gw:dev tokenizer fetch    # lädt + prüft SHA-256
+docker run --rm -v aigw-data:/data ai-gw:dev tokenizer verify   # nur prüfen
+```
+
+Alternativ beim Start laden lassen (Opt-in, braucht ausgehendes HTTPS zu
+`openaipublic.blob.core.windows.net`): `-e AIGW_TOKENIZER__DOWNLOAD_RANKS=true`. Für Umgebungen
+ohne Internet die Dateien aus einem eigenen Spiegel holen
+(`tokenizer fetch --base-url https://spiegel.example/encodings/`, Prüfsummen bleiben die
+offiziellen) oder selbst in das Volume legen. Wer ein Image mit Tabellen braucht, leitet es
+selbst ab (`COPY *.tiktoken /data/tiktoken/`) – die Lizenzfrage liegt dann beim Betreiber.
+
 ## 2. Docker Compose
 
 Unter [`deploy/compose/`](../../deploy/compose/):
@@ -183,6 +201,9 @@ AIGW_OTLP_ENDPOINT=http://otel-collector:4318 docker compose --profile otel up -
 Der Container läuft schreibgeschützt (`read_only: true`), ohne Capabilities und mit
 `no-new-privileges`. Geheimnisse: Master-Key als Docker-Secret (Datei), DB-Passwort über
 `.env` → `AIGW_STORE__URL`; `.env` und `secrets/` sind per `.gitignore` ausgeschlossen.
+
+Tokenizer-Tabellen (siehe §1): einmalig `docker compose run --rm aigw tokenizer fetch` (landen
+im Volume `aigw-data`) oder `AIGW_TOKENIZER_DOWNLOAD=true` in `.env` (Download beim Start).
 
 ## 3. Kubernetes
 
@@ -211,6 +232,19 @@ auch in CI). Mit erreichbarem Cluster zusätzlich `KUBE_SERVER_DRY_RUN=1 scripts
 (`kubectl apply --dry-run=server`). `kubectl apply --dry-run=client` braucht ebenfalls einen
 erreichbaren API-Server (Discovery). Das Image ist Multi-Arch-fähig; gemischte Knotenpools
 amd64/arm64 brauchen ein Multi-Arch-Manifest (`PUSH=… scripts/build-images.sh`).
+
+Tokenizer-Tabellen (siehe §1): Die optionale kustomize-Komponente
+[`components/tiktoken-fetch`](../../deploy/kubernetes/components/tiktoken-fetch/) fügt einen
+Init-Container (`aigw tokenizer fetch --dir /data/tiktoken`, gleiches Image) hinzu; er braucht
+ausgehendes HTTPS (bzw. `--base-url` eines internen Spiegels). Ohne die Komponente zählt ai-gw
+mit der Heuristik. Alternativ ein Volume mit den Dateien unter `/data/tiktoken` einhängen.
+
+```yaml
+# eigene kustomization.yaml
+resources: [github.com/mupf-dev/ai-gw/deploy/kubernetes?ref=<version>]
+components: [github.com/mupf-dev/ai-gw/deploy/kubernetes/components/tiktoken-fetch?ref=<version>]
+images: [{name: ai-gw, newName: <registry>/ai-gw, newTag: <version>}]
+```
 
 Ingress/Gateway-API, NetworkPolicies und Ressourcengrenzen an die eigene Umgebung anpassen;
 die Steuerebene nicht öffentlich veröffentlichen.

@@ -54,8 +54,8 @@ impl Tokenizers {
         }
     }
 
-    /// Lädt die eingebetteten BPE-Tabellen im Hintergrund vor (erste Anfrage ohne ≈ 20 ms
-    /// Ladezeit).
+    /// Greift einmal auf die BPE-Tabellen zu (zur Laufzeit installiert, AIGW-95/92), damit die
+    /// erste Anfrage keine Initialisierung bezahlt.
     pub(crate) fn warm_up() {
         let _ = std::thread::Builder::new()
             .name("aigw-tokenizer-warmup".into())
@@ -274,6 +274,10 @@ mod tests {
 
     #[test]
     fn request_estimate() {
+        // Exakte o200k-Zählung nur mit den echten Tabellen (AIGW-92: nicht im Repo).
+        if !aigw_tokenizer::ranks::tables_for_test("request_estimate") {
+            return;
+        }
         let tok = Tokenizer::Bpe(aigw_tokenizer::Encoding::O200kBase);
         let req = ChatRequest {
             model: "m".into(),

@@ -1,33 +1,29 @@
 // SPDX-FileCopyrightText: 2026 mupf-dev
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-//! Gemeinsame Hilfen der Integrationstests: `*.tiktoken`-Dateien aus den Tabellen in `data/`
-//! zurückgewinnen (byte-genau, die SHA-256-Summe stimmt) und für Builds ohne
-//! `embedded-tokenizers` zur Laufzeit installieren.
+//! Gemeinsame Hilfen der Integrationstests.
+//!
+//! Die echten Rangtabellen von OpenAI liegen nicht im Repository (AIGW-92). Tests, die sie
+//! brauchen, laden sie aus `$AIGW_TOKENIZER_RANKS_DIR` (`scripts/fetch-tokenizers.sh`) und
+//! überspringen sich sonst ([`real_tables`]). Alles andere läuft offline mit einer kleinen
+//! synthetischen Tabelle im tiktoken-Format ([`synthetic_tiktoken`]).
 
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
 
-use std::path::Path;
-use std::sync::Once;
-
-use aigw_tokenizer::{Encoding, ranks};
+use aigw_tokenizer::ranks;
 use base64::Engine as _;
 
-/// Originaldatei `<name>.tiktoken` aus `data/<name>.bin`.
-pub(crate) fn tiktoken_file(e: Encoding) -> Vec<u8> {
-    let bin = std::fs::read(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("data")
-            .join(format!("{}.bin", e.name())),
-    )
-    .unwrap();
-    let n = u32::from_le_bytes(bin[4..8].try_into().unwrap());
-    let mut rest = &bin[8..];
-    let mut out = Vec::with_capacity(bin.len() * 2);
-    for rank in 0..n {
-        let len = usize::from(rest[0]);
-        let tok = &rest[1..=len];
-        rest = &rest[len + 1..];
+/// Zusätzliche Tokens der synthetischen Tabelle nach den 256 Einzelbytes (Rang 256, 257, …).
+pub(crate) const SYNTHETIC_MERGES: [&str; 6] = ["he", "ll", "hell", "hello", " w", " wo"];
+
+/// Synthetische `*.tiktoken`-Datei: alle 256 Einzelbytes (Rang = Bytewert), danach
+/// [`SYNTHETIC_MERGES`].
+pub(crate) fn synthetic_tiktoken() -> Vec<u8> {
+    let mut out = Vec::new();
+    let tokens = (0..=255u8)
+        .map(|b| vec![b])
+        .chain(SYNTHETIC_MERGES.iter().map(|t| t.as_bytes().to_vec()));
+    for (rank, tok) in tokens.enumerate() {
         out.extend_from_slice(
             base64::engine::general_purpose::STANDARD
                 .encode(tok)
@@ -35,16 +31,10 @@ pub(crate) fn tiktoken_file(e: Encoding) -> Vec<u8> {
         );
         out.extend_from_slice(format!(" {rank}\n").as_bytes());
     }
-    assert!(rest.is_empty());
     out
 }
 
-/// Stellt sicher, dass beide Tabellen verfügbar sind (eingebettet oder zur Laufzeit geladen).
-pub(crate) fn ensure_tables() {
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
-        for e in Encoding::ALL {
-            ranks::install_tiktoken(e, &tiktoken_file(e)).unwrap();
-        }
-    });
+/// `true`, wenn die echten Tabellen installiert sind (sonst Test überspringen).
+pub(crate) fn real_tables(test: &str) -> bool {
+    ranks::tables_for_test(test)
 }

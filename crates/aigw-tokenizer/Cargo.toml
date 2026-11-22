@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: FSL-1.1-ALv2
 [package]
 name = "aigw-tokenizer"
-description = "Token-Zählung von ai-gw: eigene BPE für o200k_base/cl100k_base (Tabellen eingebettet oder zur Laufzeit geladen), HF-tokenizer.json (BPE/Unigram) und Heuristik mit Sprachfaktor"
+description = "Token-Zählung von ai-gw: eigene BPE für o200k_base/cl100k_base (Tabellen zur Laufzeit geladen), HF-tokenizer.json (BPE/Unigram) und Heuristik mit Sprachfaktor"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,16 +10,9 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 publish.workspace = true
-# Rangtabellen von OpenAI (siehe data/*.license und THIRD-PARTY.md) liegen im Crate; in das
-# Binary gehen sie nur mit dem Feature `embedded-tokenizers` ein.
-include = ["src/**", "data/**", "Cargo.toml"]
-
-[features]
-default = ["embedded-tokenizers"]
-# Rangtabellen o200k_base/cl100k_base in das Binary einbetten (AIGW-95). Ohne dieses Feature
-# lädt der Betreiber die `*.tiktoken`-Dateien zur Laufzeit (`tokenizer.ranks_dir`), sonst gilt
-# die Heuristik.
-embedded-tokenizers = []
+# Die Rangtabellen von OpenAI liegen NICHT im Crate (Lizenz ungeklärt, AIGW-92); sie werden
+# zur Laufzeit geladen (`tokenizer.ranks_dir`, `aigw tokenizer fetch`).
+include = ["src/**", "Cargo.toml"]
 
 [dependencies]
 # SHA-256 der zur Laufzeit geladenen `*.tiktoken` (gleiche Krypto-Bibliothek wie TLS/Keyring).
@@ -39,7 +32,6 @@ divan.workspace = true
 [[bench]]
 name = "count"
 harness = false
-required-features = ["embedded-tokenizers"]
 
 [lints]
 workspace = true

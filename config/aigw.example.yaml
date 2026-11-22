@@ -214,10 +214,10 @@ limits:
   # x-ratelimit-* bzw. anthropic-ratelimit-* auch bei Erfolg (bei 429 immer)
   response_headers: true
 
-# Rangtabellen o200k_base/cl100k_base (AIGW-95): nur für Builds ohne Cargo-Feature
-# embedded-tokenizers (Standard-Builds und Images enthalten sie). Dateien wie bei tiktoken
-# (cl100k_base.tiktoken, o200k_base.tiktoken), SHA-256 wird geprüft; fehlen sie, gilt die
-# Heuristik (Warnung beim Start).
+# Rangtabellen o200k_base/cl100k_base (AIGW-95/92): NICHT im Binary/Image enthalten (Lizenz
+# ungeklärt). Dateien wie bei tiktoken (cl100k_base.tiktoken, o200k_base.tiktoken), SHA-256
+# wird geprüft; bereitstellen mit `aigw tokenizer fetch --dir <ranks_dir>`. Fehlen sie, gilt die
+# Heuristik (Warnung beim Start). Im Container-Image: /data/tiktoken.
 tokenizer:
   # ranks_dir: /var/lib/aigw/tiktoken
   # Fehlende Dateien einmalig von openaipublic.blob.core.windows.net laden (Standard aus)

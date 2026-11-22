@@ -323,6 +323,17 @@ Vorabständen):
 - **Lizenz:** Der Code steht jetzt unter FSL-1.1-ALv2 (Functional Source License, nach zwei Jahren
   je Version Apache-2.0) statt unter AGPL-3.0-or-later. Plugin-Schnittstelle (WIT) und
   Beispiel-Plugins stehen unter Apache-2.0, Rechteinhaber ist mupf-dev. Frühere Stände bleiben unter AGPL.
+- **tiktoken-Rangtabellen nicht mehr enthalten (AIGW-92, inkompatibel):** Die Tabellen
+  `o200k_base`/`cl100k_base` von OpenAI (Lizenz ungeklärt) liegen nicht mehr im Repository,
+  Binary oder Image; Cargo-Feature `embedded-tokenizers` und `LICENSES/MIT.txt` entfallen.
+  ai-gw lädt sie aus `tokenizer.ranks_dir` (Image: `/data/tiktoken`); neu
+  `aigw tokenizer fetch|verify` (Download/Prüfung mit SHA-256 über `aigw-outbound`, Spiegel per
+  `--base-url`), `scripts/fetch-tokenizers.sh`, kustomize-Komponente
+  `deploy/kubernetes/components/tiktoken-fetch` (Init-Container), Compose-Schalter
+  `AIGW_TOKENIZER_DOWNLOAD`. Ohne Tabellen schätzt die Heuristik (wie bisher bei fehlenden
+  Dateien). `tokenizer.download_ranks` installiert die Tabelle auch, wenn das Verzeichnis nicht
+  beschreibbar ist. Tests laufen offline (synthetische Tabelle); exakte Referenztests mit
+  `AIGW_TOKENIZER_RANKS_DIR` bzw. `check.sh` mit `AIGW_TOKENIZER_RANKS=fetch` (CI).
 - **Admin-Cookies `__Host-` (S-23, AIGW-99, inkompatibel):** Session- und Login-Cookie heißen
   `__Host-aigw-session` bzw. `__Host-aigw-login` (`Path=/`, ohne `Domain`) – Schwester-
   Subdomains können sie nicht mehr setzen (Login-CSRF/Session-Fixierung). Alte

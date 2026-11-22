@@ -4,7 +4,9 @@
 //! Genauigkeit gegen Referenzzählungen (Fixtures aus `tools/gen_fixtures.py`):
 //!
 //! - `tiktoken.jsonl`: Token-IDs von tiktoken 0.14 für cl100k_base und o200k_base (Sprachen,
-//!   Code, CJK, Emojis, Sonderfälle, 400 Zufallstexte) – müssen exakt übereinstimmen.
+//!   Code, CJK, Emojis, Sonderfälle, 400 Zufallstexte) – müssen exakt übereinstimmen. Braucht
+//!   die echten Tabellen in `$AIGW_TOKENIZER_RANKS_DIR` (`scripts/fetch-tokenizers.sh`), sonst
+//!   übersprungen (`AIGW_TOKENIZER_REQUIRE_RANKS=1` macht daraus einen Fehler).
 //! - `hf.jsonl`: Token-Anzahl laut Hugging Face `tokenizers` 0.23 für hier trainierte
 //!   `tokenizer.json` (Byte-Level-BPE mit Llama-3-/Tekken-/GPT-2-Muster, SentencePiece-BPE mit
 //!   byte_fallback, Metaspace-BPE, Unigram).
@@ -50,7 +52,9 @@ fn ids(v: &Value) -> Vec<u32> {
 
 #[test]
 fn tiktoken_reference_ids() {
-    common::ensure_tables();
+    if !common::real_tables("tiktoken_reference_ids") {
+        return;
+    }
     let rows = rows("tiktoken.jsonl");
     assert!(rows.len() > 400);
     for enc in Encoding::ALL {
@@ -65,8 +69,22 @@ fn tiktoken_reference_ids() {
 }
 
 #[test]
+fn real_tables_match_tiktoken_files() {
+    if !common::real_tables("real_tables_match_tiktoken_files") {
+        return;
+    }
+    let cl = Encoding::Cl100kBase.load().unwrap();
+    assert_eq!(cl.vocab_size(), 100_256);
+    assert_eq!(cl.encode("Hello, world!"), [9906, 11, 1917, 0]);
+    assert_eq!(Encoding::O200kBase.load().unwrap().vocab_size(), 199_998);
+    assert_eq!(Encoding::O200kBase.count("Hello, world!"), 4);
+}
+
+#[test]
 fn long_pieces_use_heap_path_correctly() {
-    common::ensure_tables();
+    if !common::real_tables("long_pieces_use_heap_path_correctly") {
+        return;
+    }
     // Lange Stücke ohne Leerzeichen (CJK, Wiederholungen) laufen über den Heap-Pfad; die
     // Zählung muss mit der Summe kürzerer Referenzen konsistent und plausibel sein.
     let bpe = Encoding::O200kBase.load().unwrap();
@@ -135,7 +153,9 @@ fn hf_real_tokenizers() {
 
 #[test]
 fn heuristic_close_to_bpe_for_prose_and_code() {
-    common::ensure_tables();
+    if !common::real_tables("heuristic_close_to_bpe_for_prose_and_code") {
+        return;
+    }
     // Die Heuristik `generic` liegt für Prosa (EN/DE) und Code nahe an o200k_base.
     let samples = [
         "The quick brown fox jumps over the lazy dog. It was a sunny day and everyone was \

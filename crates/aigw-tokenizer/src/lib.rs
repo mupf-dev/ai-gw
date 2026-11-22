@@ -6,11 +6,10 @@
 //! Eigenentwicklung ohne fremde Tokenizer-Bibliothek:
 //!
 //! - **OpenAI** `o200k_base` (GPT-4o, GPT-4.1, GPT-5, o-Serie) und `cl100k_base` (GPT-4,
-//!   GPT-3.5, Embeddings v3): exakte BPE wie tiktoken. Die Rangtabellen sind mit dem Feature
-//!   `embedded-tokenizers` (Standard) im Binärformat eingebettet (`data/*.bin`, aus den von
-//!   OpenAI veröffentlichten `*.tiktoken`); ohne das Feature werden die Originaldateien zur
-//!   Laufzeit geladen und per SHA-256 geprüft ([`ranks`], AIGW-95) – fehlen sie, zählt die
-//!   Heuristik. Der Pre-Tokenizer ist als Zustandsautomat nachgebaut ([`Encoding`]).
+//!   GPT-3.5, Embeddings v3): exakte BPE wie tiktoken. Die Rangtabellen (von OpenAI
+//!   veröffentlichte `*.tiktoken`) sind nicht enthalten, sondern werden zur Laufzeit geladen
+//!   und per SHA-256 geprüft ([`ranks`], AIGW-95/AIGW-92) – fehlen sie, zählt die Heuristik.
+//!   Der Pre-Tokenizer ist als Zustandsautomat nachgebaut ([`Encoding`]).
 //! - **Hugging Face** `tokenizer.json` (Llama 3, Mistral, …): BPE und Unigram, soweit diese
 //!   Modelle sie brauchen ([`HfTokenizer`]); Datei je Modellgruppe (`settings.tokenizer:
 //!   hf:<datei>`).
@@ -34,8 +33,6 @@ mod unicode;
 
 use std::fmt;
 use std::sync::Arc;
-#[cfg(feature = "embedded-tokenizers")]
-use std::sync::OnceLock;
 
 pub use bpe::TableError;
 pub use heuristic::{Language, Profile};
@@ -45,12 +42,7 @@ pub use ranks::{DirOutcome, RanksError};
 use bpe::Ranks;
 use pretok::{Pattern, Pieces};
 
-#[cfg(feature = "embedded-tokenizers")]
-static CL100K_BLOB: &[u8] = include_bytes!("../data/cl100k_base.bin");
-#[cfg(feature = "embedded-tokenizers")]
-static O200K_BLOB: &[u8] = include_bytes!("../data/o200k_base.bin");
-
-/// BPE-Kodierung von OpenAI (Tabelle eingebettet oder zur Laufzeit geladen).
+/// BPE-Kodierung von OpenAI (Tabelle zur Laufzeit geladen).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Encoding {
     /// `cl100k_base` (GPT-4, GPT-3.5-Turbo, text-embedding-3-*, ada-002).
@@ -117,32 +109,11 @@ impl Encoding {
         }
     }
 
-    /// Geladene Tabelle (beim ersten Zugriff aus den eingebetteten Daten, ≈ 10–30 ms).
-    #[cfg(feature = "embedded-tokenizers")]
-    pub fn load(self) -> Result<&'static CoreBpe, &'static TableError> {
-        static CL: OnceLock<Result<CoreBpe, TableError>> = OnceLock::new();
-        static O2: OnceLock<Result<CoreBpe, TableError>> = OnceLock::new();
-        let (cell, blob) = match self {
-            Self::Cl100kBase => (&CL, CL100K_BLOB),
-            Self::O200kBase => (&O2, O200K_BLOB),
-        };
-        cell.get_or_init(|| {
-            unicode::warm_up();
-            Ranks::from_blob(blob).map(|ranks| CoreBpe {
-                ranks,
-                pattern: self.pattern(),
-            })
-        })
-        .as_ref()
-    }
-
     /// Zur Laufzeit installierte Tabelle ([`ranks::install_from_dir`],
     /// [`ranks::install_tiktoken`]); ohne Installation ein Fehler.
-    #[cfg(not(feature = "embedded-tokenizers"))]
     pub fn load(self) -> Result<&'static CoreBpe, &'static TableError> {
-        static NOT_LOADED: TableError = TableError(
-            "nicht geladen (Build ohne embedded-tokenizers, tokenizer.ranks_dir fehlt/unvollständig)",
-        );
+        static NOT_LOADED: TableError =
+            TableError("nicht geladen (tokenizer.ranks_dir fehlt bzw. unvollständig)");
         ranks::installed(self).get().ok_or(&NOT_LOADED)
     }
 
@@ -377,13 +348,5 @@ mod tests {
             "heuristic:generic"
         );
         assert_eq!(name(Some("mock"), "mock"), "heuristic:generic");
-    }
-
-    #[cfg(feature = "embedded-tokenizers")]
-    #[test]
-    fn tables_load() {
-        assert_eq!(Encoding::Cl100kBase.load().unwrap().vocab_size(), 100_256);
-        assert_eq!(Encoding::O200kBase.load().unwrap().vocab_size(), 199_998);
-        assert_eq!(Encoding::O200kBase.count("Hello, world!"), 4);
     }
 }

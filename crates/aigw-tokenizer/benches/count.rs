@@ -3,15 +3,23 @@
 
 //! Durchsatz der Token-Zählung: typischer Prompt mit 4 KB (Ziel: < 50 µs) bzw. 64 KB, gemischt
 //! Englisch/Deutsch/Code; dazu 4 KB CJK (lange Stücke) und die Heuristik.
+//!
+//! Die echten Tabellen kommen aus `$AIGW_TOKENIZER_RANKS_DIR` (`scripts/fetch-tokenizers.sh`,
+//! AIGW-92); ohne sie messen die BPE-Fälle nur die Heuristik (Warnung).
 
-#![allow(missing_docs)]
+#![allow(missing_docs, clippy::print_stderr)]
 
-use aigw_tokenizer::{Encoding, Profile, heuristic};
+use aigw_tokenizer::{Encoding, Profile, heuristic, ranks};
 
 fn main() {
     // Tabellen vorab laden (nicht Teil der Messung).
-    for e in Encoding::ALL {
-        let _ = e.load();
+    match ranks::install_from_env() {
+        Ok(true) => {}
+        Ok(false) => eprintln!(
+            "WARNUNG: {} nicht gesetzt – o200k/cl100k messen nur die Heuristik",
+            ranks::TEST_DIR_ENV
+        ),
+        Err(e) => eprintln!("WARNUNG: {e} – o200k/cl100k messen nur die Heuristik"),
     }
     divan::main();
 }

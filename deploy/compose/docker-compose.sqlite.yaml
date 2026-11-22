@@ -15,6 +15,10 @@ services:
     environment:
       AIGW_SECRETS__MASTER_KEY_FILE: /run/secrets/aigw-master-key
       AIGW_BOOTSTRAP_TOKEN: ${AIGW_BOOTSTRAP_TOKEN:-}
+      # tiktoken-Rangtabellen (nicht im Image, AIGW-92) liegen im Volume unter /data/tiktoken:
+      # einmalig `docker compose run --rm aigw tokenizer fetch` oder Download beim Start
+      # erlauben (AIGW_TOKENIZER_DOWNLOAD=true in .env); sonst Token-Schätzung (Heuristik).
+      AIGW_TOKENIZER__DOWNLOAD_RANKS: ${AIGW_TOKENIZER_DOWNLOAD:-false}
     secrets:
       - aigw-master-key
     volumes:

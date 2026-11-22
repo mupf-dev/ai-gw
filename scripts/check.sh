@@ -27,6 +27,11 @@
 #                      AIGW_TEST_OTELCOL_URL und AIGW_TEST_OTELCOL_DIR (Test aigw-observe/tests/otelcol.rs)
 #   AIGW_TEST_OTELCOL_URL=http://…, AIGW_TEST_OTELCOL_DIR=…   eigener Collector (OTLP/HTTP) mit
 #                      file-Exportern nach $DIR/traces.json und $DIR/logs.json
+#   AIGW_TOKENIZER_RANKS=fetch   tiktoken-Rangtabellen (nicht im Repo, AIGW-92) per
+#                      scripts/fetch-tokenizers.sh laden (Cache ~/.cache/aigw/tiktoken) und die
+#                      exakten Referenztests zur Pflicht machen (CI). Ohne: Tests laufen offline,
+#                      die Vergleiche mit den echten Tabellen werden übersprungen.
+#   AIGW_TOKENIZER_RANKS_DIR=…   Verzeichnis mit den Tabellen (statt Download); Referenztests Pflicht
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -136,15 +141,20 @@ YAML
   export AIGW_TEST_OTELCOL_DIR="$OTELCOL_DIR"
 fi
 
+if [[ "${AIGW_TOKENIZER_RANKS:-}" == fetch && -z "${AIGW_TOKENIZER_RANKS_DIR:-}" ]]; then
+  step "tiktoken-Rangtabellen laden (AIGW-92)"
+  AIGW_TOKENIZER_RANKS_DIR=$(scripts/fetch-tokenizers.sh)
+  export AIGW_TOKENIZER_RANKS_DIR
+fi
+if [[ -n "${AIGW_TOKENIZER_RANKS_DIR:-}" ]]; then
+  export AIGW_TOKENIZER_REQUIRE_RANKS=1
+else
+  echo "Hinweis: ohne tiktoken-Rangtabellen – exakte BPE-Referenztests werden übersprungen" \
+    "(AIGW_TOKENIZER_RANKS=fetch)"
+fi
+
 step "cargo test${AIGW_TEST_POSTGRES_URL:+ (inkl. Postgres)}${AIGW_TEST_PGVECTOR_URL:+ (inkl. pgvector)}${AIGW_TEST_REDIS_URL:+ (inkl. Redis)}${AIGW_TEST_REDIS_STACK_URL:+ (inkl. Redis Stack)}${AIGW_TEST_OTELCOL_URL:+ (inkl. OTel-Collector)}"
 cargo test --workspace "${LOCKED[@]}"
-
-# Build ohne eingebettete tiktoken-Rangtabellen (AIGW-95): Laden zur Laufzeit bzw. Heuristik.
-step "Variante ohne embedded-tokenizers: clippy + Tests (aigw-tokenizer, aigw)"
-cargo clippy -p aigw-tokenizer -p aigw --no-default-features --features aigw/mimalloc \
-  --all-targets "${LOCKED[@]}" -- -D warnings
-cargo test -p aigw-tokenizer --no-default-features "${LOCKED[@]}"
-cargo test -p aigw --no-default-features --features mimalloc "${LOCKED[@]}" -- tokenizer::
 
 step "cargo deny check"
 if cargo deny --version >/dev/null 2>&1; then

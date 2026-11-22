@@ -55,8 +55,7 @@ aigw-plugins = { path = "crates/aigw-plugins" }
 aigw-providers = { path = "crates/aigw-providers" }
 aigw-proxy = { path = "crates/aigw-proxy" }
 aigw-store = { path = "crates/aigw-store" }
-# Ohne Standard-Features: Einbetten der Rangtabellen steuert das Binary (Feature embedded-tokenizers).
-aigw-tokenizer = { path = "crates/aigw-tokenizer", default-features = false }
+aigw-tokenizer = { path = "crates/aigw-tokenizer" }
 aigw-wasm = { path = "crates/aigw-wasm" }
 aigw-webhook = { path = "crates/aigw-webhook" }
 

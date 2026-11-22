@@ -70,6 +70,20 @@ kubeconform -strict -summary -kubernetes-version "$KUBE_VERSION" -cache "$BIN" -
 grep -Eq 'Summary: [1-9][0-9]* resources? found.*Invalid: 0, Errors: 0, Skipped: 0' "$OUT.sum"
 # Bild-Referenz aus kustomization.yaml übernommen?
 grep -q 'image: registry.example.org/ai-gw:' "$OUT"
+# Optionale Komponente tiktoken-fetch (AIGW-92): Grundgerüst + Init-Container.
+COMP=$(mktemp -d)
+trap 'rm -rf "$OUT" "$OUT.sum" "$COMP"' EXIT
+cat >"$COMP/kustomization.yaml" <<YAML
+resources: [$PWD/deploy/kubernetes]
+components: [$PWD/deploy/kubernetes/components/tiktoken-fetch]
+images: [{name: ai-gw, newName: registry.example.org/ai-gw, newTag: 0.1.0}]
+YAML
+echo "--- Komponente tiktoken-fetch"
+kubectl kustomize --load-restrictor LoadRestrictionsNone "$COMP" >"$COMP/out.yaml"
+grep -q 'name: tiktoken-fetch' "$COMP/out.yaml"
+# Bild-Referenz auch im Init-Container (images: der eigenen kustomization.yaml)
+[[ $(grep -c 'image: registry.example.org/ai-gw:' "$COMP/out.yaml") == 2 ]]
+kubeconform -strict -summary -kubernetes-version "$KUBE_VERSION" -cache "$BIN" - <"$COMP/out.yaml"
 if [[ "${KUBE_SERVER_DRY_RUN:-0}" == 1 ]]; then
   echo "--- kubectl apply --dry-run=server"
   kubectl apply --dry-run=server -f "$OUT"

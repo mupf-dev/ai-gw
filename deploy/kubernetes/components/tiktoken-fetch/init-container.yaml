@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aigw
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: tiktoken-fetch
+          image: ai-gw
+          args: ["tokenizer", "fetch", "--dir", "/data/tiktoken"]
+          env:
+            - {name: AIGW_CONFIG, value: /etc/aigw/aigw.yaml}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/aigw, readOnly: true}
+            - {name: data, mountPath: /data}

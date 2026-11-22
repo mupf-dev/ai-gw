@@ -51,7 +51,7 @@ pub struct Config {
     pub admin: AdminConfig,
     /// Limits je Key/Team/Organisation/Modellgruppe (AIGW-30).
     pub limits: LimitsConfig,
-    /// BPE-Rangtabellen von OpenAI zur Laufzeit (Build ohne `embedded-tokenizers`, AIGW-95).
+    /// BPE-Rangtabellen von OpenAI zur Laufzeit (AIGW-95, AIGW-92).
     pub tokenizer: TokenizerConfig,
     /// Kosten und Budgets (AIGW-31).
     pub billing: BillingConfig,
@@ -765,8 +765,9 @@ impl Default for LimitsConfig {
 /// Rangtabellen der OpenAI-Kodierungen `o200k_base`/`cl100k_base` (AIGW-95,
 /// `docs/konzept/11-limits-und-budgets.md` §9).
 ///
-/// Nur wirksam in einem Build **ohne** Cargo-Feature `embedded-tokenizers` (Standard-Builds
-/// enthalten die Tabellen). Fehlen die Tabellen, schätzt das Gateway Tokens mit der Heuristik
+/// ai-gw liefert die Tabellen nicht mit (Lizenz ungeklärt, AIGW-92): Der Betreiber legt sie in
+/// `ranks_dir` ab (`aigw tokenizer fetch`) oder erlaubt den Download beim Start
+/// (`download_ranks`). Fehlen die Tabellen, schätzt das Gateway Tokens mit der Heuristik
 /// (Warnung beim Start).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]

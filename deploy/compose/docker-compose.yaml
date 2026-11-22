@@ -34,6 +34,10 @@ services:
       AIGW_OBSERVE__OTLP__ENDPOINT: ${AIGW_OTLP_ENDPOINT:-}
       AIGW_BOOTSTRAP_TOKEN: ${AIGW_BOOTSTRAP_TOKEN:-}
       AIGW_LOG: ${AIGW_LOG:-info}
+      # tiktoken-Rangtabellen (nicht im Image, AIGW-92) liegen im Volume unter /data/tiktoken:
+      # einmalig `docker compose run --rm aigw tokenizer fetch` oder Download beim Start
+      # erlauben (AIGW_TOKENIZER_DOWNLOAD=true in .env); sonst Token-Schätzung (Heuristik).
+      AIGW_TOKENIZER__DOWNLOAD_RANKS: ${AIGW_TOKENIZER_DOWNLOAD:-false}
     secrets:
       - aigw-master-key
     volumes:

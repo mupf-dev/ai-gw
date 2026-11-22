@@ -54,6 +54,7 @@ jobs:
             ~/.cargo/bin
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cache/aigw/tiktoken
             target
           key: ci-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -68,7 +69,8 @@ jobs:
         run: |
           . "$HOME/.cargo/env"
           export PATH="$HOME/.local/bin:$PATH"
-          scripts/check.sh
+          # tiktoken-Rangtabellen laden (nicht im Repo, AIGW-92) → exakte Referenztests Pflicht.
+          AIGW_TOKENIZER_RANKS=fetch scripts/check.sh
       # Lizenzübersicht (AIGW-91): THIRD-PARTY.md muss zu Cargo.lock und pnpm-lock.yaml passen
       # (ui/node_modules hat check.sh installiert). Zulässige Lizenzen prüft cargo-deny oben.
       - name: Drittanbieter-Lizenzen (THIRD-PARTY.md aktuell?)

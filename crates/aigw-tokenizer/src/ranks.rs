@@ -1,14 +1,18 @@
 // SPDX-FileCopyrightText: 2026 mupf-dev
 // SPDX-License-Identifier: FSL-1.1-ALv2
 
-//! Rangtabellen der OpenAI-Kodierungen zur Laufzeit (AIGW-95).
+//! Rangtabellen der OpenAI-Kodierungen zur Laufzeit (AIGW-95, AIGW-92).
 //!
-//! Standard-Builds betten die Tabellen ein (Feature `embedded-tokenizers`). Ohne das Feature
-//! liefert der Betreiber die Originaldateien von OpenAI (`cl100k_base.tiktoken`,
-//! `o200k_base.tiktoken` – dieselben Dateien, die tiktoken lädt) in einem Verzeichnis
-//! ([`install_from_dir`]) oder lädt sie einmalig herunter ([`Encoding::source_url`],
-//! [`install_tiktoken`]). Jede Datei wird vor der Verwendung gegen die eingebaute SHA-256-Summe
-//! geprüft; eine veränderte oder andere Datei wird abgelehnt.
+//! ai-gw enthält die Tabellen nicht (weder im Repository noch im Binary oder Image; ihre
+//! Lizenz ist nicht eindeutig geklärt). Der Betreiber liefert die Originaldateien von OpenAI
+//! (`cl100k_base.tiktoken`, `o200k_base.tiktoken` – dieselben Dateien, die tiktoken lädt) in
+//! einem Verzeichnis ([`install_from_dir`]) oder lädt sie herunter ([`Encoding::source_url`],
+//! [`install_tiktoken`], `aigw tokenizer fetch`). Jede Datei wird vor der Verwendung gegen die
+//! eingebaute SHA-256-Summe geprüft; eine veränderte oder andere Datei wird abgelehnt. Ohne
+//! Tabellen zählt die Heuristik.
+//!
+//! Tests mit den echten Tabellen lesen sie aus `$AIGW_TOKENIZER_RANKS_DIR`
+//! ([`install_from_env`]) und werden ohne die Variable übersprungen.
 //!
 //! Format einer `*.tiktoken`-Datei: je Zeile `<Base64 des Tokens> <Rang>\n`, Ränge lückenlos
 //! aufsteigend ab 0.
@@ -24,8 +28,10 @@ use crate::{CoreBpe, Encoding};
 /// Basis-URL der offiziellen Quelle (wie in `tiktoken_ext/openai_public.py`).
 pub const SOURCE_BASE_URL: &str = "https://openaipublic.blob.core.windows.net/encodings/";
 
-/// `true`, wenn dieser Build die Tabellen eingebettet hat (Feature `embedded-tokenizers`).
-pub const EMBEDDED: bool = cfg!(feature = "embedded-tokenizers");
+/// Umgebungsvariable mit dem Verzeichnis der echten Tabellen für Tests ([`install_from_env`]).
+pub const TEST_DIR_ENV: &str = "AIGW_TOKENIZER_RANKS_DIR";
+/// Ist diese Variable `1`, schlagen Tests ohne Tabellen fehl statt übersprungen zu werden.
+pub const TEST_REQUIRE_ENV: &str = "AIGW_TOKENIZER_REQUIRE_RANKS";
 
 /// Fehler beim Laden einer `*.tiktoken`-Datei.
 #[derive(Debug, thiserror::Error)]
@@ -71,8 +77,6 @@ pub enum RanksError {
 /// Ergebnis von [`install_from_dir`] je Kodierung.
 #[derive(Debug)]
 pub enum DirOutcome {
-    /// Tabelle ist eingebettet; das Verzeichnis wurde nicht gelesen.
-    Embedded,
     /// Aus dem Verzeichnis geladen (oder bereits zuvor installiert).
     Installed,
     /// Datei fehlt.
@@ -104,14 +108,14 @@ impl Encoding {
         format!("{SOURCE_BASE_URL}{}", self.file_name())
     }
 
-    /// `true`, wenn die Tabelle eingebettet oder zur Laufzeit installiert ist (sonst zählt
-    /// [`Encoding::count`] mit der Heuristik).
+    /// `true`, wenn die Tabelle zur Laufzeit installiert ist (sonst zählt [`Encoding::count`]
+    /// mit der Heuristik).
     pub fn is_available(self) -> bool {
         self.load().is_ok()
     }
 }
 
-/// Zur Laufzeit installierte Tabellen (Build ohne `embedded-tokenizers`).
+/// Zur Laufzeit installierte Tabellen.
 pub(crate) fn installed(e: Encoding) -> &'static OnceLock<CoreBpe> {
     static CL: OnceLock<CoreBpe> = OnceLock::new();
     static O2: OnceLock<CoreBpe> = OnceLock::new();
@@ -121,10 +125,15 @@ pub(crate) fn installed(e: Encoding) -> &'static OnceLock<CoreBpe> {
     }
 }
 
+/// SHA-256 von `data` (hex, klein).
+pub fn sha256_hex(data: &[u8]) -> String {
+    let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, data);
+    digest.as_ref().iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Prüft die SHA-256-Summe von `data` gegen die eingebaute Summe von `e`.
 pub fn verify(e: Encoding, data: &[u8]) -> Result<(), RanksError> {
-    let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, data);
-    let actual: String = digest.as_ref().iter().map(|b| format!("{b:02x}")).collect();
+    let actual = sha256_hex(data);
     if actual == e.sha256() {
         Ok(())
     } else {
@@ -141,9 +150,15 @@ pub fn verify(e: Encoding, data: &[u8]) -> Result<(), RanksError> {
 /// Der Speicher der Tabelle lebt bis zum Prozessende (einmal je Kodierung gedacht).
 pub fn parse_tiktoken(e: Encoding, data: &[u8]) -> Result<CoreBpe, RanksError> {
     verify(e, data)?;
+    parse_tiktoken_unverified(e, data)
+}
+
+/// Wie [`parse_tiktoken`], aber **ohne** Prüfsumme – nur Format und Tabelle. Für Tests mit
+/// eigenen (synthetischen) Tabellen; das Gateway verwendet immer [`parse_tiktoken`].
+pub fn parse_tiktoken_unverified(e: Encoding, data: &[u8]) -> Result<CoreBpe, RanksError> {
     let file = e.file_name();
     let fmt = |line: usize, msg: &'static str| RanksError::Format { file, line, msg };
-    // In das kompakte Format der eingebetteten Tabellen umsetzen (gleicher Leser).
+    // In das kompakte Längenpräfix-Format umsetzen (`Ranks::from_blob`).
     let mut blob = Vec::with_capacity(data.len() / 2);
     blob.extend_from_slice(b"AGTK");
     blob.extend_from_slice(&[0; 4]);
@@ -190,30 +205,27 @@ pub fn parse_tiktoken(e: Encoding, data: &[u8]) -> Result<CoreBpe, RanksError> {
 
 /// Prüft `data` und installiert die Tabelle für `e`.
 ///
-/// In einem Build mit eingebetteten Tabellen wird nur geprüft (die eingebettete Tabelle bleibt
-/// maßgeblich). Ist bereits eine Tabelle installiert, bleibt sie bestehen.
+/// Ist bereits eine Tabelle installiert, wird nur geprüft; die installierte bleibt bestehen.
 pub fn install_tiktoken(e: Encoding, data: &[u8]) -> Result<(), RanksError> {
-    if EMBEDDED {
-        return verify(e, data);
-    }
     if installed(e).get().is_some() {
-        return Ok(());
+        return verify(e, data);
     }
     let bpe = parse_tiktoken(e, data)?;
     let _ = installed(e).set(bpe);
     Ok(())
 }
 
+/// Installiert eine bereits gelesene Tabelle (z. B. aus [`parse_tiktoken_unverified`] in
+/// Tests). `false`, wenn für `e` schon eine Tabelle installiert war.
+pub fn install_parsed(e: Encoding, bpe: CoreBpe) -> bool {
+    installed(e).set(bpe).is_ok()
+}
+
 /// Lädt alle Kodierungen aus `dir` (`<name>.tiktoken`), soweit vorhanden.
-///
-/// Mit eingebetteten Tabellen wird `dir` nicht gelesen ([`DirOutcome::Embedded`]).
 pub fn install_from_dir(dir: &Path) -> Vec<(Encoding, DirOutcome)> {
     Encoding::ALL
         .into_iter()
         .map(|e| {
-            if EMBEDDED {
-                return (e, DirOutcome::Embedded);
-            }
             if installed(e).get().is_some() {
                 return (e, DirOutcome::Installed);
             }
@@ -229,4 +241,57 @@ pub fn install_from_dir(dir: &Path) -> Vec<(Encoding, DirOutcome)> {
             (e, outcome)
         })
         .collect()
+}
+
+/// Für Tests mit den echten Tabellen: lädt sie aus `$AIGW_TOKENIZER_RANKS_DIR`
+/// ([`TEST_DIR_ENV`]).
+///
+/// - `Ok(true)`: beide Tabellen verfügbar.
+/// - `Ok(false)`: Variable nicht gesetzt – der Test soll sich überspringen.
+/// - `Err`: Variable gesetzt, aber Dateien fehlen bzw. sind ungültig, oder
+///   `AIGW_TOKENIZER_REQUIRE_RANKS=1` ohne Variable.
+pub fn install_from_env() -> Result<bool, String> {
+    let required = std::env::var(TEST_REQUIRE_ENV).is_ok_and(|v| v == "1");
+    let Some(dir) = std::env::var_os(TEST_DIR_ENV).filter(|d| !d.is_empty()) else {
+        return if required {
+            Err(format!("{TEST_REQUIRE_ENV}=1, aber {TEST_DIR_ENV} ist nicht gesetzt"))
+        } else {
+            Ok(false)
+        };
+    };
+    let dir = std::path::PathBuf::from(dir);
+    let mut problems = Vec::new();
+    for (e, outcome) in install_from_dir(&dir) {
+        match outcome {
+            DirOutcome::Installed => {}
+            DirOutcome::Missing => problems.push(format!("{}: fehlt", e.file_name())),
+            DirOutcome::Invalid(err) => problems.push(err.to_string()),
+        }
+    }
+    if problems.is_empty() {
+        Ok(true)
+    } else {
+        Err(format!("{}: {}", dir.display(), problems.join("; ")))
+    }
+}
+
+/// Wie [`install_from_env`] für Tests: `true` = Tabellen da, `false` = überspringen (mit
+/// Hinweis auf stderr); bei Fehlern Abbruch des Tests.
+///
+/// # Panics
+///
+/// Wenn [`install_from_env`] einen Fehler liefert.
+#[allow(clippy::panic, clippy::print_stderr)]
+pub fn tables_for_test(test: &str) -> bool {
+    match install_from_env() {
+        Ok(true) => true,
+        Ok(false) => {
+            eprintln!(
+                "{test}: übersprungen – echte tiktoken-Tabellen fehlen ({TEST_DIR_ENV} setzen, \
+                 z. B. nach `scripts/fetch-tokenizers.sh`)"
+            );
+            false
+        }
+        Err(e) => panic!("{test}: {e}"),
+    }
 }

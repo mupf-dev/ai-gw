@@ -80,12 +80,13 @@ anschließendem Snapshot-Aufbau. Wer ein Feld umbenennt, merkt es dort.
   Arena-Sperren unter Last, [leistung.md](leistung.md) §3.1). Ohne:
   `cargo build --release -p aigw --no-default-features` bzw. im Image
   `--build-arg CARGO_FEATURES=--no-default-features`.
-- **Tokenizer-Tabellen (AIGW-95):** Standard-Builds und Images enthalten die Rangtabellen
-  `o200k_base`/`cl100k_base` (Feature `embedded-tokenizers`). Ein Build ohne das Feature
-  liest sie aus `tokenizer.ranks_dir` (`cl100k_base.tiktoken`, `o200k_base.tiktoken`,
-  SHA-256 geprüft); `tokenizer.download_ranks: true` lädt fehlende Dateien einmalig von
-  `openaipublic.blob.core.windows.net` (SSRF-Regeln wie Anbieter). Ohne Tabellen gilt die
-  Heuristik (Warnung beim Start). Details:
+- **Tokenizer-Tabellen (AIGW-95, AIGW-92):** Die Rangtabellen `o200k_base`/`cl100k_base`
+  von OpenAI sind **nicht** enthalten (Lizenz ungeklärt). ai-gw liest sie aus
+  `tokenizer.ranks_dir` (`cl100k_base.tiktoken`, `o200k_base.tiktoken`, SHA-256 geprüft; im
+  Image `/data/tiktoken`). Bereitstellen mit `aigw tokenizer fetch` (Init-Container,
+  `docker run --rm -v aigw-data:/data <image> tokenizer fetch`) oder per Opt-in
+  `tokenizer.download_ranks: true` beim Start (über `aigw-outbound`, SSRF-Regeln wie
+  Anbieter). Ohne Tabellen gilt die Heuristik (Warnung beim Start). Details:
   [11-limits-und-budgets.md](../konzept/11-limits-und-budgets.md) §8a.
 - **Request-Body:** `server.data.max_body_bytes` (32 MiB), Audio `max_audio_bytes` (25 MiB).
 - **Mock-Anbieter:** `admin.allow_mock: true` ist Standard (Demos, Smoke-Tests). Für
