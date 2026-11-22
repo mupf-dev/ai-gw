@@ -7,8 +7,63 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ## [Unreleased]
 
+## [0.1.0] – JJJJ-MM-TT
+
+Erste öffentliche Version: AI-Gateway, Admin-API und Admin-UI in einem Binary.
+
 ### Hinzugefügt
 
+- **Datenebene** (`:4000`): OpenAI-kompatibel (`/v1/chat/completions`, `/v1/responses`,
+  `/v1/embeddings`, `/v1/images/generations`, `/v1/audio/*`, `/v1/models`) und Anthropic
+  Messages (`/v1/messages`); Übersetzung immer über eine gemeinsame Zwischendarstellung (IR),
+  Streaming mit Backpressure, Fehler im Eingangsformat.
+- **Anbieter:** OpenAI, Azure OpenAI (API-Key oder Entra ID: Client-Secret,
+  Client-Zertifikat, Workload Identity, Managed Identity; Token-Cache je Credential mit
+  Erneuerung vor Ablauf, Sovereign Clouds über `entraAuthority`/`entraScope`), Anthropic, AWS Bedrock (SigV4
+  oder API-Key), Google Gemini API und Vertex AI (Service-Account), Mistral, Ollama, vLLM,
+  generisch OpenAI-kompatibel, eingebauter Mock-Anbieter.
+- **Routing:** Modellgruppen mit Aliasen, Strategien (gewichtet, geringste Latenz, geringste
+  Last, Kosten), Prioritäten, Retries, Fallbacks zwischen Gruppen, Circuit Breaker, Health
+  Checks, Deployment-Kapazität (RPM/TPM), Hot Reload.
+- **Mandanten und Zugriff:** Organisationen, Teams, Nutzer, API-Keys (aktiv/gesperrt/
+  widerrufen, Ablauf, Rotation), Modellfreigaben, Payload-Richtlinien je Ebene.
+- **Limits und Budgets:** Anfrage-/Token-Limits in gleitenden Fenstern und Kalenderzeiträumen
+  je Key/Team/Organisation/Modellgruppe; Zähler-Backends `local`, `postgres-sync`, `redis`;
+  Kostenrechnung mit Preisen je Modell und Zeitraum, Budgets (strikt mit Reservierung oder
+  weich), Warnungen per Webhook; Tokenizer (tiktoken-kompatibel, Hugging Face).
+- **Plugins und Guardrails:** Plugin-Kette mit Vererbung/Sperre je Ebene; eingebaut
+  `header`, `request-transform`, `pii` (Maskieren, Pseudonymisieren, Ablehnen),
+  `prompt-filter` (Wortlisten, Regex, Prompt-Injection), `content-safety` (Azure, OpenAI,
+  eigenes Modell), `webhook`, `cache`.
+- **Antwort-Cache:** exakt (RAM, optional Redis) und semantisch (eigener HNSW-Index, pgvector
+  oder Redis Search).
+- **MCP-Gateway** (`/mcp`): MCP-Server hinter dem Gateway, Werkzeugfreigaben je Team/Key.
+- **Admin-API** (`:4001`, OpenAPI): CRUD aller Ressourcen mit ETag/If-Match, Cursor-Pagination,
+  RFC-9457-Fehler; OIDC-Anmeldung (generisch, Microsoft Entra ID), Sessions, CSRF-Schutz, RBAC
+  (`admin`, `org-admin`, `team-admin`, `viewer`, `auditor`, `gitops`), Admin-API-Keys,
+  Bootstrap-Token, Einladungen; Audit-Log mit Hash-Kette.
+- **Admin-UI** (Svelte 5, eingebettet): Ressourcen-Editoren, Analytics, Log-Explorer,
+  Playground, YAML-Import/-Export.
+- **GitOps:** `aigw config export|diff|apply|validate`, Modus „nur YAML“.
+- **Beobachtung:** Request-Log mit Rollups und Aufbewahrung, Prometheus-Metriken (`/metrics`),
+  OpenTelemetry-Traces und -Logs (OTLP/HTTP), JSON-Lines-Export mit Rotation.
+- **Datenhaltung:** SQLite (Standard) oder Postgres mit eigenem Migrationssatz je Dialekt,
+  verschlüsselte Zugangsdaten (AES-256-GCM, Master-Key), verschlüsselter Snapshot-Cache für
+  den Kaltstart ohne Datenbank, `/readyz` mit Zustand `degraded`.
+- **Sicherheit:** SSRF-Schutz für alle ausgehenden Verbindungen (nach DNS-Auflösung),
+  Body-Limits, rustls mit aws-lc-rs; Sicherheitsreview und Härtungshinweise.
+- **Betrieb (AIGW-59):** Container-Image (distroless, nicht-root, schreibgeschütztes Root-FS,
+  `HEALTHCHECK`, OCI-Labels, buildx-fähig für amd64/arm64), Docker-Compose-Beispiele
+  (SQLite; Postgres + Redis + OpenTelemetry-Collector), Kubernetes-Grundgerüst,
+  Betriebshandbuch `docs/betrieb/`, geprüfte Beispielkonfigurationen `config/examples/`,
+  Befehle `aigw healthcheck`, `aigw config check` und `aigw config rekey`
+  (Master-Key-Rotation), Lizenzübersicht `THIRD-PARTY.md`.
+- **Leistung:** mimalloc als Standard-Allokator (abschaltbar mit `--no-default-features`),
+  größere Accept-Warteschlange; Messungen in `docs/betrieb/leistung.md`.
+- **Verbindungsschutz der Listener** (S-32): Höchstzahl gleichzeitiger Verbindungen je
+  Listener (`server.*.max_connections`, darüber sofort `503`), Lese-Timeouts gegen Slowloris
+  (Anfragekopf, Pause und Mindestrate des Anfragekörpers), Keep-Alive-Leerlauf, HTTP/2-Grenzen
+  (`server.http`); laufende Streams bleiben unberührt. Metriken `aigw_server_*`.
 - **Kostenanalyse / FinOps (AIGW-117):** neue Seite „Kosten“ (Navigation, `/costs`,
   Befehlspalette): Kostenverlauf gestapelt nach Team, Organisation, Modellgruppe, Deployment,
   Anbieter oder API-Key (Top 5 + Übrige, Schrittweite wählbar, Tabellen-Alternative), Filter
@@ -224,9 +279,25 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 - `scripts/k8s-check.sh`: `kubectl kustomize` + kubeconform (strikt, Kubernetes 1.34) für
   `deploy/kubernetes`, optional `kubectl apply --dry-run=server`.
 - CI: Lizenzübersicht `scripts/third-party.sh --check` und Manifest-Prüfung in jedem Lauf;
-  Job „Container-Images (amd64 + arm64)“ bei Tags `v*` und manuell (Tarballs als Artefakt).
+  Job „Container-Images (amd64 + arm64)“ manuell bzw. aus dem Release-Workflow (Tarballs als Artefakt).
+- **Release-Lieferung (AIGW-119):** Workflow `.github/workflows/release.yml` (Tag `v*`):
+  Binaries `ai-gw-<version>-linux-{amd64,arm64}.tar.gz` (glibc, Admin-UI eingebettet),
+  Multi-Arch-Image `ghcr.io/mupf-dev/ai-gw` (Tags `<version>`, `<major>.<minor>`, `latest`;
+  OCI-Labels und -Annotationen), `SHA256SUMS`, SBOM (CycloneDX), SLSA-Build-Provenance und
+  SBOM-Attestierung über Sigstore (`gh attestation verify`), GitHub-Release mit den Notizen
+  aus diesem CHANGELOG. Probelauf ohne Veröffentlichung per `workflow_dispatch`; lokal bzw.
+  auf der Buildbox `scripts/release-build.sh`, Vorprüfung `scripts/release-notes.sh`.
+- **Helm-Chart `deploy/helm/ai-gw` (AIGW-119):** Image, Startkonfiguration als YAML,
+  Master-Key und Datenbank-URL aus vorhandenen Secrets (`existingSecret`), Ressourcen,
+  Probes (`/readyz`, `/healthz`), PodDisruptionBudget, optional Ingress, ServiceMonitor und
+  PVC für SQLite, gehärteter securityContext. Prüfung mit `helm lint`, `helm template` und
+  kubeconform in `scripts/k8s-check.sh`, Smoke-Test in kind `scripts/helm-smoke.sh`.
+  Doku `docs/betrieb/helm.md`.
 
 ### Geändert
+
+Gegenüber den Entwicklungsständen auf `main` vor dem ersten Release (für Betreiber von
+Vorabständen):
 
 - **Lizenz:** Der Code steht jetzt unter FSL-1.1-ALv2 (Functional Source License, nach zwei Jahren
   je Version Apache-2.0) statt unter AGPL-3.0-or-later. Plugin-Schnittstelle (WIT) und
@@ -298,7 +369,6 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 - Sicherheit: wasmtime 50.0.1 → 50.0.2 (RUSTSEC-2026-0566 bis -0573); `rust-version` auf 1.97 angehoben (Mindestversion von wasmtime 50.0.2).
 
-
 - **Plugins vergrößern den Prompt nach der Admission (S-38, AIGW-103):** Nach den Pre-Plugins
   wird die Eingabe neu geschätzt; Wachstum wird auf Token-/Eingabe-Limits und harten Budgets
   nachreserviert oder die Anfrage abgelehnt (`429` bzw. Budget-Fehler).
@@ -310,69 +380,9 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   den Server an, bis der Test ihn freigibt; Zeitlimit 2 s, Zeitraumende relativ zum Ausfall.
   Aussagen unverändert (alt 2 Fehler in 85 Läufen unter Last, neu 0 in 115).
 
-## [0.1.0] – MVP – Datum offen
-
-Erste Version: AI-Gateway, Admin-API und Admin-UI in einem Binary.
-
-### Hinzugefügt
-
-- **Datenebene** (`:4000`): OpenAI-kompatibel (`/v1/chat/completions`, `/v1/responses`,
-  `/v1/embeddings`, `/v1/images/generations`, `/v1/audio/*`, `/v1/models`) und Anthropic
-  Messages (`/v1/messages`); Übersetzung immer über eine gemeinsame Zwischendarstellung (IR),
-  Streaming mit Backpressure, Fehler im Eingangsformat.
-- **Anbieter:** OpenAI, Azure OpenAI (API-Key oder Entra ID: Client-Secret,
-  Client-Zertifikat, Workload Identity, Managed Identity; Token-Cache je Credential mit
-  Erneuerung vor Ablauf, Sovereign Clouds über `entraAuthority`/`entraScope`), Anthropic, AWS Bedrock (SigV4
-  oder API-Key), Google Gemini API und Vertex AI (Service-Account), Mistral, Ollama, vLLM,
-  generisch OpenAI-kompatibel, eingebauter Mock-Anbieter.
-- **Routing:** Modellgruppen mit Aliasen, Strategien (gewichtet, geringste Latenz, geringste
-  Last, Kosten), Prioritäten, Retries, Fallbacks zwischen Gruppen, Circuit Breaker, Health
-  Checks, Deployment-Kapazität (RPM/TPM), Hot Reload.
-- **Mandanten und Zugriff:** Organisationen, Teams, Nutzer, API-Keys (aktiv/gesperrt/
-  widerrufen, Ablauf, Rotation), Modellfreigaben, Payload-Richtlinien je Ebene.
-- **Limits und Budgets:** Anfrage-/Token-Limits in gleitenden Fenstern und Kalenderzeiträumen
-  je Key/Team/Organisation/Modellgruppe; Zähler-Backends `local`, `postgres-sync`, `redis`;
-  Kostenrechnung mit Preisen je Modell und Zeitraum, Budgets (strikt mit Reservierung oder
-  weich), Warnungen per Webhook; Tokenizer (tiktoken-kompatibel, Hugging Face).
-- **Plugins und Guardrails:** Plugin-Kette mit Vererbung/Sperre je Ebene; eingebaut
-  `header`, `request-transform`, `pii` (Maskieren, Pseudonymisieren, Ablehnen),
-  `prompt-filter` (Wortlisten, Regex, Prompt-Injection), `content-safety` (Azure, OpenAI,
-  eigenes Modell), `webhook`, `cache`.
-- **Antwort-Cache:** exakt (RAM, optional Redis) und semantisch (eigener HNSW-Index, pgvector
-  oder Redis Search).
-- **MCP-Gateway** (`/mcp`): MCP-Server hinter dem Gateway, Werkzeugfreigaben je Team/Key.
-- **Admin-API** (`:4001`, OpenAPI): CRUD aller Ressourcen mit ETag/If-Match, Cursor-Pagination,
-  RFC-9457-Fehler; OIDC-Anmeldung (generisch, Microsoft Entra ID), Sessions, CSRF-Schutz, RBAC
-  (`admin`, `org-admin`, `team-admin`, `viewer`, `auditor`, `gitops`), Admin-API-Keys,
-  Bootstrap-Token, Einladungen; Audit-Log mit Hash-Kette.
-- **Admin-UI** (Svelte 5, eingebettet): Ressourcen-Editoren, Analytics, Log-Explorer,
-  Playground, YAML-Import/-Export.
-- **GitOps:** `aigw config export|diff|apply|validate`, Modus „nur YAML“.
-- **Beobachtung:** Request-Log mit Rollups und Aufbewahrung, Prometheus-Metriken (`/metrics`),
-  OpenTelemetry-Traces und -Logs (OTLP/HTTP), JSON-Lines-Export mit Rotation.
-- **Datenhaltung:** SQLite (Standard) oder Postgres mit eigenem Migrationssatz je Dialekt,
-  verschlüsselte Zugangsdaten (AES-256-GCM, Master-Key), verschlüsselter Snapshot-Cache für
-  den Kaltstart ohne Datenbank, `/readyz` mit Zustand `degraded`.
-- **Sicherheit:** SSRF-Schutz für alle ausgehenden Verbindungen (nach DNS-Auflösung),
-  Body-Limits, rustls mit aws-lc-rs; Sicherheitsreview und Härtungshinweise.
-- **Betrieb (AIGW-59):** Container-Image (distroless, nicht-root, schreibgeschütztes Root-FS,
-  `HEALTHCHECK`, OCI-Labels, buildx-fähig für amd64/arm64), Docker-Compose-Beispiele
-  (SQLite; Postgres + Redis + OpenTelemetry-Collector), Kubernetes-Grundgerüst,
-  Betriebshandbuch `docs/betrieb/`, geprüfte Beispielkonfigurationen `config/examples/`,
-  Befehle `aigw healthcheck`, `aigw config check` und `aigw config rekey`
-  (Master-Key-Rotation), Lizenzübersicht `THIRD-PARTY.md`.
-- **Leistung:** mimalloc als Standard-Allokator (abschaltbar mit `--no-default-features`),
-  größere Accept-Warteschlange; Messungen in `docs/betrieb/leistung.md`.
-- **Verbindungsschutz der Listener** (S-32): Höchstzahl gleichzeitiger Verbindungen je
-  Listener (`server.*.max_connections`, darüber sofort `503`), Lese-Timeouts gegen Slowloris
-  (Anfragekopf, Pause und Mindestrate des Anfragekörpers), Keep-Alive-Leerlauf, HTTP/2-Grenzen
-  (`server.http`); laufende Streams bleiben unberührt. Metriken `aigw_server_*`.
-
 ### Bekannte Einschränkungen
 
 - GitOps-Manifeste: höchstens 1 024 YAML-Dokumente je Datei.
-- Container-Image nur für linux/amd64 gebaut und getestet; arm64 vorbereitet
-  (behoben in Unreleased, AIGW-91).
 - Lizenz der eingebetteten tiktoken-Rangtabellen (MIT) vor einem öffentlichen Release
   rechtlich bestätigen.
 

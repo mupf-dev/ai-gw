@@ -12,6 +12,36 @@ Datenbank (SQLite-Datei oder Postgres).
 Gleiche Adresse für beide → ein gemeinsamer Listener (nur, wenn beide ohnehin gleich exponiert
 sind, siehe [haertung.md](haertung.md)).
 
+## Release-Artefakte
+
+Jeder Release (Tag `v<version>`, [Releases](https://github.com/mupf-dev/ai-gw/releases)) liefert:
+
+| Artefakt | Inhalt |
+|---|---|
+| `ai-gw-<version>-linux-amd64.tar.gz`, `…-linux-arm64.tar.gz` | Binary `aigw` (Admin-UI eingebettet, glibc ≥ 2.36: Debian 12+, Ubuntu 24.04+, RHEL/Alma/Rocky 10), `config/aigw.example.yaml`, LICENSE, THIRD-PARTY.md, CHANGELOG |
+| `ghcr.io/mupf-dev/ai-gw:<version>` | Multi-Arch-Image (amd64 + arm64), zusätzlich Tags `<major>.<minor>` und `latest` (nicht bei Vorabversionen) |
+| `SHA256SUMS` | Prüfsummen der Archive und des SBOM |
+| `ai-gw-<version>.cdx.json` | SBOM (CycloneDX) aus `Cargo.lock` und `ui/pnpm-lock.yaml` |
+| `ai-gw-<version>.provenance.sigstore.json` | SLSA-Build-Provenance (Sigstore-Bundle) der Archive |
+| Helm-Chart | [`deploy/helm/ai-gw`](../../deploy/helm/ai-gw/) im Quellstand des Tags, siehe [helm.md](helm.md) |
+
+```sh
+V=0.1.0; A=amd64        # oder arm64
+curl -fLO https://github.com/mupf-dev/ai-gw/releases/download/v$V/ai-gw-$V-linux-$A.tar.gz
+curl -fLO https://github.com/mupf-dev/ai-gw/releases/download/v$V/SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+gh attestation verify ai-gw-$V-linux-$A.tar.gz -R mupf-dev/ai-gw      # Herkunft (optional)
+tar -xzf ai-gw-$V-linux-$A.tar.gz && ./ai-gw-$V-linux-$A/aigw --version
+
+docker pull ghcr.io/mupf-dev/ai-gw:$V
+gh attestation verify oci://ghcr.io/mupf-dev/ai-gw:$V -R mupf-dev/ai-gw
+```
+
+Die Attestierungen (Provenance und SBOM) erzeugt der Release-Workflow mit
+`actions/attest` über Sigstore; `gh attestation verify` prüft, dass das Artefakt aus diesem
+Repository und dem Workflow `.github/workflows/release.yml` stammt. Ablauf für Maintainer:
+[release.md](release.md).
+
 ## 1. Container-Image
 
 ### Bauen
@@ -154,9 +184,13 @@ Der Container läuft schreibgeschützt (`read_only: true`), ohne Capabilities un
 `no-new-privileges`. Geheimnisse: Master-Key als Docker-Secret (Datei), DB-Passwort über
 `.env` → `AIGW_STORE__URL`; `.env` und `secrets/` sind per `.gitignore` ausgeschlossen.
 
-## 3. Kubernetes (Grundgerüst)
+## 3. Kubernetes
 
-[`deploy/kubernetes/`](../../deploy/kubernetes/) enthält ein kustomize-Grundgerüst (kein Helm):
+**Helm (empfohlen):** [`deploy/helm/ai-gw`](../../deploy/helm/ai-gw/) – Werte für Image,
+Startkonfiguration, Secrets (`existingSecret`), Persistenz, Ingress, ServiceMonitor; siehe
+[helm.md](helm.md).
+
+**kustomize-Grundgerüst:** [`deploy/kubernetes/`](../../deploy/kubernetes/) enthält:
 ConfigMap (Startkonfiguration), Deployment (2 Replikate, nicht-root, `readOnlyRootFilesystem`,
 Probes auf `/healthz`/`/readyz` der Steuerebene), getrennte Services `aigw-data` und
 `aigw-control`, PodDisruptionBudget. Postgres und Redis werden vorausgesetzt (Betreiber-Dienst
@@ -183,9 +217,11 @@ die Steuerebene nicht öffentlich veröffentlichen.
 
 ## 4. Binary ohne Container
 
+Fertige Binaries: [Release-Artefakte](#release-artefakte). Selbst bauen:
+
 ```sh
 cargo build --release --locked -p aigw                   # UI vorher: pnpm -C ui build
-install -m 0755 target/release/aigw /usr/local/bin/aigw
+install -m 0755 target/release/aigw /usr/local/bin/aigw  # bzw. ai-gw-<version>-linux-<arch>/aigw
 install -d -o aigw -g aigw -m 0750 /var/lib/aigw
 aigw keygen --out /etc/aigw/master-key                   # Rechte 0600, Besitzer anpassen
 aigw config check -c /etc/aigw/aigw.yaml

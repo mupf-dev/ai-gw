@@ -1,0 +1,26 @@
+{{- /*
+SPDX-FileCopyrightText: 2026 ai-gw contributors
+SPDX-License-Identifier: AGPL-3.0-or-later
+Prometheus-Operator: /metrics der Steuerebene (docs/betrieb/monitoring.md).
+*/ -}}
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "ai-gw.fullname" . }}
+  labels:
+    {{- include "ai-gw.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "ai-gw.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: control
+  endpoints:
+    - port: control
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
+{{- end }}

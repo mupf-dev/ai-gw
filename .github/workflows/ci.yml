@@ -1,9 +1,10 @@
 # SPDX-FileCopyrightText: 2026 mupf-dev
 # SPDX-License-Identifier: FSL-1.1-ALv2
 #
-# CI für Rust und UI. Das Repo ist privat: um Actions-Minuten zu sparen, läuft der Workflow
-# NICHT bei jedem Push, sondern nur bei Pull Requests, Release-Tags (v*) und manuell
-# (workflow_dispatch). Der teure arm64-Image-Job (AIGW-91) läuft nur bei Tags und manuell.
+# CI für Rust und UI: bei Pull Requests, Pushes auf main, manuell (workflow_dispatch) und als
+# wiederverwendbarer Workflow aus .github/workflows/release.yml (workflow_call, Tags v*).
+# Der teure Image-Job (amd64 + arm64, AIGW-91) läuft nur manuell; beim Release baut und testet
+# release.yml die Images selbst (scripts/release-build.sh).
 # Die eigentliche Logik steckt in scripts/check.sh – derselbe Einstieg wie auf der Buildbox.
 # Härtung: Actions auf Commit-SHAs gepinnt (Tag als Kommentar), minimale Rechte,
 # keine persistierten Checkout-Credentials.
@@ -13,7 +14,12 @@ on:
   pull_request:
   push:
     branches: [main]
-    tags: ["v*"]
+  workflow_call:
+    inputs:
+      images:
+        description: "Container-Images amd64 + arm64 bauen und testen"
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       images:
@@ -71,7 +77,7 @@ jobs:
           scripts/third-party.sh --check
 
   manifests:
-    name: Kubernetes-Manifeste (kubeconform)
+    name: Kubernetes-Manifeste und Helm-Chart (kubeconform)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -79,12 +85,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: kustomize + kubeconform
+      - name: kustomize, helm lint/template + kubeconform
         run: scripts/k8s-check.sh
 
   images:
     name: Container-Images (amd64 + arm64)
-    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.images)
+    if: inputs.images
     needs: [check, manifests]
     runs-on: ubuntu-24.04
     timeout-minutes: 90

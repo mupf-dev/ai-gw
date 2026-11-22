@@ -1,0 +1,148 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Werte des Helm-Charts ai-gw (AIGW-119). Doku: docs/betrieb/helm.md
+# Standard: eine Instanz mit SQLite auf einem PVC. Produktion (mehrere Replikate): Postgres über
+# store.existingSecret, Redis als Zähler-Backend in config.counters – Beispiel
+# ci/production-values.yaml.
+
+image:
+  repository: ghcr.io/mupf-dev/ai-gw
+  # leer = appVersion des Charts
+  tag: ""
+  # optional sha256:… – hat Vorrang vor tag
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Mehr als 1 nur mit Postgres (store.existingSecret bzw. config.store.url postgres://…).
+replicaCount: 1
+
+# Startkonfiguration (YAML, ohne Geheimnisse) – wird 1:1 als /etc/aigw/aigw.yaml eingehängt.
+# Felder: docs/betrieb/konfiguration.md. Listener, master_key_file und snapshot.cache_file
+# passen zu den Ports/Volumes des Charts; Werte per --set/-f überschreiben oder mit null
+# entfernen. Einzelwerte gehen auch über extraEnv (AIGW_<ABSCHNITT>__<FELD>).
+config:
+  server:
+    data: {listen: "0.0.0.0:4000"}
+    control: {listen: "0.0.0.0:4001"}
+  store:
+    # SQLite auf dem Datenvolume; bei store.existingSecret überschreibt AIGW_STORE__URL den Wert.
+    url: "sqlite:///data/aigw.db?mode=rwc"
+  secrets:
+    master_key_file: /run/secrets/aigw/master-key
+  snapshot:
+    cache_file: /data/snapshot.cache
+  log:
+    format: json
+  admin:
+    allow_mock: false
+    ui: {mock: false}
+
+# Master-Key (Pflicht): vorhandenes Secret, z. B.
+#   kubectl create secret generic aigw-master-key --from-file=master-key=./aigw-master-key
+masterKey:
+  existingSecret: ""
+  key: master-key
+
+# Datenbank-URL aus einem Secret (z. B. postgres://aigw:…@postgres:5432/aigw) → AIGW_STORE__URL.
+# Leer = config.store.url.
+store:
+  existingSecret: ""
+  key: store-url
+
+# Zusätzliche Umgebung, z. B. Anbieter-Schlüssel für Secret-Verweise (AIGW_SECRET_<NAME>) oder
+# das Bootstrap-Token. Werte mit Geheimnissen nur über valueFrom/secretRef.
+extraEnv: []
+#  - name: AIGW_SECRET_OPENAI_API_KEY
+#    valueFrom: {secretKeyRef: {name: aigw-providers, key: openai}}
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+
+# Datenvolume /data: SQLite-Datei und verschlüsselter Snapshot-Cache.
+persistence:
+  # true: PVC (für SQLite nötig, sonst geht die Datenbank beim Neustart verloren).
+  # false: emptyDir (genügt mit Postgres – dort liegt nur der Snapshot-Cache).
+  enabled: true
+  existingClaim: ""
+  storageClass: ""
+  accessModes: [ReadWriteOnce]
+  size: 1Gi
+  emptyDirSizeLimit: 256Mi
+
+service:
+  type: ClusterIP
+  annotations: {}
+  dataPort: 4000
+  controlPort: 4001
+
+# Ingress nur für die Datenebene (:4000). Die Steuerebene (Admin-API/-UI, /metrics) nicht
+# öffentlich veröffentlichen (docs/betrieb/haertung.md).
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: aigw.example.org
+      paths:
+        - {path: /, pathType: Prefix}
+  tls: []
+  #  - secretName: aigw-tls
+  #    hosts: [aigw.example.org]
+
+# Prometheus-Operator: /metrics der Steuerebene.
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+
+podDisruptionBudget:
+  enabled: true
+  # gilt nur bei replicaCount > 1 (bei einer Instanz würde ein PDB jedes Drain blockieren)
+  minAvailable: 1
+
+resources:
+  requests: {cpu: 500m, memory: 256Mi}
+  limits: {memory: 1Gi}
+
+probes:
+  readiness: {path: /readyz, periodSeconds: 5, timeoutSeconds: 3, failureThreshold: 3}
+  liveness: {path: /healthz, periodSeconds: 10, timeoutSeconds: 3, failureThreshold: 6}
+  startup: {path: /healthz, periodSeconds: 2, timeoutSeconds: 3, failureThreshold: 60}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # ai-gw braucht keinen Zugriff auf die Kubernetes-API; für Workload Identity ggf. true.
+  automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile: {type: RuntimeDefault}
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  privileged: false
+  runAsNonRoot: true
+  capabilities: {drop: [ALL]}
+
+terminationGracePeriodSeconds: 60
+priorityClassName: ""
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []

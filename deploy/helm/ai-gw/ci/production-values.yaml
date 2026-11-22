@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Beispiel Produktion (auch Prüfvariante in scripts/k8s-check.sh): Postgres + Redis, 2 Replikate,
+# Ingress mit TLS, ServiceMonitor, Image per Digest.
+image:
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+replicaCount: 2
+masterKey:
+  existingSecret: aigw
+store:
+  existingSecret: aigw
+  key: store-url
+config:
+  store:
+    # ohne Passwort; die vollständige URL kommt aus dem Secret (AIGW_STORE__URL)
+    url: "postgres://aigw@postgres:5432/aigw"
+    max_connections: 20
+  counters:
+    backend: redis
+    redis_url: redis://redis:6379/0
+  cache:
+    redis_url: redis://redis:6379/0
+persistence:
+  enabled: false
+extraEnv:
+  - name: AIGW_SECRET_OPENAI_API_KEY
+    valueFrom: {secretKeyRef: {name: aigw-providers, key: openai}}
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"   # Streaming (SSE)
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+  hosts:
+    - host: aigw.example.org
+      paths: [{path: /, pathType: Prefix}]
+  tls:
+    - secretName: aigw-tls
+      hosts: [aigw.example.org]
+serviceMonitor:
+  enabled: true
+  labels: {release: prometheus}
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels: {app.kubernetes.io/name: ai-gw}

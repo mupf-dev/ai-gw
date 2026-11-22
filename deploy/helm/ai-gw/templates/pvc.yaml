@@ -1,0 +1,24 @@
+{{- /*
+SPDX-FileCopyrightText: 2026 ai-gw contributors
+SPDX-License-Identifier: AGPL-3.0-or-later
+*/ -}}
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "ai-gw.fullname" . }}-data
+  labels:
+    {{- include "ai-gw.labels" . | nindent 4 }}
+  annotations:
+    # Datenbank überlebt `helm uninstall`; bewusst löschen.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ if eq . "-" }}""{{ else }}{{ . | quote }}{{ end }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size | quote }}
+{{- end }}

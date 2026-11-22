@@ -1,0 +1,41 @@
+{{- /*
+SPDX-FileCopyrightText: 2026 ai-gw contributors
+SPDX-License-Identifier: AGPL-3.0-or-later
+Nur Datenebene; die Steuerebene bleibt intern.
+*/ -}}
+{{- if .Values.ingress.enabled }}
+{{- $svc := printf "%s-data" (include "ai-gw.fullname" .) }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "ai-gw.fullname" . }}
+  labels:
+    {{- include "ai-gw.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ $svc }}
+                port:
+                  name: data
+          {{- end }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,21 @@
+ai-gw {{ .Chart.AppVersion }} ({{ include "ai-gw.image" . }}) als Release "{{ .Release.Name }}" in Namespace "{{ .Release.Namespace }}".
+
+Datenebene (Clients):   {{ include "ai-gw.fullname" . }}-data:{{ .Values.service.dataPort }}  (/v1/…, /mcp)
+Steuerebene (intern):   {{ include "ai-gw.fullname" . }}-control:{{ .Values.service.controlPort }}  (/admin/, /admin/api/v1, /metrics)
+
+Admin-UI lokal öffnen:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ai-gw.fullname" . }}-control 4001:{{ .Values.service.controlPort }}
+  → http://localhost:4001/admin/
+Einmaliges Bootstrap-Token (erster Start, leere Datenbank):
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "ai-gw.fullname" . }} | grep Bootstrap-Token
+{{- if include "ai-gw.sqlite" . }}
+{{- if not .Values.persistence.enabled }}
+
+WARNUNG: SQLite ohne persistence.enabled – die Datenbank geht beim Neustart des Pods verloren.
+{{- end }}
+{{- end }}
+{{- if and (gt (int .Values.replicaCount) 1) (not (include "ai-gw.sqlite" .)) }}
+
+Mehrere Replikate: Zähler-Backend redis bzw. postgres-sync (config.counters) setzen, sonst
+gelten Limits je Pod – siehe docs/betrieb/datenhaltung.md.
+{{- end }}

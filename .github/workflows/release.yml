@@ -1,0 +1,201 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Release (AIGW-119), ausgelöst durch einen Tag `v*` (z. B. v0.1.0):
+#   1. prepare – Tag = Version in Cargo.toml/Cargo.lock/ui/package.json, CHANGELOG-Abschnitt mit Datum
+#   2. ci      – derselbe Prüflauf wie .github/workflows/ci.yml (check.sh, THIRD-PARTY, Manifeste, Helm)
+#   3. build   – scripts/release-build.sh: Binaries linux amd64/arm64 (glibc, UI eingebettet),
+#                SBOM (CycloneDX), SHA256SUMS, Image-Smoke je Architektur, Multi-Arch-Image nach
+#                ghcr.io/<owner>/ai-gw (Tags <version>, <major>.<minor>, latest); danach signierte
+#                Attestierungen (SLSA-Provenance + SBOM, Sigstore) für Archive und Image
+#   4. release – GitHub-Release mit den Notizen aus CHANGELOG.md und allen Artefakten
+# Probelauf ohne Veröffentlichung: manuell (workflow_dispatch) – baut und testet alles, lädt die
+# Artefakte nur als Workflow-Artefakt hoch (kein Push, keine Attestierung, kein Release).
+# Ohne zusätzliche Secrets: GITHUB_TOKEN genügt für GHCR, Attestierungen und Release.
+# Härtung: Actions auf Commit-SHAs gepinnt (Tag als Kommentar), Rechte je Job minimal,
+# keine persistierten Checkout-Credentials, Ausdrücke nur über env in Shell-Schritte.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Vorprüfung
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Version, CHANGELOG
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$EVENT" == push && "$REF_TYPE" == tag ]]; then
+            version=${REF_NAME#v}
+            publish=true
+          else
+            # Probelauf: Version aus Cargo.toml, Datum im CHANGELOG darf noch offen sein.
+            version=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)
+            publish=false
+            export ALLOW_PLACEHOLDER=1
+          fi
+          scripts/release-notes.sh "$version" >/dev/null
+          prerelease=false
+          [[ "$version" == *-* ]] && prerelease=true
+          {
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "publish=$publish"
+          } >>"$GITHUB_OUTPUT"
+          echo "Version $version (Prerelease: $prerelease, veröffentlichen: $publish)" >>"$GITHUB_STEP_SUMMARY"
+
+  ci:
+    name: CI
+    needs: prepare
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Artefakte und Image
+    needs: [prepare, ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write       # Push nach ghcr.io
+      id-token: write       # Sigstore-Zertifikat für die Attestierungen
+      attestations: write   # Attestierungen speichern
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      PUBLISH: ${{ needs.prepare.outputs.publish }}
+      ALLOW_PLACEHOLDER: ${{ needs.prepare.outputs.publish == 'true' && '0' || '1' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Image-Name (Kleinbuchstaben)
+        id: image
+        env:
+          REPO: ${{ github.repository }}
+        run: echo "name=ghcr.io/${REPO,,}" >>"$GITHUB_OUTPUT"
+      - name: Anmeldung ghcr.io
+        if: env.PUBLISH == 'true'
+        env:
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ github.token }}
+        run: printf '%s' "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+      # Binaries, SBOM, SHA256SUMS; Smoke beider Images (arm64 unter QEMU); Push nur bei Tags.
+      - name: Bauen, testen, (pushen)
+        id: build
+        env:
+          SMOKE: "1"
+          PUSH_TARGET: ${{ steps.image.outputs.name }}
+        run: |
+          if [[ "$PUBLISH" == true ]]; then export PUSH="$PUSH_TARGET"; fi
+          scripts/release-build.sh
+      - name: Abmeldung ghcr.io
+        if: always() && env.PUBLISH == 'true'
+        run: docker logout ghcr.io
+      - name: Provenance Archive und SBOM
+        id: attest-files
+        if: env.PUBLISH == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - name: SBOM-Attestierung Archive
+        if: env.PUBLISH == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*.tar.gz
+          sbom-path: dist/ai-gw-${{ env.VERSION }}.cdx.json
+      - name: Provenance Image
+        if: env.PUBLISH == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false   # nur für Organisationen möglich
+      - name: SBOM-Attestierung Image
+        if: env.PUBLISH == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: dist/ai-gw-${{ env.VERSION }}.cdx.json
+          push-to-registry: true
+          create-storage-record: false
+      # Sigstore-Bundle der Provenance als Release-Asset (Offline-Prüfung mit
+      # `gh attestation verify --bundle`).
+      - name: Provenance-Bundle beilegen
+        if: env.PUBLISH == 'true'
+        env:
+          BUNDLE: ${{ steps.attest-files.outputs.bundle-path }}
+        run: cp "$BUNDLE" "dist/ai-gw-$VERSION.provenance.sigstore.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ai-gw-release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Zusammenfassung
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "### ai-gw $VERSION"
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+            if [[ -n "$DIGEST" ]]; then echo "Image: \`$IMAGE@$DIGEST\`"; fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: GitHub-Release
+    needs: [prepare, build]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # Release anlegen und Assets hochladen
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ai-gw-release
+          path: dist
+      - name: Prüfsummen
+        run: cd dist && sha256sum -c SHA256SUMS
+      - name: Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          scripts/release-notes.sh "$VERSION" >notes.md
+          flags=()
+          if [[ "$PRERELEASE" == true ]]; then flags+=(--prerelease); else flags+=(--latest); fi
+          gh release create "$TAG" --verify-tag --title "ai-gw $VERSION" --notes-file notes.md \
+            "${flags[@]}" dist/*

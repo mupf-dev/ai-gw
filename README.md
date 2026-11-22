@@ -33,6 +33,37 @@ Admin-Oberfläche (Svelte 5), Aufnahmen der echten UI. Weitere Bilder unter [doc
 | <a href="docs/konzept/ux/echt-kosten-hell-desktop.png"><img src="docs/konzept/ux/echt-kosten-hell-desktop.png" alt="Kosten" width="420"></a><br>Kosten | <a href="docs/konzept/ux/echt-kosten-dunkel-desktop.png"><img src="docs/konzept/ux/echt-kosten-dunkel-desktop.png" alt="Kosten (dunkel)" width="420"></a><br>Kosten (dunkel) |
 | <a href="docs/konzept/ux/echt-yaml-import-hell-desktop.png"><img src="docs/konzept/ux/echt-yaml-import-hell-desktop.png" alt="YAML-Import" width="420"></a><br>YAML-Import | <a href="docs/konzept/ux/befehlspalette-hell-desktop.png"><img src="docs/konzept/ux/befehlspalette-hell-desktop.png" alt="Befehlspalette" width="420"></a><br>Befehlspalette |
 
+## Installation
+
+Fertige Artefakte je Release ([Releases](https://github.com/mupf-dev/ai-gw/releases)), Details
+und Prüfung (SHA256SUMS, SBOM, `gh attestation verify`):
+[docs/betrieb/installation.md](docs/betrieb/installation.md#release-artefakte).
+
+**Binary** (linux amd64/arm64, Admin-UI eingebettet, glibc ≥ 2.36):
+
+```bash
+V=0.1.0; A=amd64                                              # oder arm64
+curl -fLO https://github.com/mupf-dev/ai-gw/releases/download/v$V/ai-gw-$V-linux-$A.tar.gz
+curl -fLO https://github.com/mupf-dev/ai-gw/releases/download/v$V/SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing && tar -xzf ai-gw-$V-linux-$A.tar.gz
+./ai-gw-$V-linux-$A/aigw keygen --out master-key
+AIGW_MASTER_KEY="$(cat master-key)" ./ai-gw-$V-linux-$A/aigw serve \
+  -c ai-gw-$V-linux-$A/config/aigw.example.yaml               # SQLite ./aigw.db, :4000/:4001
+```
+
+**Container-Image** (Multi-Arch, distroless, nicht-root): `ghcr.io/mupf-dev/ai-gw:0.1.0`
+(auch `0.1`, `latest`) – Start wie im Schnellstart unten, nur mit diesem Image statt
+`ai-gw:dev`.
+
+**Helm** (Kubernetes ≥ 1.29): Chart [deploy/helm/ai-gw](deploy/helm/ai-gw/), Doku
+[docs/betrieb/helm.md](docs/betrieb/helm.md):
+
+```bash
+kubectl create namespace aigw
+kubectl -n aigw create secret generic aigw-master-key --from-file=master-key=./master-key
+helm install ai-gw ./deploy/helm/ai-gw -n aigw --set masterKey.existingSecret=aigw-master-key
+```
+
 ## Schnellstart mit Docker
 
 ```bash
@@ -57,7 +88,7 @@ curl -s localhost:4000/v1/chat/completions -H "authorization: Bearer sk-aigw-…
 ```
 
 Mit Postgres, Redis und OpenTelemetry-Collector: [deploy/compose/](deploy/compose/docker-compose.yaml),
-Kubernetes: [deploy/kubernetes/](deploy/kubernetes/), Details:
+Kubernetes: [Helm-Chart](deploy/helm/ai-gw/) bzw. [deploy/kubernetes/](deploy/kubernetes/), Details:
 [docs/betrieb/installation.md](docs/betrieb/installation.md). Beispielkonfigurationen:
 [config/examples/](config/examples/).
 
@@ -154,10 +185,12 @@ Hinweise:
 ### CI
 
 `.github/workflows/ci.yml` führt `scripts/check.sh` und `scripts/third-party.sh --check`
-(THIRD-PARTY.md aktuell) aus, prüft die Kubernetes-Manifeste (`scripts/k8s-check.sh`) und baut
-bei Release-Tags oder manuell die Container-Images für amd64 und arm64
+(THIRD-PARTY.md aktuell) aus, prüft die Kubernetes-Manifeste und das Helm-Chart (`scripts/k8s-check.sh`) und baut
+manuell die Container-Images für amd64 und arm64
 (`scripts/build-images.sh`, arm64 quer kompiliert, Smoke unter QEMU). Der Workflow läuft bei Pushes
-auf `main`, bei Pull Requests, bei Tags `v*` und manuell (`workflow_dispatch`).
+auf `main`, bei Pull Requests und manuell (`workflow_dispatch`). Releases baut
+`.github/workflows/release.yml` bei Tags `v*` (Binaries, Multi-Arch-Image nach GHCR, SBOM,
+SHA256SUMS, Attestierungen, GitHub-Release; Ablauf: [docs/betrieb/release.md](docs/betrieb/release.md)).
 
 ## Lizenz
 

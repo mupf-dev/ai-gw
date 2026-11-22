@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+apiVersion: v2
+name: ai-gw
+description: AI-Gateway (OpenAI-/Anthropic-kompatibel) mit Admin-API und Admin-UI in einem Binary
+type: application
+# Chart-Version und App-Version laufen gemeinsam mit dem Release (scripts/release-notes.sh).
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.29.0-0"
+home: https://github.com/mupf-dev/ai-gw
+sources:
+  - https://github.com/mupf-dev/ai-gw
+keywords: [ai-gateway, llm, openai, anthropic, proxy]
+annotations:
+  artifacthub.io/license: AGPL-3.0-or-later

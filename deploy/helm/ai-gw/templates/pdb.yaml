@@ -1,0 +1,17 @@
+{{- /*
+SPDX-FileCopyrightText: 2026 ai-gw contributors
+SPDX-License-Identifier: AGPL-3.0-or-later
+*/ -}}
+{{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.replicaCount) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "ai-gw.fullname" . }}
+  labels:
+    {{- include "ai-gw.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "ai-gw.selectorLabels" . | nindent 6 }}
+{{- end }}

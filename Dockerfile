@@ -79,7 +79,13 @@ RUN --mount=type=cache,id=aigw-cargo-registry,target=/usr/local/cargo/registry \
 RUN install -d -m 0750 /out/data \
     && install -D -m 0644 config/aigw.container.yaml /out/etc/aigw/aigw.yaml
 
-# --- 3. Laufzeit ---------------------------------------------------------------------------
+# --- 3. Nur das Binary (Release, AIGW-119) -------------------------------------------------
+# `docker buildx build --target binary --platform linux/amd64,linux/arm64 --output type=local,dest=out .`
+# legt out/linux_<arch>/aigw ab (scripts/release-build.sh). Dieselbe Build-Stufe wie das Image.
+FROM scratch AS binary
+COPY --from=build /out/usr/local/bin/aigw /aigw
+
+# --- 4. Laufzeit ---------------------------------------------------------------------------
 # distroless/cc: glibc + libgcc + CA-Zertifikate, keine Shell, kein Paketmanager;
 # Benutzer nonroot (65532:65532).
 FROM ${RUNTIME_IMAGE}

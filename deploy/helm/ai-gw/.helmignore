@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 ai-gw contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+.git/
+*.swp
+*.bak
+*.tmp
+ci/

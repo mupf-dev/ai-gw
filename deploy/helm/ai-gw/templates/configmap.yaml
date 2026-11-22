@@ -1,0 +1,14 @@
+{{- /*
+SPDX-FileCopyrightText: 2026 ai-gw contributors
+SPDX-License-Identifier: AGPL-3.0-or-later
+*/ -}}
+{{- include "ai-gw.validate" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ai-gw.fullname" . }}
+  labels:
+    {{- include "ai-gw.labels" . | nindent 4 }}
+data:
+  aigw.yaml: |
+    {{- toYaml .Values.config | nindent 4 }}

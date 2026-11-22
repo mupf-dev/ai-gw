@@ -1,0 +1,42 @@
+{{- /*
+SPDX-FileCopyrightText: 2026 ai-gw contributors
+SPDX-License-Identifier: AGPL-3.0-or-later
+Getrennte Services: Datenebene für Clients (Ingress), Steuerebene nur intern.
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ai-gw.fullname" . }}-data
+  labels:
+    {{- include "ai-gw.labels" . | nindent 4 }}
+    app.kubernetes.io/component: data
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "ai-gw.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: data
+      port: {{ .Values.service.dataPort }}
+      targetPort: data
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ai-gw.fullname" . }}-control
+  labels:
+    {{- include "ai-gw.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ai-gw.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: control
+      port: {{ .Values.service.controlPort }}
+      targetPort: control
+      protocol: TCP

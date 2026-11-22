@@ -1,0 +1,142 @@
+{{- /*
+SPDX-FileCopyrightText: 2026 ai-gw contributors
+SPDX-License-Identifier: AGPL-3.0-or-later
+*/ -}}
+{{- $sqlite := include "ai-gw.sqlite" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ai-gw.fullname" . }}
+  labels:
+    {{- include "ai-gw.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "ai-gw.selectorLabels" . | nindent 6 }}
+  strategy:
+    {{- if $sqlite }}
+    # SQLite: höchstens ein Prozess auf der Datei (ReadWriteOnce-Volume).
+    type: Recreate
+    {{- else }}
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+    {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "ai-gw.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # Neue Pods bei geänderter Startkonfiguration.
+        checksum/config: {{ toYaml .Values.config | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "ai-gw.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: aigw
+          image: {{ include "ai-gw.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          env:
+            - name: AIGW_CONFIG
+              value: /etc/aigw/aigw.yaml
+            {{- if .Values.store.existingSecret }}
+            - name: AIGW_STORE__URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.store.existingSecret }}
+                  key: {{ .Values.store.key }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - {name: data, containerPort: 4000, protocol: TCP}
+            - {name: control, containerPort: 4001, protocol: TCP}
+          {{- with .Values.probes }}
+          readinessProbe:
+            httpGet: {path: {{ .readiness.path }}, port: control}
+            periodSeconds: {{ .readiness.periodSeconds }}
+            timeoutSeconds: {{ .readiness.timeoutSeconds }}
+            failureThreshold: {{ .readiness.failureThreshold }}
+          livenessProbe:
+            httpGet: {path: {{ .liveness.path }}, port: control}
+            periodSeconds: {{ .liveness.periodSeconds }}
+            timeoutSeconds: {{ .liveness.timeoutSeconds }}
+            failureThreshold: {{ .liveness.failureThreshold }}
+          startupProbe:
+            httpGet: {path: {{ .startup.path }}, port: control}
+            periodSeconds: {{ .startup.periodSeconds }}
+            timeoutSeconds: {{ .startup.timeoutSeconds }}
+            failureThreshold: {{ .startup.failureThreshold }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/aigw, readOnly: true}
+            - {name: master-key, mountPath: /run/secrets/aigw, readOnly: true}
+            - {name: data, mountPath: /data}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "ai-gw.fullname" . }}
+        - name: master-key
+          secret:
+            secretName: {{ .Values.masterKey.existingSecret }}
+            items:
+              - {key: {{ .Values.masterKey.key }}, path: master-key}
+            defaultMode: 0440   # Gruppe = fsGroup
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-data" (include "ai-gw.fullname" .)) }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.persistence.emptyDirSizeLimit }}
+          {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
