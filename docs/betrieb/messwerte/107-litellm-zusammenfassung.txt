@@ -1,0 +1,91 @@
+## Image-Größen (entpackt laut docker image inspect / komprimiert docker save | gzip -1)
+image aigw102-ai-gw:bench: 115 MiB / 31 MiB
+image ghcr.io/berriai/litellm:v1.108.8: 1730 MiB / 398 MiB
+image ghcr.io/berriai/litellm-database:v1.108.8: 1648 MiB / 383 MiB
+## direkt (Fake-Upstream ohne Gateway)
+direkt      seriell        json   c=1   19444 req/s Fehler={} ttfb p50=50µs p90=57µs p99=73µs gesamt p50=50µs p90=58µs p99=73µs
+direkt      200req/s       json   c=10  200 req/s Fehler={} ttfb p50=172µs p90=280µs p99=368µs gesamt p50=172µs p90=281µs p99=369µs
+direkt      seriell        stream c=1   24912 req/s Fehler={} ttfb p50=37µs p90=45µs p99=87µs gesamt p50=37µs p90=45µs p99=87µs
+direkt      200req/s       stream c=10  200 req/s Fehler={} ttfb p50=193µs p90=274µs p99=359µs gesamt p50=194µs p90=274µs p99=360µs
+## aigw-pg
+aigw-pg kerne: gateway=2,3 last=4-6 (Threads 3)
+aigw-pg kaltstart_erster_start=317 ms (mit leerer DB; LiteLLM inkl. Prisma-Migration)
+aigw-pg kaltstart_neustart=291 ms (DB vorhanden)
+aigw-pg mem_leerlauf=18.6 MiB
+aigw-pg     seriell        json   c=1   6619 req/s Fehler={} ttfb p50=144µs p90=179µs p99=252µs gesamt p50=144µs p90=179µs p99=252µs cpu=133 µs/Anfrage
+aigw-pg     200req/s       json   c=10  200 req/s Fehler={} ttfb p50=457µs p90=699µs p99=935µs gesamt p50=458µs p90=699µs p99=936µs cpu=475 µs/Anfrage
+aigw-pg     seriell        stream c=1   7032 req/s Fehler={} ttfb p50=128µs p90=167µs p99=258µs gesamt p50=128µs p90=168µs p99=260µs cpu=123 µs/Anfrage
+aigw-pg     200req/s       stream c=10  200 req/s Fehler={} ttfb p50=561µs p90=796µs p99=1025µs gesamt p50=564µs p90=799µs p99=1029µs cpu=560 µs/Anfrage
+aigw-pg     Sättigung     json   c=10  26771 req/s Fehler={} ttfb p50=349µs p90=512µs p99=867µs gesamt p50=350µs p90=513µs p99=867µs cpu=74 µs/Anfrage mem_peak=82.2 MiB
+aigw-pg     Sättigung     json   c=100 29653 req/s Fehler={} ttfb p50=3213µs p90=4576µs p99=6904µs gesamt p50=3213µs p90=4576µs p99=6905µs cpu=69 µs/Anfrage mem_peak=91.7 MiB
+aigw-pg     Sättigung     json   c=500 18176 req/s Fehler={} ttfb p50=22174µs p90=46692µs p99=68236µs gesamt p50=22175µs p90=46693µs p99=68237µs cpu=123 µs/Anfrage mem_peak=134.2 MiB
+aigw-pg     Sättigung     stream c=10  28170 req/s Fehler={} ttfb p50=340µs p90=474µs p99=760µs gesamt p50=341µs p90=475µs p99=761µs cpu=70 µs/Anfrage mem_peak=140.4 MiB
+aigw-pg     Sättigung     stream c=100 27773 req/s Fehler={} ttfb p50=3482µs p90=4843µs p99=6888µs gesamt p50=3482µs p90=4844µs p99=6889µs cpu=73 µs/Anfrage mem_peak=132.8 MiB
+aigw-pg     Sättigung     stream c=500 4628 req/s Fehler={} ttfb p50=24563µs p90=49258µs p99=70633µs gesamt p50=24565µs p90=49260µs p99=70635µs cpu=145 µs/Anfrage mem_peak=163.1 MiB
+aigw-pg mem_nach_last=123.2 MiB
+## aigw-pg-redis
+aigw-pg-redis kerne: gateway=2,3 last=4-6 (Threads 3)
+aigw-pg-redis kaltstart_erster_start=244 ms (mit leerer DB; LiteLLM inkl. Prisma-Migration)
+aigw-pg-redis kaltstart_neustart=245 ms (DB vorhanden)
+aigw-pg-redis mem_leerlauf=19.1 MiB
+aigw-pg-redis seriell        json   c=1   2011 req/s Fehler={} ttfb p50=417µs p90=606µs p99=2981µs gesamt p50=417µs p90=606µs p99=2981µs cpu=336 µs/Anfrage
+aigw-pg-redis 200req/s       json   c=10  200 req/s Fehler={} ttfb p50=875µs p90=1994µs p99=4890µs gesamt p50=875µs p90=1994µs p99=4890µs cpu=745 µs/Anfrage
+aigw-pg-redis seriell        stream c=1   1976 req/s Fehler={} ttfb p50=432µs p90=597µs p99=2372µs gesamt p50=433µs p90=597µs p99=2373µs cpu=353 µs/Anfrage
+aigw-pg-redis 200req/s       stream c=10  200 req/s Fehler={} ttfb p50=912µs p90=1867µs p99=4559µs gesamt p50=915µs p90=1871µs p99=4566µs cpu=758 µs/Anfrage
+aigw-pg-redis Sättigung     json   c=10  4249 req/s Fehler={} ttfb p50=1574µs p90=4824µs p99=7271µs gesamt p50=1574µs p90=4824µs p99=7271µs cpu=227 µs/Anfrage mem_peak=54.2 MiB
+aigw-pg-redis Sättigung     json   c=100 5886 req/s Fehler={} ttfb p50=17061µs p90=23730µs p99=29625µs gesamt p50=17061µs p90=23730µs p99=29626µs cpu=211 µs/Anfrage mem_peak=67.5 MiB
+aigw-pg-redis Sättigung     json   c=500 7250 req/s Fehler={} ttfb p50=67578µs p90=96445µs p99=124153µs gesamt p50=67581µs p90=96446µs p99=124153µs cpu=206 µs/Anfrage mem_peak=122.1 MiB
+aigw-pg-redis Sättigung     stream c=10  4159 req/s Fehler={} ttfb p50=1504µs p90=4824µs p99=7798µs gesamt p50=1505µs p90=4826µs p99=7799µs cpu=237 µs/Anfrage mem_peak=127.9 MiB
+aigw-pg-redis Sättigung     stream c=100 6323 req/s Fehler={} ttfb p50=15712µs p90=21869µs p99=29277µs gesamt p50=15714µs p90=21871µs p99=29280µs cpu=204 µs/Anfrage mem_peak=110.4 MiB
+aigw-pg-redis Sättigung     stream c=500 7701 req/s Fehler={} ttfb p50=66025µs p90=85572µs p99=97669µs gesamt p50=66028µs p90=85573µs p99=97671µs cpu=213 µs/Anfrage mem_peak=153.7 MiB
+aigw-pg-redis mem_nach_last=137.9 MiB
+aigw-pg-redis redis: total_commands_processed:11185615 keys=7
+## litellm-pg
+litellm-pg kerne: gateway=2,3 last=4-6 (Threads 3) worker=2
+litellm-pg kaltstart_erster_start=35203 ms (mit leerer DB; LiteLLM inkl. Prisma-Migration)
+litellm-pg kaltstart_neustart=34255 ms (DB vorhanden)
+litellm-pg mem_leerlauf=1817.5 MiB
+litellm-pg  seriell        json   c=1   59 req/s Fehler={} ttfb p50=15915µs p90=20222µs p99=33702µs gesamt p50=15915µs p90=20222µs p99=33703µs cpu=17340 µs/Anfrage
+litellm-pg  200req/s       json   c=10  86 req/s Fehler={} ttfb p50=101246µs p90=149363µs p99=209801µs gesamt p50=101247µs p90=149363µs p99=209802µs cpu=16319 µs/Anfrage
+litellm-pg  seriell        stream c=1   37 req/s Fehler={} ttfb p50=16017µs p90=20518µs p99=27652µs gesamt p50=25737µs p90=32711µs p99=49749µs cpu=27337 µs/Anfrage
+litellm-pg  200req/s       stream c=10  80 req/s Fehler={} ttfb p50=35133µs p90=84439µs p99=200622µs gesamt p50=73833µs p90=172639µs p99=637686µs cpu=21496 µs/Anfrage
+litellm-pg  Sättigung     json   c=10  139 req/s Fehler={} ttfb p50=55122µs p90=97213µs p99=205002µs gesamt p50=55123µs p90=97213µs p99=205003µs cpu=12631 µs/Anfrage mem_peak=1906.4 MiB
+litellm-pg  Sättigung     json   c=100 141 req/s Fehler={} ttfb p50=518235µs p90=817144µs p99=1934752µs gesamt p50=518236µs p90=817144µs p99=1934754µs cpu=13115 µs/Anfrage mem_peak=2034.5 MiB
+litellm-pg  Sättigung     json   c=500 129 req/s Fehler={0: 450} ttfb p50=3039050µs p90=4920795µs p99=7474425µs gesamt p50=3039050µs p90=4920795µs p99=7474426µs cpu=20445 µs/Anfrage mem_peak=2159.1 MiB
+litellm-pg  Sättigung     stream c=10  67 req/s Fehler={} ttfb p50=31777µs p90=133287µs p99=236034µs gesamt p50=74625µs p90=269763µs p99=465252µs cpu=25654 µs/Anfrage mem_peak=1917.1 MiB
+litellm-pg  Sättigung     stream c=100 37 req/s Fehler={0: 256} ttfb p50=698759µs p90=927827µs p99=7684667µs gesamt p50=2528954µs p90=3694482µs p99=8017149µs cpu=33908 µs/Anfrage mem_peak=1982.3 MiB
+litellm-pg  Sättigung     stream c=500 37 req/s Fehler={0: 261} ttfb p50=721849µs p90=2156359µs p99=6457348µs gesamt p50=13798019µs p90=15507464µs p99=17974079µs cpu=35598 µs/Anfrage mem_peak=2126.6 MiB
+litellm-pg mem_nach_last=2031.6 MiB
+## litellm-pg-w4
+litellm-pg-w4 kerne: gateway=2-5 last=6 (Threads 1) worker=4
+litellm-pg-w4 kaltstart_erster_start=36213 ms (mit leerer DB; LiteLLM inkl. Prisma-Migration)
+litellm-pg-w4 kaltstart_neustart=30006 ms (DB vorhanden)
+litellm-pg-w4 mem_leerlauf=2788.7 MiB
+litellm-pg-w4 seriell        json   c=1   58 req/s Fehler={} ttfb p50=16544µs p90=20921µs p99=34964µs gesamt p50=16544µs p90=20922µs p99=34964µs cpu=17787 µs/Anfrage
+litellm-pg-w4 200req/s       json   c=10  116 req/s Fehler={} ttfb p50=60071µs p90=106624µs p99=149085µs gesamt p50=60072µs p90=106625µs p99=149085µs cpu=18141 µs/Anfrage
+litellm-pg-w4 seriell        stream c=1   41 req/s Fehler={} ttfb p50=14218µs p90=17969µs p99=28063µs gesamt p50=22945µs p90=29143µs p99=48660µs cpu=24882 µs/Anfrage
+litellm-pg-w4 200req/s       stream c=10  142 req/s Fehler={} ttfb p50=23410µs p90=49196µs p99=77741µs gesamt p50=40246µs p90=96517µs p99=147223µs cpu=23548 µs/Anfrage
+litellm-pg-w4 Sättigung     json   c=10  114 req/s Fehler={} ttfb p50=65070µs p90=107347µs p99=175299µs gesamt p50=65070µs p90=107348µs p99=175300µs cpu=15233 µs/Anfrage mem_peak=3204.2 MiB
+litellm-pg-w4 Sättigung     json   c=100 208 req/s Fehler={0: 32} ttfb p50=274243µs p90=566471µs p99=1393434µs gesamt p50=274244µs p90=566471µs p99=1393435µs cpu=15113 µs/Anfrage mem_peak=3239.1 MiB
+litellm-pg-w4 Sättigung     json   c=500 107 req/s Fehler={503: 263} ttfb p50=1905500µs p90=4491897µs p99=4944963µs gesamt p50=1905501µs p90=4491897µs p99=4944964µs cpu=18535 µs/Anfrage mem_peak=3569.5 MiB
+litellm-pg-w4 Sättigung     stream c=10  106 req/s Fehler={} ttfb p50=48612µs p90=69837µs p99=94906µs gesamt p50=85179µs p90=118632µs p99=155390µs cpu=28082 µs/Anfrage mem_peak=3590.2 MiB
+litellm-pg-w4 Sättigung     stream c=100 71 req/s Fehler={} ttfb p50=734022µs p90=916598µs p99=2143507µs gesamt p50=1216761µs p90=1570057µs p99=2852980µs cpu=30741 µs/Anfrage mem_peak=3644.7 MiB
+litellm-pg-w4 Sättigung     stream c=500 112 req/s Fehler={} ttfb p50=693468µs p90=992656µs p99=3623484µs gesamt p50=3889590µs p90=5494891µs p99=7042085µs cpu=34574 µs/Anfrage mem_peak=3787.3 MiB
+litellm-pg-w4 mem_nach_last=3785.7 MiB
+## litellm-pg-redis-w4
+litellm-pg-redis-w4 kerne: gateway=2-5 last=6 (Threads 1) worker=4
+litellm-pg-redis-w4 kaltstart_erster_start=34230 ms (mit leerer DB; LiteLLM inkl. Prisma-Migration)
+litellm-pg-redis-w4 kaltstart_neustart=30772 ms (DB vorhanden)
+litellm-pg-redis-w4 mem_leerlauf=2785.6 MiB
+litellm-pg-redis-w4 seriell        json   c=1   48 req/s Fehler={} ttfb p50=20025µs p90=26212µs p99=43269µs gesamt p50=20025µs p90=26212µs p99=43269µs cpu=21165 µs/Anfrage
+litellm-pg-redis-w4 200req/s       json   c=10  137 req/s Fehler={} ttfb p50=21809µs p90=86588µs p99=107583µs gesamt p50=21810µs p90=86588µs p99=107584µs cpu=18549 µs/Anfrage
+litellm-pg-redis-w4 seriell        stream c=1   35 req/s Fehler={} ttfb p50=17567µs p90=22714µs p99=40097µs gesamt p50=27419µs p90=34992µs p99=55225µs cpu=29847 µs/Anfrage
+litellm-pg-redis-w4 200req/s       stream c=10  74 req/s Fehler={} ttfb p50=79359µs p90=114389µs p99=145927µs gesamt p50=120160µs p90=162621µs p99=202573µs cpu=30913 µs/Anfrage
+litellm-pg-redis-w4 Sättigung     json   c=10  127 req/s Fehler={} ttfb p50=69306µs p90=101812µs p99=151178µs gesamt p50=69307µs p90=101813µs p99=151179µs cpu=20495 µs/Anfrage mem_peak=3237.6 MiB
+litellm-pg-redis-w4 Sättigung     json   c=100 176 req/s Fehler={} ttfb p50=400498µs p90=636800µs p99=1514677µs gesamt p50=400499µs p90=636801µs p99=1514678µs cpu=16493 µs/Anfrage mem_peak=3309.5 MiB
+litellm-pg-redis-w4 Sättigung     json   c=500 168 req/s Fehler={0: 114} ttfb p50=1784638µs p90=3614671µs p99=7979725µs gesamt p50=1784639µs p90=3614671µs p99=7979726µs cpu=20936 µs/Anfrage mem_peak=3425.1 MiB
+litellm-pg-redis-w4 Sättigung     stream c=10  102 req/s Fehler={} ttfb p50=44741µs p90=79816µs p99=116766µs gesamt p50=72788µs p90=123579µs p99=188492µs cpu=27969 µs/Anfrage mem_peak=3498.5 MiB
+litellm-pg-redis-w4 Sättigung     stream c=100 64 req/s Fehler={} ttfb p50=826172µs p90=1310176µs p99=2414556µs gesamt p50=1151148µs p90=1692237µs p99=2777717µs cpu=32223 µs/Anfrage mem_peak=3560.9 MiB
+litellm-pg-redis-w4 Sättigung     stream c=500 73 req/s Fehler={} ttfb p50=406199µs p90=2416651µs p99=4222810µs gesamt p50=3968777µs p90=7542009µs p99=10262685µs cpu=40633 µs/Anfrage mem_peak=3720.9 MiB
+litellm-pg-redis-w4 mem_nach_last=3719.8 MiB
+litellm-pg-redis-w4 redis: total_commands_processed:1189905 keys=8

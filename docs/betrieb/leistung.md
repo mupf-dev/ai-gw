@@ -420,7 +420,7 @@ p99 der Gesamtzeit bei 500 Verbindungen: ai-gw 65–75 ms, LiteLLM 5,7–8,4 s.
 - Nur 2 Kerne je Gateway und eine Instanz. LiteLLM skaliert horizontal über Worker/Pods
   (laut Doku 1 vCPU und ≥ 4 GiB je Worker); mehr Worker, Redis, andere ASGI-Server
   (Gunicorn/Granian aus „Server Tuning“) und `litellm` ohne Spend-Tracking wurden nicht
-  gemessen.
+  gemessen. Mehr Worker und Redis: Nachmessung in §8.5 (AIGW-107).
 - `litellm` (ohne DB) prüft nur den Master-Key und ist damit **leichter** als die
   ai-gw-Kette (Limits, Budgets, Preis, Request-Log); `litellm-pg` ist die funktional
   vergleichbare Variante.
@@ -429,3 +429,61 @@ p99 der Gesamtzeit bei 500 Verbindungen: ai-gw 65–75 ms, LiteLLM 5,7–8,4 s.
   Läufen, die Verhältnisse sind belastbar.
 - Der ai-gw-Container nutzt ein Image vom Arbeitsstand (Dockerfile, Release-Profil); die
   LiteLLM-Version ist auf v1.108.8 (LTS, 2026-11-13) gepinnt (`LITELLM_TAG`).
+
+### 8.5 Ergänzung: mehrere Worker und Redis (AIGW-107)
+
+Offene Punkte aus §8.4 nachgemessen: LiteLLM mit **4 Workern auf 4 Kernen** und mit **Redis**
+(Mehrinstanz-Aufbau nach „Best Practices for Production“), ai-gw mit Redis-Zählern.
+`VARIANTS="aigw-pg aigw-pg-redis litellm-pg litellm-pg-w4 litellm-pg-redis-w4"
+RT=1 BUILD_IMAGE=0 OUT=target/bench/107-litellm.txt scripts/bench-litellm.sh`, Lauf vom
+2026-11-23 auf der Buildbox (cpx42, 8 vCPU EPYC Genoa; Lastdurchschnitt vorher 8, danach 14 –
+geteilt mit anderen Projekten). Rohprotokoll [107-litellm.txt](messwerte/107-litellm.txt),
+Kurzfassung [107-litellm-zusammenfassung.txt](messwerte/107-litellm-zusammenfassung.txt).
+Alles lokal per Docker gegen den Fake-Upstream, keine externen APIs, keine Keys.
+
+| Variante | Aufbau | Kerne Gateway / Last |
+|---|---|---|
+| `aigw-pg` | wie §8 (Postgres 17, Zähler `local`) | 2–3 / 4–6 |
+| `aigw-pg-redis` | wie `aigw-pg`, `counters.backend: redis` (Redis 7.4, Kern 7 mit Postgres) | 2–3 / 4–6 |
+| `litellm-pg` | wie §8 (2 Worker, virtueller Key mit Budget/RPM/TPM, Spend-Logs) | 2–3 / 4–6 |
+| `litellm-pg-w4` | 4 Worker | **2–5** / 6 |
+| `litellm-pg-redis-w4` | 4 Worker + Redis: `router_settings.redis_host/redis_port` (RPM/TPM über Instanzen), `general_settings.use_redis_transaction_buffer` mit `REDIS_HOST/REDIS_PORT` (Spend-Updates gepuffert) | **2–5** / 6 |
+
+LiteLLM bekommt in den `*-w4`-Varianten doppelt so viele Kerne wie ai-gw.
+
+| Kennzahl | aigw-pg | aigw-pg-redis | litellm-pg | litellm-pg-w4 | litellm-pg-redis-w4 |
+|---|---|---|---|---|---|
+| Aufschlag json seriell, p50 (direkt 50 µs) | +0,09 ms | +0,37 ms | +15,9 ms | +16,5 ms | +20,0 ms |
+| erreichte Rate bei Ziel 200 req/s (json / stream) | 200 / 200 | 200 / 200 | 86 / 80 | 116 / 142 | 137 / 74 |
+| Sättigung json, 10 / 100 / 500 Verb. (req/s) | 26 771 / 29 653 / 18 176 | 4 249 / 5 886 / 7 250 | 139 / 141 / 129 ¹ | 114 / 208 ¹ / 107 ² | 127 / 176 / 168 ¹ |
+| Sättigung stream, 10 / 100 / 500 Verb. (req/s) | 28 170 / 27 773 / 4 628 ³ | 4 159 / 6 323 / 7 701 | 67 / 37 ¹ / 37 ¹ | 106 / 71 / 112 | 102 / 64 / 73 |
+| p99 gesamt json, 500 Verb. | 68 ms | 124 ms | 7,5 s | 4,9 s | 8,0 s |
+| CPU je Anfrage (json, 100 Verb.) | 69 µs | 211 µs | 13 115 µs | 15 113 µs | 16 493 µs |
+| Speicher Leerlauf / Höchststand | 19 / 163 MiB | 19 / 154 MiB | 1 818 / 2 159 MiB | 2 789 / 3 787 MiB | 2 786 / 3 721 MiB |
+| Kaltstart erster Start / Neustart | 0,32 / 0,29 s | 0,24 / 0,25 s | 35,2 / 34,3 s | 36,2 / 30,0 s | 34,2 / 30,8 s |
+| Redis-Befehle je Anfrage (ca.) | – | ≈ 44 | – | – | ≈ 17 |
+
+¹ Verbindungsabbrüche (Status 0 im Lastgenerator): litellm-pg json 500: 450, stream 100/500:
+256/261; litellm-pg-w4 json 100: 32; litellm-pg-redis-w4 json 500: 114.
+² 263 × `503`. ³ Ausreißer (fremde Last auf der Box während dieses Laufs; die anderen
+ai-gw-Läufe und §8 liegen bei 10–16 k req/s).
+
+**Bewertung:**
+
+- **Mehr Worker helfen LiteLLM kaum:** Doppelte Kerne und Worker heben den Sättigungsdurchsatz
+  nur punktuell (json 100 Verb. 141 → 208 req/s), stream bleibt bei ≈ 70–110 req/s; der Aufschlag
+  je Anfrage (≈ 16 ms seriell, ≈ 13–17 ms CPU) ist unabhängig von der Worker-Zahl. Speicher
+  wächst mit den Workern (≈ 0,5 GiB je zusätzlichem Worker; 4 Worker ≈ 2,8 GiB im Leerlauf).
+- **Redis kostet LiteLLM wenig** (≈ +4 ms seriell, Durchsatz im Rauschen) – er ist dort
+  ohnehin durch die Python-Verarbeitung je Anfrage begrenzt.
+- **Redis kostet ai-gw deutlich:** Mit `counters.backend: redis` sinkt der Durchsatz auf
+  ≈ 4–8 k req/s (statt 18–30 k) und der serielle Aufschlag steigt auf ≈ 0,37 ms – ≈ 44
+  Redis-Befehle je Anfrage (Limits Org/Team/Key, Kapazität, Concurrency, Reservierung und
+  Abrechnung, einzeln). Das bestätigt Punkt 4 in §7 (Reservierung/Abrechnung je Anfrage in
+  einem Lua-Aufruf bzw. Pipeline bündeln). Auch so liegt ai-gw mit Redis noch ≈ 30–100-fach
+  über LiteLLM mit Redis und doppelt so vielen Kernen.
+- **Unter Überlast** bricht LiteLLM in allen Varianten Verbindungen ab bzw. antwortet `503`;
+  ai-gw blieb in allen Läufen fehlerfrei.
+- Ein erster Lauf am 2026-11-22 bei Lastdurchschnitt 45–65 auf der Box (fremde Builds) ergab
+  dieselben Verhältnisse bei ≈ 40–50 % niedrigeren Absolutwerten; er wurde verworfen.
+

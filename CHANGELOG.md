@@ -9,6 +9,12 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Hinzugefügt
 
+- **Lastvergleich LiteLLM mit Workern und Redis (AIGW-107):** `scripts/bench-litellm.sh` mit
+  den Varianten `aigw-pg-redis`, `litellm-pg-w4`, `litellm-pg-redis-w4`; Ergebnisse in
+  docs/betrieb/leistung.md §8.5 (u. a. ≈ 44 Redis-Befehle je Anfrage bei `counters.backend: redis`).
+- **e2e:** `ui/e2e/run.sh` nimmt zusätzliche Playwright-Argumente über `E2E_ARGS` (z. B.
+  `--repeat-each`); Tool-Inventar-Test (AIGW-87) unabhängig von Reihenfolge und Datenmenge
+  (AIGW-121).
 - **WASM-Module: Sigstore-Signatur ohne Schlüsselverwaltung und Vier-Augen-Freigabe
   (AIGW-106):** `wasm.sigstore` (Trust-Root `trusted_root.json` offline, erlaubte Identitäten
   mit Issuer/Subjekt als reguläre Ausdrücke) prüft Bundles aus `cosign sign-blob --bundle`
