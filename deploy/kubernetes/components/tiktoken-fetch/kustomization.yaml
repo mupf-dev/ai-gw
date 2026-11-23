@@ -5,7 +5,7 @@
 # Image enthält sie nicht (Lizenz ungeklärt); ohne Tabellen schätzt ai-gw Tokens (Heuristik).
 # Der Init-Container (gleiches Image) lädt die Dateien von openaipublic.blob.core.windows.net,
 # prüft die SHA-256-Summen und legt sie in /data/tiktoken ab (braucht ausgehendes HTTPS).
-# Aktivieren in der eigenen kustomization.yaml:
+# Beispiel: deploy/kubernetes-tiktoken-fetch. Aktivieren in der eigenen kustomization.yaml:
 #   resources: [<pfad>/deploy/kubernetes]
 #   components: [<pfad>/deploy/kubernetes/components/tiktoken-fetch]
 #   images: [{name: ai-gw, newName: <registry>/ai-gw, newTag: <version>}]   # gilt auch für den Init-Container

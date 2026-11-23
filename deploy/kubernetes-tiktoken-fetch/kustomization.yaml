@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
+#
+# Beispiel-Overlay (AIGW-92): Grundgerüst + Init-Container für die tiktoken-Rangtabellen.
+#   kubectl -n aigw apply -k deploy/kubernetes-tiktoken-fetch
+# images: gilt auch für den Init-Container (geprüft von scripts/k8s-check.sh).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: [../kubernetes]
+components: [../kubernetes/components/tiktoken-fetch]
+images:
+  - name: ai-gw
+    newName: registry.example.org/ai-gw
+    newTag: 0.1.0

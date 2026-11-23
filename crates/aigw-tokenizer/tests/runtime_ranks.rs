@@ -89,7 +89,11 @@ fn loads_from_dir_or_falls_back() {
     assert!(out.iter().all(|(_, o)| matches!(o, DirOutcome::Missing)));
 
     // Andere Datei unter dem richtigen Namen: abgelehnt (Prüfsumme), weiter Heuristik.
-    std::fs::write(dir.join("o200k_base.tiktoken"), common::synthetic_tiktoken()).unwrap();
+    std::fs::write(
+        dir.join("o200k_base.tiktoken"),
+        common::synthetic_tiktoken(),
+    )
+    .unwrap();
     for (e, o) in ranks::install_from_dir(&dir) {
         match e {
             Encoding::O200kBase => assert!(
@@ -110,8 +114,10 @@ fn loads_from_dir_or_falls_back() {
     assert_eq!(Encoding::O200kBase.count("hello world"), 5);
     assert_eq!(Tokenizer::Bpe(Encoding::O200kBase).count("hello world"), 5);
     let out = ranks::install_from_dir(&dir);
-    assert!(out.iter().any(|(e, o)| *e == Encoding::O200kBase
-        && matches!(o, DirOutcome::Installed)));
+    assert!(
+        out.iter()
+            .any(|(e, o)| *e == Encoding::O200kBase && matches!(o, DirOutcome::Installed))
+    );
     assert!(!Encoding::Cl100kBase.is_available());
 
     std::fs::remove_dir_all(&dir).unwrap();

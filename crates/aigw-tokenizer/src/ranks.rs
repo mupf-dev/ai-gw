@@ -254,7 +254,9 @@ pub fn install_from_env() -> Result<bool, String> {
     let required = std::env::var(TEST_REQUIRE_ENV).is_ok_and(|v| v == "1");
     let Some(dir) = std::env::var_os(TEST_DIR_ENV).filter(|d| !d.is_empty()) else {
         return if required {
-            Err(format!("{TEST_REQUIRE_ENV}=1, aber {TEST_DIR_ENV} ist nicht gesetzt"))
+            Err(format!(
+                "{TEST_REQUIRE_ENV}=1, aber {TEST_DIR_ENV} ist nicht gesetzt"
+            ))
         } else {
             Ok(false)
         };

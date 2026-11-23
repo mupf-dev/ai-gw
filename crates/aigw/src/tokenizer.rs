@@ -296,7 +296,11 @@ async fn exec(cmd: TokenizerCommand) -> Result<ExitCode, String> {
                     }
                 }
             }
-            Ok(if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE })
+            Ok(if ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
         }
         TokenizerCommand::Fetch {
             dir,
@@ -326,7 +330,11 @@ async fn exec(cmd: TokenizerCommand) -> Result<ExitCode, String> {
                     }
                 }
             }
-            Ok(if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE })
+            Ok(if ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
         }
     }
 }
@@ -411,9 +419,14 @@ mod tests {
         assert!(!dir.join("o200k_base.tiktoken").exists());
         assert!(!Encoding::O200kBase.is_available());
         // Die offizielle Prüfsumme passt nicht zur synthetischen Datei.
-        let err = fetch(&client, &base, Encoding::Cl100kBase, Encoding::Cl100kBase.sha256())
-            .await
-            .unwrap_err();
+        let err = fetch(
+            &client,
+            &base,
+            Encoding::Cl100kBase,
+            Encoding::Cl100kBase.sha256(),
+        )
+        .await
+        .unwrap_err();
         assert!(err.contains("SHA-256"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -470,7 +483,11 @@ mod cli_tests {
         .await
         .unwrap();
         assert_eq!(code, ExitCode::FAILURE);
-        assert!(check_file(&dir, Encoding::O200kBase).unwrap_err().contains("SHA-256"));
+        assert!(
+            check_file(&dir, Encoding::O200kBase)
+                .unwrap_err()
+                .contains("SHA-256")
+        );
         assert!(check_file(&dir, Encoding::Cl100kBase).is_err());
         // Fetch verweigert eine Basis-URL ohne abschließendes `/` (vor jedem Netzzugriff).
         let err = exec(TokenizerCommand::Fetch {

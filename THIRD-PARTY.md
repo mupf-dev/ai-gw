@@ -58,7 +58,13 @@ eingebettete Admin-UI eingehen. Die zulässigen Lizenzen legt `deny.toml` fest
 
 ## Admin-UI (npm, Laufzeit-Abhängigkeiten im Bundle)
 
-_nicht erzeugt (pnpm/node_modules fehlte)_
+| Lizenz | Pakete |
+|---|---|
+| `Apache-2.0` | @internationalized/date 3.12.4, @swc/helpers 0.5.24, aria-query 5.3.1, axobject-query 4.1.0 |
+| `BSD-3-Clause` | d3-array 2.12.1, d3-interpolate-path 2.3.0, d3-path 1.0.9, d3-sankey 0.12.3, d3-shape 1.3.7, d3-tile 1.0.0, rw 1.3.3 |
+| `ISC` | d3-array 3.2.5, d3-chord 3.0.2, d3-color 3.1.1, d3-contour 4.0.3, d3-delaunay 6.0.6, d3-dispatch 3.0.2, d3-dsv 3.0.2, d3-force 3.0.1, d3-format 3.1.3, d3-geo 3.1.2, d3-geo-polygon 2.0.1, d3-geo-projection 4.0.0, d3-geo-voronoi 2.1.0, d3-hierarchy 3.1.2,3.1.3, d3-interpolate 3.0.2, d3-path 3.1.1, d3-polygon 3.0.2, d3-quadtree 3.0.2, d3-random 3.0.2, d3-scale 4.0.3, d3-scale-chromatic 3.1.1, d3-shape 3.2.1, d3-time 3.1.1, d3-time-format 4.1.1, d3-timer 3.0.2, d3-tricontour 1.1.0, delaunator 5.1.0, internmap 1.0.1,2.0.3 |
+| `MIT` | @dagrejs/dagre 2.0.4, @dagrejs/graphlib 3.0.4, @floating-ui/core 1.8.0, @floating-ui/dom 1.8.0, @floating-ui/utils 0.2.12, @jridgewell/gen-mapping 0.3.13, @jridgewell/remapping 2.3.5, @jridgewell/resolve-uri 3.1.2, @jridgewell/sourcemap-codec 1.6.0, @jridgewell/trace-mapping 0.3.31, @layerstack/svelte-actions 1.0.1-next.20, @layerstack/svelte-state 0.1.0-next.25, @layerstack/tailwind 2.0.0-next.21, @layerstack/utils 2.0.0-next.19, @sveltejs/acorn-typescript 1.0.13, @types/d3-array 3.2.2, @types/d3-contour 3.0.6, @types/estree 1.0.10, @types/geojson 7946.0.16, acorn 8.19.0, bits-ui 2.20.6, clsx 2.1.1, commander 7.2.0, dequal 2.0.3, devalue 5.9.4, esm-env 1.2.2, esrap 2.4.0, iconv-lite 0.6.3, inline-style-parser 0.2.7, is-reference 3.0.3, layerchart 2.9.2, locate-character 3.0.0, lz-string 1.5.0, magic-string 0.30.21, memoize 10.2.0, mimic-function 5.0.1, openapi-fetch 0.17.0, openapi-typescript-helpers 0.1.0, runed 0.35.1,0.37.1, safer-buffer 2.1.2, style-to-object 1.0.14, svelte 5.57.3, svelte-toolbelt 0.10.7, tabbable 6.5.1, tailwind-merge 3.7.0, uplot 1.6.32, zimmerframe 1.1.5 |
+| `Unlicense` | robust-predicates 3.0.3 |
 
 ## Container-Image
 
