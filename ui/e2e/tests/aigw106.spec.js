@@ -29,7 +29,7 @@ async function open(page, token) {
   await expect(page.getByTestId('wasm-four-eyes')).toBeVisible();
 }
 
-test('Vier-Augen-Freigabe: einreichen, Selbstfreigabe gesperrt, zweiter Admin gibt frei', async ({ page, browser, playwright }) => {
+test('Vier-Augen-Freigabe: einreichen, Selbstfreigabe gesperrt, zweiter Admin gibt frei', async ({ page, playwright }) => {
   const mod = `e106-guard-${RUN}`;
   const ctx = await playwright.request.newContext({ baseURL: FOUR });
   const key = await api(ctx, 'POST', 'admin-api-keys', { name: `e106-approver-${RUN}`, description: 'AIGW-106 zweiter Admin', roles: [{ role: 'admin' }] });
@@ -55,8 +55,9 @@ test('Vier-Augen-Freigabe: einreichen, Selbstfreigabe gesperrt, zweiter Admin gi
   expect((await api(ctx, 'GET', `wasm-modules/${mod}`)).status).toBe(404);
   clean(page);
 
-  // 2. Zweiter Admin (Admin-Key) gibt über den Button frei → aktiv, Herkunft sichtbar.
-  const page2 = await browser.newPage();
+  // 2. Zweiter Admin (Admin-Key) gibt über den Button frei → aktiv, Herkunft sichtbar (gleiche Seite, neues
+  // Token: das zuletzt registrierte Init-Skript setzt es).
+  const page2 = page;
   await open(page2, key.body.secret);
   const row2 = page2.getByTestId('wasm-pending-row').filter({ hasText: mod });
   await row2.getByTestId(`wasm-approve-${mod}`).click();
@@ -101,5 +102,4 @@ test('Vier-Augen-Freigabe: einreichen, Selbstfreigabe gesperrt, zweiter Admin gi
   // Aufräumen.
   expect((await api(ctx, 'DELETE', `wasm-modules/${mod}`, undefined, TOKEN, { 'If-Match': '*' })).status).toBe(204);
   await api(ctx, 'DELETE', `admin-api-keys/e106-approver-${RUN}`, undefined, TOKEN, { 'if-match': '*' });
-  await page2.close();
 });

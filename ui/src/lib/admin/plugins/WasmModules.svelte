@@ -187,7 +187,7 @@
       {/if}
       {#if items.length === 0 && !data.pending?.length}
         <EmptyState compact icon="shield" title="Noch keine WASM-Module" text="Beispiel: plugins/keyword-guard (Stichwort-Blocker, Header-Setzer)." />
-      {:else}
+      {:else if items.length}
         <div class="overflow-x-auto">
           <table class="w-full text-left text-base" data-testid="wasm-table">
             <caption class="sr-only">WASM-Module</caption>
