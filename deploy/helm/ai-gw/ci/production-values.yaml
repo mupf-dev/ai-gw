@@ -46,3 +46,7 @@ topologySpreadConstraints:
     whenUnsatisfiable: ScheduleAnyway
     labelSelector:
       matchLabels: {app.kubernetes.io/name: ai-gw}
+# AIGW-92: Init-Container für die tiktoken-Rangtabellen mitprüfen
+tokenizer:
+  fetch:
+    enabled: true

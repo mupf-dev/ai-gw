@@ -50,6 +50,30 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- if .Values.tokenizer.fetch.enabled }}
+      initContainers:
+        # AIGW-92: tiktoken-Rangtabellen nach /data/tiktoken laden (nicht im Image enthalten).
+        - name: tiktoken-fetch
+          image: {{ include "ai-gw.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - tokenizer
+            - fetch
+            - --dir=/data/tiktoken
+            {{- with .Values.tokenizer.fetch.baseUrl }}
+            - --base-url={{ . }}
+            {{- end }}
+          env:
+            - name: AIGW_CONFIG
+              value: /etc/aigw/aigw.yaml
+          resources:
+            {{- toYaml .Values.tokenizer.fetch.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/aigw, readOnly: true}
+            - {name: data, mountPath: /data}
+      {{- end }}
       containers:
         - name: aigw
           image: {{ include "ai-gw.image" . | quote }}

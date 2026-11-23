@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 ai-gw contributors
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 mupf-dev
+# SPDX-License-Identifier: FSL-1.1-ALv2
 #
 # Lädt die tiktoken-Rangtabellen von OpenAI (cl100k_base, o200k_base) und prüft die SHA-256-
 # Summen (dieselben wie in tiktoken und in crates/aigw-tokenizer/src/ranks.rs). ai-gw enthält

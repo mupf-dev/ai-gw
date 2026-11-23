@@ -106,6 +106,20 @@ podDisruptionBudget:
   # gilt nur bei replicaCount > 1 (bei einer Instanz würde ein PDB jedes Drain blockieren)
   minAvailable: 1
 
+# tiktoken-Rangtabellen o200k_base/cl100k_base (AIGW-92): nicht im Image (Lizenz ungeklärt). Das Image sucht
+# sie unter /data/tiktoken; ohne sie schätzt ai-gw Tokens (Heuristik). `fetch.enabled` lädt sie vor dem Start per
+# Init-Container (`aigw tokenizer fetch`, SHA-256 geprüft; braucht ausgehendes HTTPS bzw. einen Spiegel). Mit
+# persistence.enabled bleiben die Dateien erhalten (erneuter Start lädt nichts nach).
+tokenizer:
+  fetch:
+    enabled: false
+    # Spiegel im internen Netz (mit abschließendem /), leer = offizielle Quelle; muss nach
+    # config.admin.allow_*_upstreams erlaubt sein
+    baseUrl: ""
+    resources:
+      requests: {cpu: 50m, memory: 64Mi}
+      limits: {memory: 128Mi}
+
 resources:
   requests: {cpu: 500m, memory: 256Mi}
   limits: {memory: 1Gi}

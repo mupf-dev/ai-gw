@@ -91,6 +91,7 @@ Zähler-Backends: [datenhaltung.md](datenhaltung.md).
 | `extraEnv`, `extraEnvFrom` | – | weitere Umgebung, z. B. `AIGW_SECRET_*`, `AIGW_BOOTSTRAP_TOKEN` (aus Secret) |
 | `extraVolumes`, `extraVolumeMounts` | – | z. B. CA-Bündel (`upstream.ca_file`), WASM-Plugins, GitOps-Secrets |
 | `persistence.*` | PVC 1 Gi `ReadWriteOnce` | `enabled: false` → emptyDir (`emptyDirSizeLimit`), `existingClaim`, `storageClass` (`-` = leer) |
+| `tokenizer.fetch.*` | aus | Init-Container `aigw tokenizer fetch` lädt die tiktoken-Rangtabellen nach `/data/tiktoken` (nicht im Image, AIGW-92; braucht ausgehendes HTTPS oder `baseUrl` eines Spiegels); ohne: Token-Schätzung per Heuristik |
 | `resources` | requests 500m/256Mi, limit 1Gi | Messwerte: [leistung.md](leistung.md) |
 | `probes.*` | readiness `/readyz`, liveness/startup `/healthz` (Port `control`) | Perioden und Schwellen anpassbar |
 | `podDisruptionBudget.*` | an, `minAvailable: 1` | nur bei `replicaCount > 1` |

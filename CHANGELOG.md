@@ -329,7 +329,8 @@ Vorabständen):
   ai-gw lädt sie aus `tokenizer.ranks_dir` (Image: `/data/tiktoken`); neu
   `aigw tokenizer fetch|verify` (Download/Prüfung mit SHA-256 über `aigw-outbound`, Spiegel per
   `--base-url`), `scripts/fetch-tokenizers.sh`, kustomize-Komponente
-  `deploy/kubernetes/components/tiktoken-fetch` (Init-Container), Compose-Schalter
+  `deploy/kubernetes/components/tiktoken-fetch` bzw. Helm-Wert `tokenizer.fetch.enabled`
+  (Init-Container), Compose-Schalter
   `AIGW_TOKENIZER_DOWNLOAD`. Ohne Tabellen schätzt die Heuristik (wie bisher bei fehlenden
   Dateien). `tokenizer.download_ranks` installiert die Tabelle auch, wenn das Verzeichnis nicht
   beschreibbar ist. Tests laufen offline (synthetische Tabelle); exakte Referenztests mit

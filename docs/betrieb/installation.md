@@ -233,8 +233,8 @@ auch in CI). Mit erreichbarem Cluster zusätzlich `KUBE_SERVER_DRY_RUN=1 scripts
 erreichbaren API-Server (Discovery). Das Image ist Multi-Arch-fähig; gemischte Knotenpools
 amd64/arm64 brauchen ein Multi-Arch-Manifest (`PUSH=… scripts/build-images.sh`).
 
-Tokenizer-Tabellen (siehe §1): Die optionale kustomize-Komponente
-[`components/tiktoken-fetch`](../../deploy/kubernetes/components/tiktoken-fetch/) fügt einen
+Tokenizer-Tabellen (siehe §1): Im Helm-Chart `tokenizer.fetch.enabled: true` ([helm.md](helm.md)). Im kustomize-Grundgerüst fügt die optionale Komponente
+[`components/tiktoken-fetch`](../../deploy/kubernetes/components/tiktoken-fetch/) einen
 Init-Container (`aigw tokenizer fetch --dir /data/tiktoken`, gleiches Image) hinzu; er braucht
 ausgehendes HTTPS (bzw. `--base-url` eines internen Spiegels). Ohne die Komponente zählt ai-gw
 mit der Heuristik. Alternativ ein Volume mit den Dateien unter `/data/tiktoken` einhängen.
