@@ -6,13 +6,22 @@
 #
 # Gleicher Fake-Upstream (Beispiel `latency upstream`, OpenAI-kompatibel, antwortet sofort) und
 # gleicher Lastgenerator (`latency load`) wie scripts/bench-e2e.sh. Beide Gateways laufen als
-# Container im Host-Netz auf denselben zwei Kernen (--cpuset-cpus 2,3), beide mit API-Key-Prüfung:
+# Container im Host-Netz auf denselben zwei Kernen (--cpuset-cpus "$GW_CPUS"), beide mit API-Key-Prüfung:
 #
 #   aigw-sqlite  ai-gw-Image (lokal gebaut), SQLite, Key mit Limits/Budgets, Preis, Request-Log an
 #   aigw-pg      wie oben, Store Postgres 17
 #   litellm      LiteLLM-Proxy, ohne DB, Prüfung gegen den Master-Key (einzige Key-Art ohne DB)
 #   litellm-pg   LiteLLM-Proxy (litellm-database-Image) + Postgres 17, virtueller Key mit
 #                Budget/RPM/TPM, Spend-Logs an (entspricht dem Request-Log von ai-gw)
+#
+# Ergänzung AIGW-107 (Mehrinstanz-Aufbau mit Redis):
+#   aigw-pg-redis        wie aigw-pg, Zähler (Limits/Kapazität) in Redis 7 (counters.backend redis)
+#   litellm-pg-w4        wie litellm-pg, aber 4 Worker auf 4 Kernen (2–5)
+#   litellm-pg-redis-w4  wie litellm-pg-w4 + Redis 7 (router_settings redis_host/redis_port für
+#                        RPM/TPM über Instanzen, use_redis_transaction_buffer für Spend-Updates)
+#   Die *-w4-Varianten bekommen doppelt so viele Kerne wie ai-gw; die Last läuft dann nur auf
+#   Kern 6 (für LiteLLM-Raten von wenigen hundert req/s ausreichend). Redis teilt sich Kern 7
+#   mit Postgres.
 #
 # LiteLLM nach „Best Practices for Production“ (docs.litellm.ai/docs/proxy/prod): ein Container
 # mit NUM_WORKERS = vCPU (hier 2), LITELLM_MODE=PRODUCTION, LITELLM_LOG=ERROR, set_verbose
@@ -28,6 +37,8 @@
 #
 #   scripts/bench-litellm.sh                       # alles (≈ 30 Min., baut das ai-gw-Image)
 #   VARIANTS="aigw-sqlite litellm" scripts/bench-litellm.sh
+#   VARIANTS="aigw-pg-redis litellm-pg-w4 litellm-pg-redis-w4" OUT=target/bench/107-litellm.txt \
+#     scripts/bench-litellm.sh                     # AIGW-107
 #   BUILD_IMAGE=0 AIGW_IMAGE=ai-gw:dev-amd64 scripts/bench-litellm.sh
 #
 # Umgebung: LITELLM_TAG (fest gepinnt, Standard v1.108.8 = LTS), VARIANTS, CONCS ("10 100 500"),
@@ -41,6 +52,7 @@ LITELLM_TAG=${LITELLM_TAG:-v1.108.8}
 LITELLM_IMAGE=ghcr.io/berriai/litellm:$LITELLM_TAG
 LITELLM_DB_IMAGE=ghcr.io/berriai/litellm-database:$LITELLM_TAG
 PG_IMAGE=postgres:17-alpine
+REDIS_IMAGE=redis:7.4-alpine
 AIGW_IMAGE=${AIGW_IMAGE:-aigw102-ai-gw:bench}
 VARIANTS=${VARIANTS:-"aigw-sqlite aigw-pg litellm litellm-pg"}
 CONCS=${CONCS:-"10 100 500"}
@@ -53,8 +65,14 @@ UP_ADDR=127.0.0.1:9102
 GW_PORT=9202
 CTL_PORT=9203
 PG_PORT=15532
+REDIS_PORT=16379
 GW_CTR=aigw102-gw
 PG_CTR=aigw102-pg
+REDIS_CTR=aigw102-redis
+# Kerne je Variante (set_cores): Gateway-Container, Lastgenerator und dessen Threads.
+GW_CPUS=2,3
+LOAD_CPUS=4-6
+LOAD_THREADS=3
 GWA=127.0.0.1:$GW_PORT
 
 cargo build --release -p aigw-proxy --example latency
@@ -71,7 +89,7 @@ cleanup() {
   if [[ -n "$SAMPLER" ]]; then kill "$SAMPLER" 2>/dev/null || true; fi
   if [[ -n "$UP" ]]; then kill "$UP" 2>/dev/null || true; fi
   wait 2>/dev/null || true
-  docker rm -f "$GW_CTR" "$PG_CTR" >/dev/null 2>&1 || true
+  docker rm -f "$GW_CTR" "$PG_CTR" "$REDIS_CTR" >/dev/null 2>&1 || true
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -86,11 +104,11 @@ if [[ "${BUILD_IMAGE:-1}" == 1 ]]; then
   docker build -q -t "$AIGW_IMAGE" . >/dev/null
   echo "# ai-gw-Image $AIGW_IMAGE gebaut in $(($(date +%s) - t)) s"
 fi
-for img in "$LITELLM_IMAGE" "$LITELLM_DB_IMAGE" "$PG_IMAGE"; do
+for img in "$LITELLM_IMAGE" "$LITELLM_DB_IMAGE" "$PG_IMAGE" "$REDIS_IMAGE"; do
   docker pull -q "$img" >/dev/null
 done
 echo "# $(date -u +%FT%TZ) $(nproc) vCPU, $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2), Last vorher: $(cut -d' ' -f1-3 /proc/loadavg)"
-echo "# Upstream: Kerne 0-1, Gateway-Container: Kerne 2-3, Last: Kerne 4-6, Postgres: Kern 7, RT=${RT:-0}"
+echo "# Upstream: Kerne 0-1, Gateway-Container: Kerne 2-3 (*-w4: 2-5), Last: Kerne 4-6 (*-w4: 6), Postgres/Redis: Kern 7, RT=${RT:-0}"
 echo "# LiteLLM: $LITELLM_IMAGE / $LITELLM_DB_IMAGE ($(docker image inspect -f '{{index .RepoDigests 0}}' "$LITELLM_IMAGE" 2>/dev/null))"
 echo "# ai-gw: $AIGW_IMAGE ($(docker image inspect -f '{{.Id}}' "$AIGW_IMAGE" | cut -c1-19))"
 sum "## Image-Größen (entpackt laut docker image inspect / komprimiert docker save | gzip -1)"
@@ -126,9 +144,9 @@ cpu_usec() { awk '/^usage_usec/{print $2}' "$(cg_dir "$GW_CTR")/cpu.stat" 2>/dev
 # Lauf des Lastgenerators; Rohausgabe ins Protokoll, eine Kurzzeile in die Zusammenfassung.
 # run_load <Variante> <Szenario> <Ziel> <Verbindungen> <Anfragen> <json|stream> [ENV=…]
 run_load() {
-  local v=$1 sc=$2 target=$3 c=$4 n=$5 mode=$6 o cores=4-6 th=3 c0 c1 s1="" peak=""
+  local v=$1 sc=$2 target=$3 c=$4 n=$5 mode=$6 o cores=$LOAD_CPUS th=$LOAD_THREADS c0 c1 s1="" peak=""
   shift 6
-  [[ "$c" == 1 ]] && cores=4 th=1
+  [[ "$c" == 1 ]] && cores=${LOAD_CPUS%%[-,]*} th=1
   echo "== $v: $sc ($mode, $c Verbindungen, $n Anfragen)"
   c0=$(cpu_usec_if "$target")
   if [[ "${PEAK:-0}" == 1 ]]; then
@@ -168,13 +186,25 @@ start_pg() {
   docker exec "$PG_CTR" createdb -h 127.0.0.1 -p "$PG_PORT" -U postgres litellm
 }
 
+start_redis() {
+  docker rm -f "$REDIS_CTR" >/dev/null 2>&1 || true
+  docker run -d --name "$REDIS_CTR" --network host --cpuset-cpus 7 "$REDIS_IMAGE" \
+    redis-server --bind 127.0.0.1 --port "$REDIS_PORT" --save '' --appendonly no >/dev/null
+  until docker exec "$REDIS_CTR" redis-cli -p "$REDIS_PORT" ping >/dev/null 2>&1; do sleep 0.2; done
+}
+# set_cores <Gateway-Kerne> <Last-Kerne> <Last-Threads> <LiteLLM-Worker>
+set_cores() { GW_CPUS=$1 LOAD_CPUS=$2 LOAD_THREADS=$3 WORKERS=$4; }
+
 # --- ai-gw ------------------------------------------------------------------------------
 KEY="sk-aigw-bench0000001-$(printf 'B%.0s' $(seq 1 43))"
 printf '%s' "$KEY" >"$TMP/key"
 chmod 0644 "$TMP/key"
 AIGW_MASTER_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')
 export AIGW_MASTER_KEY
-aigw_config() { # aigw_config <store-url>
+aigw_config() { # aigw_config <store-url> [redis-url]
+  local counters="backend: local"
+  [[ -n "${2:-}" ]] && counters="backend: redis
+  redis_url: \"$2\""
   cat >"$TMP/aigw.yaml" <<YAML
 server:
   data: {listen: "127.0.0.1:$GW_PORT"}
@@ -182,7 +212,7 @@ server:
 store:
   url: "$1"
 counters:
-  backend: local
+  $counters
 log:
   level: warn
 observe:
@@ -255,7 +285,7 @@ YAML
 aigw_run() {
   docker rm -f "$GW_CTR" >/dev/null 2>&1 || true
   T0=$(date +%s%N)
-  docker run -d --name "$GW_CTR" --network host --cpuset-cpus 2,3 -v "$TMP:/bench" \
+  docker run -d --name "$GW_CTR" --network host --cpuset-cpus "$GW_CPUS" -v "$TMP:/bench" \
     -e AIGW_MASTER_KEY "$AIGW_IMAGE" serve --config /bench/aigw.yaml >/dev/null
   wait_ready "http://127.0.0.1:$CTL_PORT/readyz"
 }
@@ -281,14 +311,21 @@ general_settings:
   database_connection_pool_limit: 10
   disable_error_logs: true
 YAML
-chmod 0644 "$TMP/litellm.yaml"
-litellm_run() { # litellm_run <image> [DATABASE_URL]
-  local db=()
+# AIGW-107: mit Redis (Mehrinstanz-Betrieb nach „Best Practices for Production“).
+sed -e 's/^general_settings:$/general_settings:\n  use_redis_transaction_buffer: true/' "$TMP/litellm.yaml" >"$TMP/litellm-redis.yaml"
+cat >>"$TMP/litellm-redis.yaml" <<YAML
+router_settings:
+  redis_host: 127.0.0.1
+  redis_port: $REDIS_PORT
+YAML
+chmod 0644 "$TMP/litellm.yaml" "$TMP/litellm-redis.yaml"
+litellm_run() { # litellm_run <image> [DATABASE_URL] [Konfigdatei]
+  local db=() cfg=${3:-$TMP/litellm.yaml}
   [[ -n "${2:-}" ]] && db=(-e "DATABASE_URL=$2")
   docker rm -f "$GW_CTR" >/dev/null 2>&1 || true
   T0=$(date +%s%N)
-  docker run -d --name "$GW_CTR" --network host --cpuset-cpus 2,3 \
-    -v "$TMP/litellm.yaml:/app/config.yaml:ro" -e LITELLM_MASTER_KEY -e LITELLM_SALT_KEY \
+  docker run -d --name "$GW_CTR" --network host --cpuset-cpus "$GW_CPUS" \
+    -v "$cfg:/app/config.yaml:ro" -e LITELLM_MASTER_KEY -e LITELLM_SALT_KEY \
     -e LITELLM_MODE=PRODUCTION -e LITELLM_LOG=ERROR -e LITELLM_LOCAL_MODEL_COST_MAP=True \
     "${db[@]}" "$1" --config /app/config.yaml --host 127.0.0.1 --port "$GW_PORT" \
     --num_workers "$WORKERS" >/dev/null
@@ -309,10 +346,15 @@ done
 for v in $VARIANTS; do
   sum "## $v"
   AUTH=""
+  set_cores 2,3 4-6 3 2
   case $v in
-    aigw-sqlite | aigw-pg)
+    aigw-sqlite | aigw-pg | aigw-pg-redis)
       REQS=$REQS_AIGW
-      if [[ $v == aigw-pg ]]; then
+      if [[ $v == aigw-pg-redis ]]; then
+        start_pg
+        start_redis
+        aigw_config "postgres://postgres:bench@127.0.0.1:$PG_PORT/aigw" "redis://127.0.0.1:$REDIS_PORT/0"
+      elif [[ $v == aigw-pg ]]; then
         start_pg
         aigw_config "postgres://postgres:bench@127.0.0.1:$PG_PORT/aigw"
       else
@@ -327,23 +369,32 @@ for v in $VARIANTS; do
       start=(litellm_run "$LITELLM_IMAGE")
       AUTH=$LITELLM_MASTER_KEY
       ;;
-    litellm-pg)
+    litellm-pg | litellm-pg-w4)
       REQS=$REQS_LITELLM
+      [[ $v == *-w4 ]] && set_cores 2-5 6 1 4
       start_pg
       start=(litellm_run "$LITELLM_DB_IMAGE" "postgresql://postgres:bench@127.0.0.1:$PG_PORT/litellm")
       ;;
+    litellm-pg-redis-w4)
+      REQS=$REQS_LITELLM
+      set_cores 2-5 6 1 4
+      start_pg
+      start_redis
+      start=(litellm_run "$LITELLM_DB_IMAGE" "postgresql://postgres:bench@127.0.0.1:$PG_PORT/litellm" "$TMP/litellm-redis.yaml")
+      ;;
     *) echo "unbekannte Variante $v" >&2; exit 2 ;;
   esac
+  sum "$v kerne: gateway=$GW_CPUS last=$LOAD_CPUS (Threads $LOAD_THREADS)$([[ $v == litellm* ]] && echo " worker=$WORKERS")"
   if ! ms=$("${start[@]}"); then
-    sum "$v: Start fehlgeschlagen"; docker logs --tail 30 "$GW_CTR"; docker rm -f "$GW_CTR" "$PG_CTR" >/dev/null 2>&1 || true; continue
+    sum "$v: Start fehlgeschlagen"; docker logs --tail 30 "$GW_CTR"; docker rm -f "$GW_CTR" "$PG_CTR" "$REDIS_CTR" >/dev/null 2>&1 || true; continue
   fi
   sum "$v kaltstart_erster_start=${ms} ms (mit leerer DB; LiteLLM inkl. Prisma-Migration)"
-  if [[ $v == litellm-pg ]]; then
+  if [[ $v == litellm-pg* ]]; then
     AUTH=$(curl -fsS "http://$GWA/key/generate" -H "authorization: Bearer $LITELLM_MASTER_KEY" \
       -H 'content-type: application/json' \
       -d '{"models":["bench"],"max_budget":10000,"rpm_limit":100000000,"tpm_limit":1000000000}' |
       grep -o '"key":"[^"]*"' | cut -d'"' -f4)
-    if [[ -z "$AUTH" ]]; then sum "$v: /key/generate fehlgeschlagen"; docker rm -f "$GW_CTR" "$PG_CTR" >/dev/null 2>&1 || true; continue; fi
+    if [[ -z "$AUTH" ]]; then sum "$v: /key/generate fehlgeschlagen"; docker rm -f "$GW_CTR" "$PG_CTR" "$REDIS_CTR" >/dev/null 2>&1 || true; continue; fi
   fi
   ms=$("${start[@]}") || ms="Timeout"
   sum "$v kaltstart_neustart=${ms} ms (DB vorhanden)"
@@ -363,7 +414,10 @@ for v in $VARIANTS; do
   done
   sleep 2
   sum "$v mem_nach_last=$(mem_mib "$GW_CTR") MiB"
-  docker rm -f "$GW_CTR" "$PG_CTR" >/dev/null 2>&1 || true
+  if [[ $v == *redis* ]]; then
+    sum "$v redis: $(docker exec "$REDIS_CTR" redis-cli -p "$REDIS_PORT" info stats | grep -E '^total_commands_processed' | tr -d '\r') keys=$(docker exec "$REDIS_CTR" redis-cli -p "$REDIS_PORT" dbsize | tr -d '\r')"
+  fi
+  docker rm -f "$GW_CTR" "$PG_CTR" "$REDIS_CTR" >/dev/null 2>&1 || true
 done
 echo "# Last danach: $(cut -d' ' -f1-3 /proc/loadavg)"
 echo "# Zusammenfassung: $SUM"
