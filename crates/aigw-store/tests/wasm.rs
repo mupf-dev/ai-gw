@@ -329,7 +329,13 @@ async fn run(store: Store) {
     assert_eq!(a.uploaded_by.as_deref(), Some("admin-key:ci"));
     assert!(a.approved_at.is_some());
     assert_eq!(a.sigstore_bundle.as_deref(), Some(bundle.as_str()));
-    assert_eq!(store.wasm_module_info("guard").await.unwrap().unwrap(), a);
+    // Zeitpunkte speichert die Datenbank mit geringerer Genauigkeit: Felder einzeln vergleichen.
+    let stored = store.wasm_module_info("guard").await.unwrap().unwrap();
+    assert_eq!(
+        (&stored.sha256, &stored.uploaded_by, &stored.approved_by, &stored.sigstore_bundle),
+        (&a.sha256, &a.uploaded_by, &a.approved_by, &a.sigstore_bundle)
+    );
+    assert!(stored.approved_at.is_some());
     assert!(
         store
             .pending_wasm_module_info("guard")
