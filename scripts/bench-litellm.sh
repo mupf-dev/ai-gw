@@ -322,6 +322,8 @@ chmod 0644 "$TMP/litellm.yaml" "$TMP/litellm-redis.yaml"
 litellm_run() { # litellm_run <image> [DATABASE_URL] [Konfigdatei]
   local db=() cfg=${3:-$TMP/litellm.yaml}
   [[ -n "${2:-}" ]] && db=(-e "DATABASE_URL=$2")
+  # Eigenständiges Redis für den Transaktionspuffer (LiteLLM verlangt REDIS_* bzw. einen Redis-Cache).
+  [[ "$cfg" == *redis* ]] && db+=(-e REDIS_HOST=127.0.0.1 -e "REDIS_PORT=$REDIS_PORT")
   docker rm -f "$GW_CTR" >/dev/null 2>&1 || true
   T0=$(date +%s%N)
   docker run -d --name "$GW_CTR" --network host --cpuset-cpus "$GW_CPUS" \
