@@ -517,6 +517,8 @@ impl RoutedEmbedder {
                 counters: &self.counters,
                 tokens: crate::observe::estimate_tokens(text.len()),
                 grants: None,
+                estimate: (crate::observe::estimate_tokens(text.len()), 0),
+                budget_slot: None,
             },
         )
         .await

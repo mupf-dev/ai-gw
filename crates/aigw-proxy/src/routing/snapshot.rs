@@ -31,10 +31,11 @@ use arc_swap::ArcSwap;
 use time::OffsetDateTime;
 
 use super::state::{DeploymentState, fingerprint};
-use super::{BreakerState, GroupPolicy, GroupRoute, MemberSpec, health};
+use super::{BreakerState, GroupPolicy, GroupRoute, MemberBudget, MemberSpec, health};
 use crate::mock::MockProvider;
 use crate::provider::ChatProvider;
 use crate::routes::ModelRoutes;
+use aigw_billing::Budgets;
 
 /// Unveränderliche Routing-Tabelle einer Konfigurationsversion.
 #[derive(Debug, Default)]
@@ -80,6 +81,8 @@ pub struct SnapshotRoutes {
     client: UpstreamClient,
     /// Deployments mit `provider: mock` aufnehmen (`admin.allow_mock`, F85).
     allow_mock: bool,
+    /// Budgetstände für Deployment-Budgets (AIGW-126); ohne sie wirken diese nicht.
+    budgets: Option<Arc<Budgets>>,
 }
 
 /// Laufzeitzustand eines Deployments dieser Instanz (AIGW-84).
@@ -108,6 +111,8 @@ pub struct DeploymentStatus {
     pub breaker: BreakerState,
     /// Offene Anfragen dieser Instanz.
     pub in_flight: u32,
+    /// Budget (AIGW-126): (Verbrauch, Betrag) in Nano-Einheiten.
+    pub budget: Option<(i64, i64)>,
 }
 
 impl fmt::Debug for SnapshotRoutes {
@@ -132,7 +137,15 @@ impl SnapshotRoutes {
             registry,
             client,
             allow_mock: true,
+            budgets: None,
         }
+    }
+
+    /// Budgetstände für Deployment-Budgets (AIGW-126; dieselben wie für Keys/Teams).
+    #[must_use]
+    pub fn with_budgets(mut self, budgets: Arc<Budgets>) -> Self {
+        self.budgets = Some(budgets);
+        self
     }
 
     /// Deployments mit `provider: mock` zulassen (Standard) oder auslassen
@@ -147,6 +160,7 @@ impl SnapshotRoutes {
     pub fn deployment_status(&self) -> Vec<DeploymentStatus> {
         let table = self.table.load();
         let mut out = Vec::new();
+        let wall = super::budget::wall_ms();
         for g in &table.groups {
             for m in g.members() {
                 out.push(DeploymentStatus {
@@ -154,6 +168,9 @@ impl SnapshotRoutes {
                     deployment: m.provider().describe().deployment.to_owned(),
                     breaker: m.state().breaker_state(),
                     in_flight: m.state().in_flight(),
+                    budget: m
+                        .budget()
+                        .map(|b| (b.used(wall).nanos(), b.amount().nanos())),
                 });
             }
         }
@@ -322,15 +339,35 @@ impl SnapshotRoutes {
                 live.insert(id);
                 table.routed.insert(id, Arc::clone(&state));
                 let spec = &d.deployment.spec;
-                let cost = snap
-                    .price_at(spec.provider, &spec.provider_model, now)
-                    .map(|p| {
-                        let t = &p.spec.per_million_tokens;
-                        let nanos = |a: Option<aigw_core::resource::Amount>| {
-                            u64::try_from(a.map_or(0, |a| a.nanos())).unwrap_or(0)
-                        };
-                        nanos(t.input).saturating_add(nanos(t.output))
-                    });
+                let price = snap.price_at(spec.provider, &spec.provider_model, now);
+                // Budget des Deployments (AIGW-126).
+                let budget = match (&spec.budget, &self.budgets) {
+                    (Some(b), Some(budgets)) => Some(MemberBudget::new(
+                        Arc::clone(budgets),
+                        id,
+                        b,
+                        price.map_or((None, None), |p| {
+                            let t = &p.spec.per_million_tokens;
+                            (t.input, t.output)
+                        }),
+                    )),
+                    (Some(_), None) => {
+                        tracing::warn!(
+                            model_group = %name,
+                            deployment = %d.deployment.metadata.name,
+                            "Deployment-Budget ohne Budgetstände (billing) – wirkt nicht"
+                        );
+                        None
+                    }
+                    _ => None,
+                };
+                let cost = price.map(|p| {
+                    let t = &p.spec.per_million_tokens;
+                    let nanos = |a: Option<aigw_core::resource::Amount>| {
+                        u64::try_from(a.map_or(0, |a| a.nanos())).unwrap_or(0)
+                    };
+                    nanos(t.input).saturating_add(nanos(t.output))
+                });
                 members.push(MemberSpec {
                     provider,
                     state: Some(state),
@@ -338,6 +375,7 @@ impl SnapshotRoutes {
                     priority: spec.priority,
                     capacity: spec.capacity,
                     cost,
+                    budget,
                 });
             }
             if members.is_empty() {

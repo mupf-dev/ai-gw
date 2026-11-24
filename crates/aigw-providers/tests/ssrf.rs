@@ -74,6 +74,7 @@ fn deployment(port: u16, settings: serde_json::Value) -> DeploymentCtx {
                     .as_object()
                     .cloned()
                     .unwrap_or_else(JsonObject::new),
+                budget: None,
             },
         },
         credential: Some(Arc::new(CredentialData(BTreeMap::from([(

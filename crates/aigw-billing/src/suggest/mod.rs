@@ -866,6 +866,7 @@ mod tests {
                 capacity: Default::default(),
                 enabled: true,
                 settings,
+                budget: None,
             },
         }
     }

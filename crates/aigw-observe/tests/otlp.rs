@@ -375,6 +375,7 @@ fn deployment(endpoint: &str) -> DeploymentCtx {
                     "propagateTraceContext".to_owned(),
                     Value::Bool(true),
                 )]),
+                budget: None,
             },
         },
         credential: Some(Arc::new(CredentialData(BTreeMap::from([(

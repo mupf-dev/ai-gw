@@ -221,6 +221,7 @@ fn dep(
                 capacity: Capacity::default(),
                 enabled: true,
                 settings: obj(settings),
+                budget: None,
             },
         },
         credential: Some(Arc::new(CredentialData(BTreeMap::from([(

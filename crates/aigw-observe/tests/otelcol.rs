@@ -108,6 +108,7 @@ fn deployment(endpoint: &str) -> DeploymentCtx {
                 capacity: Default::default(),
                 enabled: true,
                 settings: JsonObject::new(),
+                budget: None,
             },
         },
         credential: Some(Arc::new(CredentialData(BTreeMap::from([(

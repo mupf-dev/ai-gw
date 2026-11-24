@@ -87,6 +87,9 @@ pub struct DeploymentState {
     pub(crate) last_health_ms: AtomicU64,
     /// Aufeinanderfolgende fehlgeschlagene Health Checks.
     pub(crate) health_failures: AtomicU32,
+    /// Kosten der Antworten dieser Instanz (Nano-Einheiten, seit Start bzw. Änderung des
+    /// Deployments) für `budget-balanced` bei Deployments ohne Budget (AIGW-126).
+    pub(crate) spent_nanos: AtomicU64,
 }
 
 impl DeploymentState {
@@ -115,6 +118,11 @@ impl DeploymentState {
     /// Aufeinanderfolgende fehlgeschlagene Health Checks.
     pub fn health_failures(&self) -> u32 {
         self.health_failures.load(Ordering::Relaxed)
+    }
+
+    /// Kosten der Antworten dieser Instanz (Nano-Einheiten; `budget-balanced`).
+    pub fn spent_nanos(&self) -> u64 {
+        self.spent_nanos.load(Ordering::Relaxed)
     }
 
     /// Zustand des Circuit Breakers.

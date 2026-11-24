@@ -307,6 +307,8 @@ impl<'a> Pipeline<'a> {
         op: &O,
         req: O::Req,
     ) -> Result<Outcome<O::Out>, UpstreamError> {
+        // Deployment-Budgets (AIGW-126): Reservierung bis zur Abrechnung im Recorder.
+        let slot = self.rec.admission_mut().map(|a| a.deployment_slot());
         let auth = self.auth.as_ref();
         let grants = |name: &str| auth.is_none_or(|a| a.allows_group(name));
         let cap = exec::CapacityCtx {
@@ -315,6 +317,8 @@ impl<'a> Pipeline<'a> {
             grants: auth
                 .is_some_and(|a| a.key.is_some())
                 .then_some(&grants as exec::Grants<'_>),
+            estimate: (self.est.input, self.est.output),
+            budget_slot: slot.as_deref(),
         };
         let mut routed = exec::execute_op(self.st.routes.as_ref(), route, op, req, cap).await;
         self.info

@@ -873,10 +873,24 @@ pub fn classify_openai_error(
         message: String::from_utf8_lossy(body).trim().to_owned(),
         ..WireError::default()
     });
-    let quota = wire.code.as_deref() == Some("insufficient_quota")
-        || wire.kind.as_deref() == Some("insufficient_quota");
+    // Kontingent/Guthaben des Kontos erschöpft (AIGW-125): `insufficient_quota` (429, „You
+    // exceeded your current quota …“), `billing_hard_limit_reached` (400, Ausgabenlimit) und
+    // `billing_not_active` (429, Konto ohne aktive Abrechnung). Azure OpenAI nutzt dieselben
+    // Codes; ein Prepaid-Guthaben gibt es dort nicht (Kontingent = TPM/RPM → 429 RateLimit).
+    let is_quota_code = |c: Option<&str>| {
+        matches!(
+            c,
+            Some("insufficient_quota" | "billing_hard_limit_reached" | "billing_not_active")
+        )
+    };
+    let quota = is_quota_code(wire.code.as_deref())
+        || is_quota_code(wire.kind.as_deref())
+        || wire
+            .message
+            .to_ascii_lowercase()
+            .contains("you exceeded your current quota");
     let class = match s {
-        429 if quota => ErrorClass::Quota,
+        400 | 403 | 429 if quota => ErrorClass::Quota,
         429 => ErrorClass::RateLimit,
         400 | 404 | 413 | 422 if is_context_length(&wire) => ErrorClass::ContextLength,
         400..=499 if is_content_filter(&wire) => ErrorClass::ContentFilter,
@@ -927,6 +941,11 @@ pub fn classify_openai_error(
         ErrorClass::ContentFilter => {
             api.kind = ErrorKind::InvalidRequest;
             api.code.get_or_insert_with(|| "content_filter".to_owned());
+        }
+        ErrorClass::Quota => {
+            api.kind = ErrorKind::RateLimit;
+            api.code
+                .get_or_insert_with(|| "insufficient_quota".to_owned());
         }
         ErrorClass::Protocol => {
             api.kind = ErrorKind::BadGateway;
@@ -1119,6 +1138,7 @@ mod tests {
                     capacity: Default::default(),
                     enabled: true,
                     settings,
+                    budget: None,
                 },
             },
             credential: key.map(|k| {
@@ -1479,6 +1499,26 @@ mod tests {
         assert_eq!(e.class, ErrorClass::Quota);
         assert!(!e.retryable);
         assert_eq!(e.retry_after, Some(std::time::Duration::from_millis(1500)));
+
+        // AIGW-125: weitere Codes für erschöpftes Kontingent/Guthaben.
+        for (status, body) in [
+            (
+                400,
+                json!({"error": {"message": "Billing hard limit has been reached", "type": "invalid_request_error", "code": "billing_hard_limit_reached"}}),
+            ),
+            (
+                429,
+                json!({"error": {"message": "Your account is not active, please check your billing details on our website.", "type": "billing_not_active", "code": "billing_not_active"}}),
+            ),
+            (
+                429,
+                json!({"error": {"message": "You exceeded your current quota, please check your plan and billing details.", "type": "requests", "code": null}}),
+            ),
+        ] {
+            let e = classify(status, &[], body.clone());
+            assert_eq!(e.class, ErrorClass::Quota, "{body}");
+            assert!(!e.retryable);
+        }
 
         let e = classify(
             400,

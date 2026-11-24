@@ -144,6 +144,7 @@ impl Inner {
                     capacity: Default::default(),
                     enabled: true,
                     settings,
+                    budget: None,
                 },
             },
             credential: snap.credential_data.get(name).cloned(),
@@ -307,6 +308,8 @@ impl PluginHost for GatewayHost {
                     counters: &inner.counters,
                     tokens,
                     grants: None,
+                    estimate: (tokens, 0),
+                    budget_slot: None,
                 },
             )
             .await;

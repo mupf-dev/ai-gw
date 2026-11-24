@@ -286,6 +286,7 @@ async fn random_change(store: &Store, keyring: &Keyring, rng: &mut Rng) {
                 capacity: Default::default(),
                 enabled: rng.chance(80),
                 settings: Default::default(),
+                budget: None,
             };
             if store
                 .create(ACTOR, meta.clone(), spec.clone())
@@ -882,6 +883,7 @@ async fn sample(store: &Store, keyring: &Keyring) {
                 capacity: Default::default(),
                 enabled: true,
                 settings: Default::default(),
+                budget: None,
             },
         )
         .await
@@ -1311,6 +1313,7 @@ fn deployment_spec(group: &str, model: &str) -> DeploymentSpec {
         capacity: Default::default(),
         enabled: true,
         settings: Default::default(),
+        budget: None,
     }
 }
 

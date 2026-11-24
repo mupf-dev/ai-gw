@@ -46,6 +46,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aigw_billing::{BudgetExceeded, BudgetHold, BudgetLevel, BudgetTarget, Budgets, ExceededKind};
+
+use crate::routing::budget::BudgetSlot;
 use aigw_core::config::LimitsConfig;
 use aigw_core::ir::{ApiError, ChatRequest, ErrorClass, ErrorKind, UpstreamError, Usage};
 use aigw_core::observe::{PluginCall, RequestRecord};
@@ -317,6 +319,7 @@ impl Limiter {
                 .collect(),
             group: group.cloned(),
             growth: None,
+            deployment: Arc::default(),
         })
     }
 }
@@ -445,6 +448,8 @@ pub struct Admission {
     group: Option<Arc<ModelGroupCtx>>,
     /// Nachreservierung, weil Pre-Plugins die Eingabe vergrößert haben (S-38).
     growth: Option<Growth>,
+    /// Budget-Reservierung des angefragten Deployments (AIGW-126).
+    deployment: Arc<BudgetSlot>,
 }
 
 /// Nachreservierte Eingabe-Tokens (S-38): getrennte Reservierung, beim Abgleich zählt sie
@@ -468,6 +473,11 @@ impl fmt::Debug for Admission {
 
 impl Admission {
     /// Stand der knappsten Limits je Metrik (für die Antwort-Header).
+    /// Slot für die Budget-Reservierung des angefragten Deployments (AIGW-126).
+    pub(crate) fn deployment_slot(&self) -> Arc<BudgetSlot> {
+        Arc::clone(&self.deployment)
+    }
+
     pub(crate) fn headers(&self) -> &RateHeaders {
         &self.headers
     }
@@ -564,6 +574,13 @@ impl Admission {
         if let Some(c) = cost {
             record.cost = Some(c);
         }
+        // Deployment-Budget (AIGW-126): nur die Kosten der Hauptanfrage, auf das Deployment,
+        // das geantwortet hat (fehlgeschlagene Versuche kosten nichts).
+        self.deployment.settle(
+            priced.as_ref().map(|(c, _)| *c),
+            &record.usage,
+            unix_ms(record.started_at),
+        );
         if let (Some(budgets), Some(k)) = (&self.budgets, &self.key) {
             let targets = budget_targets(k);
             let at = unix_ms(record.started_at);
@@ -727,6 +744,7 @@ impl Denied {
             BudgetLevel::ApiKey => "API-Key",
             BudgetLevel::Team => "Team",
             BudgetLevel::Organization => "Organisation",
+            BudgetLevel::Deployment => "Deployment",
         };
         let period = aigw_billing::period_code(e.period);
         let msg = match e.kind {

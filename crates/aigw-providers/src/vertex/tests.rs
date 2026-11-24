@@ -34,6 +34,7 @@ fn dep(model: &str, creds: &[(&str, &str)], settings: Value) -> DeploymentCtx {
                 capacity: Default::default(),
                 enabled: true,
                 settings,
+                budget: None,
             },
         },
         credential: Some(Arc::new(CredentialData(

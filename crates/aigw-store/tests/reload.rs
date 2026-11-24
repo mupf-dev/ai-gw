@@ -383,6 +383,7 @@ async fn bench_load_and_rebuild() {
                     capacity: Default::default(),
                     enabled: true,
                     settings: Default::default(),
+                    budget: None,
                 },
             )
             .await

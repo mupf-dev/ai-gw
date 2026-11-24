@@ -877,6 +877,7 @@ fn rollup_dim(level: BudgetLevelName) -> RollupDim {
         BudgetLevelName::Organization => RollupDim::Organization,
         BudgetLevelName::Team => RollupDim::Team,
         BudgetLevelName::ApiKey => RollupDim::ApiKey,
+        BudgetLevelName::Deployment => RollupDim::Deployment,
     }
 }
 
@@ -886,6 +887,7 @@ fn level_filter(level: BudgetLevelName, ids: Vec<String>) -> KeyFilter {
         BudgetLevelName::Organization => f.organizations = Some(ids),
         BudgetLevelName::Team => f.teams = Some(ids),
         BudgetLevelName::ApiKey => f.api_keys = Some(ids),
+        BudgetLevelName::Deployment => f.deployments = Some(ids),
     }
     f
 }
@@ -1053,6 +1055,7 @@ pub(crate) async fn budgets(
             BudgetLevelName::Organization,
             BudgetLevelName::Team,
             BudgetLevelName::ApiKey,
+            BudgetLevelName::Deployment,
         ] {
             let ids: Vec<String> = items
                 .iter()
@@ -1617,6 +1620,8 @@ mod tests {
             warn_at_percent: vec![80],
             hard_limit: true,
             exhausted: used >= amount,
+            model_group: None,
+            switch_at_percent: None,
         }
     }
 

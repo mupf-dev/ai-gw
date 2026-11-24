@@ -16,6 +16,7 @@ use std::sync::atomic::Ordering;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
+use aigw_billing::BudgetHold;
 use aigw_core::ir::{
     ApiError, ChatRequest, ChatResponse, ErrorClass, ErrorKind, StreamEvent, UpstreamError, Usage,
 };
@@ -26,6 +27,7 @@ use futures_util::stream::SelectAll;
 use futures_util::{Stream, StreamExt as _};
 
 use super::breaker::Admit;
+use super::budget::BudgetSlot;
 use super::select::rand_below;
 use super::state::now_ms;
 use super::{GroupRoute, Member, RetryPolicy, Scratch};
@@ -117,6 +119,90 @@ pub(crate) struct CapacityCtx<'a> {
     pub(crate) tokens: u64,
     /// Freigaben des Keys (`None` = keine Prüfung, z. B. ohne Snapshot oder intern).
     pub(crate) grants: Option<Grants<'a>>,
+    /// Geschätzte (Eingabe-, Ausgabe-)Tokens für die Reservierung auf Deployment-Budgets
+    /// (AIGW-126).
+    pub(crate) estimate: (u64, u64),
+    /// Reservierung auf dem Budget des angefragten Deployments bis zur Abrechnung
+    /// (`None`: interne Aufrufe – geprüft, aber nicht abgerechnet).
+    pub(crate) budget_slot: Option<&'a BudgetSlot>,
+}
+
+/// Ergebnis der Budgetprüfung eines Versuchs (AIGW-126).
+enum BudgetCheck {
+    /// Frei (ggf. mit Reservierung).
+    Granted(Option<BudgetHold>),
+    /// Budget reicht nicht (erschöpft, belegt oder Schätzung zu groß): Deployment für diese
+    /// Anfrage überspringen.
+    Exhausted,
+}
+
+/// Reserviert die geschätzten Kosten eines Versuchs auf dem Budget des Deployments.
+async fn reserve_budget(member: &Member, cap: CapacityCtx<'_>) -> BudgetCheck {
+    let Some(b) = &member.budget else {
+        return BudgetCheck::Granted(None);
+    };
+    let now = super::budget::wall_ms();
+    let est = b.estimate(cap.estimate.0, cap.estimate.1);
+    match b.budgets().reserve(&[b.switch_target()], est, now).await {
+        Ok(h) => BudgetCheck::Granted((!h.is_empty()).then_some(h)),
+        Err(e) => {
+            tracing::debug!(
+                deployment = %member.provider.describe().deployment,
+                used = %e.used,
+                amount = %e.amount,
+                requested = %e.requested,
+                "Deployment-Budget reicht nicht – Deployment übersprungen"
+            );
+            BudgetCheck::Exhausted
+        }
+    }
+}
+
+/// Alle in Frage kommenden Deployments haben ihr Budget erschöpft (AIGW-126): `429`
+/// `deployment_budget_exhausted`, `Retry-After` bis zum frühesten Zeitraumwechsel.
+fn budget_exhausted(
+    group: &GroupRoute,
+    excluded: &[usize],
+    budget_skipped: &[usize],
+) -> Option<UpstreamError> {
+    let wall = super::budget::wall_ms();
+    let mut reset: Option<i64> = None;
+    let mut any = false;
+    for m in group
+        .members
+        .iter()
+        .filter(|m| !excluded.contains(&m.idx) || budget_skipped.contains(&m.idx))
+    {
+        let b = m.budget.as_ref()?;
+        if !(budget_skipped.contains(&m.idx) || b.exhausted(wall)) {
+            return None;
+        }
+        any = true;
+        if let Some(r) = b.resets_at_ms(wall) {
+            reset = Some(reset.map_or(r, |x| x.min(r)));
+        }
+    }
+    if !any {
+        return None;
+    }
+    let mut e =
+        UpstreamError::new(
+            ErrorClass::Quota,
+            ApiError::new(
+                ErrorKind::RateLimit,
+                format!(
+                    "Modellgruppe {:?}: Budget aller Deployments erschöpft – Guthaben nachladen \
+                 (Budget erhöhen) oder neuen Zeitraum abwarten",
+                    group.name
+                ),
+            )
+            .with_code("deployment_budget_exhausted"),
+        )
+        .with_retry_after(reset.map(|r| {
+            Duration::from_millis(u64::try_from(r.saturating_sub(wall)).unwrap_or(0).max(1))
+        }));
+    e.retryable = false;
+    Some(e)
 }
 
 /// Ergebnis der Kapazitätsprüfung eines Versuchs.
@@ -475,6 +561,13 @@ async fn run_group<O: Operation>(
     let mut last_failure: Option<Failure> = None;
     let mut n = 0u32;
     let mut waited = false;
+    // Deployments mit Budget, das für diese Anfrage nicht reicht (AIGW-126).
+    let mut budget_skipped: Vec<usize> = Vec::new();
+    // Budgetstände einmal je Zeitraum laden, damit die Auswahl ohne I/O prüfen kann.
+    let wall = super::budget::wall_ms();
+    for b in group.members.iter().filter_map(|m| m.budget.as_ref()) {
+        b.budgets().load(&b.switch_target(), wall).await;
+    }
     while n < policy.max_attempts {
         if n > 0 && Instant::now() >= budget_end {
             break;
@@ -494,6 +587,15 @@ async fn run_group<O: Operation>(
             break;
         };
         waited = false;
+        // Budget des Deployments (AIGW-126): reicht es nicht, ohne Fehler überspringen.
+        let budget_hold = match reserve_budget(&member, cap).await {
+            BudgetCheck::Granted(h) => h,
+            BudgetCheck::Exhausted => {
+                excluded.push(member.idx);
+                budget_skipped.push(member.idx);
+                continue;
+            }
+        };
         // Kapazität über die Zähler (instanzübergreifend je nach Backend).
         let capacity = match reserve_capacity(&member, cap).await {
             CapacityCheck::Granted(r) => r,
@@ -513,6 +615,13 @@ async fn run_group<O: Operation>(
             break;
         };
         routed.last = Some(Arc::clone(&member));
+        // Abrechnung auf das Deployment dieses Versuchs (ersetzt die Reservierung eines
+        // vorigen Versuchs; ohne Slot wird die Reservierung am Ende des Versuchs frei).
+        if let Some(slot) = cap.budget_slot {
+            slot.set(Arc::clone(&member), budget_hold);
+        } else {
+            drop(budget_hold);
+        }
         let started = Instant::now();
         let mut active = Active::start(Arc::clone(&member), group, admit, cap, capacity);
         let result = op.call(Arc::clone(&member.provider), attempt_req).await;
@@ -581,6 +690,16 @@ async fn run_group<O: Operation>(
                 });
             }
         }
+    }
+    if let Some(err) = budget_exhausted(group, &excluded, &budget_skipped)
+        && last_failure
+            .as_ref()
+            .is_none_or(|f| f.class == Some(ErrorClass::Quota))
+    {
+        return Err(Failure {
+            err,
+            class: Some(ErrorClass::Quota),
+        });
     }
     Err(last_failure.unwrap_or_else(|| Failure {
         err: unavailable(group, &excluded),
@@ -803,6 +922,12 @@ impl Active {
                 .state
                 .breaker
                 .record(&self.breaker, now_ms(), failure);
+        }
+        // Kontingent/Guthaben des Kontos erschöpft (AIGW-125): Das hält an, bis nachgeladen
+        // wird – Breaker sofort öffnen statt auf die Fehlerquote zu warten. Nach `openFor`
+        // prüft eine Probe, ob das Konto wieder nutzbar ist.
+        if error == Some(ErrorClass::Quota) && self.breaker.enabled {
+            self.member.state.breaker.open(&self.breaker, now_ms());
         }
     }
 }

@@ -24,10 +24,10 @@ use std::sync::Arc;
 
 use aigw_billing::{BudgetKey, BudgetLevel, Calendar, PeriodRange};
 use aigw_core::config::CounterBackendKind;
-use aigw_core::resource::ModelGroupSpec;
 use aigw_core::resource::{
     Amount, ApiKeyState, Budget, BudgetPeriod, Id, OrganizationSpec, TeamSpec,
 };
+use aigw_core::resource::{DeploymentSpec, ModelGroupSpec};
 use aigw_core::validate::bounds::{LimitWarning, limit_warnings};
 use aigw_store::Store;
 use axum::extract::rejection::QueryRejection;
@@ -82,6 +82,8 @@ pub enum BudgetLevelName {
     Team,
     /// API-Key.
     ApiKey,
+    /// Deployment (AIGW-126; Guthaben/Budget eines Anbieter-Deployments).
+    Deployment,
 }
 
 impl From<BudgetLevelName> for BudgetLevel {
@@ -90,6 +92,7 @@ impl From<BudgetLevelName> for BudgetLevel {
             BudgetLevelName::Organization => Self::Organization,
             BudgetLevelName::Team => Self::Team,
             BudgetLevelName::ApiKey => Self::ApiKey,
+            BudgetLevelName::Deployment => Self::Deployment,
         }
     }
 }
@@ -132,10 +135,17 @@ pub struct BudgetStatus {
     pub percent: u64,
     /// Warnschwellen in Prozent.
     pub warn_at_percent: Vec<u8>,
-    /// Harte Grenze (Ablehnung mit `budget_exceeded`).
+    /// Harte Grenze (Ablehnung mit `budget_exceeded`; bei Deployments: Überspringen im
+    /// Routing).
     pub hard_limit: bool,
     /// Betrag erreicht.
     pub exhausted: bool,
+    /// Modellgruppe (nur `deployment`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_group: Option<String>,
+    /// Umschalten ab diesem Verbrauch in Prozent (nur `deployment`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub switch_at_percent: Option<u8>,
 }
 
 /// Budget-Übersicht.
@@ -194,6 +204,8 @@ pub(crate) async fn collect_budgets(
     let read = |t: &Target| p.can(Permission::Read, t);
 
     let mut targets: Vec<(BudgetLevelName, Id, String, Budget)> = Vec::new();
+    // Deployment-Zusatz (Modellgruppe, Umschaltgrenze) je Index in `targets`.
+    let mut extra: Vec<(Option<String>, Option<u8>)> = Vec::new();
     if want(BudgetLevelName::Organization) {
         for o in store.list::<OrganizationSpec>().await? {
             if let Some(b) = o.spec.budget
@@ -247,6 +259,22 @@ pub(crate) async fn collect_budgets(
         }
     }
 
+    extra.resize(targets.len(), (None, None));
+    // AIGW-126: Deployment-Budgets (Katalog; Leserecht auf den Katalog).
+    if want(BudgetLevelName::Deployment) && read(&Target::Catalog) {
+        for d in store.list::<DeploymentSpec>().await? {
+            if let Some(b) = &d.spec.budget {
+                targets.push((
+                    BudgetLevelName::Deployment,
+                    d.id,
+                    d.metadata.name.clone(),
+                    b.as_budget(),
+                ));
+                extra.push((Some(d.spec.model_group.clone()), Some(b.switch_percent())));
+            }
+        }
+    }
+
     let now = OffsetDateTime::now_utc();
     let now_ms = i64::try_from(now.unix_timestamp_nanos() / 1_000_000).unwrap_or(i64::MAX);
     let ranges: Vec<_> = targets
@@ -269,33 +297,38 @@ pub(crate) async fn collect_budgets(
         .into_iter()
         .zip(ranges)
         .zip(used)
-        .map(|(((level, id, name, b), r), used)| {
-            let amount = b.amount.nanos();
-            let percent = if amount > 0 {
-                u64::try_from(i128::from(used.max(0)) * 100 / i128::from(amount))
-                    .unwrap_or(u64::MAX)
-            } else {
-                0
-            };
-            (
-                BudgetStatus {
-                    level,
-                    target_id: id,
-                    target_name: name,
-                    period: b.period,
-                    period_start: rfc3339(r.start_ms),
-                    period_end: r.end_ms.map(rfc3339),
-                    amount: b.amount,
-                    used: Amount::from_nanos(used),
-                    remaining: Amount::from_nanos(amount.saturating_sub(used).max(0)),
-                    percent,
-                    warn_at_percent: b.warn_at_percent,
-                    hard_limit: b.hard_limit,
-                    exhausted: used >= amount,
-                },
-                r,
-            )
-        })
+        .zip(extra)
+        .map(
+            |((((level, id, name, b), r), used), (model_group, switch_at_percent))| {
+                let amount = b.amount.nanos();
+                let percent = if amount > 0 {
+                    u64::try_from(i128::from(used.max(0)) * 100 / i128::from(amount))
+                        .unwrap_or(u64::MAX)
+                } else {
+                    0
+                };
+                (
+                    BudgetStatus {
+                        level,
+                        target_id: id,
+                        target_name: name,
+                        period: b.period,
+                        period_start: rfc3339(r.start_ms),
+                        period_end: r.end_ms.map(rfc3339),
+                        amount: b.amount,
+                        used: Amount::from_nanos(used),
+                        remaining: Amount::from_nanos(amount.saturating_sub(used).max(0)),
+                        percent,
+                        warn_at_percent: b.warn_at_percent,
+                        hard_limit: b.hard_limit,
+                        exhausted: used >= amount,
+                        model_group,
+                        switch_at_percent,
+                    },
+                    r,
+                )
+            },
+        )
         .collect();
     Ok((now_ms, items))
 }

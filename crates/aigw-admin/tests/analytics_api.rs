@@ -232,6 +232,7 @@ async fn scenario(store: Store) {
         capacity: aigw_core::resource::Capacity::default(),
         enabled: true,
         settings: aigw_core::resource::JsonObject::default(),
+        budget: None,
     };
     let d_mock = store
         .create(

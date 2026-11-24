@@ -112,6 +112,7 @@ fn deployment(
                 capacity: Default::default(),
                 enabled: true,
                 settings,
+                budget: None,
             },
         },
         credential: Some(Arc::new(CredentialData(

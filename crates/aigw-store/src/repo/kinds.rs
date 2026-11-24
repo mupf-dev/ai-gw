@@ -329,6 +329,7 @@ impl Resource for DeploymentSpec {
             ("tpm", u64_col(self.capacity.tpm)?),
             ("enabled", Col::bool(self.enabled)),
             ("settings", Col::json(&self.settings)?),
+            ("budget", Col::opt_json(self.budget.as_ref())?),
         ])
     }
 
@@ -347,6 +348,7 @@ impl Resource for DeploymentSpec {
             },
             enabled: row.bool("enabled")?,
             settings: row.json("settings")?,
+            budget: row.opt_json("budget")?,
         })
     }
 }

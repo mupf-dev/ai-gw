@@ -42,6 +42,7 @@ fn deployment(group: &str, model: &str, priority: u32) -> DeploymentSpec {
         capacity: Default::default(),
         enabled: true,
         settings: Default::default(),
+        budget: None,
     }
 }
 

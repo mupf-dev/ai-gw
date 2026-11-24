@@ -653,6 +653,7 @@ async fn plugin_headers_reach_the_upstream_but_not_credentials() {
                 capacity: Default::default(),
                 enabled: true,
                 settings: JsonObject::new(),
+                budget: None,
             },
         },
         credential: Some(Arc::new(CredentialData(std::collections::BTreeMap::from(

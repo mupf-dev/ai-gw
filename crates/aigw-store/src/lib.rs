@@ -224,6 +224,11 @@ const SQLITE_MIGRATIONS: &[(i64, &str, &str)] = &[
         "wasm_approval",
         include_str!("../migrations/sqlite/0014_wasm_approval.sql"),
     ),
+    (
+        15,
+        "deployment_budget",
+        include_str!("../migrations/sqlite/0015_deployment_budget.sql"),
+    ),
 ];
 
 /// Migrationssatz für Postgres (`migrations/postgres/`), gleiche Versionen wie SQLite.
@@ -297,6 +302,11 @@ const POSTGRES_MIGRATIONS: &[(i64, &str, &str)] = &[
         14,
         "wasm_approval",
         include_str!("../migrations/postgres/0014_wasm_approval.sql"),
+    ),
+    (
+        15,
+        "deployment_budget",
+        include_str!("../migrations/postgres/0015_deployment_budget.sql"),
     ),
 ];
 

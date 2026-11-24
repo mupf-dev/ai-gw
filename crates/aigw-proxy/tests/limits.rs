@@ -1253,6 +1253,7 @@ fn strict_snapshot() -> (SnapshotHandle, Ids) {
                 capacity: Capacity::default(),
                 enabled: true,
                 settings: JsonObject::new(),
+                budget: None,
             },
         },
         credential: None,

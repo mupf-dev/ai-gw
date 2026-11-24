@@ -576,6 +576,35 @@ fn is_context_length(message: &str) -> bool {
         || m.contains("context length")
 }
 
+/// Guthaben bzw. Ausgabenlimit des Anbieter-Kontos erschöpft (AIGW-125). Anthropic meldet das
+/// nicht einheitlich (Belege: platform.claude.com/docs/en/api/errors und
+/// …/api/rate-limits, Stand 2026-11):
+///
+/// - leeres Prepaid-Guthaben: HTTP 400 `invalid_request_error` „Your credit balance is too
+///   low to access the Anthropic API …“,
+/// - selbst gesetztes Ausgabenlimit (Organisation/Workspace): HTTP 400
+///   `invalid_request_error` „You have reached your specified (workspace) API usage limits …“,
+/// - Monatsobergrenze der Stufe: HTTP 429 `rate_limit_error` mit
+///   `error.details.error_code = "enforced_spend_limit_reached"` und ohne `retry-after`
+///   („You have reached your API usage limits …“).
+///
+/// Alle drei bleiben bis zum Nachladen bzw. Monatswechsel bestehen – ein Retry auf demselben
+/// Konto ist zwecklos, ein anderes Deployment (anderes Konto) hilft.
+fn is_credit_exhausted(message: &str, detail_code: Option<&str>) -> bool {
+    if matches!(
+        detail_code,
+        Some("enforced_spend_limit_reached" | "credit_balance_too_low")
+    ) {
+        return true;
+    }
+    let m = message.to_ascii_lowercase();
+    m.contains("credit balance is too low")
+        || m.contains("credit_balance_too_low")
+        || m.contains("reached your specified api usage limits")
+        || m.contains("reached your specified workspace api usage limits")
+        || m.contains("reached your api usage limits")
+}
+
 /// Klassifiziert eine Fehlerantwort von Anthropic
 /// (`{"type":"error","error":{"type":…,"message":…},"request_id":…}`).
 ///
@@ -584,6 +613,7 @@ fn is_context_length(message: &str) -> bool {
 /// | `overloaded_error` / 529, 503 | `Overloaded` | ja |
 /// | `rate_limit_error` / 429 | `RateLimit` (`retry-after`) | ja |
 /// | `billing_error` / 402 | `Quota` | nein (Fallback) |
+/// | 400/429 „credit balance is too low“, „reached your (specified) API usage limits“, `enforced_spend_limit_reached` | `Quota` | nein (Fallback, AIGW-125) |
 /// | `invalid_request_error` „prompt is too long“ | `ContextLength` | nein |
 /// | `authentication_error`, `permission_error` / 401, 403 | `Auth` (Meldung verborgen, 502) | nein |
 /// | `not_found_error` / 404 | `NotFound` | nein |
@@ -596,9 +626,14 @@ pub fn classify_anthropic_error(
     body: &[u8],
 ) -> UpstreamError {
     let s = status.as_u16();
-    let (kind, message) = match serde_json::from_slice::<Value>(body) {
+    let (kind, message, detail) = match serde_json::from_slice::<Value>(body) {
         Ok(v) => {
             let e = v.get("error");
+            let d = e
+                .and_then(|e| e.get("details"))
+                .and_then(|d| d.get("error_code"))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
             let t = e
                 .and_then(|e| e.get("type"))
                 .and_then(Value::as_str)
@@ -608,11 +643,14 @@ pub fn classify_anthropic_error(
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_owned();
-            (t, m)
+            (t, m, d)
         }
-        Err(_) => (None, String::from_utf8_lossy(body).trim().to_owned()),
+        Err(_) => (None, String::from_utf8_lossy(body).trim().to_owned(), None),
     };
     let class = match (kind.as_deref(), s) {
+        (_, 400 | 402 | 403 | 429) if is_credit_exhausted(&message, detail.as_deref()) => {
+            ErrorClass::Quota
+        }
         (Some("overloaded_error"), _) | (_, 503 | 529) => ErrorClass::Overloaded,
         (Some("rate_limit_error"), _) | (_, 429) => ErrorClass::RateLimit,
         (Some("billing_error"), _) | (_, 402) => ErrorClass::Quota,
@@ -814,6 +852,7 @@ mod tests {
                     capacity: Default::default(),
                     enabled: true,
                     settings,
+                    budget: None,
                 },
             },
             credential: key.map(|k| {
@@ -1115,6 +1154,66 @@ mod tests {
         let e = classify(402, &[], err("billing_error", "credit balance too low"));
         assert_eq!(e.class, ErrorClass::Quota);
         assert!(!e.retryable);
+
+        // AIGW-125: leeres Guthaben / Ausgabenlimit (Anthropic meldet 400 bzw. 429).
+        for (status, body) in [
+            (
+                400,
+                err(
+                    "invalid_request_error",
+                    "Your credit balance is too low to access the Anthropic API. Please go to \
+                     Plans & Billing to upgrade or purchase credits.",
+                ),
+            ),
+            (
+                400,
+                err(
+                    "invalid_request_error",
+                    "You have reached your specified API usage limits. You will regain access \
+                     on 2026-12-01 at 00:00 UTC.",
+                ),
+            ),
+            (
+                400,
+                err(
+                    "invalid_request_error",
+                    "You have reached your specified workspace API usage limits. You will \
+                     regain access on 2026-12-01 at 00:00 UTC.",
+                ),
+            ),
+            (
+                429,
+                json!({"type": "error", "error": {"type": "rate_limit_error",
+                    "message": "You have reached your API usage limits: your organization has \
+                     crossed its monthly API usage threshold.",
+                    "details": {"error_code": "enforced_spend_limit_reached"}}}),
+            ),
+            (
+                429,
+                json!({"type": "error", "error": {"type": "rate_limit_error",
+                    "message": "monthly cap", "details": {"error_code": "enforced_spend_limit_reached"}}}),
+            ),
+        ] {
+            let e = classify(status, &[], body.clone());
+            assert_eq!(e.class, ErrorClass::Quota, "{status} {body}");
+            assert!(!e.retryable, "{body}");
+            assert_eq!(e.error.kind, ErrorKind::RateLimit);
+            assert_eq!(e.error.code.as_deref(), Some("insufficient_quota"));
+        }
+        // Gewöhnliche 400 bleibt ein Fehler der Anfrage, Ramp-Limit ein Rate-Limit.
+        let e = classify(
+            400,
+            &[],
+            err("invalid_request_error", "max_tokens: must be positive"),
+        );
+        assert_eq!(e.class, ErrorClass::InvalidRequest);
+        let e = classify(
+            429,
+            &[("retry-after", "3")],
+            json!({"type": "error", "error": {"type": "rate_limit_error", "message": "ramp",
+                "details": {"error_code": "ramp_limit_exceeded"}}}),
+        );
+        assert_eq!(e.class, ErrorClass::RateLimit);
 
         let e = classify(
             400,

@@ -147,6 +147,7 @@ fn azure(endpoint: &str, creds: &[(&str, &str)], settings: Value) -> DeploymentC
                 capacity: Default::default(),
                 enabled: true,
                 settings,
+                budget: None,
             },
         },
         credential: (!creds.is_empty()).then(|| {

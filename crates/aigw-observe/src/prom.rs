@@ -333,6 +333,14 @@ pub struct DeploymentGauge {
     pub breaker: u8,
     /// Offene Anfragen dieser Instanz.
     pub in_flight: u32,
+    /// Budget des Deployments (AIGW-126): (Verbrauch, Betrag) in Nano-Einheiten der
+    /// Abrechnungswährung; `None` ohne Budget.
+    pub budget: Option<(i64, i64)>,
+}
+
+/// Nano-Einheiten als Dezimalzahl (ohne Gleitkomma-Rundung).
+fn nanos_str(n: i64) -> String {
+    aigw_core::resource::Amount::from_nanos(n).to_string()
 }
 
 /// Quelle der Deployment-Zustände.
@@ -821,6 +829,43 @@ impl GatewayMetrics {
                     d.in_flight
                 );
             }
+            // AIGW-126: Budget je Deployment (nur Deployments mit Budget).
+            if deps.iter().any(|d| d.budget.is_some()) {
+                for (name, help, f) in [
+                    (
+                        "aigw_deployment_budget_used",
+                        "Verbrauch des Deployment-Budgets im laufenden Zeitraum (Abrechnungswährung)",
+                        (|u, _| nanos_str(u)) as fn(i64, i64) -> String,
+                    ),
+                    (
+                        "aigw_deployment_budget_amount",
+                        "Betrag des Deployment-Budgets je Zeitraum (Abrechnungswährung)",
+                        |_, a| nanos_str(a),
+                    ),
+                    (
+                        "aigw_deployment_budget_used_ratio",
+                        "Verbrauch des Deployment-Budgets als Anteil des Betrags (0–1, kann 1 übersteigen)",
+                        |u, a| {
+                            #[allow(clippy::cast_precision_loss)]
+                            let r = if a > 0 { u as f64 / a as f64 } else { 0.0 };
+                            format!("{r}")
+                        },
+                    ),
+                ] {
+                    header(out, name, "gauge", help);
+                    for d in &deps {
+                        if let Some((u, a)) = d.budget {
+                            let _ = writeln!(
+                                out,
+                                "{name}{{model_group=\"{}\",deployment=\"{}\"}} {}",
+                                escape(&d.model_group),
+                                escape(&d.deployment),
+                                f(u, a)
+                            );
+                        }
+                    }
+                }
+            }
         }
         header(
             out,
@@ -1221,12 +1266,22 @@ mod tests {
         assert!(out.contains("aigw_fallbacks_total 0\n"));
         assert!(!out.contains("aigw_deployment_breaker_state"));
         m.set_deployment_source(|| {
-            vec![DeploymentGauge {
-                model_group: "gpt-4o".into(),
-                deployment: "d\"1".into(),
-                breaker: 1,
-                in_flight: 2,
-            }]
+            vec![
+                DeploymentGauge {
+                    model_group: "gpt-4o".into(),
+                    deployment: "d\"1".into(),
+                    breaker: 1,
+                    in_flight: 2,
+                    budget: None,
+                },
+                DeploymentGauge {
+                    model_group: "claude".into(),
+                    deployment: "acct-1".into(),
+                    breaker: 0,
+                    in_flight: 0,
+                    budget: Some((50_000_000_000, 200_000_000_000)),
+                },
+            ]
         });
         let mut fb = rec("gpt-4o", dep, 200);
         let mut other = attempt(None);
@@ -1243,6 +1298,17 @@ mod tests {
         assert!(out.contains(
             "aigw_deployment_inflight_requests{model_group=\"gpt-4o\",deployment=\"d\\\"1\"} 2\n"
         ));
+        // AIGW-126: Budget je Deployment.
+        assert!(out.contains(
+            "aigw_deployment_budget_used{model_group=\"claude\",deployment=\"acct-1\"} 50\n"
+        ));
+        assert!(out.contains(
+            "aigw_deployment_budget_amount{model_group=\"claude\",deployment=\"acct-1\"} 200\n"
+        ));
+        assert!(out.contains(
+            "aigw_deployment_budget_used_ratio{model_group=\"claude\",deployment=\"acct-1\"} 0.25\n"
+        ));
+        assert!(!out.contains("aigw_deployment_budget_used{model_group=\"gpt-4o\""));
         assert!(!out.contains("aigw_counter_backend_degraded"));
         m.set_counter_health(|| true);
         let mut out = String::new();

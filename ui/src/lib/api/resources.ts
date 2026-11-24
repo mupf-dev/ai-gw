@@ -144,6 +144,7 @@ export const ROUTING: { value: S['RoutingStrategy']; label: string; hint: string
   { value: 'least-latency', label: 'Geringste Latenz', hint: 'schnellstes Deployment zuerst' },
   { value: 'least-busy', label: 'Geringste Last', hint: 'wenigste laufende Anfragen' },
   { value: 'cost', label: 'Kosten', hint: 'günstigstes Deployment zuerst' },
+  { value: 'budget-balanced', label: 'Budget ausgleichen', hint: 'Kosten gleichmäßig über die Deployments verteilen (geringster Budgetverbrauch in %)' },
 ];
 export const FALLBACK_TRIGGERS: { value: S['FallbackTrigger']; label: string }[] = [
   { value: 'any', label: 'jeder Fehler' },

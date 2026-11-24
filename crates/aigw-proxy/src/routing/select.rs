@@ -11,6 +11,13 @@
 //! - `least-busy`: wenigste offene Anfragen, Gleichstand gewichtet zufällig.
 //! - `cost`: günstigster Preis (Eingabe + Ausgabe je 1 Mio. Tokens laut Preisliste);
 //!   Deployments ohne Preis zuletzt; Gleichstand gewichtet zufällig.
+//! - `budget-balanced` (AIGW-126): Kosten gleichmäßig verteilen. „Power of two choices“:
+//!   zwei Kandidaten gewichtet zufällig ziehen, den mit dem geringeren Budgetverbrauch in
+//!   Prozent nehmen (haben nicht alle Kandidaten ein Budget: geringere absolute Kosten);
+//!   Gleichstand → höheres Gewicht, sonst Zufall. Das strikte Minimum würde unter Last alle
+//!   gleichzeitigen Anfragen auf dasselbe Deployment lenken (Herdenverhalten), bis dessen
+//!   Verbrauch nachgezogen ist; zwei Stichproben verteilen sie, halten den Verbrauch aber
+//!   trotzdem eng beieinander. Unterschiedliche Budgets füllen sich anteilig.
 //!
 //! Zufall: wyrand je Thread, Startwert aus `RandomState` (kein Lock, keine Abhängigkeit).
 
@@ -70,10 +77,14 @@ pub(crate) fn choose(
     members: &[std::sync::Arc<Member>],
     cands: &[usize],
     stream: bool,
+    wall_ms: i64,
     scratch: &mut Vec<usize>,
 ) -> usize {
     if cands.len() == 1 {
         return 0;
+    }
+    if strategy == RoutingStrategy::BudgetBalanced {
+        return balanced(members, cands, wall_ms, scratch);
     }
     let key = |i: usize| -> u64 {
         let m = &members[i];
@@ -89,6 +100,7 @@ pub(crate) fn choose(
             }
             RoutingStrategy::LeastBusy => u64::from(m.state.in_flight()),
             RoutingStrategy::Cost => m.cost.unwrap_or(u64::MAX),
+            RoutingStrategy::BudgetBalanced => 0,
         }
     };
     if strategy == RoutingStrategy::Weighted {
@@ -105,6 +117,44 @@ pub(crate) fn choose(
     let pos_in_scratch = weighted(members, scratch);
     let chosen = scratch[pos_in_scratch];
     cands.iter().position(|&i| i == chosen).unwrap_or(0)
+}
+
+/// `budget-balanced`: zwei gewichtet zufällige Kandidaten, der mit dem geringeren Verbrauch
+/// gewinnt (`cands.len() ≥ 2`).
+fn balanced(
+    members: &[std::sync::Arc<Member>],
+    cands: &[usize],
+    wall_ms: i64,
+    scratch: &mut Vec<usize>,
+) -> usize {
+    let relative = cands.iter().all(|&i| members[i].budget.is_some());
+    let a = weighted(members, cands);
+    scratch.clear();
+    scratch.extend(
+        cands
+            .iter()
+            .enumerate()
+            .filter(|(p, _)| *p != a)
+            .map(|(_, &i)| i),
+    );
+    let bi = scratch[weighted(members, scratch)];
+    let b = cands.iter().position(|&i| i == bi).unwrap_or(a);
+    let (ma, mb) = (&members[cands[a]], &members[cands[b]]);
+    match ma
+        .balance_key(relative, wall_ms)
+        .cmp(&mb.balance_key(relative, wall_ms))
+        .then_with(|| mb.weight.cmp(&ma.weight))
+    {
+        std::cmp::Ordering::Less => a,
+        std::cmp::Ordering::Greater => b,
+        std::cmp::Ordering::Equal => {
+            if rand_below(2) == 0 {
+                a
+            } else {
+                b
+            }
+        }
+    }
 }
 
 #[cfg(test)]

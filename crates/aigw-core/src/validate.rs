@@ -18,8 +18,8 @@ use serde_json::Value;
 use time::OffsetDateTime;
 
 use crate::resource::{
-    Amount, ApiKeySpec, DeploymentSpec, EntraAuth, EntraCredentialKind, JsonObject, ModelGroupSpec,
-    PriceSpec, Role, UserSpec,
+    Amount, ApiKeySpec, DeploymentBudget, DeploymentSpec, EntraAuth, EntraCredentialKind,
+    JsonObject, ModelGroupSpec, PriceSpec, Role, UserSpec,
 };
 use crate::types::ProviderKind;
 use crate::upstream::UpstreamPolicy;
@@ -366,6 +366,9 @@ pub fn deployment(upstreams: &UpstreamPolicy, spec: &DeploymentSpec) -> Res {
         );
     }
     deployment_settings(&spec.settings)?;
+    if let Some(b) = &spec.budget {
+        deployment_budget(b)?;
+    }
     if spec.provider == ProviderKind::AzureOpenAi {
         azure(spec)?;
         azure_auth(upstreams, spec)?;
@@ -393,6 +396,23 @@ pub fn deployment(upstreams: &UpstreamPolicy, spec: &DeploymentSpec) -> Res {
     }
     if let Some(ca) = setting_str(spec, "caFile")? {
         ca_file(upstreams, ca)?;
+    }
+    Ok(())
+}
+
+/// Budget eines Deployments (AIGW-126): Betrag > 0, Warnschwellen und `switchAtPercent`
+/// 1–100.
+pub fn deployment_budget(b: &DeploymentBudget) -> Res {
+    if b.amount.nanos() <= 0 {
+        return Err("budget.amount: muss > 0 sein (ohne Budget weglassen)".into());
+    }
+    if let Some(p) = b.warn_at_percent.iter().find(|p| !(1..=100).contains(*p)) {
+        return Err(format!("budget.warnAtPercent: {p} liegt nicht in 1–100"));
+    }
+    if let Some(p) = b.switch_at_percent
+        && !(1..=100).contains(&p)
+    {
+        return Err(format!("budget.switchAtPercent: {p} liegt nicht in 1–100"));
     }
     Ok(())
 }
@@ -1023,7 +1043,44 @@ mod tests {
             capacity: Capacity::default(),
             enabled: true,
             settings: settings.as_object().cloned().unwrap_or_default(),
+            budget: None,
         }
+    }
+
+    #[test]
+    fn deployment_budget_rules() {
+        let p = UpstreamPolicy::strict();
+        let with = |b: Value| {
+            let mut d = dep(ProviderKind::OpenAi, None, json!({}));
+            d.budget = Some(serde_json::from_value(b).unwrap());
+            deployment(&p, &d)
+        };
+        assert!(with(json!({"amount": "200", "period": "total"})).is_ok());
+        assert!(
+            with(
+                json!({"amount": "200", "period": "month", "warnAtPercent": [80, 95],
+                         "switchAtPercent": 98, "enforcement": "soft"})
+            )
+            .is_ok()
+        );
+        assert!(with(json!({"amount": "0", "period": "total"})).is_err());
+        assert!(with(json!({"amount": "-1", "period": "total"})).is_err());
+        assert!(with(json!({"amount": "1", "period": "total", "switchAtPercent": 0})).is_err());
+        assert!(with(json!({"amount": "1", "period": "total", "switchAtPercent": 101})).is_err());
+        assert!(with(json!({"amount": "1", "period": "total", "warnAtPercent": [0]})).is_err());
+        // Unbekannte Felder (z. B. hardLimit des Key-Budgets) werden abgelehnt.
+        assert!(
+            serde_json::from_value::<DeploymentBudget>(
+                json!({"amount": "1", "period": "total", "hardLimit": false})
+            )
+            .is_err()
+        );
+        let b: DeploymentBudget = serde_json::from_value(
+            json!({"amount": "200", "period": "total", "switchAtPercent": 98}),
+        )
+        .unwrap();
+        assert_eq!(b.switch_budget().amount, "196".parse::<Amount>().unwrap());
+        assert_eq!(b.as_budget().amount, "200".parse::<Amount>().unwrap());
     }
 
     #[test]

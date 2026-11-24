@@ -615,6 +615,10 @@ pub enum RoutingStrategy {
     LeastBusy,
     /// Günstigstes Deployment zuerst.
     Cost,
+    /// Kosten gleichmäßig verteilen (AIGW-126): das Deployment mit dem geringsten
+    /// Budgetverbrauch in Prozent (ohne Budget: geringste Kosten), Auswahl per
+    /// „power of two choices“ gegen Herdenverhalten.
+    BudgetBalanced,
 }
 
 impl RoutingStrategy {
@@ -625,6 +629,7 @@ impl RoutingStrategy {
             Self::LeastLatency => "least-latency",
             Self::LeastBusy => "least-busy",
             Self::Cost => "cost",
+            Self::BudgetBalanced => "budget-balanced",
         }
     }
 }
@@ -839,6 +844,68 @@ pub struct DeploymentSpec {
     #[serde(default, skip_serializing_if = "JsonObject::is_empty")]
     #[schema(value_type = Object)]
     pub settings: JsonObject,
+    /// Budget dieses Deployments (AIGW-126), z. B. das Guthaben des Anbieter-Kontos. Ist es
+    /// erschöpft, überspringt das Routing das Deployment (kein Fehler, solange ein anderes
+    /// verfügbar ist).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<DeploymentBudget>,
+}
+
+/// Budget eines Deployments (AIGW-126). Beträge in `billing.currency`; die Kosten kommen aus
+/// der Preisliste (tatsächliche Usage nach der Antwort).
+///
+/// Wirkung im Routing: Ein Deployment, dessen Verbrauch `switchAtPercent` des Betrags
+/// erreicht hat, wird bei der Auswahl übersprungen; `strict` reserviert zusätzlich die
+/// geschätzten Kosten je Versuch und überspringt, wenn sie nicht mehr in den Rest passen.
+/// Sind alle Deployments der Gruppe erschöpft, antwortet der Proxy mit `429`
+/// (`deployment_budget_exhausted`). Nachladen: `amount` erhöhen (Hot Reload).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeploymentBudget {
+    /// Betrag je Zeitraum in der Abrechnungswährung (`billing.currency`).
+    pub amount: Amount,
+    /// Zeitraum (`total` = Guthaben ohne Zurücksetzen, `month` = Kalendermonat in
+    /// `billing.timezone`).
+    pub period: BudgetPeriod,
+    /// Warnschwellen in Prozent (Ereignis/Webhook `budget.threshold`), z. B. `[80, 95]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warn_at_percent: Vec<u8>,
+    /// Umschalten ab diesem Verbrauch in Prozent (1–100, Standard 100): Reserve, damit der
+    /// letzte Request das Guthaben nicht überzieht.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub switch_at_percent: Option<u8>,
+    /// `strict` (Standard): geschätzte Kosten je Versuch reservieren; `soft`: nur den
+    /// bisherigen Verbrauch prüfen.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub enforcement: BudgetEnforcement,
+}
+
+impl DeploymentBudget {
+    /// Prozent, ab dem umgeschaltet wird (1–100).
+    pub fn switch_percent(&self) -> u8 {
+        self.switch_at_percent.unwrap_or(100).clamp(1, 100)
+    }
+
+    /// Als [`Budget`] (Betrag, Warnschwellen; harte Grenze = Überspringen im Routing).
+    pub fn as_budget(&self) -> Budget {
+        Budget {
+            amount: self.amount,
+            period: self.period,
+            warn_at_percent: self.warn_at_percent.clone(),
+            hard_limit: true,
+            enforcement: self.enforcement,
+        }
+    }
+
+    /// Budget für die Auswahl im Routing: Betrag × `switchAtPercent` / 100.
+    pub fn switch_budget(&self) -> Budget {
+        let mut b = self.as_budget();
+        let p = i128::from(self.switch_percent());
+        let n = i128::from(self.amount.nanos()) * p / 100;
+        b.amount = Amount::from_nanos(i64::try_from(n).unwrap_or(i64::MAX));
+        b.warn_at_percent.clear();
+        b
+    }
 }
 
 fn default_weight() -> u32 {

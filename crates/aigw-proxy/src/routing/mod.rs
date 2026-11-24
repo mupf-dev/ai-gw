@@ -5,7 +5,9 @@
 //!
 //! - [`GroupRoute`] – eine Modellgruppe mit ihren Deployments ([`Member`]), nach Priorität in
 //!   Gruppen geordnet (0 vor 1), Strategie, [`GroupPolicy`] und Fallback-Kette.
-//! - Auswahl ([`select`]): `weighted`, `least-latency`, `least-busy`, `cost`. Eine
+//! - Auswahl ([`select`]): `weighted`, `least-latency`, `least-busy`, `cost`,
+//!   `budget-balanced` (AIGW-126). Deployments mit erschöpftem Budget ([`MemberBudget`])
+//!   werden übersprungen. Eine
 //!   Prioritätsgruppe ist gesperrt, solange alle ihre Deployments offen (Circuit Breaker), nach
 //!   `Retry-After` gesperrt oder an der Kapazitätsgrenze (RPM/TPM, gezählt über
 //!   `aigw-counters`) sind.
@@ -20,6 +22,7 @@
 //! Ausführliche Beschreibung: `docs/konzept/10-routing.md`.
 
 mod breaker;
+pub(crate) mod budget;
 pub(crate) mod exec;
 mod health;
 mod policy;
@@ -39,6 +42,7 @@ use aigw_providers::Capability;
 use crate::provider::ChatProvider;
 
 pub use breaker::BreakerState;
+pub use budget::MemberBudget;
 pub use policy::{
     BreakerConfig, ClientBetas, GroupPolicy, HealthCheckConfig, ResponseModel, RetryPolicy,
 };
@@ -60,6 +64,8 @@ pub struct Member {
     pub(crate) cost: Option<u64>,
     /// Position in [`GroupRoute::members`].
     pub(crate) idx: usize,
+    /// Budget des Deployments (AIGW-126).
+    pub(crate) budget: Option<MemberBudget>,
 }
 
 impl fmt::Debug for Member {
@@ -70,6 +76,7 @@ impl fmt::Debug for Member {
             .field("priority", &self.priority)
             .field("capacity", &self.capacity)
             .field("cost", &self.cost)
+            .field("budget", &self.budget)
             .field("state", &self.state)
             .finish()
     }
@@ -86,11 +93,32 @@ impl Member {
         &self.state
     }
 
-    /// Kann jetzt angefragt werden (Breaker, `Retry-After`-Sperre, Kapazität)?
-    fn available(&self, breaker: &BreakerConfig, now_ms: u64) -> bool {
+    /// Budget (AIGW-126).
+    pub fn budget(&self) -> Option<&MemberBudget> {
+        self.budget.as_ref()
+    }
+
+    /// Kann jetzt angefragt werden (Breaker, `Retry-After`-Sperre, Kapazität, Budget)?
+    fn available(&self, breaker: &BreakerConfig, now_ms: u64, wall_ms: i64) -> bool {
         (!breaker.enabled || self.state.breaker.available(now_ms))
             && self.state.cooldown_remaining_ms(now_ms) == 0
             && !self.at_capacity(now_ms)
+            && !self.budget_exhausted(wall_ms)
+    }
+
+    /// Budget bis zur Umschaltgrenze verbraucht (AIGW-126)?
+    pub(crate) fn budget_exhausted(&self, wall_ms: i64) -> bool {
+        self.budget.as_ref().is_some_and(|b| b.exhausted(wall_ms))
+    }
+
+    /// Schlüssel für `budget-balanced`: Verbrauch in Millionstel des Budgets (`relative`)
+    /// bzw. absolute Kosten im Zeitraum (Nano-Einheiten; ohne Budget: Kosten dieser Instanz).
+    pub(crate) fn balance_key(&self, relative: bool, wall_ms: i64) -> u64 {
+        match (&self.budget, relative) {
+            (Some(b), true) => b.busy_ppm(wall_ms),
+            (Some(b), false) => u64::try_from(b.busy(wall_ms)).unwrap_or(0),
+            (None, _) => self.state.spent_nanos(),
+        }
     }
 
     /// Kapazität laut letzter Ablehnung des Zählers erschöpft (nur Atomics, kein Zählerzugriff;
@@ -126,6 +154,8 @@ pub struct MemberSpec {
     pub capacity: Capacity,
     /// Preis für `cost` (kleiner = günstiger).
     pub cost: Option<u64>,
+    /// Budget des Deployments (AIGW-126).
+    pub budget: Option<MemberBudget>,
 }
 
 impl fmt::Debug for MemberSpec {
@@ -148,6 +178,7 @@ impl MemberSpec {
             priority: 0,
             capacity: Capacity::default(),
             cost: None,
+            budget: None,
         }
     }
 }
@@ -214,6 +245,7 @@ impl GroupRoute {
                     capacity_keys,
                     cost: m.cost,
                     idx,
+                    budget: m.budget,
                 })
             })
             .collect();
@@ -306,6 +338,7 @@ impl GroupRoute {
         scratch: &mut Scratch,
     ) -> Option<(Arc<Member>, Admit)> {
         let breaker = &self.policy.breaker;
+        let wall = budget::wall_ms();
         for pass in 0..2 {
             if pass == 1 && tried.is_empty() {
                 break;
@@ -315,7 +348,7 @@ impl GroupRoute {
                 scratch.cands.extend(tier.clone().filter(|i| {
                     !excluded.contains(i)
                         && (pass == 1 || !tried.contains(i))
-                        && self.members[*i].available(breaker, now_ms)
+                        && self.members[*i].available(breaker, now_ms, wall)
                 }));
                 while !scratch.cands.is_empty() {
                     let pos = select::choose(
@@ -323,6 +356,7 @@ impl GroupRoute {
                         &self.members,
                         &scratch.cands,
                         stream,
+                        wall,
                         &mut scratch.near,
                     );
                     let m = &self.members[scratch.cands[pos]];

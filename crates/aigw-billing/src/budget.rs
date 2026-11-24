@@ -54,6 +54,9 @@ pub enum BudgetLevel {
     Team,
     /// API-Key.
     ApiKey,
+    /// Deployment (AIGW-126): Guthaben/Budget eines Anbieter-Deployments; wirkt im Routing
+    /// (Überspringen) statt als Ablehnung der Anfrage.
+    Deployment,
 }
 
 impl BudgetLevel {
@@ -63,6 +66,7 @@ impl BudgetLevel {
             Self::Organization => "organization",
             Self::Team => "team",
             Self::ApiKey => "api-key",
+            Self::Deployment => "deployment",
         }
     }
 
@@ -72,6 +76,7 @@ impl BudgetLevel {
             "organization" => Self::Organization,
             "team" => Self::Team,
             "api-key" => Self::ApiKey,
+            "deployment" => Self::Deployment,
             _ => return None,
         })
     }
@@ -484,7 +489,16 @@ impl EntryState {
     }
 
     fn configure(&mut self, b: &Budget) {
-        self.amount = b.amount.nanos();
+        let amount = b.amount.nanos();
+        if amount != self.amount && self.amount != 0 {
+            // Betrag geändert (z. B. Guthaben nachgeladen, AIGW-126): Schwellen und
+            // Erschöpfung neu bewerten, damit sie beim nächsten Erreichen wieder melden.
+            let used = i128::from(self.used());
+            let new = i128::from(amount);
+            self.warned.retain(|p| used * 100 >= new * i128::from(*p));
+            self.exhausted = used >= new;
+        }
+        self.amount = amount;
         self.hard = b.hard_limit;
         if self.warn_at != b.warn_at_percent {
             self.warn_at.clone_from(&b.warn_at_percent);
@@ -947,6 +961,26 @@ impl Budgets {
         for ev in &events {
             self.events.on_event(ev);
         }
+    }
+
+    /// Lädt den Stand eines Budgets (einmal je Zeitraum und Instanz, wie beim ersten
+    /// [`Self::reserve`]), damit [`Self::status`] danach ohne I/O antworten kann (AIGW-126:
+    /// Auswahl im Routing).
+    pub async fn load(&self, t: &BudgetTarget<'_>, now_ms: i64) {
+        let (key, range) = self.key(t, now_ms);
+        let entry = self.entry(key, range);
+        self.ensure_loaded(key, &entry).await;
+    }
+
+    /// Stand eines Budgets im Zeitraum von `now_ms` aus dem RAM (ohne I/O): (Verbrauch,
+    /// laufende Reservierungen dieser Instanz) in Nano-Einheiten; `(0, 0)`, wenn noch nicht
+    /// geführt.
+    pub fn status(&self, t: &BudgetTarget<'_>, now_ms: i64) -> (i64, i64) {
+        let (key, _) = self.key(t, now_ms);
+        self.entries.get(&key).map_or((0, 0), |e| {
+            let st = lock(&e.st);
+            (st.used(), st.reserved)
+        })
     }
 
     /// Bekannter Verbrauch eines Budgetstands (RAM; `None`, wenn nicht geführt).

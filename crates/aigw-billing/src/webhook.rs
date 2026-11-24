@@ -66,6 +66,16 @@ fn names(
             ),
             None => (None, None, None),
         },
+        // AIGW-126: Name des Deployments (Modellgruppe steht im Deployment selbst).
+        BudgetLevel::Deployment => (
+            snap.model_groups
+                .values()
+                .flat_map(|g| g.deployments.iter())
+                .find(|d| d.deployment.id == target)
+                .map(|d| d.deployment.metadata.name.clone()),
+            None,
+            None,
+        ),
     }
 }
 

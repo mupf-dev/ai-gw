@@ -227,7 +227,9 @@ fn serve(
             )
             .map_err(|e| format!("Upstream-Client: {e}"))?
             // `admin.allow_mock: false` lässt Mock-Deployments aus (F85).
-            .with_mock(config.admin.allow_mock),
+            .with_mock(config.admin.allow_mock)
+            // Budget je Deployment (AIGW-126): dieselben Budgetstände wie Keys/Teams.
+            .with_budgets(std::sync::Arc::clone(&runtime_state.budgets)),
         );
         let routes_task = routes.spawn(runtime_state.snapshot.clone());
         // Breaker-Zustand und offene Anfragen je Deployment in /metrics (F86).
@@ -245,6 +247,7 @@ fn serve(
                             aigw_proxy::routing::BreakerState::HalfOpen => 2,
                         },
                         in_flight: d.in_flight,
+                        budget: d.budget,
                     })
                     .collect()
             });
