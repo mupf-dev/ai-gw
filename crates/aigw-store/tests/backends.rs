@@ -373,12 +373,34 @@ async fn run(store: Store) {
                     capacity: Default::default(),
                     enabled,
                     settings: Default::default(),
-                    budget: None,
+                    // AIGW-126: Budget je Deployment (JSON/JSONB-Spalte, Migration 0015).
+                    budget: enabled.then(|| {
+                        serde_json::from_value(serde_json::json!({
+                            "amount": "200", "period": "total", "warnAtPercent": [80],
+                            "switchAtPercent": 98
+                        }))
+                        .unwrap()
+                    }),
                 },
             )
             .await
             .unwrap();
     }
+    let d_a = store.get::<DeploymentSpec>("d-a").await.unwrap();
+    let b = d_a.spec.budget.as_ref().expect("Budget gespeichert");
+    assert_eq!(
+        (b.amount.to_string(), b.period, b.switch_at_percent),
+        ("200".to_owned(), BudgetPeriod::Total, Some(98))
+    );
+    assert!(
+        store
+            .get::<DeploymentSpec>("d-b")
+            .await
+            .unwrap()
+            .spec
+            .budget
+            .is_none()
+    );
     let deps = store
         .list_page::<DeploymentSpec>(&ListQuery {
             filters: vec![
@@ -769,6 +791,21 @@ async fn run(store: Store) {
             .unwrap(),
         [12]
     );
+    // AIGW-126: Ebene `deployment` (Ziel = Deployment-ID, `total` beginnt bei 0).
+    let dk = BudgetKey {
+        level: BudgetLevel::Deployment,
+        target: store.get::<DeploymentSpec>("d-a").await.unwrap().id,
+        period: BudgetPeriod::Total,
+        period_start_ms: 0,
+    };
+    assert_eq!(
+        store
+            .sync_budget_usage(&[(dk, 30_000_000)], &[dk, bk], t0)
+            .await
+            .unwrap(),
+        [30_000_000, 12]
+    );
+    assert_eq!(store.budget_usage(&[dk]).await.unwrap(), [30_000_000]);
     assert!(
         store
             .claim_event("e1", "budget", t0, t0 + 10)

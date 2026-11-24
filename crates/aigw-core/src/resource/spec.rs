@@ -867,7 +867,7 @@ pub struct DeploymentBudget {
     /// Zeitraum (`total` = Guthaben ohne Zurücksetzen, `month` = Kalendermonat in
     /// `billing.timezone`).
     pub period: BudgetPeriod,
-    /// Warnschwellen in Prozent (Ereignis/Webhook `budget.threshold`), z. B. `[80, 95]`.
+    /// Warnschwellen in Prozent (Ereignis/Webhook `budget.warning`), z. B. `[80, 95]`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warn_at_percent: Vec<u8>,
     /// Umschalten ab diesem Verbrauch in Prozent (1–100, Standard 100): Reserve, damit der

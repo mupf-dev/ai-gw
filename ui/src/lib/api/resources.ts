@@ -146,6 +146,13 @@ export const ROUTING: { value: S['RoutingStrategy']; label: string; hint: string
   { value: 'cost', label: 'Kosten', hint: 'günstigstes Deployment zuerst' },
   { value: 'budget-balanced', label: 'Budget ausgleichen', hint: 'Kosten gleichmäßig über die Deployments verteilen (geringster Budgetverbrauch in %)' },
 ];
+/** Zeiträume eines Budgets (Kalender in `billing.timezone`). */
+export const BUDGET_PERIODS: { value: S['BudgetPeriod']; label: string }[] = [
+  { value: 'total', label: 'Gesamt (Guthaben)' },
+  { value: 'month', label: 'Kalendermonat' },
+  { value: 'week', label: 'Kalenderwoche' },
+  { value: 'day', label: 'Kalendertag' },
+];
 export const FALLBACK_TRIGGERS: { value: S['FallbackTrigger']; label: string }[] = [
   { value: 'any', label: 'jeder Fehler' },
   { value: 'rate-limit', label: 'Ratenlimit' },

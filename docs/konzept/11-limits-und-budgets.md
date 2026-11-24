@@ -411,7 +411,7 @@ Ereignis aus (höchstens einmal statt mindestens einmal – siehe offene Fragen 
 
 ### 6.4 Admin-Lesezugriff
 
-`GET /admin/api/v1/usage/budgets[?level=organization|team|api-key]` (Berechtigung `Read`):
+`GET /admin/api/v1/usage/budgets[?level=organization|team|api-key|deployment]` (Berechtigung `Read`):
 alle Budgets (Organisationen, Teams, aktive Keys) mit laufendem Zeitraum (RFC 3339), Betrag,
 Verbrauch, Rest, Prozent, Schwellen, `hardLimit`, `exhausted` sowie die Zeitzone. Quelle ist
 `budget_usage` (hinkt bis zu einem Abgleichintervall hinterher).
@@ -423,6 +423,31 @@ Verbrauch, Rest, Prozent, Schwellen, `hardLimit`, `exhausted` sowie die Zeitzone
    "amount": "500", "used": "123.45", "remaining": "376.55", "percent": 24,
    "warnAtPercent": [50, 80, 100], "hardLimit": true, "exhausted": false}]}
 ```
+
+### 6.6 Budget je Deployment (AIGW-126)
+
+`Deployment.spec.budget` (`amount`, `period`, `warnAtPercent`, `switchAtPercent`,
+`enforcement`) nutzt dieselben Budgetstände (`Budgets`, `budget_usage`, Redis-Reservierung)
+mit der Ebene `deployment` (Ziel = Deployment-ID). Anders als Key/Team/Organisation **lehnt es
+keine Anfrage ab**, sondern wirkt im Routing ([10-routing.md](10-routing.md) §3):
+
+- **Auswahl:** Verbrauch ≥ `switchAtPercent` × Betrag → Deployment übersprungen.
+- **Versuch:** `strict` reserviert die geschätzten Kosten (geschätzte Eingabe-Tokens +
+  `max_tokens` × Preis des Deployments) gegen Betrag × `switchAtPercent`; reicht der Rest
+  nicht, nimmt das Routing das nächste Deployment. `soft` prüft nur den Verbrauch.
+- **Abrechnung:** nach der Antwort in `Admission::complete` mit den Kosten aus der Preisliste
+  (nur die Hauptanfrage, auf das Deployment, das geantwortet hat; fehlgeschlagene Versuche
+  kosten nichts); die Reservierung wird dabei getauscht.
+- **Alle erschöpft:** `429 deployment_budget_exhausted` (Klasse `quota`).
+- **Ereignisse/Webhook:** `budget.warning`/`budget.exhausted` mit `level: deployment`
+  (Schwellen relativ zum vollen Betrag).
+- **Nachladen:** Betrag erhöhen; erreichte Schwellen werden dabei neu bewertet (sie melden
+  beim nächsten Erreichen wieder). Ein Zurücksetzen des Verbrauchs gibt es nicht.
+- **Speicher:** Spalte `deployment.budget` (Migration 0015, JSON/JSONB); `budget_usage`
+  unverändert.
+- **Lesen:** `GET /usage/budgets?level=deployment` (zusätzlich `modelGroup`,
+  `switchAtPercent`; Leserecht auf den Katalog), Prognose über `/costs/budgets`.
+- **Metriken:** `aigw_deployment_budget_used`, `…_amount`, `…_used_ratio`.
 
 ## 6a. Grenzen Key ≤ Team ≤ Organisation (AIGW-67)
 

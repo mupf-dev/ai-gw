@@ -37,6 +37,7 @@ Wichtige Metriken:
 | `aigw_requests_total`, `aigw_request_duration_seconds`, `aigw_ttft_seconds` | Anfragen, Dauer, Zeit bis zum ersten Token (je Modellgruppe, Status) |
 | `aigw_tokens_total`, `aigw_cost_total` | Tokens und Kosten |
 | `aigw_inflight_requests`, `aigw_deployment_inflight_requests` | laufende Anfragen |
+| `aigw_deployment_budget_used`, `aigw_deployment_budget_amount`, `aigw_deployment_budget_used_ratio` | Budget je Deployment (AIGW-126; nur Deployments mit Budget, Abrechnungswährung) |
 | `aigw_upstream_attempts_total`, `aigw_upstream_errors_total`, `aigw_upstream_retries_total`, `aigw_fallbacks_total` | Upstream-Versuche, Fehlerklassen, Retries, Fallbacks |
 | `aigw_deployment_breaker_state` | Circuit Breaker je Deployment (0 geschlossen, 1 offen, 2 halb offen) |
 | `aigw_stream_client_aborts_total` | vom Client abgebrochene Streams |

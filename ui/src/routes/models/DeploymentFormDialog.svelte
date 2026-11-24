@@ -2,10 +2,11 @@
 <!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Deployment anlegen/bearbeiten (Admin-API §2.3): Anbieter, Anbieter-Modell, Endpunkt (SSRF-geprüft),
-  // Zugangsdaten desselben Anbieters, Priorität (0 vor 1), Gewicht, Kapazität (RPM/TPM), aktiv, Einstellungen.
+  // Zugangsdaten desselben Anbieters, Priorität (0 vor 1), Gewicht, Kapazität (RPM/TPM), Budget (AIGW-126), aktiv,
+  // Einstellungen.
   import { Switch } from 'bits-ui';
   import { untrack } from 'svelte';
-  import { credentials, deployments, NAME_HINT, NAME_RE, PROVIDERS, type Credential, type Deployment, type S } from '../../lib/api/resources';
+  import { BUDGET_PERIODS, credentials, deployments, NAME_HINT, NAME_RE, PROVIDERS, type Credential, type Deployment, type S } from '../../lib/api/resources';
   import { handleError } from '../../lib/admin/errors.svelte';
   import FormError from '../../lib/admin/FormError.svelte';
   import Button from '../../lib/ui/Button.svelte';
@@ -39,6 +40,10 @@
     tpm: '',
     enabled: true,
     settings: {} as Record<string, unknown>,
+    budget: '',
+    budgetPeriod: 'total' as S['BudgetPeriod'],
+    switchAt: '',
+    warnAt: '80',
   });
   let form = $state(blank());
   let settingsInvalid = $state(false);
@@ -89,6 +94,10 @@
         tpm: s.capacity?.tpm ? String(s.capacity.tpm) : '',
         enabled: s.enabled !== false,
         settings: { ...((s.settings ?? {}) as Record<string, unknown>) },
+        budget: s.budget?.amount ?? '',
+        budgetPeriod: s.budget?.period ?? 'total',
+        switchAt: s.budget?.switchAtPercent != null ? String(s.budget.switchAtPercent) : '',
+        warnAt: (s.budget?.warnAtPercent ?? []).join(', '),
       };
     } catch (e) {
       handleError(e, { action: 'Deployment laden' });
@@ -132,6 +141,16 @@
       const v = int(form[k]);
       if (v !== null && (!Number.isInteger(v) || v <= 0)) e[k] = 'Positive ganze Zahl.';
     }
+    // Budget (AIGW-126): Betrag > 0, Prozentwerte 1–100.
+    const budgetAmount = form.budget.trim().replace(',', '.');
+    if (budgetAmount && !(Number(budgetAmount) > 0)) e.budget = 'Positive Zahl (leer = ohne Budget).';
+    const switchAt = int(form.switchAt);
+    if (switchAt !== null && (!Number.isInteger(switchAt) || switchAt < 1 || switchAt > 100)) e.switchAt = 'Ganze Zahl 1–100.';
+    const warnAt = form.warnAt
+      .split(/[,;\s]+/)
+      .filter(Boolean)
+      .map(Number);
+    if (warnAt.some((p) => !Number.isInteger(p) || p < 1 || p > 100)) e.warnAt = 'Prozentwerte 1–100, durch Komma getrennt.';
     const settings = $state.snapshot(form.settings);
     if (settingsInvalid) {
       e.settings = 'Einstellungen prüfen (ungültige Zahl bzw. kein gültiges JSON).';
@@ -152,6 +171,15 @@
       capacity: { rpm: int(form.rpm), tpm: int(form.tpm) },
       enabled: form.enabled,
       settings: settings as S['DeploymentSpec']['settings'],
+      budget: budgetAmount
+        ? {
+            ...(loaded?.spec.budget ?? {}),
+            amount: budgetAmount,
+            period: form.budgetPeriod,
+            switchAtPercent: switchAt,
+            warnAtPercent: warnAt,
+          }
+        : null,
     };
     busy = true;
     try {
@@ -240,6 +268,35 @@
           {/snippet}
         </Field>
       </div>
+      <section class="flex flex-col gap-2 sm:col-span-2" aria-label="Budget" data-testid="deployment-budget">
+        <h3 class="text-sm font-medium text-fg">Budget</h3>
+        <p class="text-xs text-fg-subtle">
+          Z. B. das Guthaben des Anbieter-Kontos (Währung laut <span class="font-mono">billing.currency</span>; Anthropic rechnet in USD ab). Ist es erschöpft,
+          überspringt das Routing dieses Deployment ohne Fehler. Nachladen: Betrag erhöhen.
+        </p>
+        <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <Field label="Betrag" optional hint="Leer = ohne Budget." error={errors.budget}>
+            {#snippet children({ id, describedby, invalid })}
+              <Input {id} bind:value={form.budget} inputmode="decimal" placeholder="z. B. 200" aria-describedby={describedby} aria-invalid={invalid || undefined} data-testid="deployment-budget-amount" />
+            {/snippet}
+          </Field>
+          <Field label="Zeitraum">
+            {#snippet children({ id })}
+              <Select {id} bind:value={form.budgetPeriod} items={BUDGET_PERIODS} />
+            {/snippet}
+          </Field>
+          <Field label="Umschalten bei %" optional hint="Reserve, Standard 100." error={errors.switchAt}>
+            {#snippet children({ id, describedby, invalid })}
+              <Input {id} bind:value={form.switchAt} inputmode="numeric" placeholder="100" aria-describedby={describedby} aria-invalid={invalid || undefined} data-testid="deployment-budget-switch" />
+            {/snippet}
+          </Field>
+          <Field label="Warnen bei %" optional hint="z. B. 80, 95" error={errors.warnAt}>
+            {#snippet children({ id, describedby, invalid })}
+              <Input {id} bind:value={form.warnAt} aria-describedby={describedby} aria-invalid={invalid || undefined} />
+            {/snippet}
+          </Field>
+        </div>
+      </section>
       <section class="flex flex-col gap-1.5 sm:col-span-2" aria-label="Einstellungen">
         <h3 class="text-sm font-medium text-fg">Einstellungen</h3>
         <p class="text-xs text-fg-subtle">Anbieterspezifisches unter „Erweitert“: {SETTINGS_HINT[form.provider] ?? 'z. B. {"maxTokensField": "max_completion_tokens"}.'}</p>

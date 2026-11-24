@@ -13663,7 +13663,8 @@
         "enum": [
           "organization",
           "team",
-          "api-key"
+          "api-key",
+          "deployment"
         ]
       },
       "BudgetList": {
@@ -13789,11 +13790,18 @@
           },
           "hardLimit": {
             "type": "boolean",
-            "description": "Harte Grenze (Ablehnung mit `budget_exceeded`)."
+            "description": "Harte Grenze (Ablehnung mit `budget_exceeded`; bei Deployments: Überspringen im\nRouting)."
           },
           "level": {
             "$ref": "#/components/schemas/BudgetLevelName",
             "description": "Ebene."
+          },
+          "modelGroup": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Modellgruppe (nur `deployment`)."
           },
           "percent": {
             "type": "integer",
@@ -13819,6 +13827,15 @@
           "remaining": {
             "$ref": "#/components/schemas/Amount",
             "description": "Verbleibend (nicht negativ)."
+          },
+          "switchAtPercent": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Umschalten ab diesem Verbrauch in Prozent (nur `deployment`).",
+            "minimum": 0
           },
           "targetId": {
             "type": "string",
@@ -14651,6 +14668,47 @@
           }
         }
       },
+      "DeploymentBudget": {
+        "type": "object",
+        "description": "Budget eines Deployments (AIGW-126). Beträge in `billing.currency`; die Kosten kommen aus\nder Preisliste (tatsächliche Usage nach der Antwort).\n\nWirkung im Routing: Ein Deployment, dessen Verbrauch `switchAtPercent` des Betrags\nerreicht hat, wird bei der Auswahl übersprungen; `strict` reserviert zusätzlich die\ngeschätzten Kosten je Versuch und überspringt, wenn sie nicht mehr in den Rest passen.\nSind alle Deployments der Gruppe erschöpft, antwortet der Proxy mit `429`\n(`deployment_budget_exhausted`). Nachladen: `amount` erhöhen (Hot Reload).",
+        "required": [
+          "amount",
+          "period"
+        ],
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "Betrag je Zeitraum in der Abrechnungswährung (`billing.currency`)."
+          },
+          "enforcement": {
+            "$ref": "#/components/schemas/BudgetEnforcement",
+            "description": "`strict` (Standard): geschätzte Kosten je Versuch reservieren; `soft`: nur den\nbisherigen Verbrauch prüfen."
+          },
+          "period": {
+            "$ref": "#/components/schemas/BudgetPeriod",
+            "description": "Zeitraum (`total` = Guthaben ohne Zurücksetzen, `month` = Kalendermonat in\n`billing.timezone`)."
+          },
+          "switchAtPercent": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Umschalten ab diesem Verbrauch in Prozent (1–100, Standard 100): Reserve, damit der\nletzte Request das Guthaben nicht überzieht.",
+            "minimum": 0
+          },
+          "warnAtPercent": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "Warnschwellen in Prozent (Ereignis/Webhook `budget.threshold`), z. B. `[80, 95]`."
+          }
+        },
+        "additionalProperties": false
+      },
       "DeploymentInput": {
         "type": "object",
         "required": [
@@ -14700,6 +14758,17 @@
           "providerModel"
         ],
         "properties": {
+          "budget": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DeploymentBudget",
+                "description": "Budget dieses Deployments (AIGW-126), z. B. das Guthaben des Anbieter-Kontos. Ist es\nerschöpft, überspringt das Routing das Deployment (kein Fehler, solange ein anderes\nverfügbar ist)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "capacity": {
             "$ref": "#/components/schemas/Capacity",
             "description": "Kapazitätsgrenzen."
@@ -18068,7 +18137,8 @@
           "weighted",
           "least-latency",
           "least-busy",
-          "cost"
+          "cost",
+          "budget-balanced"
         ]
       },
       "Scope": {

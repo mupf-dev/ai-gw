@@ -143,11 +143,19 @@ für alle Arten gleich (TPM zählt Embedding-Tokens bzw. gemeldete Bild-/Audio-T
      Versuchs werden 1 Anfrage und geschätzte Eingabe + `max_tokens` reserviert, die Tokens am
      Ende des Versuchs auf die Usage korrigiert – Details in
      [11-limits-und-budgets.md](11-limits-und-budgets.md) §5).
+   - sein **Budget** bis `switchAtPercent` verbraucht hat (`Deployment.spec.budget`,
+     AIGW-126; Verbrauch aus dem RAM der Budgetstände, abgeglichen mit `budget_usage`). Vor
+     jedem Versuch reserviert `strict` die geschätzten Kosten; passen sie nicht mehr in den
+     Rest, wird das Deployment für diese Anfrage übersprungen. Abgerechnet wird nach der
+     Antwort mit den tatsächlichen Kosten auf das Deployment, das geantwortet hat.
    Dann wird die nächste Gruppe genommen. Sind alle gesperrt: **503**
    `no_deployment_available` mit `Retry-After` = kürzeste verbleibende Sperre – außer alle
    (nicht ausgeschlossenen) Deployments sind **nur** wegen `Retry-After` des Anbieters oder
    erschöpfter Kapazität gesperrt (kein offener Breaker): dann **429**
-   `deployments_rate_limited` mit `Retry-After` (F83; Drosselung, kein Ausfall).
+   `deployments_rate_limited` mit `Retry-After` (F83; Drosselung, kein Ausfall). Sind alle
+   wegen ihres Budgets ausgeschlossen: **429** `deployment_budget_exhausted` (Klasse `quota`,
+   Fallback-Auslöser `rate-limit`/`any`; `Retry-After` bis zum nächsten Zeitraum, bei `total`
+   ohne).
 2. **Strategie** innerhalb der Gruppe:
    - `weighted`: gewichtet zufällig nach `weight` (alle 0 → gleichverteilt).
    - `least-latency`: kleinste EWMA (α = 0,3) der TTFT (Streams) bzw. Antwortzeit (sonst; fehlt
@@ -157,6 +165,13 @@ für alle Arten gleich (TPM zählt Embedding-Tokens bzw. gemeldete Bild-/Audio-T
    - `least-busy`: wenigste offene Anfragen dieser Instanz; Gleichstand gewichtet zufällig.
    - `cost`: kleinster Preis (Eingabe + Ausgabe je 1 Mio. Tokens aus der Preisliste, zum
      Zeitpunkt des Snapshot-Aufbaus); ohne Preis zuletzt; Gleichstand gewichtet zufällig.
+   - `budget-balanced` (AIGW-126): Kosten gleichmäßig verteilen. „Power of two choices“: zwei
+     Kandidaten gewichtet zufällig ziehen, der mit dem geringeren Budgetverbrauch in Prozent
+     (inkl. laufender Reservierungen dieser Instanz) gewinnt; Gleichstand → höheres Gewicht,
+     sonst Zufall. Haben nicht alle Kandidaten ein Budget, zählen die absoluten Kosten
+     (ohne Budget: Kosten dieser Instanz seit Start). Kein striktes Minimum, damit unter Last
+     nicht alle gleichzeitigen Anfragen auf dasselbe Deployment fallen (Herdenverhalten).
+     Rezept: [../betrieb/rezept-accounts-rotieren.md](../betrieb/rezept-accounts-rotieren.md).
 3. Halboffene Breaker lassen genau eine Probe durch (`compare_exchange`); verliert ein
    Kandidat das Rennen, wird ohne ihn neu gewählt.
 
@@ -237,6 +252,11 @@ Keys nicht direkt ansprechen sollen).
   Stream-Ende ohne Fehler; auch Client-Fehler (`400`, Kontextlänge, Content-Filter) – der
   Anbieter hat ja geantwortet. **Nicht gewertet**: `rate_limit` (dafür die `Retry-After`-Sperre)
   und Abbrüche durch den Client.
+- **`quota` öffnet sofort** (AIGW-125): Guthaben/Ausgabenlimit des Kontos erschöpft (Anthropic
+  „credit balance is too low“, „reached your specified API usage limits“,
+  `enforced_spend_limit_reached`; OpenAI/Azure `insufficient_quota`,
+  `billing_hard_limit_reached`, `billing_not_active`) hält an, bis nachgeladen wird – der Breaker
+  wartet nicht auf die Fehlerquote; nach `openSecs` prüft eine Probe.
 - Öffnet bei `fehler ≥ failureRate × gesamt` und `gesamt ≥ minRequests`, bleibt `openSecs`
   offen, lässt dann genau eine Probe durch (halboffen): Erfolg schließt, Fehler öffnet erneut.
   Kommt die Probe nicht zurück (Client-Abbruch), darf nach weiteren `openSecs` eine neue laufen.

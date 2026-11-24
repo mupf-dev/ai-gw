@@ -9,6 +9,18 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ### Hinzugefügt
 
+- **Budget je Deployment und Account-Rotation (AIGW-126):** `Deployment.spec.budget`
+  (`amount`, `period`, `warnAtPercent`, `switchAtPercent`, `enforcement`; Migration 0015 für
+  SQLite und Postgres). Erschöpfte Deployments überspringt das Routing ohne Fehler (`strict`
+  reserviert die geschätzten Kosten je Versuch), abgerechnet wird nach der Antwort mit den
+  tatsächlichen Kosten; sind alle erschöpft: `429 deployment_budget_exhausted`. Nachladen per
+  höherem Betrag (Hot Reload). Neue Routing-Strategie **`budget-balanced`** (gleichmäßige
+  Verteilung nach Budgetverbrauch in Prozent, „power of two choices“). Budget-Ebene
+  `deployment` in `GET /usage/budgets`, `/costs/budgets` (Prognose), Webhook-Ereignissen und
+  Metriken (`aigw_deployment_budget_used|amount|used_ratio`); UI: Budgetfelder und Verbrauch am
+  Deployment, Strategie in der Modellgruppe, Deployment-Budgets auf der Seite „Kosten“. Rezept
+  docs/betrieb/rezept-accounts-rotieren.md.
+
 - **Lastvergleich LiteLLM mit Workern und Redis (AIGW-107):** `scripts/bench-litellm.sh` mit
   den Varianten `aigw-pg-redis`, `litellm-pg-w4`, `litellm-pg-redis-w4`; Ergebnisse in
   docs/betrieb/leistung.md §8.5 (u. a. ≈ 44 Redis-Befehle je Anfrage bei `counters.backend: redis`).
@@ -33,6 +45,15 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
   `approve`, `reject`). Migration 0014 (`wasm_module_pending`; `wasm_module.sigstore_bundle`,
   `uploaded_by`, `approved_by`, `approved_at`). Neuer Signaturstatus `identity`, Metrikgründe
   `sigstore`/`identity`.
+
+### Geändert
+
+- **Erschöpftes Guthaben als `quota` (AIGW-125):** Anthropic „Your credit balance is too low“,
+  „You have reached your specified (workspace) API usage limits“ (HTTP 400) und
+  `enforced_spend_limit_reached` (HTTP 429) sowie OpenAI/Azure `billing_hard_limit_reached`,
+  `billing_not_active` und „You exceeded your current quota“ gelten als `quota` statt
+  `invalid_request`/`rate_limit`: kein Retry auf demselben Konto, Fallback auf das nächste
+  Deployment, der Circuit Breaker öffnet sofort.
 
 ## [0.1.0] – JJJJ-MM-TT
 

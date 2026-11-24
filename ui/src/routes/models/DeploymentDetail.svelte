@@ -2,7 +2,8 @@
 <!-- SPDX-License-Identifier: FSL-1.1-ALv2 -->
 <script lang="ts">
   // Detailseite eines Deployments (D8/F136, /deployments/{name}): Anbieter (Mock gekennzeichnet, F85), Modell,
-  // Endpunkt, Zugangsdaten, Priorität/Gewicht/Kapazität, strukturierte Einstellungen; Nutzung und Audit.
+  // Endpunkt, Zugangsdaten, Priorität/Gewicht/Kapazität, Budget mit Verbrauch (AIGW-126), strukturierte
+  // Einstellungen; Nutzung und Audit.
   import { Tabs } from 'bits-ui';
   import { deployments, modelGroups, providerLabel, type Deployment } from '../../lib/api/resources';
   import AsyncState from '../../lib/admin/AsyncState.svelte';
@@ -10,7 +11,9 @@
   import DetailLayout from '../../lib/admin/DetailLayout.svelte';
   import { Loader } from '../../lib/admin/errors.svelte';
   import UsagePanel from '../../lib/admin/UsagePanel.svelte';
+  import { budgets as budgetList } from '../../lib/api/observe';
   import { num } from '../../lib/format';
+  import Meter from '../../lib/ui/Meter.svelte';
   import { detailPath } from '../../lib/nav';
   import { canWrite } from '../../lib/rbac.svelte';
   import { href } from '../../lib/router.svelte';
@@ -31,6 +34,14 @@
     formOpen = true;
   }
   const writable = $derived(canWrite({ kind: 'catalog' }));
+  // Stand des Deployment-Budgets aus dem Ledger (GET /usage/budgets?level=deployment).
+  const budgetState = new Loader(async () => {
+    const d = await deployments.get(name);
+    if (!d.data.spec.budget) return null;
+    const list = await budgetList('deployment');
+    return { status: list.items.find((i) => i.targetId === d.data.id) ?? null };
+  });
+  const PERIOD: Record<string, string> = { day: 'Kalendertag', week: 'Kalenderwoche', month: 'Kalendermonat', total: 'gesamt (Guthaben)' };
 </script>
 
 <AsyncState loader={data}>
@@ -81,6 +92,32 @@
             </dl>
           </Card>
         </div>
+        {#if d.spec.budget}
+          {@const b = d.spec.budget}
+          <Card title="Budget" testid="deployment-budget-card">
+            <dl class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-base">
+              <dt class="text-fg-muted">Betrag</dt><dd class="num">{b.amount} · {PERIOD[b.period] ?? b.period}</dd>
+              <dt class="text-fg-muted">Umschalten bei</dt><dd class="num">{b.switchAtPercent ?? 100} %</dd>
+              {#if b.warnAtPercent?.length}<dt class="text-fg-muted">Warnen bei</dt><dd class="num">{b.warnAtPercent.join(', ')} %</dd>{/if}
+            </dl>
+            <AsyncState loader={budgetState} rows={1}>
+              {#snippet children(st)}
+                {#if st?.status}
+                  <div class="mt-3 flex flex-col gap-1.5" data-testid="deployment-budget-usage">
+                    <div class="flex items-baseline gap-2 text-sm">
+                      <span class="text-fg-muted">Verbraucht</span>
+                      <span class="num ml-auto">{st.status.used} / {st.status.amount} ({st.status.percent} %)</span>
+                    </div>
+                    <Meter value={st.status.percent / 100} label="Budgetverbrauch {d.metadata.name}" tone="auto" />
+                    {#if st.status.percent >= (b.switchAtPercent ?? 100)}
+                      <p class="text-xs text-warning-fg" role="status">Erschöpft – das Routing überspringt dieses Deployment. Nachladen: Betrag erhöhen.</p>
+                    {/if}
+                  </div>
+                {/if}
+              {/snippet}
+            </AsyncState>
+          </Card>
+        {/if}
         <Card><SettingsView settings={d.spec.settings ?? {}} sections={DEPLOYMENT_SECTIONS} /></Card>
       </Tabs.Content>
       <Tabs.Content value="usage"><UsagePanel filter={{ deployment: name }} logsQuery="deployment={encodeURIComponent(name)}" /></Tabs.Content>

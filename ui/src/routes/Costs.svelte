@@ -170,7 +170,7 @@
     at_risk: { tone: 'danger', label: 'Überschreitung erwartet' },
     exhausted: { tone: 'danger', label: 'erschöpft' },
   };
-  const LEVEL: Record<string, string> = { organization: 'Organisation', team: 'Team', 'api-key': 'Key' };
+  const LEVEL: Record<string, string> = { organization: 'Organisation', team: 'Team', 'api-key': 'Key', deployment: 'Deployment' };
   const PERIOD: Record<string, string> = { day: 'Tag', week: 'Woche', month: 'Monat', total: 'gesamt' };
   const n = (v: string | number | null | undefined) => (v == null ? 0 : Number(v));
   const deltaFrac = (pct: number | null | undefined) => (pct == null ? undefined : pct / 100);
@@ -364,7 +364,7 @@
     <AsyncState loader={budgets} rows={4}>
       {#snippet children(b)}
         {#if b.items.length === 0}
-          <EmptyState compact icon="gauge" title="Keine Budgets" text="Budgets lassen sich an Organisationen, Teams und Keys festlegen." />
+          <EmptyState compact icon="gauge" title="Keine Budgets" text="Budgets lassen sich an Organisationen, Teams, Keys und Deployments festlegen." />
         {:else}
           <ul class="flex flex-col divide-y divide-line">
             {#each b.items as it (it.budget.level + it.budget.targetId)}

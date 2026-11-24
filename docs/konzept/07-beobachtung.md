@@ -357,6 +357,7 @@ Label-Schlüssel braucht und ein `RwLock` nimmt).
 | `aigw_fallbacks_total` | counter | – | Wechsel auf eine Fallback-Modellgruppe |
 | `aigw_deployment_breaker_state` | gauge | model_group, deployment (Name) | Circuit Breaker: 0 geschlossen, 1 offen, 2 halboffen (beim Abruf aus dem Routing, höchstens `max_deployments` Serien) |
 | `aigw_deployment_inflight_requests` | gauge | model_group, deployment | offene Upstream-Anfragen dieser Instanz |
+| `aigw_deployment_budget_used` / `_amount` / `_used_ratio` | gauge | model_group, deployment | Budget je Deployment (AIGW-126): Verbrauch, Betrag, Anteil |
 | `aigw_inflight_requests` | gauge | – | `request_started` − `record` |
 | `aigw_snapshot_version` | gauge | – | aktive `config_version` |
 | `aigw_snapshot_reload_total` | counter | result (`ok`, `failed`, `check_failed`) | `ReloadMetrics` |

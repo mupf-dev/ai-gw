@@ -88,6 +88,13 @@ anschließendem Snapshot-Aufbau. Wer ein Feld umbenennt, merkt es dort.
   `tokenizer.download_ranks: true` beim Start (über `aigw-outbound`, SSRF-Regeln wie
   Anbieter). Ohne Tabellen gilt die Heuristik (Warnung beim Start). Details:
   [11-limits-und-budgets.md](../konzept/11-limits-und-budgets.md) §8a.
+- **Budget je Deployment (AIGW-126):** `Deployment.spec.budget` (`amount`, `period`
+  `total|month|week|day`, `warnAtPercent`, `switchAtPercent` 1–100, Standard 100,
+  `enforcement` `strict|soft`). Beträge in `billing.currency` wie die Preisliste – Anthropic
+  rechnet in USD ab. Erschöpfte Deployments überspringt das Routing ohne Fehler; sind alle
+  erschöpft, kommt `429 deployment_budget_exhausted`. Nachladen: Betrag erhöhen (Hot Reload).
+  Strategie `routing: budget-balanced` verteilt die Kosten gleichmäßig. Rezept mit vier
+  Anthropic-Accounts: [rezept-accounts-rotieren.md](rezept-accounts-rotieren.md).
 - **Request-Body:** `server.data.max_body_bytes` (32 MiB), Audio `max_audio_bytes` (25 MiB).
 - **Mock-Anbieter:** `admin.allow_mock: true` ist Standard (Demos, Smoke-Tests). Für
   Produktion `false`, ebenso `admin.ui.mock: false`.

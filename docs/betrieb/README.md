@@ -14,6 +14,7 @@ Stand: 0.1.0 (MVP) · Zielgruppe: Betrieb/Plattform-Teams
 | [fehlersuche.md](fehlersuche.md) | Häufige Fehlerbilder und Diagnose |
 | [haertung.md](haertung.md) | Härtung und sicherer Betrieb (aus dem Sicherheitsreview) |
 | [leistung.md](leistung.md) | Last- und Latenzmessungen, Empfehlungen für Lastbetrieb |
+| [rezept-accounts-rotieren.md](rezept-accounts-rotieren.md) | Rezept: mehrere Anbieter-Accounts mit Budget je Deployment nacheinander oder verteilt nutzen |
 | [sicherheitsreview.md](sicherheitsreview.md) | Befunde des Sicherheitsreviews (AIGW-58) |
 
 Schnellstart mit Docker: [README](../../README.md#schnellstart-mit-docker).

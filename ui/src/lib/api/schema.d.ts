@@ -1806,7 +1806,7 @@ export interface components {
          * @description Ebene eines Budgets.
          * @enum {string}
          */
-        BudgetLevelName: "organization" | "team" | "api-key";
+        BudgetLevelName: "organization" | "team" | "api-key" | "deployment";
         /** @description Budget-Übersicht. */
         BudgetList: {
             /** @description Zeitpunkt der Auswertung (RFC 3339). */
@@ -1852,10 +1852,15 @@ export interface components {
             amount: components["schemas"]["Amount"];
             /** @description Betrag erreicht. */
             exhausted: boolean;
-            /** @description Harte Grenze (Ablehnung mit `budget_exceeded`). */
+            /**
+             * @description Harte Grenze (Ablehnung mit `budget_exceeded`; bei Deployments: Überspringen im
+             *     Routing).
+             */
             hardLimit: boolean;
             /** @description Ebene. */
             level: components["schemas"]["BudgetLevelName"];
+            /** @description Modellgruppe (nur `deployment`). */
+            modelGroup?: string | null;
             /**
              * Format: int64
              * @description Verbrauch in Prozent des Betrags (ganzzahlig abgerundet; 0 bei Betrag 0).
@@ -1869,6 +1874,11 @@ export interface components {
             periodStart: string;
             /** @description Verbleibend (nicht negativ). */
             remaining: components["schemas"]["Amount"];
+            /**
+             * Format: int32
+             * @description Umschalten ab diesem Verbrauch in Prozent (nur `deployment`).
+             */
+            switchAtPercent?: number | null;
             /**
              * Format: uuid
              * @description ID des Ziels.
@@ -2222,6 +2232,38 @@ export interface components {
             /** @description Spezifikation. */
             spec: components["schemas"]["DeploymentSpec"];
         };
+        /**
+         * @description Budget eines Deployments (AIGW-126). Beträge in `billing.currency`; die Kosten kommen aus
+         *     der Preisliste (tatsächliche Usage nach der Antwort).
+         *
+         *     Wirkung im Routing: Ein Deployment, dessen Verbrauch `switchAtPercent` des Betrags
+         *     erreicht hat, wird bei der Auswahl übersprungen; `strict` reserviert zusätzlich die
+         *     geschätzten Kosten je Versuch und überspringt, wenn sie nicht mehr in den Rest passen.
+         *     Sind alle Deployments der Gruppe erschöpft, antwortet der Proxy mit `429`
+         *     (`deployment_budget_exhausted`). Nachladen: `amount` erhöhen (Hot Reload).
+         */
+        DeploymentBudget: {
+            /** @description Betrag je Zeitraum in der Abrechnungswährung (`billing.currency`). */
+            amount: components["schemas"]["Amount"];
+            /**
+             * @description `strict` (Standard): geschätzte Kosten je Versuch reservieren; `soft`: nur den
+             *     bisherigen Verbrauch prüfen.
+             */
+            enforcement?: components["schemas"]["BudgetEnforcement"];
+            /**
+             * @description Zeitraum (`total` = Guthaben ohne Zurücksetzen, `month` = Kalendermonat in
+             *     `billing.timezone`).
+             */
+            period: components["schemas"]["BudgetPeriod"];
+            /**
+             * Format: int32
+             * @description Umschalten ab diesem Verbrauch in Prozent (1–100, Standard 100): Reserve, damit der
+             *     letzte Request das Guthaben nicht überzieht.
+             */
+            switchAtPercent?: number | null;
+            /** @description Warnschwellen in Prozent (Ereignis/Webhook `budget.threshold`), z. B. `[80, 95]`. */
+            warnAtPercent?: number[];
+        };
         DeploymentInput: {
             /** @description Metadaten (`name`, `labels`; vom Server gepflegte Felder werden ignoriert). */
             metadata: components["schemas"]["ObjectMeta"];
@@ -2236,6 +2278,7 @@ export interface components {
         };
         /** @description Deployment: konkretes Anbieter-Modell hinter einer Modellgruppe. */
         DeploymentSpec: {
+            budget?: components["schemas"]["DeploymentBudget"] | null;
             /** @description Kapazitätsgrenzen. */
             capacity?: components["schemas"]["Capacity"];
             /** @description Zugangsdaten (Name einer `ProviderCredential`). */
@@ -3559,7 +3602,7 @@ export interface components {
          * @description Routing-Strategie einer Modellgruppe (§6).
          * @enum {string}
          */
-        RoutingStrategy: "weighted" | "least-latency" | "least-busy" | "cost";
+        RoutingStrategy: "weighted" | "least-latency" | "least-busy" | "cost" | "budget-balanced";
         /** @description Ziel einer Bindung: Ebene + Name des Ziels (bei `global` ohne Ziel). */
         Scope: {
             /** @description Ebene. */
