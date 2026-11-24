@@ -2261,7 +2261,7 @@ export interface components {
              *     letzte Request das Guthaben nicht überzieht.
              */
             switchAtPercent?: number | null;
-            /** @description Warnschwellen in Prozent (Ereignis/Webhook `budget.threshold`), z. B. `[80, 95]`. */
+            /** @description Warnschwellen in Prozent (Ereignis/Webhook `budget.warning`), z. B. `[80, 95]`. */
             warnAtPercent?: number[];
         };
         DeploymentInput: {

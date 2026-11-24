@@ -5,7 +5,12 @@
 //! höherem Betrag, Entfernen, `GET /usage/budgets?level=deployment` und GitOps-Prüfung.
 //! SQLite und – mit `AIGW_TEST_POSTGRES_URL` – Postgres.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stderr)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr
+)]
 
 use std::sync::Arc;
 

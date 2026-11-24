@@ -9,6 +9,8 @@
 //!   sind alle erschöpft, kommt `429 deployment_budget_exhausted`; Nachladen (Betrag erhöhen,
 //!   Hot Reload) macht ein Konto wieder nutzbar.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
