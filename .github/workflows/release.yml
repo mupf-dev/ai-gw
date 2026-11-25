@@ -112,9 +112,6 @@ jobs:
         run: |
           if [[ "$PUBLISH" == true ]]; then export PUSH="$PUSH_TARGET"; fi
           scripts/release-build.sh
-      - name: Abmeldung ghcr.io
-        if: always() && env.PUBLISH == 'true'
-        run: docker logout ghcr.io
       - name: Provenance Archive und SBOM
         id: attest-files
         if: env.PUBLISH == 'true'
@@ -144,6 +141,10 @@ jobs:
           sbom-path: dist/ai-gw-${{ env.VERSION }}.cdx.json
           push-to-registry: true
           create-storage-record: false
+      # Erst nach den Image-Attestierungen (push-to-registry braucht die Anmeldung).
+      - name: Abmeldung ghcr.io
+        if: always() && env.PUBLISH == 'true'
+        run: docker logout ghcr.io
       # Sigstore-Bundle der Provenance als Release-Asset (Offline-Prüfung mit
       # `gh attestation verify --bundle`).
       - name: Provenance-Bundle beilegen
