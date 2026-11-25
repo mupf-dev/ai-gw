@@ -131,9 +131,12 @@ cp deploy/compose/docker-compose.yaml deploy/compose/otel-collector.yaml "$TMP/c
 cp -r config/examples/ha-postgres-redis "$TMP/config/examples/"
 cp "$TMP/master-key" "$TMP/compose/secrets/aigw-master-key"
 # Docker Compose übernimmt Besitzer/Rechte der Host-Datei (siehe docs/betrieb/installation.md).
-chown 65532:65532 "$TMP/compose/secrets/aigw-master-key" 2>/dev/null ||
+# Ohne root (z. B. GitHub-Runner) schlägt chown fehl – dann lesbar für alle statt 0400.
+if chown 65532:65532 "$TMP/compose/secrets/aigw-master-key" 2>/dev/null; then
+  chmod 0400 "$TMP/compose/secrets/aigw-master-key"
+else
   chmod 0644 "$TMP/compose/secrets/aigw-master-key"
-chmod 0400 "$TMP/compose/secrets/aigw-master-key" 2>/dev/null || true
+fi
 # Der Compose-Pfad zur Startkonfiguration ist relativ (../../config/examples/…).
 mkdir -p "$TMP/a/b"
 mv "$TMP/compose" "$TMP/a/b/compose"
