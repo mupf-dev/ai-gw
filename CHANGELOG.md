@@ -7,55 +7,7 @@ inkompatibel ändern; solche Änderungen stehen hier unter „Geändert“ bzw. 
 
 ## [Unreleased]
 
-### Hinzugefügt
-
-- **Budget je Deployment und Account-Rotation (AIGW-126):** `Deployment.spec.budget`
-  (`amount`, `period`, `warnAtPercent`, `switchAtPercent`, `enforcement`; Migration 0015 für
-  SQLite und Postgres). Erschöpfte Deployments überspringt das Routing ohne Fehler (`strict`
-  reserviert die geschätzten Kosten je Versuch), abgerechnet wird nach der Antwort mit den
-  tatsächlichen Kosten; sind alle erschöpft: `429 deployment_budget_exhausted`. Nachladen per
-  höherem Betrag (Hot Reload). Neue Routing-Strategie **`budget-balanced`** (gleichmäßige
-  Verteilung nach Budgetverbrauch in Prozent, „power of two choices“). Budget-Ebene
-  `deployment` in `GET /usage/budgets`, `/costs/budgets` (Prognose), Webhook-Ereignissen und
-  Metriken (`aigw_deployment_budget_used|amount|used_ratio`); UI: Budgetfelder und Verbrauch am
-  Deployment, Strategie in der Modellgruppe, Deployment-Budgets auf der Seite „Kosten“. Rezept
-  docs/betrieb/rezept-accounts-rotieren.md.
-
-- **Lastvergleich LiteLLM mit Workern und Redis (AIGW-107):** `scripts/bench-litellm.sh` mit
-  den Varianten `aigw-pg-redis`, `litellm-pg-w4`, `litellm-pg-redis-w4`; Ergebnisse in
-  docs/betrieb/leistung.md §8.5 (u. a. ≈ 44 Redis-Befehle je Anfrage bei `counters.backend: redis`).
-- **e2e:** `ui/e2e/run.sh` nimmt zusätzliche Playwright-Argumente über `E2E_ARGS` (z. B.
-  `--repeat-each`); Tool-Inventar-Test (AIGW-87) unabhängig von Reihenfolge und Datenmenge
-  (AIGW-121).
-- **WASM-Module: Sigstore-Signatur ohne Schlüsselverwaltung und Vier-Augen-Freigabe
-  (AIGW-106):** `wasm.sigstore` (Trust-Root `trusted_root.json` offline, erlaubte Identitäten
-  mit Issuer/Subjekt als reguläre Ausdrücke) prüft Bundles aus `cosign sign-blob --bundle`
-  (Fulcio-Kette, SCT, Rekor-SET und Inclusion-Proof mit Checkpoint) beim Upload, beim Import aus
-  `wasm.modules` (`sigstore_bundle`), vor jedem Kompilieren und bei der Freigabe – ohne
-  Netzaufrufe zur Laufzeit; eigenes schlankes Crate `aigw-sigstore` (aws-lc-rs,
-  rustls-webpki), getestet mit der Sigstore-Konformitätssuite. Upload mit Bundle als
-  JSON-Umschlag (`Content-Type: application/json`, `{content, sigstoreBundle}`), UI-Feld
-  „Sigstore-Bundle“, CLI `aigw wasm verify-sigstore`. **Vier-Augen-Freigabe** `wasm.four_eyes`
-  (Standard im neuen Profil `wasm.profile: strict`, das außerdem eine Signatur erzwingt):
-  Uploads antworten mit `202` und warten auf Freigabe durch einen anderen globalen `admin`
-  (`POST /admin/api/v1/wasm-modules/{name}/approve?sha256=…`, verwerfen mit `DELETE
-  …/{name}/pending`, prüfen mit `GET …/{name}/pending/content`); Admin-Keys zählen als ihr
-  Ersteller. UI: Bereich „Wartet auf Freigabe“ mit Buttons „Freigeben“/„Verwerfen“, Herkunft
-  (hochgeladen/freigegeben von) je Modul. Audit-Art `wasm-module-approval` (Aktionen `submit`,
-  `approve`, `reject`). Migration 0014 (`wasm_module_pending`; `wasm_module.sigstore_bundle`,
-  `uploaded_by`, `approved_by`, `approved_at`). Neuer Signaturstatus `identity`, Metrikgründe
-  `sigstore`/`identity`.
-
-### Geändert
-
-- **Erschöpftes Guthaben als `quota` (AIGW-125):** Anthropic „Your credit balance is too low“,
-  „You have reached your specified (workspace) API usage limits“ (HTTP 400) und
-  `enforced_spend_limit_reached` (HTTP 429) sowie OpenAI/Azure `billing_hard_limit_reached`,
-  `billing_not_active` und „You exceeded your current quota“ gelten als `quota` statt
-  `invalid_request`/`rate_limit`: kein Retry auf demselben Konto, Fallback auf das nächste
-  Deployment, der Circuit Breaker öffnet sofort.
-
-## [0.1.0] – JJJJ-MM-TT
+## [0.1.0] – 2026-11-25
 
 Erste öffentliche Version: AI-Gateway, Admin-API und Admin-UI in einem Binary.
 
@@ -233,8 +185,7 @@ Erste öffentliche Version: AI-Gateway, Admin-API und Admin-UI in einem Binary.
   gegen eingebaute Summen) und `download_ranks` (einmaliger Download von
   `openaipublic.blob.core.windows.net` über den gemeinsamen Client mit SSRF-Regeln, Standard
   aus). Fehlen die Tabellen, gilt die Heuristik mit Startwarnung. `scripts/check.sh` baut und
-  testet auch die Variante ohne Feature. Lizenzfrage der Tabellen weiter offen
-  (docs/konzept/99-offene-fragen.md, THIRD-PARTY.md).
+  testet auch die Variante ohne Feature (Tabellen inzwischen ganz entfernt, siehe „Geändert“).
 
 - **RUSTSEC-2026-0459 erneut geprüft (AIGW-64):** weiterhin nicht ohne Ausnahme lösbar –
   sqlx 0.9.0 (neuestes Release) pinnt libsqlite3-sys <0.38, gepatcht ist erst 0.39; Ausnahme
@@ -342,6 +293,43 @@ Erste öffentliche Version: AI-Gateway, Admin-API und Admin-UI in einem Binary.
   kubeconform in `scripts/k8s-check.sh`, Smoke-Test in kind `scripts/helm-smoke.sh`.
   Doku `docs/betrieb/helm.md`.
 
+- **Budget je Deployment und Account-Rotation (AIGW-126):** `Deployment.spec.budget`
+  (`amount`, `period`, `warnAtPercent`, `switchAtPercent`, `enforcement`; Migration 0015 für
+  SQLite und Postgres). Erschöpfte Deployments überspringt das Routing ohne Fehler (`strict`
+  reserviert die geschätzten Kosten je Versuch), abgerechnet wird nach der Antwort mit den
+  tatsächlichen Kosten; sind alle erschöpft: `429 deployment_budget_exhausted`. Nachladen per
+  höherem Betrag (Hot Reload). Neue Routing-Strategie **`budget-balanced`** (gleichmäßige
+  Verteilung nach Budgetverbrauch in Prozent, „power of two choices“). Budget-Ebene
+  `deployment` in `GET /usage/budgets`, `/costs/budgets` (Prognose), Webhook-Ereignissen und
+  Metriken (`aigw_deployment_budget_used|amount|used_ratio`); UI: Budgetfelder und Verbrauch am
+  Deployment, Strategie in der Modellgruppe, Deployment-Budgets auf der Seite „Kosten“. Rezept
+  docs/betrieb/rezept-accounts-rotieren.md.
+
+- **Lastvergleich LiteLLM mit Workern und Redis (AIGW-107):** `scripts/bench-litellm.sh` mit
+  den Varianten `aigw-pg-redis`, `litellm-pg-w4`, `litellm-pg-redis-w4`; Ergebnisse in
+  docs/betrieb/leistung.md §8.5 (u. a. ≈ 44 Redis-Befehle je Anfrage bei `counters.backend: redis`).
+- **e2e:** `ui/e2e/run.sh` nimmt zusätzliche Playwright-Argumente über `E2E_ARGS` (z. B.
+  `--repeat-each`); Tool-Inventar-Test (AIGW-87) unabhängig von Reihenfolge und Datenmenge
+  (AIGW-121).
+- **WASM-Module: Sigstore-Signatur ohne Schlüsselverwaltung und Vier-Augen-Freigabe
+  (AIGW-106):** `wasm.sigstore` (Trust-Root `trusted_root.json` offline, erlaubte Identitäten
+  mit Issuer/Subjekt als reguläre Ausdrücke) prüft Bundles aus `cosign sign-blob --bundle`
+  (Fulcio-Kette, SCT, Rekor-SET und Inclusion-Proof mit Checkpoint) beim Upload, beim Import aus
+  `wasm.modules` (`sigstore_bundle`), vor jedem Kompilieren und bei der Freigabe – ohne
+  Netzaufrufe zur Laufzeit; eigenes schlankes Crate `aigw-sigstore` (aws-lc-rs,
+  rustls-webpki), getestet mit der Sigstore-Konformitätssuite. Upload mit Bundle als
+  JSON-Umschlag (`Content-Type: application/json`, `{content, sigstoreBundle}`), UI-Feld
+  „Sigstore-Bundle“, CLI `aigw wasm verify-sigstore`. **Vier-Augen-Freigabe** `wasm.four_eyes`
+  (Standard im neuen Profil `wasm.profile: strict`, das außerdem eine Signatur erzwingt):
+  Uploads antworten mit `202` und warten auf Freigabe durch einen anderen globalen `admin`
+  (`POST /admin/api/v1/wasm-modules/{name}/approve?sha256=…`, verwerfen mit `DELETE
+  …/{name}/pending`, prüfen mit `GET …/{name}/pending/content`); Admin-Keys zählen als ihr
+  Ersteller. UI: Bereich „Wartet auf Freigabe“ mit Buttons „Freigeben“/„Verwerfen“, Herkunft
+  (hochgeladen/freigegeben von) je Modul. Audit-Art `wasm-module-approval` (Aktionen `submit`,
+  `approve`, `reject`). Migration 0014 (`wasm_module_pending`; `wasm_module.sigstore_bundle`,
+  `uploaded_by`, `approved_by`, `approved_at`). Neuer Signaturstatus `identity`, Metrikgründe
+  `sigstore`/`identity`.
+
 ### Geändert
 
 Gegenüber den Entwicklungsständen auf `main` vor dem ersten Release (für Betreiber von
@@ -425,6 +413,13 @@ Vorabständen):
   (`settings.credentialField`, Standard `apiKey`, sonst `value`) enthält – sonst `422` mit
   `issues`.
 
+- **Erschöpftes Guthaben als `quota` (AIGW-125):** Anthropic „Your credit balance is too low“,
+  „You have reached your specified (workspace) API usage limits“ (HTTP 400) und
+  `enforced_spend_limit_reached` (HTTP 429) sowie OpenAI/Azure `billing_hard_limit_reached`,
+  `billing_not_active` und „You exceeded your current quota“ gelten als `quota` statt
+  `invalid_request`/`rate_limit`: kein Retry auf demselben Konto, Fallback auf das nächste
+  Deployment, der Circuit Breaker öffnet sofort.
+
 ### Behoben
 
 - Sicherheit: wasmtime 50.0.1 → 50.0.2 (RUSTSEC-2026-0566 bis -0573); `rust-version` auf 1.97 angehoben (Mindestversion von wasmtime 50.0.2).
@@ -443,8 +438,6 @@ Vorabständen):
 ### Bekannte Einschränkungen
 
 - GitOps-Manifeste: höchstens 1 024 YAML-Dokumente je Datei.
-- Lizenz der eingebetteten tiktoken-Rangtabellen (MIT) vor einem öffentlichen Release
-  rechtlich bestätigen.
 
 [Unreleased]: https://github.com/mupf-dev/ai-gw/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/mupf-dev/ai-gw/releases/tag/v0.1.0
